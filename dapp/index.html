@@ -2328,7 +2328,7 @@ async function prodFastExecute(vi, nonce) {
     }
 
     let packedSigs = '0x';
-    for(const s of sigs) packedSigs += s.sig.slice(2);
+    for(const s of sigs) packedSigs += (s.sig || s.signature).slice(2);
 
     const tlContract = new ethers.Contract(v.executor, TIMELOCK_EXECUTOR_ABI, signer);
     flash('INSTANT EXECUTING VIA EXECUTOR...');
@@ -2427,7 +2427,7 @@ async function prodCancel(vi, nonce) {
 
     // Threshold met — execute via forward()
     let packedSigs = '0x';
-    for(const s of sigs) packedSigs += s.sig.slice(2);
+    for(const s of sigs) packedSigs += (s.sig || s.signature).slice(2);
 
     const tlContract = new ethers.Contract(v.executor, TIMELOCK_EXECUTOR_ABI, signer);
     flash('CANCELLING VIA EXECUTOR...');
@@ -2539,7 +2539,7 @@ async function prodAccelerate(vi, nonce) {
 
     // All sigs collected — execute via forward()
     let packedSigs = '0x';
-    for(const s of sigs) packedSigs += s.sig.slice(2);
+    for(const s of sigs) packedSigs += (s.sig || s.signature).slice(2);
 
     const tlContract = new ethers.Contract(v.executor, TIMELOCK_EXECUTOR_ABI, signer);
     flash('ACCELERATING VIA EXECUTOR...');
