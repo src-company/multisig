@@ -2139,13 +2139,15 @@ function verifySigs(sigs, domain, types, msg, owners) {
   const verified = [];
   for(const s of sigs) {
     // Sender/approval sigs (on-chain approvals) — trust them, contract validates
-    if(s.sigType === 'approval' || s.sigType === 'sender') {
+    const st = s.sigType || s.sig_type;
+    if(st === 'approval' || st === 'sender') {
       if(ownerSet.has(s.signer.toLowerCase())) verified.push(s);
       continue;
     }
     // Verify ECDSA sigs client-side
     try {
-      const recovered = ethers.verifyTypedData(domain, types, msg, s.sig);
+      const sigData = s.sig || s.signature;
+      const recovered = ethers.verifyTypedData(domain, types, msg, sigData);
       if(recovered.toLowerCase() === s.signer.toLowerCase() && ownerSet.has(recovered.toLowerCase())) {
         verified.push(s);
       } else {
