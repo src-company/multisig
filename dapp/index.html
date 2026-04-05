@@ -536,7 +536,7 @@ function nextNonce(v){return v.queue.length?Math.max(v.nonce,...v.queue.map(t=>t
 function txSt(tx,v){
   const you = getYou();
   const ac=Object.values(tx.approvals).filter(Boolean).length;
-  if(tx.eta>0){if(fmtEta(tx.eta)==="READY")return{l:"READY",c:"var(--g)",exec:true,cancel:true};const youSigned=you&&tx.accelSigners&&tx.accelSigners.has(you.toLowerCase());return{l:fmtEta(tx.eta),c:"var(--d)",cancel:true,accel:v.fastPath&&!youSigned,accelSigs:tx.accelSigners?tx.accelSigners.size:0}}
+  if(tx.eta>0){const csc=tx.cancelSigners?tx.cancelSigners.size:0;const cancelReady=csc>=v.threshold;const youCancel=you&&tx.cancelSigners&&tx.cancelSigners.has(you.toLowerCase());if(fmtEta(tx.eta)==="READY")return{l:"READY",c:"var(--g)",exec:true,cancel:!cancelReady&&!youCancel,cancelExec:cancelReady,cancelSigs:csc};const asc=tx.accelSigners?tx.accelSigners.size:0;const accelReady=v.fastPath&&asc>=v.ownerCount;const youAccel=you&&tx.accelSigners&&tx.accelSigners.has(you.toLowerCase());const csc=tx.cancelSigners?tx.cancelSigners.size:0;const cancelReady=csc>=v.threshold;const youCancel=you&&tx.cancelSigners&&tx.cancelSigners.has(you.toLowerCase());return{l:fmtEta(tx.eta),c:"var(--d)",cancel:!cancelReady&&!youCancel,cancelExec:cancelReady,cancelSigs:csc,accel:v.fastPath&&!accelReady&&!youAccel,accelExec:accelReady,accelSigs:asc}}
   if(ac<v.threshold)return{l:`${ac}/${v.threshold} SIGS`,c:"var(--y)",sign:true};
   if(v.delay===0)return{l:"EXECUTE",c:"var(--g)",queue:true,instant:true};
   return{l:"SUBMIT",c:"var(--a)",queue:true};
@@ -804,23 +804,33 @@ function renderDash(v,mob){
       actionBtn=mob
         ?`<div style="display:flex;gap:8px;flex-direction:column">
             <button class="btn btn-green btn-w" onclick="doExecute(${S.sel},${tx.nonce})">EXECUTE</button>
-            <button class="btn btn-danger btn-w" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL</button>
+            ${s.cancelExec?`<button class="btn btn-danger btn-w" onclick="doCancel(${S.sel},${tx.nonce})">EXECUTE CANCEL <span style="opacity:.5;font-size:9px;margin-left:4px">${s.cancelSigs}/${v.threshold} VIA EXECUTOR</span></button>`:''}
+            ${s.cancel?`<button class="btn btn-danger btn-w" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL${s.cancelSigs?` (${s.cancelSigs}/${v.threshold})`:''}</button>`:''}
+            ${!s.cancel&&!s.cancelExec&&s.cancelSigs?`<span style="font-size:10px;color:var(--r);letter-spacing:1px">CANCEL ${s.cancelSigs}/${v.threshold}</span>`:''}
           </div>`
         :`<div style="display:flex;gap:8px">
             <button class="btn btn-green" onclick="doExecute(${S.sel},${tx.nonce})">EXECUTE</button>
-            <button class="btn btn-danger" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL</button>
+            ${s.cancelExec?`<button class="btn btn-danger" onclick="doCancel(${S.sel},${tx.nonce})">EXECUTE CANCEL <span style="opacity:.5;font-size:9px;margin-left:4px">${s.cancelSigs}/${v.threshold} VIA EXECUTOR</span></button>`:''}
+            ${s.cancel?`<button class="btn btn-danger" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL${s.cancelSigs?` (${s.cancelSigs}/${v.threshold})`:''}</button>`:''}
+            ${!s.cancel&&!s.cancelExec&&s.cancelSigs?`<span style="font-size:10px;color:var(--r);letter-spacing:1px">CANCEL ${s.cancelSigs}/${v.threshold}</span>`:''}
           </div>`;
     }else if(s.cancel){
       actionBtn=mob
         ?`<div style="display:flex;gap:8px;flex-direction:column">
+            ${s.accelExec?`<button class="btn btn-green btn-w" onclick="doAccelerate(${S.sel},${tx.nonce})">INSTANT EXECUTE <span style="opacity:.5;font-size:9px;margin-left:4px">${s.accelSigs}/${v.ownerCount} VIA EXECUTOR</span></button>`:''}
             ${s.accel?`<button class="btn btn-outline btn-w" onclick="doAccelerate(${S.sel},${tx.nonce})">ACCELERATE${s.accelSigs?` (${s.accelSigs}/${v.ownerCount})`:''}</button>`:''}
-            ${!s.accel&&s.accelSigs?`<span style="font-size:10px;color:var(--d);letter-spacing:1px">ACCELERATE ${s.accelSigs}/${v.ownerCount}</span>`:''}
-            <button class="btn btn-danger btn-w" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL</button>
+            ${!s.accel&&!s.accelExec&&s.accelSigs?`<span style="font-size:10px;color:var(--d);letter-spacing:1px">ACCELERATE ${s.accelSigs}/${v.ownerCount}</span>`:''}
+            ${s.cancelExec?`<button class="btn btn-danger btn-w" onclick="doCancel(${S.sel},${tx.nonce})">EXECUTE CANCEL <span style="opacity:.5;font-size:9px;margin-left:4px">${s.cancelSigs}/${v.threshold} VIA EXECUTOR</span></button>`:''}
+            ${s.cancel?`<button class="btn btn-danger btn-w" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL${s.cancelSigs?` (${s.cancelSigs}/${v.threshold})`:''}</button>`:''}
+            ${!s.cancel&&!s.cancelExec&&s.cancelSigs?`<span style="font-size:10px;color:var(--r);letter-spacing:1px">CANCEL ${s.cancelSigs}/${v.threshold}</span>`:''}
           </div>`
         :`<div style="display:flex;gap:8px">
+            ${s.accelExec?`<button class="btn btn-green" onclick="doAccelerate(${S.sel},${tx.nonce})">INSTANT EXECUTE <span style="opacity:.5;font-size:9px;margin-left:4px">${s.accelSigs}/${v.ownerCount} VIA EXECUTOR</span></button>`:''}
             ${s.accel?`<button class="btn btn-outline" onclick="doAccelerate(${S.sel},${tx.nonce})">ACCELERATE${s.accelSigs?` (${s.accelSigs}/${v.ownerCount})`:''}</button>`:''}
-            ${!s.accel&&s.accelSigs?`<span style="font-size:10px;color:var(--d);letter-spacing:1px">ACCELERATE ${s.accelSigs}/${v.ownerCount}</span>`:''}
-            <button class="btn btn-danger" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL</button>
+            ${!s.accel&&!s.accelExec&&s.accelSigs?`<span style="font-size:10px;color:var(--d);letter-spacing:1px">ACCELERATE ${s.accelSigs}/${v.ownerCount}</span>`:''}
+            ${s.cancelExec?`<button class="btn btn-danger" onclick="doCancel(${S.sel},${tx.nonce})">EXECUTE CANCEL <span style="opacity:.5;font-size:9px;margin-left:4px">${s.cancelSigs}/${v.threshold} VIA EXECUTOR</span></button>`:''}
+            ${s.cancel?`<button class="btn btn-danger" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL${s.cancelSigs?` (${s.cancelSigs}/${v.threshold})`:''}</button>`:''}
+            ${!s.cancel&&!s.cancelExec&&s.cancelSigs?`<span style="font-size:10px;color:var(--r);letter-spacing:1px">CANCEL ${s.cancelSigs}/${v.threshold}</span>`:''}
           </div>`;
     }
     return`<div class="tx${blocked?" blocked":""}">
@@ -1591,15 +1601,19 @@ async function loadVaultQueue(vi) {
     // Track stale txs to clean up in DB
     const staleTxIds = [];
 
-    // Build accelerate sig counts: map original nonce → set of signers
-    const accelSigs = {};
+    // Build accelerate and cancel sig counts: map original nonce → set of signers
+    const accelSigs = {}, cancelSigs = {};
     for(let ti = 0; ti < txs.length; ti++) {
       const t = txs[ti];
       if(t.description && t.description.startsWith('Accelerate #')) {
         const origNonce = parseInt(t.description.replace('Accelerate #', ''));
         if(!isNaN(origNonce)) {
-          const sigs = allSigs[ti];
-          accelSigs[origNonce] = new Set(sigs.map(s => s.signer.toLowerCase()));
+          accelSigs[origNonce] = new Set(allSigs[ti].map(s => s.signer.toLowerCase()));
+        }
+      } else if(t.description && t.description.startsWith('Cancel #')) {
+        const origNonce = parseInt(t.description.replace('Cancel #', ''));
+        if(!isNaN(origNonce)) {
+          cancelSigs[origNonce] = new Set(allSigs[ti].map(s => s.signer.toLowerCase()));
         }
       }
     }
@@ -1613,8 +1627,8 @@ async function loadVaultQueue(vi) {
         continue;
       }
 
-      // Skip accelerate entries — they collect sigs via forward(), not the regular queue
-      if(t.description && t.description.startsWith('Accelerate #')) continue;
+      // Skip accelerate/cancel entries — they collect sigs via forward(), not the regular queue
+      if(t.description && (t.description.startsWith('Accelerate #') || t.description.startsWith('Cancel #'))) continue;
 
       // Prune queued txs that are no longer queued on-chain (executed or cancelled externally)
       if(t.status === 'queued' && t.tx_hash && t.tx_hash in onchainQueued) {
@@ -1668,7 +1682,8 @@ async function loadVaultQueue(vi) {
         callData: t.call_data,
         rawValue: t.value,
         signatures: sigs.map(s => ({signer: s.signer, sig: s.signature, sigType: s.sig_type})),
-        accelSigners: accelSigs[t.nonce] || null
+        accelSigners: accelSigs[t.nonce] || null,
+        cancelSigners: cancelSigs[t.nonce] || null
       });
     }
     v.queue = queue;
@@ -2336,31 +2351,99 @@ async function prodCancel(vi, nonce) {
   const tx = v.queue.find(t => t.nonce === nonce);
   if(!tx) return;
 
-  // Build cancelQueued calldata
+  // Cancel via executor.forward() — only needs threshold sigs, no forwardEnabled required
+  // This bypasses the nonce queue entirely
   const target = tx.target;
   const value = tx.rawValue ? BigInt(tx.rawValue) : ethers.parseEther(tx.value || '0');
   const data = tx.callData || '0x';
   const domain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address };
-  const txHash = tx.txHash || ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, { target, value, data, nonce });
-  const cancelData = msIface.encodeFunctionData('cancelQueued', [txHash]);
-
-  // Create a new cancel proposal
-  const cancelNonce = nextNonce(v);
-  const cancelTarget = v.address;
-  const cancelValue = '0';
+  const origTxHash = tx.txHash || ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, { target, value, data, nonce });
+  const cancelData = msIface.encodeFunctionData('cancelQueued', [origTxHash]);
+  const ownerAddrs = v.loadedOwners || v.owners.map(o => o.addr);
 
   try {
-    const cancelMsg = { target: cancelTarget, value: 0n, data: cancelData, nonce: cancelNonce };
-    const sig = await signer.signTypedData(domain, EIP712_TYPES, cancelMsg);
-    const cancelTxHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, cancelMsg);
-
+    // Check DB for an existing cancel proposal (first signer sets the nonce)
+    let cancelNonce = v.nonce;
+    let existingSigs = [];
+    let existingTxId = null;
     if(v.dbId) {
-      const txId = await dbProposeTx(v.dbId, cancelNonce, cancelTarget, cancelValue, cancelData, cancelTxHash, v.threshold, connectedAddress, `Cancel #${nonce}`);
-      if(txId) await dbAddSig(txId, connectedAddress, sig);
+      const { data: rows } = await sb.from('transactions')
+        .select('id, nonce, tx_hash')
+        .eq('wallet_id', v.dbId)
+        .eq('description', `Cancel #${nonce}`)
+        .in('status', ['proposed', 'executing'])
+        .limit(1);
+      if(rows?.length) {
+        existingTxId = rows[0].id;
+        cancelNonce = rows[0].nonce;
+        const dbSigs = await dbGetSigs(existingTxId);
+        const msg = { target: v.address, value: 0n, data: cancelData, nonce: cancelNonce };
+        existingSigs = verifySigs(dbSigs, domain, EIP712_TYPES, msg, ownerAddrs);
+        if(existingSigs.length === 0 && dbSigs.length > 0) {
+          cancelNonce = v.nonce;
+          existingTxId = null;
+        }
+      }
     }
 
-    flash(`CANCEL PROPOSED #${cancelNonce} \u2192 cancelQueued(#${nonce})`);
-    await reloadQueue(vi);
+    const msg = { target: v.address, value: 0n, data: cancelData, nonce: cancelNonce };
+    const cancelTxHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg);
+
+    // Add caller's sig
+    let sigs = [...existingSigs];
+    const callerIsOwner = ownerAddrs.some(o => o.toLowerCase() === connectedAddress.toLowerCase());
+    const callerHasSigned = sigs.some(s => s.signer.toLowerCase() === connectedAddress.toLowerCase());
+    if(callerIsOwner && !callerHasSigned) {
+      const sig = await signer.signTypedData(domain, EIP712_TYPES, msg);
+      sigs.push({signer: connectedAddress, sig, sigType: 'ecdsa'});
+      if(v.dbId) {
+        if(!existingTxId) {
+          existingTxId = await dbProposeTx(v.dbId, cancelNonce, v.address, '0', cancelData, cancelTxHash, v.threshold, connectedAddress, `Cancel #${nonce}`);
+        }
+        if(existingTxId) await dbAddSig(existingTxId, connectedAddress, sigs[sigs.length-1].sig);
+      }
+    }
+    sigs.sort((a,b) => a.signer.toLowerCase() < b.signer.toLowerCase() ? -1 : 1);
+
+    if(sigs.length < v.threshold) {
+      flash(`SIGNED CANCEL (${sigs.length}/${v.threshold}) — NEED ${v.threshold} SIGS`);
+      await reloadQueue(vi);
+      return;
+    }
+
+    // Verify nonce still matches on-chain
+    const ms = new ethers.Contract(v.address, MULTISIG_ABI, provider);
+    const liveNonce = Number(await ms.nonce());
+    if(liveNonce !== cancelNonce) {
+      flash('NONCE CHANGED — RESIGNING NEEDED');
+      if(existingTxId) {
+        await sb.from('transactions').update({status: 'cancelled', cancelled_at: new Date().toISOString()}).eq('id', existingTxId);
+      }
+      await reloadQueue(vi);
+      return;
+    }
+
+    // Threshold met — execute via forward()
+    let packedSigs = '0x';
+    for(const s of sigs) packedSigs += s.sig.slice(2);
+
+    const tlContract = new ethers.Contract(v.executor, TIMELOCK_EXECUTOR_ABI, signer);
+    flash('CANCELLING VIA EXECUTOR...');
+    const atx = await tlContract.forward(v.address, v.address, 0n, cancelData, packedSigs);
+    flash('TX SENT, WAITING...');
+    const receipt = await atx.wait();
+
+    if(v.dbId) {
+      if(existingTxId) await dbMarkExecuted(existingTxId, Number(receipt.blockNumber), receipt.hash);
+      if(tx.dbId) {
+        await sb.from('transactions').update({
+          status: 'cancelled', cancelled_at: new Date().toISOString(),
+          cancelled_by: connectedAddress
+        }).eq('id', tx.dbId);
+      }
+    }
+    flash(`CANCELLED #${nonce} VIA EXECUTOR`);
+    await reloadVault(vi);
   } catch(e) {
     console.error(e);
     flash(e.shortMessage || e.message || 'CANCEL FAILED');
