@@ -2207,14 +2207,14 @@ async function prodSubmit(vi, nonce) {
       // Cancel needs threshold sigs, forward needs all (already ownerCount)
       const fwdSigs = canCancel ? sigs.slice(0, v.threshold) : sigs;
       let forwardSigs = '0x';
-      for(const s of fwdSigs) forwardSigs += s.sig.slice(2);
+      for(const s of fwdSigs) forwardSigs += (s.sig || s.signature).slice(2);
       flash(canCancel ? 'CANCELLING VIA EXECUTOR...' : 'FORWARDING VIA EXECUTOR...');
       atx = await tlContract.forward(v.address, target, value, data, forwardSigs);
     } else {
       // Contract requires exactly threshold * 65 bytes of sigs
       const execSigs = sigs.slice(0, v.threshold);
       let packedSigs = '0x';
-      for(const s of execSigs) packedSigs += s.sig.slice(2);
+      for(const s of execSigs) packedSigs += (s.sig || s.signature).slice(2);
       flash('SUBMITTING TX...');
       atx = await ms.execute(target, value, data, packedSigs);
     }
