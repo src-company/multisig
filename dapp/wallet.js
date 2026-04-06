@@ -167,6 +167,7 @@ async function connectWithWallet(walletKey) {
     walletProvider.on('chainChanged', _walletEventHandlers.chainChanged);
 
     try { localStorage.setItem('ms_wallet', walletKey); if (walletKey.startsWith('eip6963_')) { const uuid = walletKey.replace('eip6963_', ''); const name = eip6963Providers.get(uuid)?.info?.name; if (name) localStorage.setItem('ms_wallet_name', name); } } catch (e) {}
+    notifyDisplayUpdate();
     for (const fn of _onConnectCallbacks) { try { fn(); } catch (e) { console.error('onConnect error:', e); } }
   } catch (error) {
     console.error('Wallet connect error:', error);

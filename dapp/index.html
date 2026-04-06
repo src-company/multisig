@@ -29,6 +29,8 @@ button:active{transform:scale(.97)}
 ::-webkit-scrollbar-thumb{background:var(--ln)}
 @keyframes toastIn{from{opacity:0;transform:translateX(-50%) translateY(12px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+@keyframes txLinked{0%,40%{background:color-mix(in srgb,var(--g) 15%,transparent)}100%{background:transparent}}
+.tx-linked{animation:txLinked 2s ease}
 @media(hover:hover){
   button:hover{opacity:.85}
   .btn:hover{opacity:.9}
@@ -68,7 +70,7 @@ button:active{transform:scale(.97)}
 .addr{font-size:10px;letter-spacing:2px;color:var(--m);margin-top:4px}
 .hdr-r{display:flex;gap:10px;align-items:center}
 .theme-btn{background:transparent;border:1px solid var(--ln);color:var(--a);width:40px;height:40px;font-size:14px;display:flex;align-items:center;justify-content:center;transition:background .15s}
-.wallet-btn{background:transparent;border:1px solid var(--ln);color:var(--m);height:40px;padding:0 14px;font-size:10px;font-weight:600;letter-spacing:1px;display:flex;align-items:center;gap:6px;transition:background .15s}
+.wallet-btn{background:transparent;border:1px solid var(--ln);color:var(--m);height:40px;padding:0 14px;font-size:10px;font-weight:600;letter-spacing:1px;display:flex;align-items:center;gap:6px;transition:background .15s;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dot-sm{width:4px;height:4px;border-radius:50%;background:var(--g)}
 
 /* nav */
@@ -95,7 +97,7 @@ button:active{transform:scale(.97)}
 .btn-big{height:48px;font-size:13px;letter-spacing:3px}
 
 /* inputs */
-.inp{width:100%;padding:12px 0;font-size:15px;background:transparent;border:none;border-bottom:1px solid var(--ln);margin-bottom:16px;border-radius:0;-webkit-appearance:none;transition:border-color .15s}
+.inp{width:100%;padding:12px 0;font-size:16px;background:transparent;border:none;border-bottom:1px solid var(--ln);margin-bottom:16px;border-radius:0;-webkit-appearance:none;transition:border-color .15s}
 .lbl{font-size:10px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:var(--m);margin-bottom:4px;display:block}
 .lbl .dim{opacity:.5}
 textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:12px;font-size:13px;border-bottom:1px solid var(--ln)}
@@ -168,7 +170,7 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 .docs-link:hover{color:var(--a)}
 
 /* toast */
-.toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:var(--a);color:var(--bg);padding:12px 24px;font-size:11px;font-weight:700;letter-spacing:2px;z-index:999;animation:toastIn .2s ease;text-align:center}
+.toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:var(--a);color:var(--bg);padding:12px 24px;padding-bottom:max(12px,env(safe-area-inset-bottom));font-size:11px;font-weight:700;letter-spacing:2px;z-index:999;animation:toastIn .2s ease;text-align:center}
 
 /* empty */
 .empty{text-align:center;padding:120px 0}
@@ -240,7 +242,7 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
   .btn-big{height:52px}
   .thresh-btns{gap:4px}
   .thresh-btn{min-height:44px}
-  .toast{bottom:20px;max-width:88vw}
+  .toast{bottom:max(20px,env(safe-area-inset-bottom));max-width:88vw}
   .footer{font-size:8px;letter-spacing:1px}
   .footer-l,.footer-r{gap:8px}
   .empty{padding:60px 0}
@@ -516,7 +518,6 @@ const S = {
   adminTab: "POLICY",
   nt: 2,
   nd: 24,
-  tick: 0,
   chainId: parseInt(localStorage.getItem('ms_chain')||'1'),
   showChains: false,
   statusMsg: null,
@@ -569,7 +570,7 @@ function chainName(){
 const LOADING_SVG_DARK = `<svg class="loading-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#2D5FE8"/><defs><path id="l2t" d="M4,4 H60" fill="none"/><path id="l2r" d="M60,4 V60" fill="none"/><path id="l2b" d="M60,60 H4" fill="none"/><path id="l2l" d="M4,60 V4" fill="none"/></defs><text font-family="'Courier New',monospace" font-size="4.2" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l2t"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l2r"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l2b"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l2l"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><path d="M16,48 V16 H22 L32,32 L42,16 H48 V48 H42 V26 L32,42 L22,26 V48 Z" fill="#0A0A0A"/></svg>`;
 const LOADING_SVG_LIGHT = `<svg class="loading-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#FDFDFD"/><defs><path id="l3t" d="M4,4 H60" fill="none"/><path id="l3r" d="M60,4 V60" fill="none"/><path id="l3b" d="M60,60 H4" fill="none"/><path id="l3l" d="M4,60 V4" fill="none"/></defs><text font-family="'Courier New',monospace" font-size="4.2" fill="#0099B3" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l3t"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#0099B3" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l3r"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#0099B3" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l3b"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#0099B3" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l3l"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><path d="M16,48 V16 H22 L32,32 L42,16 H48 V48 H42 V26 L32,42 L22,26 V48 Z" fill="#0099B3"/></svg>`;
 
-let toastTimer, hideLoadingTimer, _submitting = false;
+let toastTimer, hideLoadingTimer, _submitting = false, _linkedNonce = null;
 function guardSubmit(fn) { return async function(...args) { if(_submitting) return; _submitting = true; try { await fn(...args); } finally { _submitting = false; } }; }
 function showLoading(msg) {
   clearTimeout(hideLoadingTimer);
@@ -697,7 +698,7 @@ function renderChainOverlay(mob){
 
 // ── DASHBOARD ─────────────────────────────────────────────────────
 function renderDash(v,mob){
-  if(!v)return`<div class="empty"><div class="empty-title">NO VAULTS</div><div class="empty-sub">${S.demoMode?"":"DEPLOY YOUR FIRST MULTISIG"}</div><button class="btn btn-outline" style="padding:0 32px;height:48px" onclick="S.view='CREATE';render()">CREATE VAULT</button>${!S.demoMode?`<div style="margin-top:32px;display:flex;align-items:center;gap:8px;justify-content:center"><input class="inp" id="load-addr" style="max-width:320px;margin:0;font-size:12px" placeholder="0x... LOAD EXISTING VAULT"><button class="btn btn-outline btn-sm" onclick="loadVaultByAddress()">LOAD</button></div><div style="margin-top:32px"><button class="btn btn-outline" style="font-size:9px;border-color:var(--ln);color:var(--d)" onclick="S.demoMode=true;S.vaults=seed();S.sel=0;flash('DEMO LOADED');render()">LOAD DEMO</button></div>`:""}</div>`;
+  if(!v)return`<div class="empty"><div class="empty-title">NO VAULTS</div><div class="empty-sub">${S.demoMode?"":"DEPLOY YOUR FIRST MULTISIG"}</div><button class="btn btn-outline" style="padding:0 32px;height:48px" onclick="S.view='CREATE';render()">CREATE VAULT</button>${!S.demoMode?`<div style="margin-top:32px;display:flex;align-items:center;gap:8px;justify-content:center;flex-wrap:wrap"><input class="inp" id="load-addr" style="max-width:320px;min-width:0;flex:1;margin:0;font-size:16px" placeholder="0x... LOAD EXISTING VAULT"><button class="btn btn-outline btn-sm" onclick="loadVaultByAddress()">LOAD</button></div><div style="margin-top:32px"><button class="btn btn-outline" style="font-size:9px;border-color:var(--ln);color:var(--d)" onclick="S.demoMode=true;S.vaults=seed();S.sel=0;flash('DEMO LOADED');render()">LOAD DEMO</button></div>`:""}</div>`;
   const you = getYou();
   const h0=v.holdings[0];
 
@@ -727,7 +728,7 @@ function renderDash(v,mob){
       const rdy=vt.queue.some(tx=>{const st=txSt(tx,vt);return st.exec||st.instant});
       const needsYou=vt.queue.some(tx=>{const st=txSt(tx,vt);return st.sign&&you&&!tx.approvals[you]});
       const dot=rdy?'<span class="vtab-dot" style="background:var(--g)"></span>':needsYou?'<span class="vtab-dot" style="background:var(--y)"></span>':"";
-      return`<button class="vtab${on?" on":""}" onclick="S.sel=${i};S.showTx=false;render()">
+      return`<button class="vtab${on?" on":""}" onclick="S.sel=${i};S.nt=S.vaults[${i}].threshold;S.nd=S.vaults[${i}].delay/3600;S.showTx=false;render()">
       <div class="vtab-name">${esc(vt.name)}${dot}</div>
       <div class="vtab-info">${vt.holdings.length?vt.holdings[0].balance+" "+vt.holdings[0].token+(vt.holdings.length>1?" +"+(vt.holdings.length-1)+" MORE":""):"EMPTY"}${vt.queue.length>0?` &middot; ${vt.queue.length} PENDING`:""}</div>
     </button>`}).join("")}
@@ -833,11 +834,12 @@ function renderDash(v,mob){
             ${!s.cancel&&!s.cancelExec&&s.cancelSigs?`<span style="font-size:10px;color:var(--r);letter-spacing:1px">CANCEL ${s.cancelSigs}/${v.threshold}</span>`:''}
           </div>`;
     }
-    return`<div class="tx${blocked?" blocked":""}">
+    const txLink=!S.demoMode&&v.address&&ethers.isAddress(v.address)?`${location.origin}/#${S.chainId}/${v.address}/tx/${tx.nonce}`:'';
+    return`<div class="tx${blocked?" blocked":""}" data-tx-nonce="${tx.nonce}">
       <div class="tx-top">
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
-            <span class="tx-nonce">#${tx.nonce}${isCancel?" VIA EXECUTOR":i===firstUnqueued&&!isQueued?" NEXT":""}</span>
+            <span class="tx-nonce">#${tx.nonce}${isCancel?" VIA EXECUTOR":i===firstUnqueued&&!isQueued?" NEXT":""}${txLink?` <button class="x-btn" style="font-size:8px;opacity:.4;display:inline-flex;min-width:auto;min-height:auto;padding:2px 4px;vertical-align:middle" onclick="event.stopPropagation();navigator.clipboard.writeText('${txLink}');flash('TX LINK COPIED')" title="${txLink}">\u29C9</button>`:""}</span>
             <span class="tx-val">${esc(display)}</span>
           </div>
           <div class="tx-to">&rarr; ${S.demoMode?addrLink(tx.target,v.chain):addrLink(tx.target)}</div>
@@ -1490,7 +1492,7 @@ async function loadAllVaults() {
       render();
       return;
     }
-    const results = await Promise.allSettled(wallets.map(w => loadSingleVaultData(w.address)));
+    const results = await Promise.allSettled(wallets.map(w => loadSingleVaultData(w.address, { id: w.id, name: w.name })));
     const vaults = results.filter(r => r.status === 'fulfilled' && r.value).map(r => r.value);
     results.filter(r => r.status === 'rejected').forEach(r => console.error('Load vault:', r.reason));
     S.vaults = vaults;
@@ -1502,7 +1504,7 @@ async function loadAllVaults() {
     hideLoading();
     render();
     // Load queues + history in background (single render after all complete)
-    Promise.all(S.vaults.map((_, i) => Promise.all([loadVaultQueue(i), loadVaultHistory(i)]))).then(render);
+    Promise.all(S.vaults.map((_, i) => Promise.all([loadVaultQueue(i), loadVaultHistory(i)]))).then(render).catch(e => console.error('Background queue load:', e));
   } catch(e) {
     console.error('loadAllVaults:', e);
     hideLoading();
@@ -1510,9 +1512,13 @@ async function loadAllVaults() {
   }
 }
 
-async function loadSingleVaultData(addr) {
-  const s = await multicallLoad(addr);
-  let dbW = await dbFindWallet(addr);
+async function loadSingleVaultData(addr, dbWallet) {
+  // Phase 1: RPC + DB lookup in parallel
+  const [s, dbWFromQuery] = await Promise.all([
+    multicallLoad(addr),
+    dbWallet ? Promise.resolve(null) : dbFindWallet(addr)
+  ]);
+  let dbW = dbWallet || dbWFromQuery;
 
   // Auto-register vault in DB if not found (e.g. loaded by address)
   if(!dbW && window._connectedAddress) {
@@ -1523,30 +1529,27 @@ async function loadSingleVaultData(addr) {
     } catch(e) { console.error('Auto-register vault:', e); }
   }
 
-  // Load owner labels from DB
-  let ownerLabels = {};
-  if(dbW?.id) {
-    const labels = await dbGetOwnerLabels(dbW.id);
-    labels.forEach(l => { if(l.label) ownerLabels[l.address.toLowerCase()] = l.label; });
-  }
+  // Phase 2: owner labels + executor check + token balances in parallel
+  const [labelsRaw, fpResult, holdings] = await Promise.all([
+    dbW?.id ? dbGetOwnerLabels(dbW.id) : Promise.resolve([]),
+    s.executor !== ethers.ZeroAddress ? (async () => {
+      try {
+        const tlContract = new ethers.Contract(s.executor, TIMELOCK_EXECUTOR_ABI, provider);
+        return { isTE: true, fpEnabled: await tlContract.forwardEnabled(addr) };
+      } catch(_) { return { isTE: false, fpEnabled: false }; }
+    })() : Promise.resolve({ isTE: false, fpEnabled: false }),
+    loadTokenBalances(addr, s.balance)
+  ]);
+
+  const ownerLabels = {};
+  labelsRaw.forEach(l => { if(l.label) ownerLabels[l.address.toLowerCase()] = l.label; });
   const you = window._connectedAddress;
   const owners = [...s.owners].map(o => ({
     addr: o,
     label: ownerLabels[o.toLowerCase()] || (o.toLowerCase() === you?.toLowerCase() ? 'YOU' : ''),
     you: o.toLowerCase() === you?.toLowerCase()
   }));
-
-  // Detect TimelockExecutor
-  let isTE = false, fpEnabled = false;
-  if(s.executor !== ethers.ZeroAddress) {
-    try {
-      const tlContract = new ethers.Contract(s.executor, TIMELOCK_EXECUTOR_ABI, provider);
-      fpEnabled = await tlContract.forwardEnabled(addr);
-      isTE = true;
-    } catch(_) {}
-  }
-
-  const holdings = await loadTokenBalances(addr, s.balance);
+  const { isTE, fpEnabled } = fpResult;
 
   return {
     id: dbW?.id || addr.slice(0,8),
@@ -1576,27 +1579,30 @@ async function loadVaultQueue(vi) {
     const txs = await dbGetPending(v.dbId);
     const you = window._connectedAddress;
     const queue = [];
-    const allSigs = await Promise.all(txs.map(t => dbGetSigs(t.id)));
 
-    // Verify queued txs against on-chain state (batch via multicall)
+    // Fetch sigs + verify on-chain queue state in parallel
     const queuedTxs = txs.filter(t => t.status === 'queued' && t.tx_hash);
-    let onchainQueued = {};
-    if(queuedTxs.length) {
-      try {
-        const mc = new ethers.Contract(MC3, MC3_ABI, provider);
-        const calls = queuedTxs.map(t => ({
-          target: v.address, allowFailure: true,
-          callData: msIface.encodeFunctionData('queued', [t.tx_hash])
-        }));
-        const results = await mc.aggregate3(calls);
-        queuedTxs.forEach((t, i) => {
-          if(results[i].success) {
-            const eta = Number(msIface.decodeFunctionResult('queued', results[i].returnData)[0]);
-            onchainQueued[t.tx_hash] = eta;
-          }
-        });
-      } catch(e) { console.error('Queue verification:', e); }
-    }
+    const [allSigs, onchainQueued] = await Promise.all([
+      Promise.all(txs.map(t => dbGetSigs(t.id))),
+      (async () => {
+        const result = {};
+        if(!queuedTxs.length) return result;
+        try {
+          const mc = new ethers.Contract(MC3, MC3_ABI, provider);
+          const calls = queuedTxs.map(t => ({
+            target: v.address, allowFailure: true,
+            callData: msIface.encodeFunctionData('queued', [t.tx_hash])
+          }));
+          const results = await mc.aggregate3(calls);
+          queuedTxs.forEach((t, i) => {
+            if(results[i].success) {
+              result[t.tx_hash] = Number(msIface.decodeFunctionResult('queued', results[i].returnData)[0]);
+            }
+          });
+        } catch(e) { console.error('Queue verification:', e); }
+        return result;
+      })()
+    ]);
 
     // Track stale txs to clean up in DB
     const staleTxIds = [];
@@ -1761,21 +1767,10 @@ async function reloadVault(vi) {
     v.delay = Number(s.delay);
     v.nonce = Number(s.nonce);
     v.executor = s.executor;
-    // Re-check executor type and forward status
-    v.isTimelockExecutor = false;
-    v.fastPath = false;
-    if(s.executor !== ethers.ZeroAddress) {
-      try {
-        const tlContract = new ethers.Contract(s.executor, TIMELOCK_EXECUTOR_ABI, provider);
-        v.fastPath = await tlContract.forwardEnabled(v.address);
-        v.isTimelockExecutor = true;
-      } catch(_) {}
-    }
     const you = window._connectedAddress;
     // Preserve existing labels
     const oldLabels = {};
     v.owners.forEach(o => { if(o.label) oldLabels[o.addr.toLowerCase()] = o.label; });
-    // Apply pending label from addOwner
     if(v._pendingLabel && v._pendingLabel.label) {
       oldLabels[v._pendingLabel.addr] = v._pendingLabel.label;
     }
@@ -1792,8 +1787,21 @@ async function reloadVault(vi) {
       if(match) dbUpdateOwnerLabel(v.dbId, match.addr, pl.label);
     }
     delete v._pendingLabel;
-    v.holdings = await loadTokenBalances(v.address, s.balance);
-    await Promise.all([loadVaultQueue(vi), loadVaultHistory(vi)]);
+    // Executor check + token balances + queue + history in parallel
+    const [fpResult, holdings] = await Promise.all([
+      s.executor !== ethers.ZeroAddress ? (async () => {
+        try {
+          const tlContract = new ethers.Contract(s.executor, TIMELOCK_EXECUTOR_ABI, provider);
+          return { isTE: true, fpEnabled: await tlContract.forwardEnabled(v.address) };
+        } catch(_) { return { isTE: false, fpEnabled: false }; }
+      })() : Promise.resolve({ isTE: false, fpEnabled: false }),
+      loadTokenBalances(v.address, s.balance),
+      loadVaultQueue(vi),
+      loadVaultHistory(vi)
+    ]);
+    v.isTimelockExecutor = fpResult.isTE;
+    v.fastPath = fpResult.fpEnabled;
+    v.holdings = holdings;
     if(v.dbId) dbSyncWalletState(v.address, v.dbId);
     render();
   } catch(e) {
@@ -2807,6 +2815,11 @@ async function switchChain(id, skipLoad) {
         addChainParams: ADD_CHAIN_PARAMS[id] || null
       });
     } catch(e) { console.error('Chain switch:', e); }
+    // Warn if wallet rejected the switch (browsing still works, signing won't)
+    try {
+      const wc = await window._connectedWalletProvider.request({method:'eth_chainId'});
+      if(parseInt(wc, 16) !== id) flash('WALLET ON DIFFERENT CHAIN — SWITCH TO SIGN');
+    } catch(_) {}
   }
 
   if(!S.demoMode && !skipLoad) {
@@ -2823,14 +2836,10 @@ async function switchChain(id, skipLoad) {
 // ── WALLET INTEGRATION ────────────────────────────────────────────
 
 function onWalletConnect() {
-  if(S.demoMode) {
-    // Exit demo mode when wallet connects
-    S.demoMode = false;
-    S.vaults = [];
-    S.sel = 0;
-  }
+  if(S.demoMode) S.demoMode = false;
+  S.vaults = [];
+  S.sel = 0;
 
-  // Verify wallet is on the expected chain
   if(window._connectedWalletProvider) {
     (async () => {
       try {
@@ -2840,14 +2849,17 @@ function onWalletConnect() {
           S.chainId = walletChain;
           localStorage.setItem('ms_chain', String(S.chainId));
           provider = makeProvider(S.chainId);
+          S.latestBlock = 0;
+          fetchBlock();
         }
       } catch(_) {}
+      render();
       loadAllVaults();
     })();
   } else {
+    render();
     loadAllVaults();
   }
-  render();
 }
 
 function onWalletDisconnect() {
@@ -2862,7 +2874,7 @@ window.onWalletDisplayUpdate = render;
 
 function handleDeepLink() {
   const hash = location.hash.slice(1);
-  const matchTx = hash.match(/^(\d+)\/(0x[0-9a-fA-F]{40})\/tx\/(0x[0-9a-fA-F]{64})$/);
+  const matchTx = hash.match(/^(\d+)\/(0x[0-9a-fA-F]{40})\/tx\/(\d+)$/);
   const match = matchTx || hash.match(/^(\d+)\/(0x[0-9a-fA-F]{40})$/);
   if(match) {
     const linkChain = parseInt(match[1]);
@@ -2871,33 +2883,40 @@ function handleDeepLink() {
       localStorage.setItem('ms_chain', String(S.chainId));
       provider = makeProvider(S.chainId);
       fetchBlock();
+      // Sync wallet target chain so auto-reconnect uses the deep-linked chain
+      walletSwitchChain({
+        chainId: linkChain,
+        chainHex: CHAINS[linkChain].hex,
+        rpc: CHAINS[linkChain].rpcs[0],
+        addChainParams: ADD_CHAIN_PARAMS[linkChain] || null
+      });
       // Load this specific vault
       const addr = match[2];
+      if(matchTx) _linkedNonce = parseInt(match[3]);
+      showLoading('LOADING VAULT');
       (async () => {
         try {
-          // Switch connected wallet to the deep-linked chain
-          if(window._connectedWalletProvider) {
-            try {
-              await walletSwitchChain({
-                chainId: linkChain,
-                chainHex: CHAINS[linkChain].hex,
-                rpc: CHAINS[linkChain].rpcs[0],
-                addChainParams: ADD_CHAIN_PARAMS[linkChain] || null
-              });
-            } catch(_) {}
-          }
           const vData = await loadSingleVaultData(addr);
           if(vData) {
             S.vaults = [vData];
             S.sel = 0;
             S.nt = vData.threshold;
             S.nd = vData.delay / 3600;
+            hideLoading();
             render();
             await Promise.all([loadVaultQueue(0), loadVaultHistory(0)]);
             render();
+            if(_linkedNonce !== null) {
+              const el = document.querySelector(`[data-tx-nonce="${_linkedNonce}"]`);
+              if(el) { el.scrollIntoView({behavior:'smooth',block:'center'}); el.classList.add('tx-linked'); }
+              _linkedNonce = null;
+            }
+          } else {
+            hideLoading();
           }
         } catch(e) {
           console.error('Deep link load:', e);
+          hideLoading();
         }
       })();
       return true;
@@ -2915,9 +2934,10 @@ async function fetchBlock(){
   } catch(_){}
 }
 setInterval(()=>{
-  S.tick++;
   fetchBlock();
-  document.querySelectorAll("[data-eta]").forEach(el=>{const eta=+el.dataset.eta;const f=fmtEta(eta);if(f)el.textContent=f==="READY"?"READY":new Date(eta*1000).toLocaleString("en-US",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"})});
+  let anyReady=false;
+  document.querySelectorAll("[data-eta]").forEach(el=>{const eta=+el.dataset.eta;const f=fmtEta(eta);if(f){if(f==="READY"&&el.textContent!=="READY")anyReady=true;el.textContent=f==="READY"?"READY":new Date(eta*1000).toLocaleString("en-US",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"})}});
+  if(anyReady)render();
 },12000);
 
 // ── INIT ──────────────────────────────────────────────────────────
@@ -2937,9 +2957,9 @@ setInterval(()=>{
 
   fetchBlock();
 
-  handleDeepLink();
+  const hasDeepLink = handleDeepLink();
   render();
-  setTimeout(hideLoading, 400);
+  if(!hasDeepLink) setTimeout(hideLoading, 400);
 
   let resizeT;
   window.addEventListener("resize",()=>{clearTimeout(resizeT);resizeT=setTimeout(render,150)});
