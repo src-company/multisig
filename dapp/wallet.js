@@ -126,7 +126,11 @@ async function connectWithWallet(walletKey) {
       walletProvider = eip6963Providers.get(uuid)?.provider;
       if (!walletProvider) {
         const savedName = localStorage.getItem('ms_wallet_name')?.toLowerCase();
-        if (savedName) for (const [, { info, provider }] of eip6963Providers) if (info?.name?.toLowerCase() === savedName) { walletProvider = provider; break; }
+        if (savedName) {
+          for (const [, { info, provider }] of eip6963Providers) {
+            if (info?.name?.toLowerCase() === savedName) { walletProvider = provider; break; }
+          }
+        }
       }
       _isWalletConnect = false;
     } else {
@@ -160,13 +164,26 @@ async function connectWithWallet(walletKey) {
     resolveWeiName(_connectedAddress);
 
     if (oldWP && _walletEventHandlers) {
-      try { oldWP.removeListener('accountsChanged', _walletEventHandlers.accountsChanged); oldWP.removeListener('chainChanged', _walletEventHandlers.chainChanged); } catch (e) {}
+      try {
+        oldWP.removeListener('accountsChanged', _walletEventHandlers.accountsChanged);
+        oldWP.removeListener('chainChanged', _walletEventHandlers.chainChanged);
+      } catch (e) {}
     }
-    _walletEventHandlers = { accountsChanged: () => window.location.reload(), chainChanged: () => window.location.reload() };
+    _walletEventHandlers = {
+      accountsChanged: () => window.location.reload(),
+      chainChanged: () => window.location.reload()
+    };
     walletProvider.on('accountsChanged', _walletEventHandlers.accountsChanged);
     walletProvider.on('chainChanged', _walletEventHandlers.chainChanged);
 
-    try { localStorage.setItem('ms_wallet', walletKey); if (walletKey.startsWith('eip6963_')) { const uuid = walletKey.replace('eip6963_', ''); const name = eip6963Providers.get(uuid)?.info?.name; if (name) localStorage.setItem('ms_wallet_name', name); } } catch (e) {}
+    try {
+      localStorage.setItem('ms_wallet', walletKey);
+      if (walletKey.startsWith('eip6963_')) {
+        const uuid = walletKey.replace('eip6963_', '');
+        const name = eip6963Providers.get(uuid)?.info?.name;
+        if (name) localStorage.setItem('ms_wallet_name', name);
+      }
+    } catch (e) {}
     notifyDisplayUpdate();
     for (const fn of _onConnectCallbacks) { try { fn(); } catch (e) { console.error('onConnect error:', e); } }
   } catch (error) {
@@ -178,12 +195,27 @@ async function connectWithWallet(walletKey) {
 }
 
 window.disconnectWallet = function() {
-  if (_connectedWalletProvider && _walletEventHandlers) { try { _connectedWalletProvider.removeListener('accountsChanged', _walletEventHandlers.accountsChanged); _connectedWalletProvider.removeListener('chainChanged', _walletEventHandlers.chainChanged); } catch (e) {} }
+  if (_connectedWalletProvider && _walletEventHandlers) {
+    try {
+      _connectedWalletProvider.removeListener('accountsChanged', _walletEventHandlers.accountsChanged);
+      _connectedWalletProvider.removeListener('chainChanged', _walletEventHandlers.chainChanged);
+    } catch (e) {}
+  }
   _walletEventHandlers = null;
-  if (_walletConnectProvider) { try { _walletConnectProvider.disconnect(); } catch (e) {} _walletConnectProvider = null; }
-  _walletProvider = null; _signer = null; _connectedAddress = null; _connectedWalletProvider = null; _isWalletConnect = false;
+
+  if (_walletConnectProvider) {
+    try { _walletConnectProvider.disconnect(); } catch (e) {}
+    _walletConnectProvider = null;
+  }
+
+  _walletProvider = null;
+  _signer = null;
+  _connectedAddress = null;
+  _connectedWalletProvider = null;
+  _isWalletConnect = false;
   _walletDisplayName = null;
   _walletConnecting = false;
+
   closeWalletModal();
   try { localStorage.removeItem('ms_wallet'); localStorage.removeItem('ms_wallet_name'); } catch (e) {}
   for (const fn of _onDisconnectCallbacks) { try { fn(); } catch (e) {} }
@@ -241,14 +273,30 @@ async function tryAutoConnect() {
     if (savedWallet.startsWith('eip6963_')) {
       const uuid = savedWallet.replace('eip6963_', '');
       probe = eip6963Providers.get(uuid)?.provider;
-      if (!probe) { const savedName = localStorage.getItem('ms_wallet_name')?.toLowerCase(); if (savedName) for (const [, { info, provider }] of eip6963Providers) if (info?.name?.toLowerCase() === savedName) { probe = provider; break; } }
-    } else if (savedWallet !== 'walletconnect') probe = window.ethereum;
-    if (probe) { const accts = await probe.request({ method: 'eth_accounts' }); if (!accts || accts.length === 0) { _walletConnecting = false; notifyDisplayUpdate(); return; } }
+      if (!probe) {
+        const savedName = localStorage.getItem('ms_wallet_name')?.toLowerCase();
+        if (savedName) {
+          for (const [, { info, provider }] of eip6963Providers) {
+            if (info?.name?.toLowerCase() === savedName) { probe = provider; break; }
+          }
+        }
+      }
+    } else if (savedWallet !== 'walletconnect') {
+      probe = window.ethereum;
+    }
+    if (probe) {
+      const accts = await probe.request({ method: 'eth_accounts' });
+      if (!accts || accts.length === 0) { _walletConnecting = false; notifyDisplayUpdate(); return; }
+    }
     await connectWithWallet(savedWallet);
   } catch (e) {
     _walletConnecting = false;
     _walletDisplayName = null;
     notifyDisplayUpdate();
+  } finally {
+    if (!_connectedAddress && typeof window._onAutoReconnectFail === 'function') {
+      try { window._onAutoReconnectFail(); } catch (_) {}
+    }
   }
 }
 

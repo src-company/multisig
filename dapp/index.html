@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://*.supabase.co https://repo.sourcify.dev https://*.publicnode.com https://1rpc.io https://*.drpc.org https://mainnet.base.org https://sepolia.base.org https://arb1.arbitrum.io https://mainnet.optimism.io wss:; img-src 'self' data:; upgrade-insecure-requests">
 <title>multisig</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 <link id="favicon" rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%3Crect%20width%3D%2264%22%20height%3D%2264%22%20fill%3D%22%232D5FE8%22%2F%3E%0A%3Cdefs%3E%0A%3Cpath%20id%3D%22pt%22%20d%3D%22M4%2C4%20H60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pr%22%20d%3D%22M60%2C4%20V60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pb%22%20d%3D%22M60%2C60%20H4%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pl%22%20d%3D%22M4%2C60%20V4%22%20fill%3D%22none%22%2F%3E%0A%3C%2Fdefs%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pt%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pr%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pb%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pl%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Cpath%20d%3D%22M16%2C48%20V16%20H22%20L32%2C32%20L42%2C16%20H48%20V48%20H42%20V26%20L32%2C42%20L22%2C26%20V48%20Z%22%20fill%3D%22%230A0A0A%22%2F%3E%0A%3C%2Fsvg%3E" type="image/svg+xml">
@@ -315,13 +315,17 @@ const CHAINS = {
 
 const _providerCache = {};
 function makeProvider(id) {
-  if(_providerCache[id]) return _providerCache[id];
+  if (_providerCache[id]) return _providerCache[id];
   const c = CHAINS[id];
   const p = c.rpcs.length === 1
-    ? new ethers.JsonRpcProvider(c.rpcs[0], id, {staticNetwork:true})
-    : new ethers.FallbackProvider(c.rpcs.map((url, i) =>
-        ({ provider: new ethers.JsonRpcProvider(url, id, {staticNetwork:true}), priority: i + 1, stallTimeout: 2000 })
-      ), id);
+    ? new ethers.JsonRpcProvider(c.rpcs[0], id, { staticNetwork: true })
+    : new ethers.FallbackProvider(
+        c.rpcs.map((url, i) => ({
+          provider: new ethers.JsonRpcProvider(url, id, { staticNetwork: true }),
+          priority: i + 1, stallTimeout: 2000
+        })),
+        id
+      );
   _providerCache[id] = p;
   return p;
 }
@@ -494,16 +498,82 @@ const asc = n => "/".repeat(n);
 const ASC400 = asc(400);
 const ASC200 = asc(200);
 
-function seed(){return[
-{id:"V-001",name:"TREASURY_ALPHA",chain:"ETHEREUM",address:"0x8F3a...E7d1",threshold:2,ownerCount:3,delay:86400,nonce:43,executor:TIMELOCK_EXECUTOR,fastPath:true,holdings:[{token:"ETH",balance:"14.2",usd:"$29,181"},{token:"USDC",balance:"52,300",usd:"$52,300"},{token:"wstETH",balance:"3.1",usd:"$7,828"}],owners:[{addr:DEMO_YOU,label:"DEPLOYER",you:true},{addr:"0x5e6F...7A8B",label:"TREASURY"},{addr:"0x9A0B...cD1E",label:"OPS"}],queue:[
-{nonce:40,target:"0x7a25...f3e1",value:"2.5",token:"ETH",dataLabel:"TRANSFER",eta:NOW()-3600,approvals:{[DEMO_YOU]:true,"0x5e6F...7A8B":true,"0x9A0B...cD1E":false}},
-{nonce:41,target:"0x3bc1...a8d4",value:"10,000",token:"USDC",dataLabel:"ERC20 TRANSFER",eta:NOW()+72000,approvals:{[DEMO_YOU]:true,"0x5e6F...7A8B":true,"0x9A0B...cD1E":false}}]},
-{id:"V-002",name:"OPS_PAYROLL",chain:"BASE",address:"0x42Bf...1aE9",threshold:3,ownerCount:5,delay:172800,nonce:109,executor:TIMELOCK_EXECUTOR,holdings:[{token:"USDC",balance:"127,450",usd:"$127,450"},{token:"ETH",balance:"1.05",usd:"$2,158"}],owners:[{addr:DEMO_YOU,label:"DEPLOYER",you:true},{addr:"0xAa11...Bb22",label:"CFO"},{addr:"0xCc33...Dd44",label:"HR"},{addr:"0xEe55...Ff66",label:"COO"},{addr:"0x7788...9900",label:"LEGAL"}],queue:[{nonce:108,target:"0x9A44...0eF1",value:"32,000",token:"USDC",dataLabel:"ERC20 TRANSFER",eta:NOW()+129600,approvals:{[DEMO_YOU]:true,"0xAa11...Bb22":true,"0xCc33...Dd44":true,"0xEe55...Ff66":false,"0x7788...9900":false}}]},
-{id:"V-003",name:"NFT_VAULT",chain:"ETHEREUM",address:"0xC1d8...93Fa",threshold:2,ownerCount:2,delay:43200,nonce:13,executor:TIMELOCK_EXECUTOR,holdings:[{token:"ETH",balance:"3.8",usd:"$7,809"}],owners:[{addr:DEMO_YOU,label:"DEPLOYER",you:true},{addr:"0xA4d1...5e99",label:"CURATOR"}],queue:[
-{nonce:12,target:"0xC1d8...93Fa",value:"0",token:"",dataLabel:"setDelay(86400)",eta:NOW()+28800,approvals:{[DEMO_YOU]:true,"0xA4d1...5e99":true}}]},
-{id:"V-004",name:"DEV_GRANTS",chain:"ARBITRUM",address:"0x7E2a...Bb04",threshold:2,ownerCount:4,delay:259200,nonce:8,executor:TIMELOCK_EXECUTOR,holdings:[{token:"ETH",balance:"42.7",usd:"$87,749"},{token:"USDC",balance:"18,000",usd:"$18,000"},{token:"DAI",balance:"5,200",usd:"$5,200"},{token:"WBTC",balance:"0.15",usd:"$10,076"}],owners:[{addr:DEMO_YOU,label:"DEPLOYER",you:true},{addr:"0xDE01...1eAd",label:"ENG"},{addr:"0x64A2...B4c1",label:"GRANTS"},{addr:"0xC044...dA01",label:"DAO"}],queue:[
-{nonce:7,target:"0x64A2...F00d",value:"5,000",token:"USDC",dataLabel:"ERC20 TRANSFER",eta:0,approvals:{[DEMO_YOU]:false,"0xDE01...1eAd":true,"0x64A2...B4c1":false,"0xC044...dA01":false}}]}
-]}
+function seed() {
+  return [
+    {
+      id: "V-001", name: "TREASURY_ALPHA", chain: "ETHEREUM", address: "0x8F3a...E7d1",
+      threshold: 2, ownerCount: 3, delay: 86400, nonce: 43, executor: TIMELOCK_EXECUTOR, fastPath: true,
+      holdings: [
+        { token: "ETH", balance: "14.2", usd: "$29,181" },
+        { token: "USDC", balance: "52,300", usd: "$52,300" },
+        { token: "wstETH", balance: "3.1", usd: "$7,828" },
+      ],
+      owners: [
+        { addr: DEMO_YOU, label: "DEPLOYER", you: true },
+        { addr: "0x5e6F...7A8B", label: "TREASURY" },
+        { addr: "0x9A0B...cD1E", label: "OPS" },
+      ],
+      queue: [
+        { nonce: 40, target: "0x7a25...f3e1", value: "2.5", token: "ETH", dataLabel: "TRANSFER",
+          eta: NOW() - 3600, approvals: { [DEMO_YOU]: true, "0x5e6F...7A8B": true, "0x9A0B...cD1E": false } },
+        { nonce: 41, target: "0x3bc1...a8d4", value: "10,000", token: "USDC", dataLabel: "ERC20 TRANSFER",
+          eta: NOW() + 72000, approvals: { [DEMO_YOU]: true, "0x5e6F...7A8B": true, "0x9A0B...cD1E": false } },
+      ],
+    },
+    {
+      id: "V-002", name: "OPS_PAYROLL", chain: "BASE", address: "0x42Bf...1aE9",
+      threshold: 3, ownerCount: 5, delay: 172800, nonce: 109, executor: TIMELOCK_EXECUTOR,
+      holdings: [
+        { token: "USDC", balance: "127,450", usd: "$127,450" },
+        { token: "ETH", balance: "1.05", usd: "$2,158" },
+      ],
+      owners: [
+        { addr: DEMO_YOU, label: "DEPLOYER", you: true },
+        { addr: "0xAa11...Bb22", label: "CFO" },
+        { addr: "0xCc33...Dd44", label: "HR" },
+        { addr: "0xEe55...Ff66", label: "COO" },
+        { addr: "0x7788...9900", label: "LEGAL" },
+      ],
+      queue: [
+        { nonce: 108, target: "0x9A44...0eF1", value: "32,000", token: "USDC", dataLabel: "ERC20 TRANSFER",
+          eta: NOW() + 129600, approvals: { [DEMO_YOU]: true, "0xAa11...Bb22": true, "0xCc33...Dd44": true, "0xEe55...Ff66": false, "0x7788...9900": false } },
+      ],
+    },
+    {
+      id: "V-003", name: "NFT_VAULT", chain: "ETHEREUM", address: "0xC1d8...93Fa",
+      threshold: 2, ownerCount: 2, delay: 43200, nonce: 13, executor: TIMELOCK_EXECUTOR,
+      holdings: [{ token: "ETH", balance: "3.8", usd: "$7,809" }],
+      owners: [
+        { addr: DEMO_YOU, label: "DEPLOYER", you: true },
+        { addr: "0xA4d1...5e99", label: "CURATOR" },
+      ],
+      queue: [
+        { nonce: 12, target: "0xC1d8...93Fa", value: "0", token: "", dataLabel: "setDelay(86400)",
+          eta: NOW() + 28800, approvals: { [DEMO_YOU]: true, "0xA4d1...5e99": true } },
+      ],
+    },
+    {
+      id: "V-004", name: "DEV_GRANTS", chain: "ARBITRUM", address: "0x7E2a...Bb04",
+      threshold: 2, ownerCount: 4, delay: 259200, nonce: 8, executor: TIMELOCK_EXECUTOR,
+      holdings: [
+        { token: "ETH", balance: "42.7", usd: "$87,749" },
+        { token: "USDC", balance: "18,000", usd: "$18,000" },
+        { token: "DAI", balance: "5,200", usd: "$5,200" },
+        { token: "WBTC", balance: "0.15", usd: "$10,076" },
+      ],
+      owners: [
+        { addr: DEMO_YOU, label: "DEPLOYER", you: true },
+        { addr: "0xDE01...1eAd", label: "ENG" },
+        { addr: "0x64A2...B4c1", label: "GRANTS" },
+        { addr: "0xC044...dA01", label: "DAO" },
+      ],
+      queue: [
+        { nonce: 7, target: "0x64A2...F00d", value: "5,000", token: "USDC", dataLabel: "ERC20 TRANSFER",
+          eta: 0, approvals: { [DEMO_YOU]: false, "0xDE01...1eAd": true, "0x64A2...B4c1": false, "0xC044...dA01": false } },
+      ],
+    },
+  ];
+}
 
 // ── STATE ─────────────────────────────────────────────────────────
 const S = {
@@ -512,27 +582,76 @@ const S = {
   sel: 0,
   vaults: [],
   demoMode: false,
+
+  // tx builder
   showTx: false,
   txMode: "TRANSFER",
   txToken: "ETH",
-  cf: {name:'',threshold:"2",owners:[{addr:'',label:''},{addr:'',label:''},{addr:'',label:''}],delayH:"24",net:0,fastPath:false},
-  batch: [{t:"",v:"",d:""},{t:"",v:"",d:""}],
+  batch: [{ t: "", v: "", d: "" }, { t: "", v: "", d: "" }],
+
+  // create form
+  cf: {
+    name: '', threshold: "2", delayH: "24", net: 0, fastPath: false,
+    owners: [{ addr: '', label: '' }, { addr: '', label: '' }, { addr: '', label: '' }],
+  },
+
+  // admin
   adminTab: "POLICY",
   nt: 2,
   nd: 24,
-  chainId: parseInt(localStorage.getItem('ms_chain')||'1'),
+
+  // chain / network
+  chainId: parseInt(localStorage.getItem('ms_chain') || '1'),
   showChains: false,
   statusMsg: null,
   latestBlock: 0,
+
+  // custom call builder
+  cxTarget: '',
+  cxValue: '',
+  cxAbi: null,
+  cxFn: null,
+  cxArgs: {},
+  cxAddr: '',
+  cxLoading: false,
 };
 
 // ── UTILITIES ─────────────────────────────────────────────────────
-function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;")}
-const DECIMALS = {ETH:18,USDC:6,USDT:6,DAI:18,WBTC:8,wstETH:18,cbBTC:8};
-function toUnits(val,dec){if(!val||val==="0")return"0";const s=val.replace(/,/g,"");if(!/^\d*\.?\d+$/.test(s))return"INVALID";const p=s.split(".");const w=p[0]||"0";const f=(p[1]||"").padEnd(dec,"0").slice(0,dec);return(w+f).replace(/^0+/,"")||"0"}
+function esc(s) {
+  return String(s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
 
-function fmtEta(eta){if(!eta)return null;const d=eta-NOW();if(d<=0)return"READY";const h=Math.floor(d/3600),m=Math.floor((d%3600)/60);return h>0?`${h}H ${m}M`:`${m}M`}
-function fmtD(s){if(!s)return"0";const h=s/3600;if(h>=24)return`${Math.floor(h/24)}D`;if(h<1){const m=Math.round(s/60);return`${m}M`}return Number.isInteger(h)?`${h}H`:`${h.toFixed(1)}H`}
+const DECIMALS = { ETH: 18, USDC: 6, USDT: 6, DAI: 18, WBTC: 8, wstETH: 18, cbBTC: 8 };
+
+function stripCommas(s) { return String(s).replace(/,/g, ''); }
+
+function toUnits(val, dec) {
+  if (!val || val === "0") return "0";
+  const s = val.replace(/,/g, "");
+  if (!/^\d*\.?\d+$/.test(s)) return "INVALID";
+  const p = s.split(".");
+  const w = p[0] || "0";
+  const f = (p[1] || "").padEnd(dec, "0").slice(0, dec);
+  return (w + f).replace(/^0+/, "") || "0";
+}
+
+function fmtEta(eta) {
+  if (!eta) return null;
+  const d = eta - NOW();
+  if (d <= 0) return "READY";
+  const h = Math.floor(d / 3600), m = Math.floor((d % 3600) / 60);
+  return h > 0 ? `${h}H ${m}M` : `${m}M`;
+}
+
+function fmtD(s) {
+  if (!s) return "0";
+  const h = s / 3600;
+  if (h >= 24) return `${Math.floor(h / 24)}D`;
+  if (h < 1) return `${Math.round(s / 60)}M`;
+  return Number.isInteger(h) ? `${h}H` : `${h.toFixed(1)}H`;
+}
 
 const _selectorLabels = {};
 function selectorToLabel(callData) {
@@ -556,15 +675,45 @@ function selectorToLabel(callData) {
   return fallback;
 }
 
-function isCancelTx(tx,v){return tx.cancelTarget!=null||(tx.callData&&tx.callData.length>=10&&tx.callData.slice(0,10)===msIface.getFunction('cancelQueued').selector&&tx.target&&tx.target.toLowerCase()===v.address.toLowerCase())}
-function nextNonce(v){return v.queue.length?Math.max(v.nonce,...v.queue.map(t=>t.nonce+1)):v.nonce}
-function txSt(tx,v){
+function isCancelTx(tx, v) {
+  return tx.cancelTarget != null
+    || (tx.callData && tx.callData.length >= 10
+        && tx.callData.slice(0, 10) === msIface.getFunction('cancelQueued').selector
+        && tx.target && tx.target.toLowerCase() === v.address.toLowerCase());
+}
+
+function nextNonce(v) {
+  return v.queue.length
+    ? Math.max(v.nonce, ...v.queue.map(t => t.nonce + 1))
+    : v.nonce;
+}
+
+function txSt(tx, v) {
   const you = getYou();
-  const ac=Object.values(tx.approvals).filter(Boolean).length;
-  if(tx.eta>0){const csc=tx.cancelSigners?tx.cancelSigners.size:0;const cancelReady=csc>=v.threshold;const youCancel=you&&tx.cancelSigners&&tx.cancelSigners.has(you.toLowerCase());if(fmtEta(tx.eta)==="READY")return{l:"READY",c:"var(--g)",exec:true,cancel:!cancelReady&&!youCancel,cancelExec:cancelReady,cancelSigs:csc};const asc=tx.accelSigners?tx.accelSigners.size:0;const accelReady=v.fastPath&&asc>=v.ownerCount;const youAccel=you&&tx.accelSigners&&tx.accelSigners.has(you.toLowerCase());return{l:fmtEta(tx.eta),c:"var(--d)",cancel:!cancelReady&&!youCancel,cancelExec:cancelReady,cancelSigs:csc,accel:v.fastPath&&!accelReady&&!youAccel,accelExec:accelReady,accelSigs:asc}}
-  if(ac<v.threshold)return{l:`${ac}/${v.threshold} SIGS`,c:"var(--y)",sign:true};
-  if(v.delay===0)return{l:"EXECUTE",c:"var(--g)",queue:true,instant:true};
-  return{l:"SUBMIT",c:"var(--a)",queue:true};
+  const ac = Object.values(tx.approvals).filter(Boolean).length;
+
+  if (tx.eta > 0) {
+    const csc = tx.cancelSigners ? tx.cancelSigners.size : 0;
+    const cancelReady = csc >= v.threshold;
+    const youCancel = you && tx.cancelSigners && tx.cancelSigners.has(you.toLowerCase());
+
+    if (fmtEta(tx.eta) === "READY") {
+      return { l: "READY", c: "var(--g)", exec: true,
+        cancel: !cancelReady && !youCancel, cancelExec: cancelReady, cancelSigs: csc };
+    }
+
+    const accelSigCount = tx.accelSigners ? tx.accelSigners.size : 0;
+    const accelReady = v.fastPath && accelSigCount >= v.ownerCount;
+    const youAccel = you && tx.accelSigners && tx.accelSigners.has(you.toLowerCase());
+
+    return { l: fmtEta(tx.eta), c: "var(--d)",
+      cancel: !cancelReady && !youCancel, cancelExec: cancelReady, cancelSigs: csc,
+      accel: v.fastPath && !accelReady && !youAccel, accelExec: accelReady, accelSigs: accelSigCount };
+  }
+
+  if (ac < v.threshold) return { l: `${ac}/${v.threshold} SIGS`, c: "var(--y)", sign: true };
+  if (v.delay === 0) return { l: "EXECUTE", c: "var(--g)", queue: true, instant: true };
+  return { l: "SUBMIT", c: "var(--a)", queue: true };
 }
 
 function getYou(){
@@ -572,21 +721,19 @@ function getYou(){
   return window._connectedAddress || null;
 }
 
-function addrLink(addr,chain){
+function addrLink(addr, chain) {
   const safe = esc(addr);
-  if(S.demoMode){
-    const base=EXPLORERS[chain]||EXPLORERS.ETHEREUM;
-    if(ethers.isAddress(addr)) return`<a href="${base}/address/${safe}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;border-bottom:1px solid var(--ln)">${safe}</a>`;
-    return`<span style="border-bottom:1px solid var(--ln)">${safe}</span>`;
+  const base = S.demoMode
+    ? (EXPLORERS[chain] || EXPLORERS.ETHEREUM)
+    : (CHAINS[S.chainId]?.explorer || 'https://etherscan.io');
+  if (ethers.isAddress(addr)) {
+    return `<a href="${base}/address/${safe}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;border-bottom:1px solid var(--ln)">${safe}</a>`;
   }
-  const c = CHAINS[S.chainId];
-  const base = c ? c.explorer : 'https://etherscan.io';
-  if(ethers.isAddress(addr)) return`<a href="${base}/address/${safe}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;border-bottom:1px solid var(--ln)">${safe}</a>`;
-  return`<span style="border-bottom:1px solid var(--ln)">${safe}</span>`;
+  return `<span style="border-bottom:1px solid var(--ln)">${safe}</span>`;
 }
 
-function chainName(){
-  if(S.demoMode){
+function chainName() {
+  if (S.demoMode) {
     const v = S.vaults[S.sel];
     return v ? v.chain : "ETHEREUM";
   }
@@ -601,6 +748,141 @@ let _lastFaviconDark = null;
 const LOADING_SVG_DARK = `<svg class="loading-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#2D5FE8"/><defs><path id="l2t" d="M4,4 H60" fill="none"/><path id="l2r" d="M60,4 V60" fill="none"/><path id="l2b" d="M60,60 H4" fill="none"/><path id="l2l" d="M4,60 V4" fill="none"/></defs><text font-family="'Courier New',monospace" font-size="4.2" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l2t"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l2r"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l2b"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l2l"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><path d="M16,48 V16 H22 L32,32 L42,16 H48 V48 H42 V26 L32,42 L22,26 V48 Z" fill="#0A0A0A"/></svg>`;
 const LOADING_SVG_LIGHT = `<svg class="loading-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#FDFDFD"/><defs><path id="l3t" d="M4,4 H60" fill="none"/><path id="l3r" d="M60,4 V60" fill="none"/><path id="l3b" d="M60,60 H4" fill="none"/><path id="l3l" d="M4,60 V4" fill="none"/></defs><text font-family="'Courier New',monospace" font-size="4.2" fill="#0099B3" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l3t"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#0099B3" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l3r"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#0099B3" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l3b"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#0099B3" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l3l"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><path d="M16,48 V16 H22 L32,32 L42,16 H48 V48 H42 V26 L32,42 L22,26 V48 Z" fill="#0099B3"/></svg>`;
 
+// ── ABI FETCH (Sourcify) ─────────────────────────────────────────
+// Cache: false=EOA, []=unverified contract, [...]=verified fns, undefined=not fetched
+const _abiCache = {};
+const _ABI_CACHE_MAX = 200;
+let _cxDebounce = null;
+const SOURCIFY_REPO = 'https://repo.sourcify.dev/contracts';
+// Proxy implementation storage slots
+const IMPL_SLOTS = [
+  '0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc', // EIP-1967
+  '0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3', // OZ legacy
+];
+
+async function sourcifyAbi(chainId, addr) {
+  for(const match of ['full_match', 'partial_match']) {
+    try {
+      const res = await fetch(`${SOURCIFY_REPO}/${match}/${chainId}/${addr}/metadata.json`);
+      if(res.ok) {
+        const json = await res.json();
+        return (json.output && json.output.abi) || [];
+      }
+    } catch(_) {}
+  }
+  return null;
+}
+
+function extractWriteFns(abi) {
+  return abi
+    .filter(item => item.type === 'function' && item.stateMutability !== 'view' && item.stateMutability !== 'pure')
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+async function fetchContractAbi(addr) {
+  const key = S.chainId + ':' + addr.toLowerCase();
+  if(_abiCache[key] !== undefined) return _abiCache[key];
+  if(Object.keys(_abiCache).length >= _ABI_CACHE_MAX) {
+    const first = Object.keys(_abiCache)[0]; delete _abiCache[first];
+  }
+  try {
+    const code = await provider.getCode(addr);
+    if(!code || code === '0x') { _abiCache[key] = false; return false; }
+
+    // Check proxy implementation slots in parallel
+    const slotReads = IMPL_SLOTS.map(s => provider.getStorage(addr, s).catch(() => null));
+    const [directAbi, ...slotResults] = await Promise.all([sourcifyAbi(S.chainId, addr), ...slotReads]);
+
+    // Find implementation address from first non-zero slot
+    let implAddr = null;
+    for(const raw of slotResults) {
+      if(raw && raw !== '0x' + '0'.repeat(64)) {
+        const a = '0x' + raw.slice(-40);
+        if(a !== ethers.ZeroAddress) { implAddr = ethers.getAddress(a); break; }
+      }
+    }
+
+    // If proxy detected, fetch implementation ABI
+    if(implAddr) {
+      const implAbi = await sourcifyAbi(S.chainId, implAddr);
+      if(implAbi && implAbi.length) {
+        const fns = extractWriteFns(implAbi);
+        _abiCache[key] = fns;
+        return fns;
+      }
+    }
+
+    // Fall back to direct ABI
+    if(directAbi && directAbi.length) {
+      const fns = extractWriteFns(directAbi);
+      _abiCache[key] = fns;
+      return fns;
+    }
+
+    _abiCache[key] = [];
+    return [];
+  } catch(e) {
+    console.error('Fetch ABI:', e);
+    return []; // Network error — don't cache, allow retry
+  }
+}
+
+function onCxTargetChange(val) {
+  S.cxTarget = val;
+  clearTimeout(_cxDebounce);
+  if(!val || !ethers.isAddress(val)) {
+    if(S.cxAbi !== null || S.cxLoading) { S.cxAbi = null; S.cxFn = null; S.cxArgs = {}; S.cxAddr = ''; S.cxLoading = false; }
+    return;
+  }
+  const addr = ethers.getAddress(val);
+  if(addr === S.cxAddr) return;
+  S.cxLoading = true; S.cxAbi = null; S.cxFn = null; S.cxArgs = {}; S.cxAddr = addr; render();
+  _cxDebounce = setTimeout(async () => {
+    const fns = await fetchContractAbi(addr);
+    if(S.cxAddr !== addr) return;
+    S.cxAbi = fns; S.cxLoading = false;
+    render();
+  }, 500);
+}
+
+function selectCxFn(idx) {
+  S.cxFn = S.cxFn === idx ? null : idx;
+  S.cxArgs = {};
+  render();
+}
+
+function encodeCxCall() {
+  if(!S.cxAbi || S.cxFn == null) return null;
+  const fn = S.cxAbi[S.cxFn];
+  if(!fn) return null;
+  try {
+    const iface = new ethers.Interface([fn]);
+    const args = fn.inputs.map((inp, i) => parseCxArg(S.cxArgs[i] || '', inp.type));
+    return iface.encodeFunctionData(fn.name, args);
+  } catch(e) { return null; }
+}
+
+function parseCxArg(raw, type) {
+  if(type.endsWith('[]')) {
+    if(!raw) return [];
+    try { return JSON.parse(raw); } catch(_) { return raw.split(',').map(s => s.trim()); }
+  }
+  if(type === 'tuple') { try { return JSON.parse(raw); } catch(_) { return raw; } }
+  if(type === 'bool') return raw === 'true' || raw === '1';
+  return raw;
+}
+
+function resetCxState() {
+  S.cxTarget = '';
+  S.cxValue = '';
+  S.cxAbi = null;
+  S.cxFn = null;
+  S.cxArgs = {};
+  S.cxAddr = '';
+  S.cxLoading = false;
+  clearTimeout(_cxDebounce);
+}
+
 function requireSigner() {
   const signer = window._signer;
   const addr = window._connectedAddress;
@@ -608,25 +890,67 @@ function requireSigner() {
   return { signer, addr };
 }
 
-const _todayStr = new Date().toLocaleDateString("en-US",{year:"2-digit",month:"short",day:"numeric"}).toUpperCase();
-let toastTimer, hideLoadingTimer, _submitting = false, _linkedNonce = null;
-function guardSubmit(fn) { return async function(...args) { if(_submitting) return; _submitting = true; try { await fn(...args); } finally { _submitting = false; } }; }
+const _todayStr = new Date().toLocaleDateString("en-US", { year: "2-digit", month: "short", day: "numeric" }).toUpperCase();
+let toastTimer, hideLoadingTimer, _initLoadingTimer, _safetyLoadingTimer;
+let _submitting = false, _linkedNonce = null;
+
+function guardSubmit(fn) {
+  return async function(...args) {
+    if (_submitting) return;
+    _submitting = true;
+    try { await fn(...args); } finally { _submitting = false; }
+  };
+}
 function showLoading(msg) {
   clearTimeout(hideLoadingTimer);
+  clearTimeout(_initLoadingTimer);
+  clearTimeout(_safetyLoadingTimer);
   const el = document.getElementById('loading');
+  const targetClass = 'loading-overlay ' + (S.dark ? 'dark-bg' : 'light-bg');
+  const wasVisible = el.style.display !== 'none' && !el.classList.contains('fade-out');
   el.style.display = '';
-  el.className = 'loading-overlay ' + (S.dark ? 'dark-bg' : 'light-bg');
-  el.innerHTML = (S.dark ? LOADING_SVG_DARK : LOADING_SVG_LIGHT) + `<div class="loading-text">${esc(msg||'LOADING')}</div>`;
+  el.classList.remove('fade-out');
+  if(wasVisible && el.className === targetClass) {
+    const textEl = el.querySelector('.loading-text');
+    if(textEl) { textEl.textContent = msg || 'LOADING'; }
+    else { el.className = targetClass; el.innerHTML = (S.dark ? LOADING_SVG_DARK : LOADING_SVG_LIGHT) + `<div class="loading-text">${esc(msg||'LOADING')}</div>`; }
+  } else {
+    el.className = targetClass;
+    el.innerHTML = (S.dark ? LOADING_SVG_DARK : LOADING_SVG_LIGHT) + `<div class="loading-text">${esc(msg||'LOADING')}</div>`;
+  }
+  _safetyLoadingTimer = setTimeout(hideLoading, 15000);
 }
 function hideLoading() {
   clearTimeout(hideLoadingTimer);
+  clearTimeout(_initLoadingTimer);
+  clearTimeout(_safetyLoadingTimer);
   const el = document.getElementById('loading');
   el.classList.add('fade-out');
   hideLoadingTimer = setTimeout(() => { el.style.display = 'none'; }, 300);
 }
-function flash(msg){const el=document.getElementById("toast-el");el.textContent=">>> "+msg;el.style.display="";el.style.animation="none";el.offsetHeight;el.style.animation="";clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.style.display="none",2200)}
-function toggleInfo(){document.getElementById("info-modal").classList.toggle("open");document.getElementById("info-backdrop").classList.toggle("open")}
-document.addEventListener("keydown",e=>{if(e.key==="Escape"){document.getElementById("info-modal").classList.remove("open");document.getElementById("info-backdrop").classList.remove("open");if(S.showChains){S.showChains=false;render()}}});
+function flash(msg) {
+  const el = document.getElementById("toast-el");
+  el.textContent = ">>> " + msg;
+  el.style.display = "";
+  el.style.animation = "none";
+  el.offsetHeight; // reflow
+  el.style.animation = "";
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.style.display = "none", 2200);
+}
+
+function toggleInfo() {
+  document.getElementById("info-modal").classList.toggle("open");
+  document.getElementById("info-backdrop").classList.toggle("open");
+}
+
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") {
+    document.getElementById("info-modal").classList.remove("open");
+    document.getElementById("info-backdrop").classList.remove("open");
+    if (S.showChains) { S.showChains = false; render(); }
+  }
+});
 
 function explorerTxLink(hash) {
   if(!hash || !/^0x[0-9a-fA-F]{64}$/.test(hash)) return esc(hash||'');
@@ -805,7 +1129,8 @@ function renderDash(v,mob){
     const isQueued=tx.eta>0;
     const firstUnqueued=v.queue.findIndex(t=>t.eta===0&&!isCancelTx(t,v));
     const blocked=!isQueued&&!isCancel&&i!==firstUnqueued;
-    const display=tx.value&&tx.value!=="0"?`${tx.value} ${tx.token}`:tx.dataLabel;
+    const dv=tx.displayValue||tx.value,dt=tx.displayToken||tx.token;
+    const display=dv&&dv!=="0"?`${dv} ${dt}`:tx.dataLabel;
     const apHtml=v.owners.map(o=>`<span class="${tx.approvals[o.addr]?"ap-ok":"ap-no"}">${tx.approvals[o.addr]?"\u2713":"\u25CB"} ${esc(o.label)}${o.you?"*":""}</span>`).join("");
     const etaHtml=tx.eta>0&&fmtEta(tx.eta)!=="READY"?`<span class="eta" data-eta="${tx.eta}">${new Date(tx.eta*1000).toLocaleString("en-US",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"})}</span>`:"";
     const signedByYou=you&&tx.approvals[you];
@@ -886,7 +1211,7 @@ function renderDash(v,mob){
             <span class="tx-nonce">#${tx.nonce}${isCancel?" VIA EXECUTOR":i===firstUnqueued&&!isQueued?" NEXT":""}${txLink?` <button class="x-btn" style="font-size:8px;opacity:.4;display:inline-flex;min-width:auto;min-height:auto;padding:2px 4px;vertical-align:middle" onclick="event.stopPropagation();navigator.clipboard.writeText('${txLink}');flash('TX LINK COPIED')" title="${txLink}">\u29C9</button>`:""}</span>
             <span class="tx-val">${esc(display)}</span>
           </div>
-          <div class="tx-to">&rarr; ${S.demoMode?addrLink(tx.target,v.chain):addrLink(tx.target)}</div>
+          <div class="tx-to">&rarr; ${S.demoMode?addrLink(tx.target,v.chain):addrLink(tx.displayTo||tx.target)}</div>
         </div>
         ${!mob&&!blocked?`<div class="tx-actions"><span class="tx-status" style="color:${s.c}">&bull; ${s.l}</span>${actionBtn}</div>`:""}
         ${mob&&!blocked?`<span class="tx-status" style="color:${s.c}">&bull; ${s.l}</span>`:""}
@@ -924,14 +1249,46 @@ function renderTxBuilder(v,mob){
         <button class="btn btn-fill btn-w" style="margin-top:${mob?8:16}px" onclick="submitTransfer()">SIGN + SUBMIT</button>
       </div></div>`;
   }else if(S.txMode==="CUSTOM"){
+    const hasFns = Array.isArray(S.cxAbi) && S.cxAbi.length > 0;
+    const isUnverified = S.cxAddr && Array.isArray(S.cxAbi) && S.cxAbi.length === 0;
+    const selFn = hasFns && S.cxFn != null ? S.cxAbi[S.cxFn] : null;
+    const encoded = selFn ? encodeCxCall() : null;
+    let abiStatus = '';
+    if(S.cxLoading) abiStatus = `<div style="font-size:10px;color:var(--d);letter-spacing:2px;margin:-8px 0 12px;animation:pulse 2s infinite">LOADING ABI...</div>`;
+    else if(isUnverified) abiStatus = `<div style="font-size:10px;color:var(--d);margin:-8px 0 12px">UNVERIFIED CONTRACT — USE RAW CALLDATA</div>`;
+    else if(hasFns) abiStatus = `<div style="font-size:10px;color:var(--g);margin:-8px 0 4px;letter-spacing:2px">CONTRACT VERIFIED &middot; ${S.cxAbi.length} WRITE FN${S.cxAbi.length>1?'S':''}</div>`;
+    let fnPills = '';
+    if(hasFns) {
+      const dupes = new Set(); const seen = new Set();
+      S.cxAbi.forEach(f => { if(seen.has(f.name)) dupes.add(f.name); seen.add(f.name); });
+      fnPills = `<label class="lbl">FUNCTION</label><div class="token-pills" style="margin-bottom:12px;max-height:${mob?'140px':'200px'};overflow-y:auto">${S.cxAbi.map((fn, i) => {
+        const label = dupes.has(fn.name) ? fn.name+'('+fn.inputs.map(p=>p.type).join(',')+')' : fn.name;
+        return`<button class="pill${S.cxFn===i?" on":""}" onclick="selectCxFn(${i})">${esc(label)}</button>`;
+      }).join('')}</div>`;
+    }
+    let rightCol = '';
+    if(selFn) {
+      const fnSig = selFn.name+'('+selFn.inputs.map(p=>p.type).join(',')+')';
+      const params = selFn.inputs.length ? selFn.inputs.map((inp, i) =>
+        `<label class="lbl">${esc(inp.name||'arg'+i)} <span class="dim">${esc(inp.type)}</span></label><input class="inp" placeholder="${esc(inp.type)}" value="${esc(S.cxArgs[i]||'')}" oninput="S.cxArgs[${i}]=this.value">`
+      ).join('') : '<div style="font-size:10px;color:var(--d);margin:8px 0 12px;letter-spacing:2px">NO PARAMETERS</div>';
+      const preview = encoded
+        ? `<label class="lbl">CALLDATA <span class="dim">${esc(fnSig)}</span></label><div style="font-size:10px;color:var(--d);word-break:break-all;max-height:48px;overflow-y:auto;line-height:1.6;margin-bottom:12px;padding:8px;border:1px solid var(--ln)">${esc(encoded)}</div>`
+        : '';
+      const encodeFail = !encoded && selFn.inputs.length && Object.keys(S.cxArgs).length
+        ? '<div style="font-size:10px;color:var(--r);margin-bottom:12px;letter-spacing:1px">ENCODE ERROR — CHECK PARAMS</div>' : '';
+      rightCol = `${params}${selFn.stateMutability==='payable'?'<div style="font-size:10px;color:var(--g);margin:-8px 0 12px;letter-spacing:1px">PAYABLE</div>':''}${preview}${encodeFail}<button class="btn btn-fill btn-w" style="margin-top:${mob?8:16}px" onclick="submitCustom()">SIGN + SUBMIT</button>`;
+    } else {
+      rightCol = `<label class="lbl">CALLDATA</label><textarea class="inp" id="cx-data" placeholder="0x..."></textarea><button class="btn btn-fill btn-w" style="margin-top:${mob?8:16}px" onclick="submitCustom()">SIGN + SUBMIT</button>`;
+    }
     body=`<div class="grid2">
       <div>
-        <label class="lbl">TARGET</label><input class="inp" id="cx-target" placeholder="0x...">
-        <label class="lbl">VALUE (ETH)</label><input class="inp" id="cx-value" placeholder="0" oninput="document.getElementById('cx-wei').textContent=this.value?toUnits(this.value,18)+' WEI':''">
-        <div id="cx-wei" style="font-size:10px;color:var(--d);margin-top:-12px;margin-bottom:12px;word-break:break-all"></div>
+        <label class="lbl">TARGET</label><input class="inp" id="cx-target" placeholder="0x..." value="${esc(S.cxTarget)}" oninput="onCxTargetChange(this.value)">
+        ${abiStatus}${fnPills}
+        <label class="lbl">VALUE (ETH)</label><input class="inp" id="cx-value" placeholder="0" value="${esc(S.cxValue)}" oninput="S.cxValue=this.value;document.getElementById('cx-wei').textContent=this.value?toUnits(this.value,18)+' WEI':''">
+        <div id="cx-wei" style="font-size:10px;color:var(--d);margin-top:-12px;margin-bottom:12px;word-break:break-all">${S.cxValue?toUnits(S.cxValue,18)+' WEI':''}</div>
       </div><div>
-        <label class="lbl">CALLDATA</label><textarea class="inp" id="cx-data" placeholder="0x..."></textarea>
-        <button class="btn btn-fill btn-w" style="margin-top:${mob?8:16}px" onclick="submitCustom()">SIGN + SUBMIT</button>
+        ${rightCol}
       </div></div>`;
   }else{
     body=S.batch.map((c,i)=>`<div class="batch-call">
@@ -965,7 +1322,7 @@ function renderCreate(mob){
       <label class="lbl">OWNERS</label>
       ${c.owners.map((o,i)=>`<div style="display:flex;gap:8px;align-items:center;margin-bottom:2px">
         <span style="font-size:10px;font-weight:700;color:var(--d);width:20px">${String(i+1).padStart(2,"0")}</span>
-        <input class="inp" style="margin-bottom:8px;flex:2" placeholder="0x... or name.eth / name.wei" value="${esc(o.addr)}" oninput="S.cf.owners[${i}].addr=this.value;const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;if(+S.cf.threshold>fc)S.cf.threshold=String(fc);render()">
+        <input class="inp" style="margin-bottom:8px;flex:2" placeholder="0x... or name.eth / name.wei" value="${esc(o.addr)}" oninput="S.cf.owners[${i}].addr=this.value;const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;if(+S.cf.threshold>fc){S.cf.threshold=String(fc);render()}">
         <input class="inp" style="margin-bottom:8px;flex:1;font-size:11px;letter-spacing:1px" placeholder="LABEL" value="${esc(o.label)}" oninput="S.cf.owners[${i}].label=this.value">
         ${c.owners.length>1?`<button class="x-btn red" onclick="S.cf.owners.splice(${i},1);S.cf.threshold=String(Math.min(+S.cf.threshold||1,S.cf.owners.length));render()">&#10005;</button>`:""}
       </div>`).join("")}
@@ -1108,171 +1465,232 @@ function renderAdmin(v,mob){
 
 // ── DEMO TX ACTIONS ───────────────────────────────────────────────
 
-function addTxDemo(tx){
-  const v=S.vaults[S.sel];const n=v.nonce;const you=getYou();
-  const ap={};v.owners.forEach(o=>ap[o.addr]=(o.you||o.addr===you));
-  v.queue.push({nonce:n,...tx,eta:0,approvals:ap});
+function addTxDemo(tx) {
+  const v = S.vaults[S.sel];
+  const n = v.nonce;
+  const you = getYou();
+  const ap = {};
+  v.owners.forEach(o => ap[o.addr] = (o.you || o.addr === you));
+  v.queue.push({ nonce: n, ...tx, eta: 0, approvals: ap });
   v.nonce++;
-  S.showTx=false;flash(`TX #${n} CREATED`);render();
+  S.showTx = false;
+  flash(`TX #${n} CREATED`);
+  render();
 }
 
-function submitTransfer(){
-  if(S.demoMode){
-    const amt=document.getElementById("tx-amount")?.value||"0",to=document.getElementById("tx-to")?.value||"";
-    const dec=DECIMALS[S.txToken]||18;const raw=toUnits(amt,dec);
-    addTxDemo({value:amt,token:S.txToken,target:to,dataLabel:S.txToken==="ETH"?"TRANSFER":"ERC20 TRANSFER",raw:raw});
+function submitTransfer() {
+  if (S.demoMode) {
+    const amt = document.getElementById("tx-amount")?.value || "0";
+    const to = document.getElementById("tx-to")?.value || "";
+    const dec = DECIMALS[S.txToken] || 18;
+    addTxDemo({
+      value: amt, token: S.txToken, target: to, raw: toUnits(amt, dec),
+      dataLabel: S.txToken === "ETH" ? "TRANSFER" : "ERC20 TRANSFER",
+    });
   } else {
     guardSubmit(prodSubmitTransfer)();
   }
 }
 
-function submitCustom(){
-  if(S.demoMode){
-    const t=document.getElementById("cx-target")?.value||"",val=document.getElementById("cx-value")?.value||"0",d=document.getElementById("cx-data")?.value||"";
-    const wei=toUnits(val,18);
-    addTxDemo({value:val,token:"ETH",target:t,dataLabel:d?`CALL ${d.slice(0,10)}`:"CALL",wei:wei});
+function getCxCalldata() {
+  if(S.cxFn != null && Array.isArray(S.cxAbi) && S.cxAbi.length) {
+    const d = encodeCxCall();
+    if(!d) { flash('INVALID PARAMETERS — CHECK INPUTS'); return null; }
+    return d;
+  }
+  return (document.getElementById("cx-data")?.value || "0x").trim();
+}
+
+function submitCustom() {
+  if (S.demoMode) {
+    const t = S.cxTarget || document.getElementById("cx-target")?.value || "";
+    const val = S.cxValue || document.getElementById("cx-value")?.value || "0";
+    const d = getCxCalldata(); if (d === null) return;
+    const fnName = S.cxFn != null && Array.isArray(S.cxAbi) && S.cxAbi[S.cxFn] ? S.cxAbi[S.cxFn].name : null;
+    resetCxState();
+    addTxDemo({
+      value: val, token: "ETH", target: t, wei: toUnits(val, 18),
+      dataLabel: fnName ? fnName.toUpperCase() : (d && d !== '0x' ? `CALL ${d.slice(0, 10)}` : "CALL"),
+    });
   } else {
     guardSubmit(prodSubmitCustom)();
   }
 }
 
-function submitBatch(){
-  if(S.demoMode){
-    const v=S.vaults[S.sel];
-    addTxDemo({value:"0",token:"",target:v.address,dataLabel:`BATCH (${S.batch.length})`});
+function submitBatch() {
+  if (S.demoMode) {
+    const v = S.vaults[S.sel];
+    addTxDemo({ value: "0", token: "", target: v.address, dataLabel: `BATCH (${S.batch.length})` });
   } else {
     guardSubmit(prodSubmitBatch)();
   }
 }
 
-function doSign(vi,nonce){
-  if(S.demoMode){
-    const tx=S.vaults[vi].queue.find(t=>t.nonce===nonce);if(!tx)return;
-    tx.approvals[DEMO_YOU]=true;flash(`SIGNED #${nonce} (OFF-CHAIN)`);render();
+function doSign(vi, nonce) {
+  if (S.demoMode) {
+    const tx = S.vaults[vi].queue.find(t => t.nonce === nonce);
+    if (!tx) return;
+    tx.approvals[DEMO_YOU] = true;
+    flash(`SIGNED #${nonce} (OFF-CHAIN)`);
+    render();
   } else {
-    guardSubmit(prodSign)(vi,nonce);
+    guardSubmit(prodSign)(vi, nonce);
   }
 }
 
-function doApprove(vi,nonce){
-  if(S.demoMode){
-    const tx=S.vaults[vi].queue.find(t=>t.nonce===nonce);if(!tx)return;
-    tx.approvals[DEMO_YOU]=true;flash(`APPROVED #${nonce} (ON-CHAIN)`);render();
+function doApprove(vi, nonce) {
+  if (S.demoMode) {
+    const tx = S.vaults[vi].queue.find(t => t.nonce === nonce);
+    if (!tx) return;
+    tx.approvals[DEMO_YOU] = true;
+    flash(`APPROVED #${nonce} (ON-CHAIN)`);
+    render();
   } else {
-    guardSubmit(prodApprove)(vi,nonce);
+    guardSubmit(prodApprove)(vi, nonce);
   }
 }
 
-function doUnsign(vi,nonce){
-  if(S.demoMode){
-    const tx=S.vaults[vi].queue.find(t=>t.nonce===nonce);if(!tx)return;
-    tx.approvals[DEMO_YOU]=false;flash(`UNSIGNED #${nonce}`);render();
+function doUnsign(vi, nonce) {
+  if (S.demoMode) {
+    const tx = S.vaults[vi].queue.find(t => t.nonce === nonce);
+    if (!tx) return;
+    tx.approvals[DEMO_YOU] = false;
+    flash(`UNSIGNED #${nonce}`);
+    render();
   } else {
-    guardSubmit(prodUnsign)(vi,nonce);
+    guardSubmit(prodUnsign)(vi, nonce);
   }
 }
 
-function doSubmit(vi,nonce){
-  if(S.demoMode){
-    const vt=S.vaults[vi],tx=vt.queue.find(t=>t.nonce===nonce);
-    if(!tx)return;
-    if(tx.cancelTarget!=null){
-      vt.queue=vt.queue.filter(t=>t.nonce!==nonce&&t.nonce!==tx.cancelTarget);
+function doSubmit(vi, nonce) {
+  if (S.demoMode) {
+    const vt = S.vaults[vi];
+    const tx = vt.queue.find(t => t.nonce === nonce);
+    if (!tx) return;
+    if (tx.cancelTarget != null) {
+      vt.queue = vt.queue.filter(t => t.nonce !== nonce && t.nonce !== tx.cancelTarget);
       flash(`CANCELLED #${tx.cancelTarget} VIA EXECUTOR`);
-    }else if(vt.delay===0){
-      vt.queue=vt.queue.filter(t=>t.nonce!==nonce);
+    } else if (vt.delay === 0) {
+      vt.queue = vt.queue.filter(t => t.nonce !== nonce);
       flash(`EXECUTED #${nonce}`);
-    }else{
-      tx.eta=NOW()+vt.delay;
+    } else {
+      tx.eta = NOW() + vt.delay;
       flash(`QUEUED #${nonce}`);
     }
     render();
   } else {
-    guardSubmit(prodSubmit)(vi,nonce);
+    guardSubmit(prodSubmit)(vi, nonce);
   }
 }
 
-function doExecute(vi,nonce){
-  if(S.demoMode){
-    const vt=S.vaults[vi];vt.queue=vt.queue.filter(t=>t.nonce!==nonce);
-    flash(`EXECUTED #${nonce}`);render();
+function doExecute(vi, nonce) {
+  if (S.demoMode) {
+    const vt = S.vaults[vi];
+    vt.queue = vt.queue.filter(t => t.nonce !== nonce);
+    flash(`EXECUTED #${nonce}`);
+    render();
   } else {
-    guardSubmit(prodExecute)(vi,nonce);
+    guardSubmit(prodExecute)(vi, nonce);
   }
 }
 
-function doFastExecute(vi,nonce){
-  if(S.demoMode){
-    const vt=S.vaults[vi];vt.queue=vt.queue.filter(t=>t.nonce!==nonce);
-    flash(`INSTANT EXECUTED #${nonce} VIA EXECUTOR`);render();
+function doFastExecute(vi, nonce) {
+  if (S.demoMode) {
+    const vt = S.vaults[vi];
+    vt.queue = vt.queue.filter(t => t.nonce !== nonce);
+    flash(`INSTANT EXECUTED #${nonce} VIA EXECUTOR`);
+    render();
   } else {
     guardSubmit(prodFastExecute)(vi,nonce);
   }
 }
 
-function doCancel(vi,nonce){
-  if(S.demoMode){
-    const vt=S.vaults[vi];
-    const tx=vt.queue.find(t=>t.nonce===nonce);if(!tx)return;
-    const n=vt.nonce;
-    const ap={};vt.owners.forEach(o=>ap[o.addr]=!!o.you);
-    vt.queue.push({nonce:n,target:vt.address,value:"0",token:"",dataLabel:`CANCEL #${nonce}`,eta:0,approvals:ap,cancelTarget:nonce});
+function doCancel(vi, nonce) {
+  if (S.demoMode) {
+    const vt = S.vaults[vi];
+    const tx = vt.queue.find(t => t.nonce === nonce);
+    if (!tx) return;
+    const n = vt.nonce;
+    const ap = {};
+    vt.owners.forEach(o => ap[o.addr] = !!o.you);
+    vt.queue.push({
+      nonce: n, target: vt.address, value: "0", token: "",
+      dataLabel: `CANCEL #${nonce}`, eta: 0, approvals: ap, cancelTarget: nonce,
+    });
     vt.nonce++;
     flash(`CANCEL PROPOSED #${n} \u2192 cancelQueued(#${nonce})`);
     render();
   } else {
-    guardSubmit(prodCancel)(vi,nonce);
+    guardSubmit(prodCancel)(vi, nonce);
   }
 }
 
-function doAccelerate(vi,nonce){
-  if(S.demoMode){
-    const vt=S.vaults[vi];
-    vt.queue=vt.queue.filter(t=>t.nonce!==nonce);
-    flash(`ACCELERATED #${nonce} VIA EXECUTOR`);render();
+function doAccelerate(vi, nonce) {
+  if (S.demoMode) {
+    const vt = S.vaults[vi];
+    vt.queue = vt.queue.filter(t => t.nonce !== nonce);
+    flash(`ACCELERATED #${nonce} VIA EXECUTOR`);
+    render();
   } else {
-    guardSubmit(prodAccelerate)(vi,nonce);
+    guardSubmit(prodAccelerate)(vi, nonce);
   }
 }
 
-function doDeploy(){
-  if(S.demoMode){
-    const c=S.cf,net=NETS[c.net];
-    const valid=c.owners.filter(o=>o.addr.trim());
-    if(!valid.length){flash("ADD AT LEAST 1 OWNER");return}
-    if(parseInt(c.threshold)>valid.length){flash("THRESHOLD > OWNER COUNT");return}
-    const owners=valid.sort((a,b)=>a.addr.localeCompare(b.addr)).map((o,i)=>({addr:o.addr,label:o.label||"OWNER "+(i+1)}));
-    owners[0].you=true;owners[0].addr=DEMO_YOU;owners[0].label=owners[0].label||"DEPLOYER";
-    const id="V-"+String(S.vaults.length+1).padStart(3,"0");
-    const delay=Math.floor((parseFloat(c.delayH)||0)*3600);
-    const fp=c.fastPath&&delay>0;
-    const addr="0x"+Math.random().toString(16).slice(2,6)+"..."+Math.random().toString(16).slice(2,6);
-    S.vaults.push({id,name:c.name||net.name+"_"+id,chain:net.name,address:addr,threshold:parseInt(c.threshold)||1,ownerCount:owners.length,delay,nonce:0,executor:TIMELOCK_EXECUTOR,holdings:[],owners,queue:[],history:[],fastPath:fp});
-    S.sel=S.vaults.length-1;S.view="DASH";
-    flash(fp?`createWithCalls() \u2192 ${FACTORY.slice(0,10)}...`:`create() \u2192 ${FACTORY.slice(0,10)}...`);
+function doDeploy() {
+  if (S.demoMode) {
+    const c = S.cf, net = NETS[c.net];
+    const valid = c.owners.filter(o => o.addr.trim());
+    if (!valid.length) { flash("ADD AT LEAST 1 OWNER"); return; }
+    if (parseInt(c.threshold) > valid.length) { flash("THRESHOLD > OWNER COUNT"); return; }
+
+    const owners = valid.sort((a, b) => a.addr.localeCompare(b.addr))
+      .map((o, i) => ({ addr: o.addr, label: o.label || "OWNER " + (i + 1) }));
+    owners[0].you = true;
+    owners[0].addr = DEMO_YOU;
+    owners[0].label = owners[0].label || "DEPLOYER";
+
+    const id = "V-" + String(S.vaults.length + 1).padStart(3, "0");
+    const delay = Math.floor((parseFloat(c.delayH) || 0) * 3600);
+    const fp = c.fastPath && delay > 0;
+    const addr = "0x" + Math.random().toString(16).slice(2, 6) + "..." + Math.random().toString(16).slice(2, 6);
+
+    S.vaults.push({
+      id, name: c.name || net.name + "_" + id, chain: net.name, address: addr,
+      threshold: parseInt(c.threshold) || 1, ownerCount: owners.length, delay, nonce: 0,
+      executor: TIMELOCK_EXECUTOR, holdings: [], owners, queue: [], history: [], fastPath: fp,
+    });
+    S.sel = S.vaults.length - 1;
+    S.view = "DASH";
+    flash(fp ? `createWithCalls() \u2192 ${FACTORY.slice(0, 10)}...` : `create() \u2192 ${FACTORY.slice(0, 10)}...`);
     render();
   } else {
     guardSubmit(prodDeploy)();
   }
 }
 
-function doAdminPropose(action, val){
-  if(S.demoMode){
-    const v=S.vaults[S.sel];if(!v)return;
-    const n=v.nonce;const you=getYou();
-    const ap={};v.owners.forEach(o=>ap[o.addr]=(o.you||o.addr===you));
-    let desc,target=v.address;
-    if(action==='setThreshold'){desc=`setThreshold(${val})`}
-    else if(action==='setDelay'){desc=`setDelay(${val})`}
-    else if(action==='setExecutor'){desc='setExecutor(...)'}
-    else if(action==='enableForward'){desc=`enableForward(${!v.fastPath})`;target=v.executor}
-    else if(action==='removeOwner'){desc=`removeOwner(${v.owners[val]?.addr||'...'})`}
-    else if(action==='addOwner'){const raw=document.getElementById('admin-add-owner')?.value||'...';desc=`addOwner(${raw})`}
+function doAdminPropose(action, val) {
+  if (S.demoMode) {
+    const v = S.vaults[S.sel];
+    if (!v) return;
+    const n = v.nonce;
+    const you = getYou();
+    const ap = {};
+    v.owners.forEach(o => ap[o.addr] = (o.you || o.addr === you));
+
+    let desc, target = v.address;
+    if (action === 'setThreshold') desc = `setThreshold(${val})`;
+    else if (action === 'setDelay') desc = `setDelay(${val})`;
+    else if (action === 'setExecutor') desc = 'setExecutor(...)';
+    else if (action === 'enableForward') { desc = `enableForward(${!v.fastPath})`; target = v.executor; }
+    else if (action === 'removeOwner') desc = `removeOwner(${v.owners[val]?.addr || '...'})`;
+    else if (action === 'addOwner') { desc = `addOwner(${document.getElementById('admin-add-owner')?.value || '...'})`; }
     else return;
-    v.queue.push({nonce:n,target,value:"0",token:"",dataLabel:desc.toUpperCase(),eta:0,approvals:ap});
+
+    v.queue.push({ nonce: n, target, value: "0", token: "", dataLabel: desc.toUpperCase(), eta: 0, approvals: ap });
     v.nonce++;
     flash(`PROPOSE: ${desc}`);
-    S.view="DASH";render();
+    S.view = "DASH";
+    render();
   } else {
     guardSubmit(prodAdminPropose)(action, val);
   }
@@ -1526,7 +1944,8 @@ async function loadAllVaults() {
   if(S.demoMode) return;
   const addr = window._connectedAddress;
   if(!addr) return;
-  showLoading('LOADING VAULTS');
+  const hadVaults = S.vaults.length > 0;
+  if(!hadVaults) showLoading('LOADING VAULTS');
   try {
     const wallets = await dbMyWallets(addr);
     // Preserve vaults loaded via deep link that aren't in the user's DB set
@@ -1550,7 +1969,10 @@ async function loadAllVaults() {
     hideLoading();
     render();
     // Load queues + history in background (single render after all complete)
-    Promise.all(S.vaults.map((_, i) => Promise.all([loadVaultQueue(i), loadVaultHistory(i)]))).then(render).catch(e => console.error('Background queue load:', e));
+    const snapshotVaults = S.vaults;
+    Promise.all(S.vaults.map((_, i) => Promise.allSettled([loadVaultQueue(i), loadVaultHistory(i)])))
+      .then(() => { if (S.vaults === snapshotVaults) render(); })
+      .catch(e => { console.error('Background queue load:', e); if (S.vaults === snapshotVaults) render(); });
   } catch(e) {
     console.error('loadAllVaults:', e);
     hideLoading();
@@ -1704,11 +2126,30 @@ async function loadVaultQueue(vi) {
       const dataLabel = selectorToLabel(t.call_data);
 
       const ethVal = t.value && t.value !== '0' ? ethers.formatEther(BigInt(t.value)) : '0';
+      const value = ethVal === '0' ? '0' : ethVal;
+      const token = (t.call_data === '0x' || !t.call_data) && ethVal !== '0' ? 'ETH' : '';
+      let displayValue = value, displayToken = token, displayTo = null;
+      // Decode ERC20 transfer amount and recipient for display
+      if(dataLabel === 'ERC20 TRANSFER' && t.call_data && t.call_data.length >= 10) {
+        try {
+          const decoded = erc20Iface.decodeFunctionData('transfer', t.call_data);
+          const allTokens = PROD_TOKENS[S.chainId] || ETH_ONLY;
+          const tokenInfo = allTokens.find(tk => tk.address.toLowerCase() === t.target.toLowerCase());
+          if(tokenInfo && decoded[1] != null) {
+            displayValue = ethers.formatUnits(decoded[1], tokenInfo.decimals);
+            displayToken = tokenInfo.symbol;
+            displayTo = decoded[0];
+          }
+        } catch(_) {}
+      }
       queue.push({
         nonce: t.nonce,
         target: t.target,
-        value: ethVal === '0' ? '0' : ethVal,
-        token: (t.call_data === '0x' || !t.call_data) && ethVal !== '0' ? 'ETH' : '',
+        displayTo: displayTo,
+        displayValue: displayValue,
+        displayToken: displayToken,
+        value: value,
+        token: token,
         dataLabel: dataLabel,
         eta: t.eta || 0,
         approvals: approvals,
@@ -2017,6 +2458,7 @@ async function prodDeploy() {
 // ── PRODUCTION: SIGN ──────────────────────────────────────────────
 
 function senderSig(addr) {
+  // Encode as r=addr (left-padded), s=0, v=0 — contract interprets as msg.sender approval
   return '0x' + addr.slice(2).toLowerCase().padStart(64, '0') + '0'.repeat(64) + '00';
 }
 
@@ -2569,7 +3011,7 @@ async function prodSubmitTransfer() {
   const v = S.vaults[S.sel];
   if(!v) return;
 
-  const amt = document.getElementById("tx-amount")?.value || "0";
+  const amt = stripCommas(document.getElementById("tx-amount")?.value || "0");
   const to = document.getElementById("tx-to")?.value || "";
   if(!to || !amt) { flash('FILL IN AMOUNT AND RECIPIENT'); return; }
 
@@ -2618,9 +3060,9 @@ async function prodSubmitCustom() {
   const v = S.vaults[S.sel];
   if(!v) return;
 
-  const target = document.getElementById("cx-target")?.value || "";
-  const val = document.getElementById("cx-value")?.value || "0";
-  const d = (document.getElementById("cx-data")?.value || "0x").trim();
+  const target = S.cxTarget || document.getElementById("cx-target")?.value || "";
+  const val = stripCommas(S.cxValue || document.getElementById("cx-value")?.value || "0");
+  const d = getCxCalldata(); if(d === null) return;
   if(!target) { flash('ENTER TARGET'); return; }
   if(d !== '0x' && !/^0x[0-9a-fA-F]*$/.test(d)) { flash('INVALID CALLDATA — MUST BE HEX (0x...)'); return; }
   if(d !== '0x' && d.length % 2 !== 0) { flash('INVALID CALLDATA — ODD LENGTH'); return; }
@@ -2635,13 +3077,17 @@ async function prodSubmitCustom() {
     const sig = await signer.signTypedData(domain, EIP712_TYPES, msg);
     const txHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg);
 
+    const fnName = S.cxFn != null && Array.isArray(S.cxAbi) && S.cxAbi[S.cxFn] ? S.cxAbi[S.cxFn].name : null;
+    const desc = fnName ? `${fnName}() → ${resolvedTarget.slice(0,8)}...` : undefined;
+
     if(v.dbId) {
-      const txId = await dbProposeTx(v.dbId, nonce, resolvedTarget, value, d, txHash, v.threshold, connectedAddress);
+      const txId = await dbProposeTx(v.dbId, nonce, resolvedTarget, value, d, txHash, v.threshold, connectedAddress, desc);
       if(txId) await dbAddSig(txId, connectedAddress, sig);
     }
 
     flash(`TX #${nonce} CREATED`);
     S.showTx = false;
+    resetCxState();
     await reloadQueue(S.sel);
   } catch(e) {
     console.error(e);
@@ -2657,11 +3103,16 @@ async function prodSubmitBatch() {
 
   const calls = S.batch.filter(c => c.t.trim());
   if(!calls.length) { flash('ADD AT LEAST 1 CALL'); return; }
+  for(const c of calls) {
+    const cd = (c.d || '0x').trim();
+    if(cd !== '0x' && !/^0x[0-9a-fA-F]*$/.test(cd)) { flash('INVALID CALLDATA — MUST BE HEX (0x...)'); return; }
+    if(cd !== '0x' && cd.length % 2 !== 0) { flash('INVALID CALLDATA — ODD LENGTH'); return; }
+  }
 
   try {
     const targets = await Promise.all(calls.map(c => resolveName(c.t)));
-    const values = calls.map(c => ethers.parseEther(c.v || '0'));
-    const datas = calls.map(c => c.d || '0x');
+    const values = calls.map(c => ethers.parseEther(stripCommas(c.v || '0')));
+    const datas = calls.map(c => (c.d || '0x').trim());
 
     const batchData = msIface.encodeFunctionData('batch', [targets, values, datas]);
     const target = v.address;
@@ -2789,6 +3240,7 @@ async function switchChain(id, skipLoad) {
   provider = makeProvider(id);
   S.showChains = false;
   S.latestBlock = 0;
+  resetCxState();
   fetchBlock();
 
   // Ask wallet to switch chain
@@ -2858,7 +3310,12 @@ function onWalletDisconnect() {
   render();
 }
 
-window.onWalletDisplayUpdate = render;
+window.onWalletDisplayUpdate = function() {
+  const hasFocused = document.querySelector(
+    '.txb input:focus, .txb textarea:focus, .content input:focus, .content textarea:focus, .content select:focus'
+  );
+  if (!hasFocused) render();
+};
 
 // ── DEEP LINKING ──────────────────────────────────────────────────
 
@@ -2907,6 +3364,7 @@ function handleDeepLink() {
         } catch(e) {
           console.error('Deep link load:', e);
           hideLoading();
+          render();
         }
       })();
       return true;
@@ -2916,20 +3374,32 @@ function handleDeepLink() {
 }
 
 // ── TICK (block number + ETA updates) ─────────────────────────────
-async function fetchBlock(){
+async function fetchBlock() {
   try {
     const n = await provider.getBlockNumber();
     S.latestBlock = n;
-    document.querySelectorAll("[data-block]").forEach(el=>el.textContent="BLOCK "+n.toLocaleString());
-  } catch(_){}
+    document.querySelectorAll("[data-block]").forEach(el => el.textContent = "BLOCK " + n.toLocaleString());
+  } catch (_) {}
 }
-setInterval(()=>{
-  if(document.hidden) return;
+setInterval(() => {
+  if (document.hidden) return;
   fetchBlock();
-  let anyReady=false;
-  document.querySelectorAll("[data-eta]").forEach(el=>{const eta=+el.dataset.eta;const f=fmtEta(eta);if(f){if(f==="READY"&&el.textContent!=="READY")anyReady=true;el.textContent=f==="READY"?"READY":new Date(eta*1000).toLocaleString("en-US",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"})}});
-  if(anyReady)render();
-},12000);
+  let anyReady = false;
+  document.querySelectorAll("[data-eta]").forEach(el => {
+    const eta = +el.dataset.eta;
+    const f = fmtEta(eta);
+    if (f) {
+      if (f === "READY" && el.textContent !== "READY") anyReady = true;
+      el.textContent = f === "READY"
+        ? "READY"
+        : new Date(eta * 1000).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    }
+  });
+  const hasFocused = document.querySelector(
+    '.txb input:focus, .txb textarea:focus, .content input:focus, .content textarea:focus, .content select:focus'
+  );
+  if (anyReady && !hasFocused) render();
+}, 12000);
 
 // ── INIT ──────────────────────────────────────────────────────────
 (function init() {
@@ -2950,10 +3420,21 @@ setInterval(()=>{
 
   const hasDeepLink = handleDeepLink();
   render();
-  if(!hasDeepLink) setTimeout(hideLoading, 400);
+  if(!hasDeepLink) {
+    const hasSavedWallet = !!localStorage.getItem('ms_wallet');
+    if(hasSavedWallet) {
+      window._onAutoReconnectFail = () => { clearTimeout(_initLoadingTimer); hideLoading(); };
+      _initLoadingTimer = setTimeout(hideLoading, 5000);
+    } else {
+      _initLoadingTimer = setTimeout(hideLoading, 400);
+    }
+  }
 
   let resizeT;
-  window.addEventListener("resize",()=>{clearTimeout(resizeT);resizeT=setTimeout(render,150)});
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeT);
+    resizeT = setTimeout(render, 150);
+  });
 })();
 </script>
 </body>
