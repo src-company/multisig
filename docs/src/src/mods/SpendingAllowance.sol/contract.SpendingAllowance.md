@@ -1,5 +1,5 @@
 # SpendingAllowance
-[Git Source](https://github.com/z0r0z/multisig/blob/88f2fd9c70fcd2f83b9d61859bb5b7eeef042d87/src/mods/SpendingAllowance.sol)
+[Git Source](https://github.com/z0r0z/multisig/blob/7a81a30eb63788e9eea9c0790c2db6cfb7f435dd/src/mods/SpendingAllowance.sol)
 
 Executor module that grants a spender a periodic ETH allowance.
 Set as the multisig's executor. The spender calls spend() to transfer

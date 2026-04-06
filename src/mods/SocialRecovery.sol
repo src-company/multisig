@@ -25,6 +25,7 @@ contract SocialRecovery {
     constructor() payable {}
 
     function setGuardian(address guardian, bool active) public {
+        if (active) require(delay[msg.sender] != 0, NotReady());
         isGuardian[msg.sender][guardian] = active;
         emit GuardianSet(msg.sender, guardian, active);
     }

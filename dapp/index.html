@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">
 <title>multisig</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 <link id="favicon" rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%3Crect%20width%3D%2264%22%20height%3D%2264%22%20fill%3D%22%232D5FE8%22%2F%3E%0A%3Cdefs%3E%0A%3Cpath%20id%3D%22pt%22%20d%3D%22M4%2C4%20H60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pr%22%20d%3D%22M60%2C4%20V60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pb%22%20d%3D%22M60%2C60%20H4%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pl%22%20d%3D%22M4%2C60%20V4%22%20fill%3D%22none%22%2F%3E%0A%3C%2Fdefs%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pt%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pr%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pb%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pl%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Cpath%20d%3D%22M16%2C48%20V16%20H22%20L32%2C32%20L42%2C16%20H48%20V48%20H42%20V26%20L32%2C42%20L22%2C26%20V48%20Z%22%20fill%3D%22%230A0A0A%22%2F%3E%0A%3C%2Fsvg%3E" type="image/svg+xml">
@@ -481,6 +482,7 @@ const EIP712_TYPES = { Execute: [
 
 // ── PROVIDER STATE ────────────────────────────────────────────────
 let provider = null;
+function getMC3() { return new ethers.Contract(MC3, MC3_ABI, provider); }
 const SENTINEL = '0x0000000000000000000000000000000000000001';
 // ── DEMO DATA ─────────────────────────────────────────────────────
 const DEMO_YOU = "0x1a2B...3c4D";
@@ -527,10 +529,32 @@ const S = {
 // ── UTILITIES ─────────────────────────────────────────────────────
 function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;")}
 const DECIMALS = {ETH:18,USDC:6,USDT:6,DAI:18,WBTC:8,wstETH:18,cbBTC:8};
-function toUnits(val,dec){if(!val||val==="0")return"0";const s=val.replace(/,/g,"");if(!/^\d+(\.\d+)?$/.test(s))return"INVALID";const p=s.split(".");const w=p[0]||"0";const f=(p[1]||"").padEnd(dec,"0").slice(0,dec);return(w+f).replace(/^0+/,"")||"0"}
+function toUnits(val,dec){if(!val||val==="0")return"0";const s=val.replace(/,/g,"");if(!/^\d*\.?\d+$/.test(s))return"INVALID";const p=s.split(".");const w=p[0]||"0";const f=(p[1]||"").padEnd(dec,"0").slice(0,dec);return(w+f).replace(/^0+/,"")||"0"}
 
 function fmtEta(eta){if(!eta)return null;const d=eta-NOW();if(d<=0)return"READY";const h=Math.floor(d/3600),m=Math.floor((d%3600)/60);return h>0?`${h}H ${m}M`:`${m}M`}
-function fmtD(s){if(!s)return"0";const h=s/3600;return h>=24?`${Math.floor(h/24)}D`:`${h}H`}
+function fmtD(s){if(!s)return"0";const h=s/3600;if(h>=24)return`${Math.floor(h/24)}D`;if(h<1){const m=Math.round(s/60);return`${m}M`}return Number.isInteger(h)?`${h}H`:`${h.toFixed(1)}H`}
+
+const _selectorLabels = {};
+function selectorToLabel(callData) {
+  if(!callData || callData === '0x') return 'TRANSFER';
+  if(callData.length < 10) return 'CALL';
+  const sel = callData.slice(0, 10);
+  if(_selectorLabels[sel] !== undefined) return _selectorLabels[sel];
+  const map = [
+    [erc20Iface, 'transfer', 'ERC20 TRANSFER'],
+    [msIface, 'addOwner', 'ADD OWNER'], [msIface, 'removeOwner', 'REMOVE OWNER'],
+    [msIface, 'setThreshold', 'SET THRESHOLD'], [msIface, 'setDelay', 'SET DELAY'],
+    [msIface, 'setExecutor', 'SET EXECUTOR'], [msIface, 'cancelQueued', 'CANCEL'],
+    [msIface, 'executeQueued', 'ACCELERATE'], [msIface, 'batch', 'BATCH'],
+    [msIface, 'delegateCall', 'DELEGATE CALL'], [tlIface, 'enableForward', 'ENABLE FORWARD'],
+  ];
+  for(const [iface, fn, label] of map) {
+    if(sel === iface.getFunction(fn).selector) { _selectorLabels[sel] = label; return label; }
+  }
+  const fallback = `CALL ${sel}`;
+  _selectorLabels[sel] = fallback;
+  return fallback;
+}
 
 function isCancelTx(tx,v){return tx.cancelTarget!=null||(tx.callData&&tx.callData.length>=10&&tx.callData.slice(0,10)===msIface.getFunction('cancelQueued').selector&&tx.target&&tx.target.toLowerCase()===v.address.toLowerCase())}
 function nextNonce(v){return v.queue.length?Math.max(v.nonce,...v.queue.map(t=>t.nonce+1)):v.nonce}
@@ -549,13 +573,16 @@ function getYou(){
 }
 
 function addrLink(addr,chain){
+  const safe = esc(addr);
   if(S.demoMode){
     const base=EXPLORERS[chain]||EXPLORERS.ETHEREUM;
-    return`<a href="${base}/address/${addr}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;border-bottom:1px solid var(--ln)">${addr}</a>`;
+    if(ethers.isAddress(addr)) return`<a href="${base}/address/${safe}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;border-bottom:1px solid var(--ln)">${safe}</a>`;
+    return`<span style="border-bottom:1px solid var(--ln)">${safe}</span>`;
   }
   const c = CHAINS[S.chainId];
   const base = c ? c.explorer : 'https://etherscan.io';
-  return`<a href="${base}/address/${addr}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;border-bottom:1px solid var(--ln)">${addr}</a>`;
+  if(ethers.isAddress(addr)) return`<a href="${base}/address/${safe}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;border-bottom:1px solid var(--ln)">${safe}</a>`;
+  return`<span style="border-bottom:1px solid var(--ln)">${safe}</span>`;
 }
 
 function chainName(){
@@ -567,9 +594,21 @@ function chainName(){
   return c ? c.name.toUpperCase() : "ETHEREUM";
 }
 
+const FAVICON_DARK = "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%3Crect%20width%3D%2264%22%20height%3D%2264%22%20fill%3D%22%232D5FE8%22%2F%3E%0A%3Cdefs%3E%0A%3Cpath%20id%3D%22pt%22%20d%3D%22M4%2C4%20H60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pr%22%20d%3D%22M60%2C4%20V60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pb%22%20d%3D%22M60%2C60%20H4%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pl%22%20d%3D%22M4%2C60%20V4%22%20fill%3D%22none%22%2F%3E%0A%3C%2Fdefs%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pt%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pr%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pb%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pl%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Cpath%20d%3D%22M16%2C48%20V16%20H22%20L32%2C32%20L42%2C16%20H48%20V48%20H42%20V26%20L32%2C42%20L22%2C26%20V48%20Z%22%20fill%3D%22%230A0A0A%22%2F%3E%0A%3C%2Fsvg%3E";
+const FAVICON_LIGHT = "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%3Crect%20width%3D%2264%22%20height%3D%2264%22%20fill%3D%22%23FDFDFD%22%2F%3E%0A%3Cdefs%3E%0A%3Cpath%20id%3D%22pt%22%20d%3D%22M4%2C4%20H60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pr%22%20d%3D%22M60%2C4%20V60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pb%22%20d%3D%22M60%2C60%20H4%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pl%22%20d%3D%22M4%2C60%20V4%22%20fill%3D%22none%22%2F%3E%0A%3C%2Fdefs%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230099B3%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pt%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230099B3%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pr%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230099B3%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pb%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230099B3%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pl%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Cpath%20d%3D%22M16%2C48%20V16%20H22%20L32%2C32%20L42%2C16%20H48%20V48%20H42%20V26%20L32%2C42%20L22%2C26%20V48%20Z%22%20fill%3D%22%230099B3%22%2F%3E%0A%3C%2Fsvg%3E";
+let _lastFaviconDark = null;
+
 const LOADING_SVG_DARK = `<svg class="loading-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#2D5FE8"/><defs><path id="l2t" d="M4,4 H60" fill="none"/><path id="l2r" d="M60,4 V60" fill="none"/><path id="l2b" d="M60,60 H4" fill="none"/><path id="l2l" d="M4,60 V4" fill="none"/></defs><text font-family="'Courier New',monospace" font-size="4.2" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l2t"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l2r"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l2b"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l2l"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><path d="M16,48 V16 H22 L32,32 L42,16 H48 V48 H42 V26 L32,42 L22,26 V48 Z" fill="#0A0A0A"/></svg>`;
 const LOADING_SVG_LIGHT = `<svg class="loading-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#FDFDFD"/><defs><path id="l3t" d="M4,4 H60" fill="none"/><path id="l3r" d="M60,4 V60" fill="none"/><path id="l3b" d="M60,60 H4" fill="none"/><path id="l3l" d="M4,60 V4" fill="none"/></defs><text font-family="'Courier New',monospace" font-size="4.2" fill="#0099B3" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l3t"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#0099B3" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l3r"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#0099B3" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l3b"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#0099B3" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l3l"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><path d="M16,48 V16 H22 L32,32 L42,16 H48 V48 H42 V26 L32,42 L22,26 V48 Z" fill="#0099B3"/></svg>`;
 
+function requireSigner() {
+  const signer = window._signer;
+  const addr = window._connectedAddress;
+  if(!signer) { flash('CONNECT WALLET FIRST'); return null; }
+  return { signer, addr };
+}
+
+const _todayStr = new Date().toLocaleDateString("en-US",{year:"2-digit",month:"short",day:"numeric"}).toUpperCase();
 let toastTimer, hideLoadingTimer, _submitting = false, _linkedNonce = null;
 function guardSubmit(fn) { return async function(...args) { if(_submitting) return; _submitting = true; try { await fn(...args); } finally { _submitting = false; } }; }
 function showLoading(msg) {
@@ -590,6 +629,7 @@ function toggleInfo(){document.getElementById("info-modal").classList.toggle("op
 document.addEventListener("keydown",e=>{if(e.key==="Escape"){document.getElementById("info-modal").classList.remove("open");document.getElementById("info-backdrop").classList.remove("open");if(S.showChains){S.showChains=false;render()}}});
 
 function explorerTxLink(hash) {
+  if(!hash || !/^0x[0-9a-fA-F]{64}$/.test(hash)) return esc(hash||'');
   const c = CHAINS[S.chainId];
   const base = c ? c.explorer : 'https://etherscan.io';
   return `<a href="${base}/tx/${hash}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;border-bottom:1px solid var(--ln)">${hash.slice(0,10)}...${hash.slice(-6)}</a>`;
@@ -600,9 +640,10 @@ function render(){
   const v = S.vaults[S.sel] || null;
   const mob = window.innerWidth <= 640;
   document.body.className = S.dark ? "" : "light";
-  document.getElementById("favicon").href = S.dark
-    ? "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%3Crect%20width%3D%2264%22%20height%3D%2264%22%20fill%3D%22%232D5FE8%22%2F%3E%0A%3Cdefs%3E%0A%3Cpath%20id%3D%22pt%22%20d%3D%22M4%2C4%20H60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pr%22%20d%3D%22M60%2C4%20V60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pb%22%20d%3D%22M60%2C60%20H4%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pl%22%20d%3D%22M4%2C60%20V4%22%20fill%3D%22none%22%2F%3E%0A%3C%2Fdefs%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pt%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pr%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pb%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pl%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Cpath%20d%3D%22M16%2C48%20V16%20H22%20L32%2C32%20L42%2C16%20H48%20V48%20H42%20V26%20L32%2C42%20L22%2C26%20V48%20Z%22%20fill%3D%22%230A0A0A%22%2F%3E%0A%3C%2Fsvg%3E"
-    : "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%3Crect%20width%3D%2264%22%20height%3D%2264%22%20fill%3D%22%23FDFDFD%22%2F%3E%0A%3Cdefs%3E%0A%3Cpath%20id%3D%22pt%22%20d%3D%22M4%2C4%20H60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pr%22%20d%3D%22M60%2C4%20V60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pb%22%20d%3D%22M60%2C60%20H4%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pl%22%20d%3D%22M4%2C60%20V4%22%20fill%3D%22none%22%2F%3E%0A%3C%2Fdefs%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230099B3%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pt%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230099B3%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pr%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230099B3%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pb%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230099B3%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pl%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Cpath%20d%3D%22M16%2C48%20V16%20H22%20L32%2C32%20L42%2C16%20H48%20V48%20H42%20V26%20L32%2C42%20L22%2C26%20V48%20Z%22%20fill%3D%22%230099B3%22%2F%3E%0A%3C%2Fsvg%3E";
+  if(_lastFaviconDark !== S.dark) {
+    _lastFaviconDark = S.dark;
+    document.getElementById("favicon").href = S.dark ? FAVICON_DARK : FAVICON_LIGHT;
+  }
 
   const you = getYou();
   let walletLabel;
@@ -661,7 +702,7 @@ function render(){
         ${S.vaults.length===0&&!S.demoMode?`<button class="reset-btn" onclick="S.demoMode=true;S.vaults=seed();S.sel=0;flash('DEMO LOADED');render()">DEMO</button>`:""}
         ${S.demoMode?`<button class="reset-btn" onclick="S.demoMode=false;S.vaults=[];S.sel=0;S.view='DASH';S.showTx=false;S.batch=[{t:'',v:'',d:''},{t:'',v:'',d:''}];S.adminTab='POLICY';flash('DEMO CLEARED');render()">RESET</button>`:""}
         ${!S.demoMode&&S.vaults.length>0?`<button class="reset-btn" onclick="loadAllVaults()">RELOAD</button>`:""}
-        <span>${new Date().toLocaleDateString("en-US",{year:"2-digit",month:"short",day:"numeric"}).toUpperCase()}</span>
+        <span>${_todayStr}</span>
       </div>
     </div>
     <div class="hbar">${ASC200}</div>
@@ -748,7 +789,7 @@ function renderDash(v,mob){
     <div class="meta">
       <span>${v.threshold}/${v.ownerCount} SIG</span>
       ${v.delay>0
-        ?`<span style="border-left:2px solid var(--a);padding-left:10px;margin-left:2px"><strong>${v.delay/3600}h</strong> TIMELOCK</span>`
+        ?`<span style="border-left:2px solid var(--a);padding-left:10px;margin-left:2px"><strong>${fmtD(v.delay)}</strong> TIMELOCK</span>`
         :`<span style="border-left:2px solid var(--y);padding-left:10px;margin-left:2px;color:var(--y)"><strong>UNLOCKED</strong></span>`}
       <span>${S.demoMode?v.chain:chainName()}</span>
       ${v.executor===ethers.ZeroAddress||v.executor==="0x0000...0000"?'<span style="color:var(--y)">NO EXECUTOR</span>':""}
@@ -784,8 +825,9 @@ function renderDash(v,mob){
     }else if(s.queue){
       const ac=Object.values(tx.approvals).filter(Boolean).length;
       const unanimous=ac===v.ownerCount;
+      const unsignLink=signedByYou?`<button style="background:transparent;border:none;color:var(--r);font-size:9px;font-weight:700;letter-spacing:2px;opacity:.5;padding:6px 0;cursor:pointer;font-family:var(--f)" onclick="doUnsign(${S.sel},${tx.nonce})">UNSIGN</button>`:'';
       if(s.instant){
-        actionBtn=`<button class="btn btn-green" ${mob?"style='width:100%'":""} onclick="doSubmit(${S.sel},${tx.nonce})">EXECUTE</button>`;
+        actionBtn=`<div style="display:flex;flex-direction:column;${mob?"width:100%":"align-items:flex-end"}"><button class="btn btn-green" ${mob?"style='width:100%'":""} onclick="doSubmit(${S.sel},${tx.nonce})">EXECUTE</button>${unsignLink}</div>`;
       }else if(isCancel){
         actionBtn=`<button class="btn btn-danger" ${mob?"style='width:100%'":""} onclick="doSubmit(${S.sel},${tx.nonce})">EXECUTE CANCEL</button>`;
       }else if(unanimous&&v.fastPath){
@@ -793,13 +835,17 @@ function renderDash(v,mob){
           ?`<div style="display:flex;gap:8px;flex-direction:column">
               <button class="btn btn-green btn-w" onclick="doFastExecute(${S.sel},${tx.nonce})">INSTANT EXECUTE <span style="opacity:.5;font-size:9px;margin-left:4px">VIA EXECUTOR</span></button>
               <button class="btn btn-outline btn-w" onclick="doSubmit(${S.sel},${tx.nonce})">QUEUE WITH TIMELOCK</button>
+              ${unsignLink}
             </div>`
-          :`<div style="display:flex;gap:8px">
-              <button class="btn btn-green" onclick="doFastExecute(${S.sel},${tx.nonce})">INSTANT EXECUTE</button>
-              <button class="btn btn-outline" onclick="doSubmit(${S.sel},${tx.nonce})">QUEUE</button>
+          :`<div style="display:flex;flex-direction:column;align-items:flex-end">
+              <div style="display:flex;gap:8px">
+                <button class="btn btn-green" onclick="doFastExecute(${S.sel},${tx.nonce})">INSTANT EXECUTE</button>
+                <button class="btn btn-outline" onclick="doSubmit(${S.sel},${tx.nonce})">QUEUE</button>
+              </div>
+              ${unsignLink}
             </div>`;
       }else{
-        actionBtn=`<button class="btn btn-fill" ${mob?"style='width:100%'":""} onclick="doSubmit(${S.sel},${tx.nonce})">SUBMIT</button>`;
+        actionBtn=`<div style="display:flex;flex-direction:column;${mob?"width:100%":"align-items:flex-end"}"><button class="btn btn-fill" ${mob?"style='width:100%'":""} onclick="doSubmit(${S.sel},${tx.nonce})">SUBMIT</button>${unsignLink}</div>`;
       }
     }else if(s.exec){
       actionBtn=mob
@@ -822,16 +868,14 @@ function renderDash(v,mob){
             ${s.accel?`<button class="btn btn-outline btn-w" onclick="doAccelerate(${S.sel},${tx.nonce})">ACCELERATE${s.accelSigs?` (${s.accelSigs}/${v.ownerCount})`:''}</button>`:''}
             ${!s.accel&&!s.accelExec&&s.accelSigs?`<span style="font-size:10px;color:var(--d);letter-spacing:1px">ACCELERATE ${s.accelSigs}/${v.ownerCount}</span>`:''}
             ${s.cancelExec?`<button class="btn btn-danger btn-w" onclick="doCancel(${S.sel},${tx.nonce})">EXECUTE CANCEL <span style="opacity:.5;font-size:9px;margin-left:4px">${s.cancelSigs}/${v.threshold} VIA EXECUTOR</span></button>`:''}
-            ${s.cancel?`<button class="btn btn-danger btn-w" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL${s.cancelSigs?` (${s.cancelSigs}/${v.threshold})`:''}</button>`:''}
-            ${!s.cancel&&!s.cancelExec&&s.cancelSigs?`<span style="font-size:10px;color:var(--r);letter-spacing:1px">CANCEL ${s.cancelSigs}/${v.threshold}</span>`:''}
+            <button class="btn btn-danger btn-w" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL${s.cancelSigs?` (${s.cancelSigs}/${v.threshold})`:''}</button>
           </div>`
         :`<div style="display:flex;gap:8px">
             ${s.accelExec?`<button class="btn btn-green" onclick="doAccelerate(${S.sel},${tx.nonce})">INSTANT EXECUTE <span style="opacity:.5;font-size:9px;margin-left:4px">${s.accelSigs}/${v.ownerCount} VIA EXECUTOR</span></button>`:''}
             ${s.accel?`<button class="btn btn-outline" onclick="doAccelerate(${S.sel},${tx.nonce})">ACCELERATE${s.accelSigs?` (${s.accelSigs}/${v.ownerCount})`:''}</button>`:''}
             ${!s.accel&&!s.accelExec&&s.accelSigs?`<span style="font-size:10px;color:var(--d);letter-spacing:1px">ACCELERATE ${s.accelSigs}/${v.ownerCount}</span>`:''}
             ${s.cancelExec?`<button class="btn btn-danger" onclick="doCancel(${S.sel},${tx.nonce})">EXECUTE CANCEL <span style="opacity:.5;font-size:9px;margin-left:4px">${s.cancelSigs}/${v.threshold} VIA EXECUTOR</span></button>`:''}
-            ${s.cancel?`<button class="btn btn-danger" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL${s.cancelSigs?` (${s.cancelSigs}/${v.threshold})`:''}</button>`:''}
-            ${!s.cancel&&!s.cancelExec&&s.cancelSigs?`<span style="font-size:10px;color:var(--r);letter-spacing:1px">CANCEL ${s.cancelSigs}/${v.threshold}</span>`:''}
+            <button class="btn btn-danger" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL${s.cancelSigs?` (${s.cancelSigs}/${v.threshold})`:''}</button>
           </div>`;
     }
     const txLink=!S.demoMode&&v.address&&ethers.isAddress(v.address)?`${location.origin}/#${S.chainId}/${v.address}/tx/${tx.nonce}`:'';
@@ -910,7 +954,7 @@ function getProdTokenSymbols(){
 
 // ── CREATE ────────────────────────────────────────────────────────
 function renderCreate(mob){
-  const c=S.cf,ds=(parseInt(c.delayH)||0)*3600,net=NETS[c.net],toks=DEMO_TOKENS[net.name]||["ETH"];
+  const c=S.cf,ds=Math.floor((parseFloat(c.delayH)||0)*3600),net=NETS[c.net],toks=DEMO_TOKENS[net.name]||["ETH"];
   const explorerBase = S.demoMode ? (EXPLORERS[net.name]||EXPLORERS.ETHEREUM) : (CHAINS[S.chainId]?CHAINS[S.chainId].explorer:'https://etherscan.io');
   return`
   <div class="sec"><span>DEPLOY NEW VAULT</span><span class="line"></span></div>
@@ -936,7 +980,7 @@ function renderCreate(mob){
         </div>
         <div>
           <label class="lbl">DELAY (HOURS)</label>
-          <input class="inp" type="number" value="${c.delayH}" onchange="S.cf.delayH=this.value;if(!parseInt(this.value))S.cf.fastPath=false;render()" oninput="S.cf.delayH=this.value">
+          <input class="inp" type="number" step="any" min="0" value="${c.delayH}" onchange="S.cf.delayH=this.value;if(!parseFloat(this.value))S.cf.fastPath=false;render()" oninput="S.cf.delayH=this.value">
           ${ds>0?`<div style="font-size:10px;color:var(--d);margin-top:-10px">${fmtD(ds)}</div>`:`<div style="font-size:10px;color:var(--y);margin-top:-10px;letter-spacing:2px">UNLOCKED &mdash; NO TIMELOCK</div>`}
         </div>
       </div>
@@ -949,8 +993,8 @@ function renderCreate(mob){
       </div>`:""}
     </div>
     <div>
-      ${!mob?`<label class="lbl">PREVIEW</label><div class="preview-text">NAME        ${c.name||'UNNAMED'}
-OWNERS      ${c.owners.length}${c.owners.some(o=>o.label)?" ("+c.owners.filter(o=>o.label).map(o=>o.label).join(", ")+")":""}
+      ${!mob?`<label class="lbl">PREVIEW</label><div class="preview-text">NAME        ${esc(c.name||'UNNAMED')}
+OWNERS      ${c.owners.length}${c.owners.some(o=>o.label)?" ("+c.owners.filter(o=>o.label).map(o=>esc(o.label)).join(", ")+")":""}
 THRESHOLD   ${c.threshold}/${c.owners.length}
 DELAY       ${ds>0?c.delayH+"h ("+ds+"s)":"0 &mdash; UNLOCKED"}${ds>0?"\nFAST PATH   "+(c.fastPath?"ENABLED (ALL OWNERS)":"DISABLED"):""}
 NETWORK     ${net.name} (${net.id})
@@ -975,7 +1019,7 @@ METHOD      ${c.fastPath&&ds>0?"createWithCalls()":"create()"}</div><div class="
 // ── ADMIN ─────────────────────────────────────────────────────────
 function renderAdmin(v,mob){
   if(!v)return'<div style="padding:80px 0;text-align:center;font-size:24px;font-weight:700">NO VAULT</div>';
-  const tab=S.adminTab,tc=S.nt!==v.threshold,dc=S.nd*3600!==v.delay;
+  const tab=S.adminTab,tc=S.nt!==v.threshold,dc=Math.floor(S.nd*3600)!==v.delay;
   const explorerBase = S.demoMode ? (EXPLORERS[v.chain]||EXPLORERS.ETHEREUM) : (CHAINS[S.chainId]?CHAINS[S.chainId].explorer:'https://etherscan.io');
   return`
   <div class="vtabs"><div class="vtabs-inner" style="min-width:max-content">
@@ -1008,9 +1052,9 @@ function renderAdmin(v,mob){
         <span style="font-size:13px;color:var(--m)">${v.delay/3600}h</span>
       </div>
       <label class="lbl">NEW DELAY (HOURS)</label>
-      <input class="inp" type="number" value="${S.nd}" onchange="S.nd=parseInt(this.value)||0;render()" oninput="S.nd=parseInt(this.value)||0">
-      ${dc?`<div style="font-size:10px;color:var(--y);letter-spacing:2px;margin-top:-10px;margin-bottom:10px">&rarr; ${fmtD(S.nd*3600)} (${S.nd*3600}s)</div>`:""}
-      <button class="btn btn-fill btn-w" style="opacity:${dc?1:.3}" onclick="${dc?`doAdminPropose('setDelay',${S.nd*3600})`:""}" >PROPOSE</button>
+      <input class="inp" type="number" step="any" min="0" value="${S.nd}" onchange="S.nd=parseFloat(this.value)||0;render()" oninput="S.nd=parseFloat(this.value)||0">
+      ${dc?`<div style="font-size:10px;color:var(--y);letter-spacing:2px;margin-top:-10px;margin-bottom:10px">&rarr; ${fmtD(Math.floor(S.nd*3600))} (${Math.floor(S.nd*3600)}s)</div>`:""}
+      <button class="btn btn-fill btn-w" style="opacity:${dc?1:.3}" onclick="${dc?`doAdminPropose('setDelay',${Math.floor(S.nd*3600)})`:""}" >PROPOSE</button>
       <div class="sep"></div>
       <label class="lbl"><span class="dim">SET &middot;</span> EXECUTOR</label>
       <div style="font-size:12px;font-weight:700;margin:8px 0 4px;word-break:break-all">${S.demoMode?addrLink(v.executor,v.chain):addrLink(v.executor)}</div>
@@ -1041,7 +1085,7 @@ function renderAdmin(v,mob){
   </div>`:`<div>
     ${(()=>{
       const hist = S.demoMode
-        ? [{nonce:42,act:"TRANSFER",desc:"0.3 ETH &rarr; 0xab12",age:"1H",status:"executed"},{nonce:39,act:"TRANSFER",desc:"1.2 ETH &rarr; 0x4f21",age:"4H",status:"executed"},{nonce:38,act:"THRESHOLD",desc:"1 &rarr; 2",age:"18H",status:"executed"},{nonce:37,act:"ADD OWNER",desc:"0x9A0B...cD1E",age:"2D",status:"executed"},{nonce:36,act:"TRANSFER",desc:"5K USDC &rarr; 0x8bc2",age:"3D",status:"executed"}]
+        ? [{nonce:42,act:"TRANSFER",desc:"0.3 ETH \u2192 0xab12",age:"1H",status:"executed"},{nonce:39,act:"TRANSFER",desc:"1.2 ETH \u2192 0x4f21",age:"4H",status:"executed"},{nonce:38,act:"THRESHOLD",desc:"1 \u2192 2",age:"18H",status:"executed"},{nonce:37,act:"ADD OWNER",desc:"0x9A0B...cD1E",age:"2D",status:"executed"},{nonce:36,act:"TRANSFER",desc:"5K USDC \u2192 0x8bc2",age:"3D",status:"executed"}]
         : (v.history||[]);
       if(!hist.length) return '<div style="padding:48px 0;text-align:center;font-size:11px;color:var(--d);letter-spacing:2px">NO HISTORY YET</div>';
       return hist.map(tx=>`<div class="row">
@@ -1200,7 +1244,7 @@ function doDeploy(){
     const owners=valid.sort((a,b)=>a.addr.localeCompare(b.addr)).map((o,i)=>({addr:o.addr,label:o.label||"OWNER "+(i+1)}));
     owners[0].you=true;owners[0].addr=DEMO_YOU;owners[0].label=owners[0].label||"DEPLOYER";
     const id="V-"+String(S.vaults.length+1).padStart(3,"0");
-    const delay=(parseInt(c.delayH)||0)*3600;
+    const delay=Math.floor((parseFloat(c.delayH)||0)*3600);
     const fp=c.fastPath&&delay>0;
     const addr="0x"+Math.random().toString(16).slice(2,6)+"..."+Math.random().toString(16).slice(2,6);
     S.vaults.push({id,name:c.name||net.name+"_"+id,chain:net.name,address:addr,threshold:parseInt(c.threshold)||1,ownerCount:owners.length,delay,nonce:0,executor:TIMELOCK_EXECUTOR,holdings:[],owners,queue:[],history:[],fastPath:fp});
@@ -1259,7 +1303,7 @@ async function resolveName(input) {
 // ── PRODUCTION: MULTICALL ─────────────────────────────────────────
 
 async function multicallLoad(addr) {
-  const mc = new ethers.Contract(MC3, MC3_ABI, provider);
+  const mc = getMC3();
   const encode = fn => ({ target: addr, allowFailure: false, callData: msIface.encodeFunctionData(fn) });
   const fns = ['threshold','delay','nonce','executor','ownerCount','getOwners'];
   const [results, balance] = await Promise.all([mc.aggregate3(fns.map(encode)), provider.getBalance(addr)]);
@@ -1277,7 +1321,7 @@ async function loadTokenBalances(walletAddr, ethBalance) {
   let balances, prices = {};
 
   try {
-    const mc = new ethers.Contract(MC3, MC3_ABI, provider);
+    const mc = getMC3();
     const balCalls = erc20Tokens.map(t => ({
       target: t.address, allowFailure: true,
       callData: erc20Iface.encodeFunctionData('balanceOf', [walletAddr])
@@ -1485,8 +1529,10 @@ async function loadAllVaults() {
   showLoading('LOADING VAULTS');
   try {
     const wallets = await dbMyWallets(addr);
+    // Preserve vaults loaded via deep link that aren't in the user's DB set
+    const existing = S.vaults.filter(v => v.address && !wallets.some(w => w.address.toLowerCase() === v.address.toLowerCase()));
     if(!wallets.length) {
-      S.vaults = [];
+      S.vaults = existing;
       S.sel = 0;
       hideLoading();
       render();
@@ -1495,7 +1541,7 @@ async function loadAllVaults() {
     const results = await Promise.allSettled(wallets.map(w => loadSingleVaultData(w.address, { id: w.id, name: w.name })));
     const vaults = results.filter(r => r.status === 'fulfilled' && r.value).map(r => r.value);
     results.filter(r => r.status === 'rejected').forEach(r => console.error('Load vault:', r.reason));
-    S.vaults = vaults;
+    S.vaults = [...existing, ...vaults];
     S.sel = 0;
     if(vaults.length) {
       S.nt = vaults[0].threshold;
@@ -1588,7 +1634,7 @@ async function loadVaultQueue(vi) {
         const result = {};
         if(!queuedTxs.length) return result;
         try {
-          const mc = new ethers.Contract(MC3, MC3_ABI, provider);
+          const mc = getMC3();
           const calls = queuedTxs.map(t => ({
             target: v.address, allowFailure: true,
             callData: msIface.encodeFunctionData('queued', [t.tx_hash])
@@ -1655,24 +1701,7 @@ async function loadVaultQueue(vi) {
       v.owners.forEach(o => addrKey[o.addr.toLowerCase()] = o.addr);
       sigs.forEach(s => { const k = addrKey[s.signer.toLowerCase()]; if(k) approvals[k] = true; });
 
-      let dataLabel = 'CALL';
-      if(t.call_data === '0x' || !t.call_data) {
-        dataLabel = 'TRANSFER';
-      } else if(t.call_data.length >= 10) {
-        const sel = t.call_data.slice(0, 10);
-        if(sel === erc20Iface.getFunction('transfer').selector) dataLabel = 'ERC20 TRANSFER';
-        else if(sel === msIface.getFunction('addOwner').selector) dataLabel = 'ADD OWNER';
-        else if(sel === msIface.getFunction('removeOwner').selector) dataLabel = 'REMOVE OWNER';
-        else if(sel === msIface.getFunction('setThreshold').selector) dataLabel = 'SET THRESHOLD';
-        else if(sel === msIface.getFunction('setDelay').selector) dataLabel = 'SET DELAY';
-        else if(sel === msIface.getFunction('setExecutor').selector) dataLabel = 'SET EXECUTOR';
-        else if(sel === msIface.getFunction('cancelQueued').selector) dataLabel = 'CANCEL';
-        else if(sel === msIface.getFunction('executeQueued').selector) dataLabel = 'ACCELERATE';
-        else if(sel === msIface.getFunction('batch').selector) dataLabel = 'BATCH';
-        else if(sel === msIface.getFunction('delegateCall').selector) dataLabel = 'DELEGATE CALL';
-        else if(sel === tlIface.getFunction('enableForward').selector) dataLabel = 'ENABLE FORWARD';
-        else dataLabel = `CALL ${sel}`;
-      }
+      const dataLabel = selectorToLabel(t.call_data);
 
       const ethVal = t.value && t.value !== '0' ? ethers.formatEther(BigInt(t.value)) : '0';
       queue.push({
@@ -1711,24 +1740,7 @@ async function loadVaultHistory(vi) {
   try {
     const rows = await dbGetHistory(v.dbId, 50);
     v.history = rows.map(t => {
-      let act = 'CALL';
-      if(t.call_data === '0x' || !t.call_data) {
-        act = 'TRANSFER';
-      } else if(t.call_data && t.call_data.length >= 10) {
-        const sel = t.call_data.slice(0, 10);
-        if(sel === erc20Iface.getFunction('transfer').selector) act = 'TRANSFER';
-        else if(sel === msIface.getFunction('addOwner').selector) act = 'ADD OWNER';
-        else if(sel === msIface.getFunction('removeOwner').selector) act = 'REMOVE OWNER';
-        else if(sel === msIface.getFunction('setThreshold').selector) act = 'THRESHOLD';
-        else if(sel === msIface.getFunction('setDelay').selector) act = 'SET DELAY';
-        else if(sel === msIface.getFunction('setExecutor').selector) act = 'SET EXECUTOR';
-        else if(sel === msIface.getFunction('cancelQueued').selector) act = 'CANCEL';
-        else if(sel === msIface.getFunction('executeQueued').selector) act = 'ACCELERATE';
-        else if(sel === msIface.getFunction('batch').selector) act = 'BATCH';
-        else if(sel === msIface.getFunction('delegateCall').selector) act = 'DELEGATE CALL';
-        else if(sel === tlIface.getFunction('enableForward').selector) act = 'ENABLE FORWARD';
-        else act = `CALL ${sel}`;
-      }
+      const act = selectorToLabel(t.call_data);
       const ethVal = t.value && t.value !== '0' ? ethers.formatEther(BigInt(t.value)) : null;
       const desc = t.description || (ethVal ? `${ethVal} ETH → ${t.target.slice(0,6)}...` : act);
       const ts = t.executed_at || t.cancelled_at;
@@ -1836,6 +1848,9 @@ async function loadVaultByAddress() {
       await Promise.all([loadVaultQueue(li), loadVaultHistory(li)]);
       render();
       flash(`LOADED: ${checksummed.slice(0,10)}...`);
+    } else {
+      hideLoading();
+      flash('FAILED TO LOAD — IS THIS A MULTISIG?');
     }
   } catch(e) {
     console.error('loadVaultByAddress:', e);
@@ -1875,7 +1890,8 @@ function buildInitcode(impl) {
 async function mineVanitySalt(factory, impl, caller) {
   const hash = ethers.keccak256(buildInitcode(impl));
   const base = BigInt(caller) << 96n;
-  for(let n = 0n; ; n++) {
+  const MAX_ITER = 2000000n;
+  for(let n = 0n; n < MAX_ITER; n++) {
     const salt = '0x' + (base | n).toString(16).padStart(64, '0');
     const addr = ethers.getCreate2Address(factory, salt, hash);
     if(addr.slice(2, 4) === '00') {
@@ -1885,30 +1901,27 @@ async function mineVanitySalt(factory, impl, caller) {
     }
     if(n > 0n && n % 5000n === 0n) await new Promise(r => setTimeout(r, 0));
   }
+  throw new Error('Vanity address mining exceeded max iterations');
 }
 
 // ── PRODUCTION: DEPLOY ────────────────────────────────────────────
 
 async function prodDeploy() {
-  const signer = window._signer;
-  const connectedAddress = window._connectedAddress;
-  if(!signer) { flash('CONNECT WALLET FIRST'); return; }
+  const w = requireSigner(); if(!w) return;
+  const { signer, addr: connectedAddress } = w;
 
   const c = S.cf, net = NETS[c.net];
   const valid = c.owners.filter(o => o.addr.trim());
   if(!valid.length) { flash('ADD AT LEAST 1 OWNER'); return; }
   if(parseInt(c.threshold) > valid.length) { flash('THRESHOLD > OWNER COUNT'); return; }
 
-  // Resolve all owner addresses
-  const resolvedOwners = [];
-  for(const o of valid) {
-    try {
-      const addr = await resolveName(o.addr);
-      resolvedOwners.push(addr);
-    } catch(e) {
-      flash(`INVALID OWNER: ${o.addr}`);
-      return;
-    }
+  // Resolve all owner addresses in parallel
+  let resolvedOwners;
+  try {
+    resolvedOwners = await Promise.all(valid.map(o => resolveName(o.addr)));
+  } catch(e) {
+    flash(`INVALID OWNER: ${e.message}`);
+    return;
   }
   resolvedOwners.sort((a, b) => a.toLowerCase() < b.toLowerCase() ? -1 : 1);
 
@@ -1919,7 +1932,7 @@ async function prodDeploy() {
   }
 
   const thresh = Math.min(parseInt(c.threshold) || 1, resolvedOwners.length);
-  const del = (parseInt(c.delayH) || 0) * 3600;
+  const del = Math.floor((parseFloat(c.delayH) || 0) * 3600);
   const executor = del > 0 ? TIMELOCK_EXECUTOR : ethers.ZeroAddress;
   const wantForward = c.fastPath && del > 0;
 
@@ -2008,9 +2021,8 @@ function senderSig(addr) {
 }
 
 async function prodSign(vi, nonce) {
-  const signer = window._signer;
-  const connectedAddress = window._connectedAddress;
-  if(!signer) { flash('CONNECT WALLET FIRST'); return; }
+  const w = requireSigner(); if(!w) return;
+  const { signer, addr: connectedAddress } = w;
   const v = S.vaults[vi];
   const tx = v.queue.find(t => t.nonce === nonce);
   if(!tx) return;
@@ -2053,9 +2065,8 @@ async function prodSign(vi, nonce) {
 }
 
 async function prodApprove(vi, nonce) {
-  const signer = window._signer;
-  const connectedAddress = window._connectedAddress;
-  if(!signer) { flash('CONNECT WALLET FIRST'); return; }
+  const w = requireSigner(); if(!w) return;
+  const { signer, addr: connectedAddress } = w;
   const v = S.vaults[vi];
   const tx = v.queue.find(t => t.nonce === nonce);
   if(!tx) return;
@@ -2100,9 +2111,9 @@ async function prodApprove(vi, nonce) {
 }
 
 async function prodUnsign(vi, nonce) {
-  const signer = window._signer;
   const connectedAddress = window._connectedAddress;
   if(!connectedAddress) return;
+  const signer = window._signer;
   const v = S.vaults[vi];
   const tx = v.queue.find(t => t.nonce === nonce);
   if(!tx) return;
@@ -2142,6 +2153,31 @@ async function prodUnsign(vi, nonce) {
   render();
 }
 
+function packSigs(sigs) {
+  let packed = '0x';
+  for(const s of sigs) {
+    const raw = (s.sig || s.signature);
+    if(!raw || raw.length !== 132) throw new Error(`Invalid signature length from ${s.signer}: expected 132 chars, got ${raw?.length}`);
+    packed += raw.slice(2);
+  }
+  return packed;
+}
+
+function collectSigs(tx, v, connectedAddress) {
+  const domain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address };
+  const value = tx.rawValue ? BigInt(tx.rawValue) : ethers.parseEther(tx.value || '0');
+  const msg = { target: tx.target, value, data: tx.callData || '0x', nonce: tx.nonce };
+  const ownerAddrs = v.loadedOwners || v.owners.map(o => o.addr);
+  let sigs = verifySigs(tx.signatures || [], domain, EIP712_TYPES, msg, ownerAddrs);
+  const callerIsOwner = ownerAddrs.some(o => o.toLowerCase() === connectedAddress.toLowerCase());
+  const callerHasSigned = sigs.some(s => s.signer.toLowerCase() === connectedAddress.toLowerCase());
+  if(callerIsOwner && !callerHasSigned) {
+    sigs = [...sigs, {signer: connectedAddress, sig: senderSig(connectedAddress), sigType: 'sender'}];
+  }
+  sigs.sort((a,b) => a.signer.toLowerCase() < b.signer.toLowerCase() ? -1 : 1);
+  return { sigs, domain, msg, ownerAddrs };
+}
+
 function verifySigs(sigs, domain, types, msg, owners) {
   const ownerSet = new Set(owners.map(o => o.toLowerCase()));
   const verified = [];
@@ -2169,9 +2205,8 @@ function verifySigs(sigs, domain, types, msg, owners) {
 }
 
 async function prodSubmit(vi, nonce) {
-  const signer = window._signer;
-  const connectedAddress = window._connectedAddress;
-  if(!signer) { flash('CONNECT WALLET FIRST'); return; }
+  const w = requireSigner(); if(!w) return;
+  const { signer, addr: connectedAddress } = w;
   const v = S.vaults[vi];
   const tx = v.queue.find(t => t.nonce === nonce);
   if(!tx) return;
@@ -2181,18 +2216,7 @@ async function prodSubmit(vi, nonce) {
     const value = tx.rawValue ? BigInt(tx.rawValue) : ethers.parseEther(tx.value || '0');
     const data = tx.callData || '0x';
 
-    // Collect signatures and verify
-    const domain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address };
-    const msg = { target, value, data, nonce };
-    let sigs = tx.signatures || [];
-    const ownerAddrs = v.loadedOwners || v.owners.map(o => o.addr);
-    sigs = verifySigs(sigs, domain, EIP712_TYPES, msg, ownerAddrs);
-    const callerIsOwner = ownerAddrs.some(o => o.toLowerCase() === connectedAddress.toLowerCase());
-    const callerHasSigned = sigs.some(s => s.signer.toLowerCase() === connectedAddress.toLowerCase());
-    if(callerIsOwner && !callerHasSigned) {
-      sigs = [...sigs, {signer: connectedAddress, sig: senderSig(connectedAddress), sigType: 'sender'}];
-    }
-    sigs.sort((a,b) => a.signer.toLowerCase() < b.signer.toLowerCase() ? -1 : 1);
+    const { sigs } = collectSigs(tx, v, connectedAddress);
 
     const ms = new ethers.Contract(v.address, MULTISIG_ABI, signer);
 
@@ -2214,15 +2238,11 @@ async function prodSubmit(vi, nonce) {
       const tlContract = new ethers.Contract(executorAddr, TIMELOCK_EXECUTOR_ABI, signer);
       // Cancel needs threshold sigs, forward needs all (already ownerCount)
       const fwdSigs = canCancel ? sigs.slice(0, v.threshold) : sigs;
-      let forwardSigs = '0x';
-      for(const s of fwdSigs) forwardSigs += (s.sig || s.signature).slice(2);
       flash(canCancel ? 'CANCELLING VIA EXECUTOR...' : 'FORWARDING VIA EXECUTOR...');
-      atx = await tlContract.forward(v.address, target, value, data, forwardSigs);
+      atx = await tlContract.forward(v.address, target, value, data, packSigs(fwdSigs));
     } else {
       // Contract requires exactly threshold * 65 bytes of sigs
-      const execSigs = sigs.slice(0, v.threshold);
-      let packedSigs = '0x';
-      for(const s of execSigs) packedSigs += (s.sig || s.signature).slice(2);
+      const packedSigs = packSigs(sigs.slice(0, v.threshold));
       flash('SUBMITTING TX...');
       atx = await ms.execute(target, value, data, packedSigs);
     }
@@ -2263,9 +2283,8 @@ async function prodSubmit(vi, nonce) {
 }
 
 async function prodExecute(vi, nonce) {
-  const signer = window._signer;
-  const connectedAddress = window._connectedAddress;
-  if(!signer) { flash('CONNECT WALLET FIRST'); return; }
+  const w = requireSigner(); if(!w) return;
+  const { signer, addr: connectedAddress } = w;
   const v = S.vaults[vi];
   const tx = v.queue.find(t => t.nonce === nonce);
   if(!tx) return;
@@ -2307,40 +2326,26 @@ async function prodExecute(vi, nonce) {
 }
 
 async function prodFastExecute(vi, nonce) {
-  const signer = window._signer;
-  const connectedAddress = window._connectedAddress;
-  if(!signer) { flash('CONNECT WALLET FIRST'); return; }
+  const w = requireSigner(); if(!w) return;
+  const { signer, addr: connectedAddress } = w;
   const v = S.vaults[vi];
   const tx = v.queue.find(t => t.nonce === nonce);
   if(!tx) return;
 
   try {
-    const target = tx.target;
-    const value = tx.rawValue ? BigInt(tx.rawValue) : ethers.parseEther(tx.value || '0');
-    const data = tx.callData || '0x';
-
-    const domain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address };
-    const msg = { target, value, data, nonce };
-    const ownerAddrs = v.loadedOwners || v.owners.map(o => o.addr);
-    let sigs = verifySigs(tx.signatures || [], domain, EIP712_TYPES, msg, ownerAddrs);
-    const callerIsOwner = ownerAddrs.some(o => o.toLowerCase() === connectedAddress.toLowerCase());
-    const callerHasSigned = sigs.some(s => s.signer.toLowerCase() === connectedAddress.toLowerCase());
-    if(callerIsOwner && !callerHasSigned) {
-      sigs = [...sigs, {signer: connectedAddress, sig: senderSig(connectedAddress), sigType: 'sender'}];
-    }
-    sigs.sort((a,b) => a.signer.toLowerCase() < b.signer.toLowerCase() ? -1 : 1);
+    const { sigs } = collectSigs(tx, v, connectedAddress);
 
     if(sigs.length < v.ownerCount) {
       flash(`NEED ALL ${v.ownerCount} SIGS FOR INSTANT EXECUTE (HAVE ${sigs.length})`);
       return;
     }
 
-    let packedSigs = '0x';
-    for(const s of sigs) packedSigs += (s.sig || s.signature).slice(2);
-
+    const target = tx.target;
+    const value = tx.rawValue ? BigInt(tx.rawValue) : ethers.parseEther(tx.value || '0');
+    const data = tx.callData || '0x';
     const tlContract = new ethers.Contract(v.executor, TIMELOCK_EXECUTOR_ABI, signer);
     flash('INSTANT EXECUTING VIA EXECUTOR...');
-    const atx = await tlContract.forward(v.address, target, value, data, packedSigs);
+    const atx = await tlContract.forward(v.address, target, value, data, packSigs(sigs));
     flash('TX SENT, WAITING...');
     const receipt = await atx.wait();
 
@@ -2354,9 +2359,8 @@ async function prodFastExecute(vi, nonce) {
 }
 
 async function prodCancel(vi, nonce) {
-  const signer = window._signer;
-  const connectedAddress = window._connectedAddress;
-  if(!signer) { flash('CONNECT WALLET FIRST'); return; }
+  const w = requireSigner(); if(!w) return;
+  const { signer, addr: connectedAddress } = w;
   const v = S.vaults[vi];
   const tx = v.queue.find(t => t.nonce === nonce);
   if(!tx) return;
@@ -2427,29 +2431,23 @@ async function prodCancel(vi, nonce) {
     if(liveNonce !== cancelNonce) {
       flash('NONCE CHANGED — RESIGNING NEEDED');
       if(existingTxId) {
-        await sb.from('transactions').update({status: 'cancelled', cancelled_at: new Date().toISOString()}).eq('id', existingTxId);
+        await dbCancelTx(existingTxId, connectedAddress);
       }
       await reloadQueue(vi);
       return;
     }
 
     // Threshold met — execute via forward()
-    let packedSigs = '0x';
-    for(const s of sigs) packedSigs += (s.sig || s.signature).slice(2);
-
     const tlContract = new ethers.Contract(v.executor, TIMELOCK_EXECUTOR_ABI, signer);
     flash('CANCELLING VIA EXECUTOR...');
-    const atx = await tlContract.forward(v.address, v.address, 0n, cancelData, packedSigs);
+    const atx = await tlContract.forward(v.address, v.address, 0n, cancelData, packSigs(sigs));
     flash('TX SENT, WAITING...');
     const receipt = await atx.wait();
 
     if(v.dbId) {
       if(existingTxId) await dbMarkExecuted(existingTxId, Number(receipt.blockNumber), receipt.hash);
       if(tx.dbId) {
-        await sb.from('transactions').update({
-          status: 'cancelled', cancelled_at: new Date().toISOString(),
-          cancelled_by: connectedAddress
-        }).eq('id', tx.dbId);
+        await dbCancelTx(tx.dbId, connectedAddress);
       }
     }
     flash(`CANCELLED #${nonce} VIA EXECUTOR`);
@@ -2461,9 +2459,8 @@ async function prodCancel(vi, nonce) {
 }
 
 async function prodAccelerate(vi, nonce) {
-  const signer = window._signer;
-  const connectedAddress = window._connectedAddress;
-  if(!signer) { flash('CONNECT WALLET FIRST'); return; }
+  const w = requireSigner(); if(!w) return;
+  const { signer, addr: connectedAddress } = w;
   const v = S.vaults[vi];
   const tx = v.queue.find(t => t.nonce === nonce);
   if(!tx) return;
@@ -2539,19 +2536,16 @@ async function prodAccelerate(vi, nonce) {
       flash('NONCE CHANGED — RESIGNING NEEDED');
       // Invalidate stale sigs in DB
       if(existingTxId) {
-        await sb.from('transactions').update({status: 'cancelled', cancelled_at: new Date().toISOString()}).eq('id', existingTxId);
+        await dbCancelTx(existingTxId, connectedAddress);
       }
       await reloadQueue(vi);
       return;
     }
 
     // All sigs collected — execute via forward()
-    let packedSigs = '0x';
-    for(const s of sigs) packedSigs += (s.sig || s.signature).slice(2);
-
     const tlContract = new ethers.Contract(v.executor, TIMELOCK_EXECUTOR_ABI, signer);
     flash('ACCELERATING VIA EXECUTOR...');
-    const atx = await tlContract.forward(v.address, v.address, 0n, accelData, packedSigs);
+    const atx = await tlContract.forward(v.address, v.address, 0n, accelData, packSigs(sigs));
     flash('TX SENT, WAITING...');
     const receipt = await atx.wait();
 
@@ -2570,9 +2564,8 @@ async function prodAccelerate(vi, nonce) {
 // ── PRODUCTION: SUBMIT TRANSFER/CUSTOM/BATCH ──────────────────────
 
 async function prodSubmitTransfer() {
-  const signer = window._signer;
-  const connectedAddress = window._connectedAddress;
-  if(!signer) { flash('CONNECT WALLET FIRST'); return; }
+  const w = requireSigner(); if(!w) return;
+  const { signer, addr: connectedAddress } = w;
   const v = S.vaults[S.sel];
   if(!v) return;
 
@@ -2620,16 +2613,17 @@ async function prodSubmitTransfer() {
 }
 
 async function prodSubmitCustom() {
-  const signer = window._signer;
-  const connectedAddress = window._connectedAddress;
-  if(!signer) { flash('CONNECT WALLET FIRST'); return; }
+  const w = requireSigner(); if(!w) return;
+  const { signer, addr: connectedAddress } = w;
   const v = S.vaults[S.sel];
   if(!v) return;
 
   const target = document.getElementById("cx-target")?.value || "";
   const val = document.getElementById("cx-value")?.value || "0";
-  const d = document.getElementById("cx-data")?.value || "0x";
+  const d = (document.getElementById("cx-data")?.value || "0x").trim();
   if(!target) { flash('ENTER TARGET'); return; }
+  if(d !== '0x' && !/^0x[0-9a-fA-F]*$/.test(d)) { flash('INVALID CALLDATA — MUST BE HEX (0x...)'); return; }
+  if(d !== '0x' && d.length % 2 !== 0) { flash('INVALID CALLDATA — ODD LENGTH'); return; }
 
   try {
     const resolvedTarget = await resolveName(target);
@@ -2656,9 +2650,8 @@ async function prodSubmitCustom() {
 }
 
 async function prodSubmitBatch() {
-  const signer = window._signer;
-  const connectedAddress = window._connectedAddress;
-  if(!signer) { flash('CONNECT WALLET FIRST'); return; }
+  const w = requireSigner(); if(!w) return;
+  const { signer, addr: connectedAddress } = w;
   const v = S.vaults[S.sel];
   if(!v) return;
 
@@ -2666,15 +2659,9 @@ async function prodSubmitBatch() {
   if(!calls.length) { flash('ADD AT LEAST 1 CALL'); return; }
 
   try {
-    const targets = [];
-    const values = [];
-    const datas = [];
-    for(const c of calls) {
-      const addr = await resolveName(c.t);
-      targets.push(addr);
-      values.push(ethers.parseEther(c.v || '0'));
-      datas.push(c.d || '0x');
-    }
+    const targets = await Promise.all(calls.map(c => resolveName(c.t)));
+    const values = calls.map(c => ethers.parseEther(c.v || '0'));
+    const datas = calls.map(c => c.d || '0x');
 
     const batchData = msIface.encodeFunctionData('batch', [targets, values, datas]);
     const target = v.address;
@@ -2704,9 +2691,8 @@ async function prodSubmitBatch() {
 // ── PRODUCTION: ADMIN PROPOSALS ───────────────────────────────────
 
 async function prodAdminPropose(action, val) {
-  const signer = window._signer;
-  const connectedAddress = window._connectedAddress;
-  if(!signer) { flash('CONNECT WALLET FIRST'); return; }
+  const w = requireSigner(); if(!w) return;
+  const { signer, addr: connectedAddress } = w;
   const v = S.vaults[S.sel];
   if(!v) return;
 
@@ -2837,6 +2823,7 @@ async function switchChain(id, skipLoad) {
 
 function onWalletConnect() {
   if(S.demoMode) S.demoMode = false;
+  const deepLinked = S.vaults.length > 0 ? [...S.vaults] : null;
   S.vaults = [];
   S.sel = 0;
 
@@ -2853,10 +2840,13 @@ function onWalletConnect() {
           fetchBlock();
         }
       } catch(_) {}
+      // Restore deep-linked vaults so they aren't lost on auto-reconnect
+      if(deepLinked) { S.vaults = deepLinked; S.sel = 0; }
       render();
       loadAllVaults();
     })();
   } else {
+    if(deepLinked) { S.vaults = deepLinked; S.sel = 0; }
     render();
     loadAllVaults();
   }
@@ -2889,7 +2879,7 @@ function handleDeepLink() {
         chainHex: CHAINS[linkChain].hex,
         rpc: CHAINS[linkChain].rpcs[0],
         addChainParams: ADD_CHAIN_PARAMS[linkChain] || null
-      });
+      }).catch(_=>{});
       // Load this specific vault
       const addr = match[2];
       if(matchTx) _linkedNonce = parseInt(match[3]);
@@ -2934,6 +2924,7 @@ async function fetchBlock(){
   } catch(_){}
 }
 setInterval(()=>{
+  if(document.hidden) return;
   fetchBlock();
   let anyReady=false;
   document.querySelectorAll("[data-eta]").forEach(el=>{const eta=+el.dataset.eta;const f=fmtEta(eta);if(f){if(f==="READY"&&el.textContent!=="READY")anyReady=true;el.textContent=f==="READY"?"READY":new Date(eta*1000).toLocaleString("en-US",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"})}});

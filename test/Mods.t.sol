@@ -341,9 +341,9 @@ contract ModsTest is Test {
     function test_recovery_createWithCalls() public {
         (address[] memory t, uint256[] memory v, bytes[] memory d) = _callArrays2(
             address(recovery),
-            abi.encodeCall(SocialRecovery.setGuardian, (guardian, true)),
+            abi.encodeCall(SocialRecovery.setDelay, (1 days)),
             address(recovery),
-            abi.encodeCall(SocialRecovery.setDelay, (1 days))
+            abi.encodeCall(SocialRecovery.setGuardian, (guardian, true))
         );
 
         Multisig w =
@@ -366,8 +366,8 @@ contract ModsTest is Test {
     function test_recovery_addedLater() public {
         Multisig w = _deploy(2);
         _exec(w, address(w), 0, abi.encodeCall(Multisig.setExecutor, (address(recovery))));
-        _exec(w, address(recovery), 0, abi.encodeCall(SocialRecovery.setGuardian, (guardian, true)));
         _exec(w, address(recovery), 0, abi.encodeCall(SocialRecovery.setDelay, (1 days)));
+        _exec(w, address(recovery), 0, abi.encodeCall(SocialRecovery.setGuardian, (guardian, true)));
 
         address newOwner = vm.addr(0xD4);
         bytes memory data = abi.encodeCall(Multisig.addOwner, (newOwner));
@@ -382,8 +382,8 @@ contract ModsTest is Test {
     function test_recovery_revertBeforeDelay() public {
         Multisig w = _deploy(2);
         _exec(w, address(w), 0, abi.encodeCall(Multisig.setExecutor, (address(recovery))));
-        _exec(w, address(recovery), 0, abi.encodeCall(SocialRecovery.setGuardian, (guardian, true)));
         _exec(w, address(recovery), 0, abi.encodeCall(SocialRecovery.setDelay, (1 days)));
+        _exec(w, address(recovery), 0, abi.encodeCall(SocialRecovery.setGuardian, (guardian, true)));
 
         bytes memory data = abi.encodeCall(Multisig.addOwner, (vm.addr(0xD4)));
         vm.prank(guardian);
@@ -396,8 +396,8 @@ contract ModsTest is Test {
     function test_recovery_cancel() public {
         Multisig w = _deploy(2);
         _exec(w, address(w), 0, abi.encodeCall(Multisig.setExecutor, (address(recovery))));
-        _exec(w, address(recovery), 0, abi.encodeCall(SocialRecovery.setGuardian, (guardian, true)));
         _exec(w, address(recovery), 0, abi.encodeCall(SocialRecovery.setDelay, (1 days)));
+        _exec(w, address(recovery), 0, abi.encodeCall(SocialRecovery.setGuardian, (guardian, true)));
 
         bytes memory data = abi.encodeCall(Multisig.addOwner, (vm.addr(0xD4)));
         vm.prank(guardian);
@@ -414,6 +414,7 @@ contract ModsTest is Test {
     function test_recovery_revertUnauthorizedPropose() public {
         Multisig w = _deploy(2);
         _exec(w, address(w), 0, abi.encodeCall(Multisig.setExecutor, (address(recovery))));
+        _exec(w, address(recovery), 0, abi.encodeCall(SocialRecovery.setDelay, (1 days)));
         _exec(w, address(recovery), 0, abi.encodeCall(SocialRecovery.setGuardian, (guardian, true)));
 
         vm.prank(address(0xBAD));
@@ -424,6 +425,7 @@ contract ModsTest is Test {
     function test_recovery_revertUnauthorizedCancel() public {
         Multisig w = _deploy(2);
         _exec(w, address(w), 0, abi.encodeCall(Multisig.setExecutor, (address(recovery))));
+        _exec(w, address(recovery), 0, abi.encodeCall(SocialRecovery.setDelay, (1 days)));
         _exec(w, address(recovery), 0, abi.encodeCall(SocialRecovery.setGuardian, (guardian, true)));
 
         bytes memory data = abi.encodeCall(Multisig.addOwner, (vm.addr(0xD4)));
@@ -438,8 +440,8 @@ contract ModsTest is Test {
     function test_recovery_finalizeWrongParams() public {
         Multisig w = _deploy(2);
         _exec(w, address(w), 0, abi.encodeCall(Multisig.setExecutor, (address(recovery))));
-        _exec(w, address(recovery), 0, abi.encodeCall(SocialRecovery.setGuardian, (guardian, true)));
         _exec(w, address(recovery), 0, abi.encodeCall(SocialRecovery.setDelay, (1 days)));
+        _exec(w, address(recovery), 0, abi.encodeCall(SocialRecovery.setGuardian, (guardian, true)));
 
         bytes memory data = abi.encodeCall(Multisig.addOwner, (vm.addr(0xD4)));
         vm.prank(guardian);
@@ -455,8 +457,8 @@ contract ModsTest is Test {
     function test_recovery_revertProposeWhileActive() public {
         Multisig w = _deploy(2);
         _exec(w, address(w), 0, abi.encodeCall(Multisig.setExecutor, (address(recovery))));
-        _exec(w, address(recovery), 0, abi.encodeCall(SocialRecovery.setGuardian, (guardian, true)));
         _exec(w, address(recovery), 0, abi.encodeCall(SocialRecovery.setDelay, (1 days)));
+        _exec(w, address(recovery), 0, abi.encodeCall(SocialRecovery.setGuardian, (guardian, true)));
 
         vm.prank(guardian);
         recovery.propose(address(w), address(w), 0, abi.encodeCall(Multisig.addOwner, (vm.addr(0xD4))));
@@ -470,8 +472,8 @@ contract ModsTest is Test {
     function test_recovery_overwriteExpiredProposal() public {
         Multisig w = _deploy(2);
         _exec(w, address(w), 0, abi.encodeCall(Multisig.setExecutor, (address(recovery))));
-        _exec(w, address(recovery), 0, abi.encodeCall(SocialRecovery.setGuardian, (guardian, true)));
         _exec(w, address(recovery), 0, abi.encodeCall(SocialRecovery.setDelay, (1 days)));
+        _exec(w, address(recovery), 0, abi.encodeCall(SocialRecovery.setGuardian, (guardian, true)));
 
         // First proposal
         bytes memory data1 = abi.encodeCall(Multisig.addOwner, (vm.addr(0xD4)));
@@ -500,8 +502,8 @@ contract ModsTest is Test {
     function test_recovery_finalizePermissionless() public {
         Multisig w = _deploy(2);
         _exec(w, address(w), 0, abi.encodeCall(Multisig.setExecutor, (address(recovery))));
-        _exec(w, address(recovery), 0, abi.encodeCall(SocialRecovery.setGuardian, (guardian, true)));
         _exec(w, address(recovery), 0, abi.encodeCall(SocialRecovery.setDelay, (1 days)));
+        _exec(w, address(recovery), 0, abi.encodeCall(SocialRecovery.setGuardian, (guardian, true)));
 
         address newOwner = vm.addr(0xD4);
         bytes memory data = abi.encodeCall(Multisig.addOwner, (newOwner));
@@ -631,9 +633,9 @@ contract ModsTest is Test {
     function test_createWithCalls_advancesNonce() public {
         (address[] memory t, uint256[] memory v, bytes[] memory d) = _callArrays2(
             address(recovery),
-            abi.encodeCall(SocialRecovery.setGuardian, (guardian, true)),
+            abi.encodeCall(SocialRecovery.setDelay, (1 days)),
             address(recovery),
-            abi.encodeCall(SocialRecovery.setDelay, (1 days))
+            abi.encodeCall(SocialRecovery.setGuardian, (guardian, true))
         );
 
         Multisig w =

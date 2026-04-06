@@ -27,6 +27,7 @@ contract SpendingAllowance {
     constructor() payable {}
 
     function configure(address _spender, uint128 _allowance, uint32 _period) public {
+        require(_period != 0, OverLimit());
         configs[msg.sender] = Config(_spender, _allowance, 0, _period, uint32(block.timestamp));
         emit Configured(msg.sender, _spender, _allowance, _period);
     }
