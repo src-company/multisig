@@ -1319,13 +1319,13 @@ function getProdTokenSymbols(){
 // ── CREATE ────────────────────────────────────────────────────────
 function renderCreate(mob){
   const c=S.cf,ds=Math.floor((parseFloat(c.delayH)||0)*3600),net=NETS[c.net],toks=DEMO_TOKENS[net.name]||["ETH"];
-  const explorerBase = S.demoMode ? (EXPLORERS[net.name]||EXPLORERS.ETHEREUM) : (CHAINS[S.chainId]?CHAINS[S.chainId].explorer:'https://etherscan.io');
+  const explorerBase = CHAINS[net.id]?.explorer || 'https://etherscan.io';
   return`
   <div class="sec"><span>DEPLOY NEW VAULT</span><span class="line"></span></div>
   <div class="grid2" style="gap:${mob?0:48}px">
     <div>
       <label class="lbl">VAULT NAME</label>
-      <input class="inp" style="margin-bottom:20px" placeholder="MY VAULT" value="${esc(c.name||'')}" oninput="S.cf.name=this.value">
+      <input class="inp" style="margin-bottom:20px" placeholder="MY VAULT" value="${esc(c.name||'')}" oninput="S.cf.name=this.value" onchange="render()">
       <label class="lbl">OWNERS</label>
       ${(()=>{const you=window._connectedAddress;if(you&&!S.demoMode&&c.owners.every(o=>!o.addr.trim())){c.owners[0].addr=you;c.owners[0].label='YOU'}return''})()}${c.owners.map((o,i)=>`<div style="display:flex;gap:8px;align-items:center;margin-bottom:2px">
         <span style="font-size:10px;font-weight:700;color:var(--d);width:20px">${String(i+1).padStart(2,"0")}</span>
