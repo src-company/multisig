@@ -648,8 +648,10 @@ function fmtEta(eta) {
   if (!eta) return null;
   const d = eta - NOW();
   if (d <= 0) return "READY";
-  const h = Math.floor(d / 3600), m = Math.floor((d % 3600) / 60);
-  return h > 0 ? `${h}H ${m}M` : `${m}M`;
+  const h = Math.floor(d / 3600), m = Math.floor((d % 3600) / 60), s = d % 60;
+  if (h > 0) return `${h}H ${m}M`;
+  if (m > 0) return `${m}M ${s}S`;
+  return `${s}S`;
 }
 
 function fmtD(s) {
@@ -1220,8 +1222,8 @@ function renderDash(v,mob){
           </div>
           <div class="tx-to">&rarr; ${S.demoMode?addrLink(tx.target,v.chain):addrLink(tx.displayTo||tx.target)}</div>
         </div>
-        ${!mob&&!blocked?`<div class="tx-actions"><span class="tx-status" style="color:${s.c}">&bull; ${s.l}</span>${actionBtn}</div>`:""}
-        ${mob&&!blocked?`<span class="tx-status" style="color:${s.c}">&bull; ${s.l}</span>`:""}
+        ${!mob&&!blocked?`<div class="tx-actions"><span class="tx-status" style="color:${s.c}"${tx.eta>0&&!s.exec?` data-eta-status="${tx.eta}"`:``}>&bull; ${s.l}</span>${actionBtn}</div>`:""}
+        ${mob&&!blocked?`<span class="tx-status" style="color:${s.c}"${tx.eta>0&&!s.exec?` data-eta-status="${tx.eta}"`:``}>&bull; ${s.l}</span>`:""}
         ${blocked?'<span style="font-size:10px;color:var(--d);letter-spacing:2px">BLOCKED</span>':""}
       </div>
       <div class="approvals">${apHtml}${etaHtml}</div>
@@ -1769,7 +1771,7 @@ async function loadTokenBalances(walletAddr, ethBalance) {
     });
   } catch(e) {
     console.error('Token balances:', e);
-    return [];
+    balances = [];
   }
 
   if(ethBalance == null) ethBalance = await provider.getBalance(walletAddr);
@@ -3395,6 +3397,15 @@ setInterval(() => {
       el.textContent = f === "READY"
         ? "READY"
         : new Date(eta * 1000).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    }
+  });
+  document.querySelectorAll("[data-eta-status]").forEach(el => {
+    const eta = +el.dataset.etaStatus;
+    const f = fmtEta(eta);
+    if (f) {
+      if (f === "READY" && !el.textContent.includes("READY")) anyReady = true;
+      el.textContent = "\u2022 " + f;
+      el.style.color = f === "READY" ? "var(--g)" : "var(--d)";
     }
   });
   const hasFocused = document.querySelector(
