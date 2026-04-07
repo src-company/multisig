@@ -598,7 +598,7 @@ const S = {
 
   // create form
   cf: {
-    name: '', threshold: "2", delayH: "24", net: 0, fastPath: false,
+    name: '', threshold: "1", delayH: "24", net: 0, fastPath: false,
     owners: [{ addr: '', label: '' }, { addr: '', label: '' }, { addr: '', label: '' }],
   },
 
@@ -1327,11 +1327,11 @@ function renderCreate(mob){
       <label class="lbl">VAULT NAME</label>
       <input class="inp" style="margin-bottom:20px" placeholder="MY VAULT" value="${esc(c.name||'')}" oninput="S.cf.name=this.value">
       <label class="lbl">OWNERS</label>
-      ${c.owners.map((o,i)=>`<div style="display:flex;gap:8px;align-items:center;margin-bottom:2px">
+      ${(()=>{const you=window._connectedAddress;if(you&&!S.demoMode&&c.owners.every(o=>!o.addr.trim())){c.owners[0].addr=you;c.owners[0].label='YOU'}return''})()}${c.owners.map((o,i)=>`<div style="display:flex;gap:8px;align-items:center;margin-bottom:2px">
         <span style="font-size:10px;font-weight:700;color:var(--d);width:20px">${String(i+1).padStart(2,"0")}</span>
-        <input class="inp" style="margin-bottom:8px;flex:2" placeholder="0x... or name.eth / name.wei" value="${esc(o.addr)}" oninput="S.cf.owners[${i}].addr=this.value;const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;if(+S.cf.threshold>fc){S.cf.threshold=String(fc);render()}">
-        <input class="inp" style="margin-bottom:8px;flex:1;font-size:11px;letter-spacing:1px" placeholder="LABEL" value="${esc(o.label)}" oninput="S.cf.owners[${i}].label=this.value">
-        ${c.owners.length>1?`<button class="x-btn red" onclick="S.cf.owners.splice(${i},1);S.cf.threshold=String(Math.min(+S.cf.threshold||1,S.cf.owners.length));render()">&#10005;</button>`:""}
+        <input class="inp" style="margin-bottom:8px;flex:2" placeholder="0x... or name.eth / name.wei" value="${esc(o.addr)}" oninput="S.cf.owners[${i}].addr=this.value;const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;if(+S.cf.threshold>fc){S.cf.threshold=String(fc)}" onchange="S.cf.owners[${i}].addr=this.value;render()">
+        <input class="inp" style="margin-bottom:8px;flex:1;font-size:11px;letter-spacing:1px" placeholder="LABEL" value="${esc(o.label)}" oninput="S.cf.owners[${i}].label=this.value" onchange="render()">
+        ${c.owners.length>1?`<button class="x-btn red" onclick="S.cf.owners.splice(${i},1);const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;S.cf.threshold=String(Math.min(+S.cf.threshold||1,fc));render()">&#10005;</button>`:""}
       </div>`).join("")}
       <button class="link-btn" onclick="S.cf.owners.push({addr:'',label:''});S.cf.threshold=String(Math.min(+S.cf.threshold||1,S.cf.owners.length));render()">+ ADD</button>
       <div class="sep"></div>
@@ -1358,8 +1358,8 @@ function renderCreate(mob){
     </div>
     <div>
       ${!mob?`<label class="lbl">PREVIEW</label><div class="preview-text">NAME        ${esc(c.name||'UNNAMED')}
-OWNERS      ${c.owners.length}${c.owners.some(o=>o.label)?" ("+c.owners.filter(o=>o.label).map(o=>esc(o.label)).join(", ")+")":""}
-THRESHOLD   ${c.threshold}/${c.owners.length}
+OWNERS      ${c.owners.filter(o=>o.addr.trim()).length||0}${c.owners.some(o=>o.label&&o.addr.trim())?" ("+c.owners.filter(o=>o.label&&o.addr.trim()).map(o=>esc(o.label)).join(", ")+")":""}
+THRESHOLD   ${c.threshold}/${c.owners.filter(o=>o.addr.trim()).length||1}
 DELAY       ${ds>0?c.delayH+"h ("+ds+"s)":"0 &mdash; UNLOCKED"}${ds>0?"\nFAST PATH   "+(c.fastPath?"ENABLED (ALL OWNERS)":"DISABLED"):""}
 NETWORK     ${net.name} (${net.id})
 TOKENS      ${toks.join(", ")}
@@ -2372,12 +2372,6 @@ async function prodDeploy() {
     return;
   }
   resolvedOwners.sort((a, b) => a.toLowerCase() < b.toLowerCase() ? -1 : 1);
-
-  // Ensure connected address is an owner
-  if(!resolvedOwners.some(o => o.toLowerCase() === connectedAddress.toLowerCase())) {
-    resolvedOwners.push(connectedAddress);
-    resolvedOwners.sort((a, b) => a.toLowerCase() < b.toLowerCase() ? -1 : 1);
-  }
 
   const thresh = Math.min(parseInt(c.threshold) || 1, resolvedOwners.length);
   const del = Math.floor((parseFloat(c.delayH) || 0) * 3600);
