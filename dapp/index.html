@@ -1799,7 +1799,7 @@ async function loadTokenBalances(walletAddr, ethBalance) {
 
   // ERC20s
   erc20Tokens.forEach((t, i) => {
-    if(!balances[i].success || balances[i].bal === 0n) return;
+    if(!balances[i] || !balances[i].success || balances[i].bal === 0n) return;
     const formatted = ethers.formatUnits(balances[i].bal, t.decimals);
     const amount = Number(formatted);
     const display = t.decimals <= 8 ? amount.toFixed(2) : amount.toFixed(4).replace(/\.?0+$/, '');
