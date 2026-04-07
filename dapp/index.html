@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://*.supabase.co https://repo.sourcify.dev https://*.publicnode.com https://1rpc.io https://*.drpc.org https://mainnet.base.org https://sepolia.base.org https://arb1.arbitrum.io https://mainnet.optimism.io wss:; img-src 'self' data:; upgrade-insecure-requests">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://*.supabase.co https://repo.sourcify.dev https://*.publicnode.com https://1rpc.io https://*.drpc.org https://mainnet.base.org https://sepolia.base.org https://arb1.arbitrum.io https://mainnet.optimism.io https://mainnet.megaeth.com https://rpc-megaeth-mainnet.globalstake.io wss:; img-src 'self' data:; upgrade-insecure-requests">
 <title>multisig</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 <link id="favicon" rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%3Crect%20width%3D%2264%22%20height%3D%2264%22%20fill%3D%22%232D5FE8%22%2F%3E%0A%3Cdefs%3E%0A%3Cpath%20id%3D%22pt%22%20d%3D%22M4%2C4%20H60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pr%22%20d%3D%22M60%2C4%20V60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pb%22%20d%3D%22M60%2C60%20H4%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pl%22%20d%3D%22M4%2C60%20V4%22%20fill%3D%22none%22%2F%3E%0A%3C%2Fdefs%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pt%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pr%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pb%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pl%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Cpath%20d%3D%22M16%2C48%20V16%20H22%20L32%2C32%20L42%2C16%20H48%20V48%20H42%20V26%20L32%2C42%20L22%2C26%20V48%20Z%22%20fill%3D%22%230A0A0A%22%2F%3E%0A%3C%2Fsvg%3E" type="image/svg+xml">
@@ -311,6 +311,7 @@ const CHAINS = {
   10:       { name:'OP Mainnet', rpcs:['https://optimism.publicnode.com','https://1rpc.io/op','https://optimism.drpc.org'],       explorer:'https://optimistic.etherscan.io', hex:'0xa' },
   11155111: { name:'Sepolia',      rpcs:['https://ethereum-sepolia.publicnode.com','https://1rpc.io/sepolia','https://sepolia.drpc.org'], explorer:'https://sepolia.etherscan.io',   hex:'0xaa36a7' },
   84532:    { name:'Base Sepolia', rpcs:['https://base-sepolia.publicnode.com','https://sepolia.base.org'],                           explorer:'https://sepolia.basescan.org',   hex:'0x14a34' },
+  4326:     { name:'MegaETH',     rpcs:['https://mainnet.megaeth.com/rpc','https://rpc-megaeth-mainnet.globalstake.io','https://megaeth.drpc.org'], explorer:'https://mega.etherscan.io',      hex:'0x10e6' },
 };
 
 const _providerCache = {};
@@ -340,6 +341,7 @@ const ADD_CHAIN_PARAMS = {
   10:       { chainId:'0xa',   chainName:'OP Mainnet',   rpcUrls:['https://mainnet.optimism.io'],             blockExplorerUrls:['https://optimistic.etherscan.io'], nativeCurrency:{name:'ETH',symbol:'ETH',decimals:18} },
   84532:    { chainId:'0x14a34', chainName:'Base Sepolia',   rpcUrls:['https://sepolia.base.org'],                blockExplorerUrls:['https://sepolia.basescan.org'],  nativeCurrency:{name:'ETH',symbol:'ETH',decimals:18} },
   11155111: { chainId:'0xaa36a7',chainName:'Sepolia',        rpcUrls:['https://ethereum-sepolia.publicnode.com'], blockExplorerUrls:['https://sepolia.etherscan.io'],  nativeCurrency:{name:'ETH',symbol:'ETH',decimals:18} },
+  4326:     { chainId:'0x10e6',  chainName:'MegaETH',       rpcUrls:['https://mainnet.megaeth.com/rpc'],                 blockExplorerUrls:['https://mega.etherscan.io'],    nativeCurrency:{name:'ETH',symbol:'ETH',decimals:18} },
 };
 
 // ── ABIs ──────────────────────────────────────────────────────────
@@ -426,6 +428,11 @@ const PROD_TOKENS = {
     { symbol:'cbBTC',  address:'0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf',   decimals:8,  icon:WBTC_ICON },
     { symbol:'wstETH', address:'0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452',   decimals:18, icon:WSTETH_ICON },
   ],
+  4326: [
+    { symbol:'ETH',    address:ethers.ZeroAddress,                              decimals:18, icon:ETH_ICON },
+    { symbol:'USDT0',  address:'0xb8ce59FC3717adA4C02eaDF9682a9E934F625EBb',   decimals:6,  icon:USDT_ICON },
+    { symbol:'wstETH', address:'0x601Ac63637933d88285a025C685Ac4E9a92a98DA',   decimals:18, icon:WSTETH_ICON },
+  ],
   42161: [
     { symbol:'ETH',    address:ethers.ZeroAddress,                              decimals:18, icon:ETH_ICON },
     { symbol:'USDC',   address:'0xaf88d065e77c8cC2239327C5EDb3A432268e5831',   decimals:6,  icon:USDC_ICON },
@@ -464,7 +471,7 @@ const CHAINLINK_FEEDS = {
 };
 
 // Demo token lists for display in create form
-const DEMO_TOKENS = {ETHEREUM:["ETH","USDC","USDT","DAI","WBTC","wstETH"],BASE:["ETH","USDC","USDT","DAI","cbBTC","wstETH"],ARBITRUM:["ETH","USDC","USDT","DAI","WBTC","wstETH"],"OP MAINNET":["ETH","USDC","USDT","DAI","WBTC","wstETH"],SEPOLIA:["ETH"],"BASE SEPOLIA":["ETH"]};
+const DEMO_TOKENS = {ETHEREUM:["ETH","USDC","USDT","DAI","WBTC","wstETH"],BASE:["ETH","USDC","USDT","DAI","cbBTC","wstETH"],MEGAETH:["ETH","USDT0","wstETH"],ARBITRUM:["ETH","USDC","USDT","DAI","WBTC","wstETH"],"OP MAINNET":["ETH","USDC","USDT","DAI","WBTC","wstETH"],SEPOLIA:["ETH"],"BASE SEPOLIA":["ETH"]};
 
 // ── SUPABASE ──────────────────────────────────────────────────────
 const SB_KEY = 'sb_publishable_HCQ27VwozIa8TaSY4h91YA__Pn1N4Id';
@@ -490,8 +497,8 @@ function getMC3() { return new ethers.Contract(MC3, MC3_ABI, provider); }
 const SENTINEL = '0x0000000000000000000000000000000000000001';
 // ── DEMO DATA ─────────────────────────────────────────────────────
 const DEMO_YOU = "0x1a2B...3c4D";
-const NETS = [{name:"ETHEREUM",id:1},{name:"BASE",id:8453},{name:"ARBITRUM",id:42161},{name:"OP MAINNET",id:10},{name:"SEPOLIA",id:11155111,test:true},{name:"BASE SEPOLIA",id:84532,test:true}];
-const EXPLORERS = {ETHEREUM:"https://etherscan.io",BASE:"https://basescan.org",ARBITRUM:"https://arbiscan.io","OP MAINNET":"https://optimistic.etherscan.io",SEPOLIA:"https://sepolia.etherscan.io","BASE SEPOLIA":"https://sepolia.basescan.org"};
+const NETS = [{name:"ETHEREUM",id:1},{name:"BASE",id:8453},{name:"MEGAETH",id:4326},{name:"ARBITRUM",id:42161},{name:"OP MAINNET",id:10},{name:"SEPOLIA",id:11155111,test:true},{name:"BASE SEPOLIA",id:84532,test:true}];
+const EXPLORERS = {ETHEREUM:"https://etherscan.io",BASE:"https://basescan.org",MEGAETH:"https://mega.etherscan.io",ARBITRUM:"https://arbiscan.io","OP MAINNET":"https://optimistic.etherscan.io",SEPOLIA:"https://sepolia.etherscan.io","BASE SEPOLIA":"https://sepolia.basescan.org"};
 
 const NOW = () => Math.floor(Date.now()/1000);
 const asc = n => "/".repeat(n);
@@ -623,7 +630,7 @@ function esc(s) {
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
-const DECIMALS = { ETH: 18, USDC: 6, USDT: 6, DAI: 18, WBTC: 8, wstETH: 18, cbBTC: 8 };
+const DECIMALS = { ETH: 18, USDC: 6, USDT: 6, USDT0: 6, DAI: 18, WBTC: 8, wstETH: 18, cbBTC: 8 };
 
 function stripCommas(s) { return String(s).replace(/,/g, ''); }
 
@@ -1186,21 +1193,21 @@ function renderDash(v,mob){
             ${s.cancel?`<button class="btn btn-danger" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL${s.cancelSigs?` (${s.cancelSigs}/${v.threshold})`:''}</button>`:''}
             ${!s.cancel&&!s.cancelExec&&s.cancelSigs?`<span style="font-size:10px;color:var(--r);letter-spacing:1px">CANCEL ${s.cancelSigs}/${v.threshold}</span>`:''}
           </div>`;
-    }else if(s.cancel){
+    }else if(s.cancel||s.cancelExec||s.accel||s.accelExec){
       actionBtn=mob
         ?`<div style="display:flex;gap:8px;flex-direction:column">
             ${s.accelExec?`<button class="btn btn-green btn-w" onclick="doAccelerate(${S.sel},${tx.nonce})">INSTANT EXECUTE <span style="opacity:.5;font-size:9px;margin-left:4px">${s.accelSigs}/${v.ownerCount} VIA EXECUTOR</span></button>`:''}
             ${s.accel?`<button class="btn btn-outline btn-w" onclick="doAccelerate(${S.sel},${tx.nonce})">ACCELERATE${s.accelSigs?` (${s.accelSigs}/${v.ownerCount})`:''}</button>`:''}
             ${!s.accel&&!s.accelExec&&s.accelSigs?`<span style="font-size:10px;color:var(--d);letter-spacing:1px">ACCELERATE ${s.accelSigs}/${v.ownerCount}</span>`:''}
             ${s.cancelExec?`<button class="btn btn-danger btn-w" onclick="doCancel(${S.sel},${tx.nonce})">EXECUTE CANCEL <span style="opacity:.5;font-size:9px;margin-left:4px">${s.cancelSigs}/${v.threshold} VIA EXECUTOR</span></button>`:''}
-            <button class="btn btn-danger btn-w" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL${s.cancelSigs?` (${s.cancelSigs}/${v.threshold})`:''}</button>
+            ${s.cancel?`<button class="btn btn-danger btn-w" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL${s.cancelSigs?` (${s.cancelSigs}/${v.threshold})`:''}</button>`:''}
           </div>`
         :`<div style="display:flex;gap:8px">
             ${s.accelExec?`<button class="btn btn-green" onclick="doAccelerate(${S.sel},${tx.nonce})">INSTANT EXECUTE <span style="opacity:.5;font-size:9px;margin-left:4px">${s.accelSigs}/${v.ownerCount} VIA EXECUTOR</span></button>`:''}
             ${s.accel?`<button class="btn btn-outline" onclick="doAccelerate(${S.sel},${tx.nonce})">ACCELERATE${s.accelSigs?` (${s.accelSigs}/${v.ownerCount})`:''}</button>`:''}
             ${!s.accel&&!s.accelExec&&s.accelSigs?`<span style="font-size:10px;color:var(--d);letter-spacing:1px">ACCELERATE ${s.accelSigs}/${v.ownerCount}</span>`:''}
             ${s.cancelExec?`<button class="btn btn-danger" onclick="doCancel(${S.sel},${tx.nonce})">EXECUTE CANCEL <span style="opacity:.5;font-size:9px;margin-left:4px">${s.cancelSigs}/${v.threshold} VIA EXECUTOR</span></button>`:''}
-            <button class="btn btn-danger" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL${s.cancelSigs?` (${s.cancelSigs}/${v.threshold})`:''}</button>
+            ${s.cancel?`<button class="btn btn-danger" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL${s.cancelSigs?` (${s.cancelSigs}/${v.threshold})`:''}</button>`:''}
           </div>`;
     }
     const txLink=!S.demoMode&&v.address&&ethers.isAddress(v.address)?`${location.origin}/#${S.chainId}/${v.address}/tx/${tx.nonce}`:'';
@@ -1767,7 +1774,7 @@ async function loadTokenBalances(walletAddr, ethBalance) {
 
   if(ethBalance == null) ethBalance = await provider.getBalance(walletAddr);
   const ethPrice = prices['ETH'] || 0;
-  const stableSymbols = new Set(['USDC', 'USDT', 'DAI']);
+  const stableSymbols = new Set(['USDC', 'USDT', 'USDT0', 'DAI']);
   const holdings = [];
   let totalUsd = 0;
 
@@ -2622,19 +2629,23 @@ function collectSigs(tx, v, connectedAddress) {
 
 function verifySigs(sigs, domain, types, msg, owners) {
   const ownerSet = new Set(owners.map(o => o.toLowerCase()));
+  const seen = new Set();
   const verified = [];
   for(const s of sigs) {
+    const key = s.signer.toLowerCase();
+    if(seen.has(key)) continue;
     // Sender/approval sigs (on-chain approvals) — trust them, contract validates
     const st = s.sigType || s.sig_type;
     if(st === 'approval' || st === 'sender') {
-      if(ownerSet.has(s.signer.toLowerCase())) verified.push(s);
+      if(ownerSet.has(key)) { seen.add(key); verified.push(s); }
       continue;
     }
     // Verify ECDSA sigs client-side
     try {
       const sigData = s.sig || s.signature;
       const recovered = ethers.verifyTypedData(domain, types, msg, sigData);
-      if(recovered.toLowerCase() === s.signer.toLowerCase() && ownerSet.has(recovered.toLowerCase())) {
+      if(recovered.toLowerCase() === key && ownerSet.has(key)) {
+        seen.add(key);
         verified.push(s);
       } else {
         console.warn(`Sig verification failed for ${s.signer}: recovered ${recovered}`);
@@ -2667,21 +2678,17 @@ async function prodSubmit(vi, nonce) {
       && target.toLowerCase() === v.address.toLowerCase()
       && data.length >= 10 && data.slice(0, 10) === msIface.getFunction('cancelQueued').selector;
     const canCancel = isCancelCall && sigs.length >= v.threshold;
-    const canForward = v.isTimelockExecutor && v.fastPath && sigs.length === v.ownerCount && !isCancelCall;
-
-    if(!canCancel && !canForward && sigs.length < v.threshold) {
+    if(!canCancel && sigs.length < v.threshold) {
       flash(`NEED ${v.threshold - sigs.length} MORE VALID SIG${v.threshold - sigs.length > 1 ? 'S' : ''}`);
       return;
     }
 
     let atx;
-    if(canCancel || canForward) {
+    if(canCancel) {
       const executorAddr = v.executor;
       const tlContract = new ethers.Contract(executorAddr, TIMELOCK_EXECUTOR_ABI, signer);
-      // Cancel needs threshold sigs, forward needs all (already ownerCount)
-      const fwdSigs = canCancel ? sigs.slice(0, v.threshold) : sigs;
-      flash(canCancel ? 'CANCELLING VIA EXECUTOR...' : 'FORWARDING VIA EXECUTOR...');
-      atx = await tlContract.forward(v.address, target, value, data, packSigs(fwdSigs));
+      flash('CANCELLING VIA EXECUTOR...');
+      atx = await tlContract.forward(v.address, target, value, data, packSigs(sigs.slice(0, v.threshold)));
     } else {
       // Contract requires exactly threshold * 65 bytes of sigs
       const packedSigs = packSigs(sigs.slice(0, v.threshold));
@@ -3240,6 +3247,7 @@ async function switchChain(id, skipLoad) {
   provider = makeProvider(id);
   S.showChains = false;
   S.latestBlock = 0;
+  S.txToken = 'ETH';
   resetCxState();
   fetchBlock();
 
