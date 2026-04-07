@@ -1730,12 +1730,21 @@ async function resolveName(input) {
 // ── PRODUCTION: MULTICALL ─────────────────────────────────────────
 
 async function multicallLoad(addr) {
-  const mc = getMC3();
-  const encode = fn => ({ target: addr, allowFailure: false, callData: msIface.encodeFunctionData(fn) });
-  const fns = ['threshold','delay','nonce','executor','ownerCount','getOwners'];
-  const [results, balance] = await Promise.all([mc.aggregate3(fns.map(encode)), provider.getBalance(addr)]);
-  const d = (fn, i) => msIface.decodeFunctionResult(fn, results[i].returnData)[0];
-  return { threshold:d('threshold',0), delay:d('delay',1), nonce:d('nonce',2), executor:d('executor',3), ownerCount:d('ownerCount',4), owners:d('getOwners',5), balance };
+  try {
+    const mc = getMC3();
+    const encode = fn => ({ target: addr, allowFailure: false, callData: msIface.encodeFunctionData(fn) });
+    const fns = ['threshold','delay','nonce','executor','ownerCount','getOwners'];
+    const [results, balance] = await Promise.all([mc.aggregate3(fns.map(encode)), provider.getBalance(addr)]);
+    const d = (fn, i) => msIface.decodeFunctionResult(fn, results[i].returnData)[0];
+    return { threshold:d('threshold',0), delay:d('delay',1), nonce:d('nonce',2), executor:d('executor',3), ownerCount:d('ownerCount',4), owners:d('getOwners',5), balance };
+  } catch(e) {
+    // Fallback for chains without Multicall3
+    const ms = new ethers.Contract(addr, MULTISIG_ABI, provider);
+    const [threshold, delay, nonce, executor, ownerCount, owners, balance] = await Promise.all([
+      ms.threshold(), ms.delay(), ms.nonce(), ms.executor(), ms.ownerCount(), ms.getOwners(), provider.getBalance(addr)
+    ]);
+    return { threshold, delay, nonce, executor, ownerCount, owners, balance };
+  }
 }
 
 async function loadTokenBalances(walletAddr, ethBalance) {
