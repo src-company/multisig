@@ -1,0 +1,64 @@
+# Render Blueprint — self-hosted PostgREST + Postgres + static dapp.
+# Replaces Supabase with equivalent, self-owned pieces, all on Render.
+# Spec: https://render.com/docs/blueprint-spec
+#
+# One-time setup after first deploy:
+#   1. Connect to the DB and run, in order:
+#        supabase/schema.sql      (tables, functions, views, RLS)
+#        supabase/roles.sql       (authenticator + anon roles/grants)
+#   2. Give the login role a password:
+#        ALTER ROLE authenticator WITH PASSWORD '<strong-random-password>';
+#   3. Set PGRST_DB_URI (marked sync:false below) in the dashboard to:
+#        postgres://authenticator:<password>@<host>:<port>/<db>
+#      using the host/port/db from the multisig-db "Info" tab.
+
+databases:
+  - name: multisig-db
+    # free plan is deleted after 30 days — use a paid plan for anything real.
+    plan: basic-256mb
+    postgresMajorVersion: "16"
+
+services:
+  # ── API layer: self-hosted PostgREST ────────────────────────────
+  - type: web
+    name: multisig-postgrest
+    runtime: image
+    image:
+      url: docker.io/postgrest/postgrest:v12.2.12
+    plan: starter
+    healthCheckPath: /
+    envVars:
+      # Connection string for the low-privilege `authenticator` role.
+      # Render only auto-exposes the DB OWNER connection string, and
+      # PostgREST must NOT connect as the owner — so set this by hand
+      # (see step 3 above). sync:false = prompt for it, never store in git.
+      - key: PGRST_DB_URI
+        sync: false
+      - key: PGRST_DB_SCHEMAS
+        value: public
+      - key: PGRST_DB_ANON_ROLE
+        value: anon
+      - key: PGRST_DB_POOL
+        value: "10"
+      # PostgREST listens here; Render auto-detects the open port. If routing
+      # fails, add an env var PORT with the same value.
+      - key: PGRST_SERVER_PORT
+        value: "3000"
+      # Only used if you later mint authenticated JWTs. Unused while the app
+      # runs purely as anon (no Authorization header), but harmless to have.
+      - key: PGRST_JWT_SECRET
+        generateValue: true
+
+  # ── Static dapp ─────────────────────────────────────────────────
+  - type: web
+    name: multisig-dapp
+    runtime: static
+    staticPublishPath: ./dapp
+    buildCommand: "echo no build step"
+    # Optional: serve the CSP/security headers from here instead of the
+    # <meta> tag in index.html. Remember to point connect-src at the
+    # PostgREST service URL (replacing https://*.supabase.co).
+    # headers:
+    #   - path: /*
+    #     name: Content-Security-Policy
+    #     value: "default-src 'self'; ..."
