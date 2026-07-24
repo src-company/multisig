@@ -553,7 +553,10 @@ const sb = {
 const WEINS = '0x0000000000696760E15f265e828DB644A0c242EB';
 const WEINS_ABI = [
   'function computeId(string) pure returns (uint256)',
-  'function ownerOf(uint256) view returns (address)',
+  // Canonical forward resolution: inactive/expired -> 0; explicitly-set
+  // recipient address if any; otherwise the current owner. Use this rather
+  // than ownerOf so a name pointed at a different address resolves correctly.
+  'function resolve(uint256) view returns (address)',
   'function reverseResolve(address) view returns (string)',
 ];
 const weinsIface = new ethers.Interface(WEINS_ABI);
@@ -2032,9 +2035,10 @@ async function resolveName(input) {
   if(v.endsWith('.wei')) {
     const ns = new ethers.Contract(WEINS, WEINS_ABI, ethMainRpc);
     const tokenId = await ns.computeId(v);
-    const owner = await ns.ownerOf(tokenId);
-    if(!owner || owner === ethers.ZeroAddress) throw new Error(`${v} not found`);
-    return ethers.getAddress(owner);
+    // resolve() = explicit recipient if set, else owner; 0 if inactive/expired.
+    const addr = await ns.resolve(tokenId);
+    if(!addr || addr === ethers.ZeroAddress) throw new Error(`${v} not found`);
+    return ethers.getAddress(addr);
   }
   if(v.endsWith('.eth')) {
     const addr = await ethMainRpc.resolveName(v);
