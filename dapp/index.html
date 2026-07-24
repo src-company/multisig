@@ -45,6 +45,8 @@ button:active{transform:scale(.97)}
 .tx-share{display:inline-flex;align-items:center;gap:8px;font-size:8px;font-weight:700;letter-spacing:1px;color:var(--a);border:1px solid var(--a);padding:3px 4px 3px 8px;text-transform:uppercase}
 .tx-share button{background:none;border:none;color:var(--a);cursor:pointer;font-size:11px;line-height:1;padding:0 2px;opacity:.6}
 .tx-share button:hover{opacity:1}
+.reject-link{background:transparent;border:1px solid var(--ln);color:var(--d);font-size:9px;font-weight:700;letter-spacing:2px;padding:6px 12px;cursor:pointer;font-family:var(--f);text-transform:uppercase;transition:border-color .15s,color .15s}
+.reject-link:hover{border-color:var(--r);color:var(--r)}
 .copy-btn{opacity:.4;transition:opacity .15s}
 @media(hover:hover){.copy-btn:hover{opacity:1}}
 @media(hover:hover){
@@ -216,6 +218,7 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 .policy-big{font-size:44px;font-weight:700;letter-spacing:-2px}
 .policy-of{font-size:18px;font-weight:700;color:var(--m)}
 .changed-tag{font-size:10px;color:var(--y);letter-spacing:2px}
+.policy-warn{font-size:10px;letter-spacing:1px;line-height:1.6;color:var(--y);border-left:2px solid var(--y);background:color-mix(in srgb,var(--y) 6%,transparent);padding:10px 14px;margin-bottom:20px}
 .thresh-btns{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap}
 .thresh-btn{flex:0 0 auto;min-width:60px;padding:0 10px}
 .btn-disabled{border:1px solid var(--fr)!important;color:var(--d)!important;background:transparent!important;cursor:not-allowed}
@@ -793,6 +796,22 @@ function nextNonce(v) {
   return v.queue.length
     ? Math.max(v.nonce, ...v.queue.map(t => t.nonce + 1))
     : v.nonce;
+}
+
+// Pending self-calls that mutate the owner set / threshold. Because execution
+// is strictly sequential by nonce, a new owner change created now executes
+// AFTER these and may revert if the set shifts first — used to warn the user.
+let _policySelectors = null;
+function pendingPolicyChanges(v) {
+  if(!v || !v.address || !v.queue) return [];
+  if(!_policySelectors) _policySelectors = {
+    [msIface.getFunction('addOwner').selector]: 'ADD OWNER',
+    [msIface.getFunction('removeOwner').selector]: 'REMOVE OWNER',
+    [msIface.getFunction('setThreshold').selector]: 'SET THRESHOLD',
+  };
+  const self = v.address.toLowerCase();
+  return v.queue.filter(t => t.target && t.target.toLowerCase() === self && t.callData && _policySelectors[t.callData.slice(0,10)])
+    .map(t => ({ nonce: t.nonce, label: _policySelectors[t.callData.slice(0,10)] }));
 }
 
 function txSt(tx, v) {
@@ -1424,6 +1443,7 @@ function renderDash(v,mob){
       </div>
       ${blocked?"":progressLine}
       <div class="approvals">${apHtml}${etaHtml}</div>
+      ${(i===firstUnqueued&&!isQueued&&!isCancel&&!blocked)?`<div style="margin-top:12px"><button class="reject-link" onclick="doReject(${S.sel},${tx.nonce})" title="Sign a no-op to consume this nonce so later transactions can proceed">REJECT &middot; SKIP NONCE</button></div>`:''}
       ${mob&&!blocked&&actionBtn?`<div class="mob-actions">${actionBtn}</div>`:""}
     </div>`}).join("")}
   <div class="sec"><span>SIGNERS</span><span class="line"></span></div>
@@ -1752,6 +1772,7 @@ function renderAdmin(v,mob){
       </div>`:""}
     </div>
   `:tab==="OWNERS"?`<div>
+    ${(()=>{const pc=pendingPolicyChanges(v);return pc.length?`<div class="policy-warn">${pc.length} OWNER/THRESHOLD CHANGE${pc.length>1?"S":""} PENDING (#${pc.map(p=>p.nonce).join(", #")}) &middot; changes execute in order, so a new one here may need re-creating if the owner set shifts first</div>`:''})()}
     ${v.owners.map((o,oi)=>{const isYouLbl=o.label&&o.label.trim().toUpperCase()==='YOU';return`<div class="row" style="${mob?"flex-direction:column;align-items:stretch;gap:10px":""}">
       <div style="min-width:0">
         <div class="signer-addr">${S.demoMode?addrLink(o.addr,v.chain):addrLink(o.addr)}${ethers.isAddress(o.addr)?copyBtn(o.addr):""}${o.name?` <span class="signer-name">${esc(o.name)}</span>`:""}${o.you?` <span style="font-size:9px;font-weight:700;letter-spacing:1px;color:var(--m);border:1px solid var(--fr);padding:1px 6px;margin-left:6px">YOU</span>`:""}</div>
@@ -1951,6 +1972,18 @@ function doCancel(vi, nonce) {
     render();
   } else {
     guardSubmit(prodCancel)(vi, nonce);
+  }
+}
+
+function doReject(vi, nonce) {
+  if (S.demoMode) {
+    const vt = S.vaults[vi];
+    // Demo: skipping the nonce drops the stuck proposal so the queue advances.
+    vt.queue = vt.queue.filter(t => t.nonce !== nonce);
+    flash(`REJECTED #${nonce} \u2014 NONCE SKIPPED`);
+    render();
+  } else {
+    guardSubmit(prodReject)(vi, nonce);
   }
 }
 
@@ -3317,6 +3350,96 @@ async function prodCancel(vi, nonce) {
   } catch(e) {
     console.error(e);
     flash(e.shortMessage || e.message || 'CANCEL FAILED');
+  }
+}
+
+// Skip a stuck proposal so later ones can proceed. Because execution is
+// strictly sequential by nonce, a proposal that can't reach threshold blocks
+// everything behind it. REJECT signs a no-op self-call (execute(self,0,0x)) at
+// that same nonce; once threshold owners sign it, submitting consumes the nonce
+// and unblocks the queue. The payload moves nothing and is bound to this nonce.
+async function prodReject(vi, nonce) {
+  const w = requireSigner(); if(!w) return;
+  const { signer, addr: connectedAddress } = w;
+  const v = S.vaults[vi];
+  const tx = v.queue.find(t => t.nonce === nonce);
+  if(!tx) return;
+
+  const rejectNonce = nonce;   // == the stuck proposal's (and live) on-chain nonce
+  const rejectData = '0x';     // no-op self-call
+  const domain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address };
+  const ownerAddrs = v.loadedOwners || v.owners.map(o => o.addr);
+
+  try {
+    // Aggregate any existing "Reject #N" companion signatures from the DB.
+    let existingSigs = [];
+    let existingTxId = null;
+    if(v.dbId) {
+      const { data: rows } = await sb.from('transactions')
+        .select('id, nonce, tx_hash')
+        .eq('wallet_id', v.dbId)
+        .eq('description', `Reject #${nonce}`)
+        .in('status', ['proposed', 'executing'])
+        .limit(1);
+      if(rows?.length) {
+        existingTxId = rows[0].id;
+        const dbSigs = await dbGetSigs(existingTxId);
+        const msg = { target: v.address, value: 0n, data: rejectData, nonce: rejectNonce };
+        existingSigs = verifySigs(dbSigs, domain, EIP712_TYPES, msg, ownerAddrs);
+        // Companion exists but all its sigs are stale (e.g. nonce moved) — start fresh.
+        if(existingSigs.length === 0 && dbSigs.length > 0) existingTxId = null;
+      }
+    }
+
+    const msg = { target: v.address, value: 0n, data: rejectData, nonce: rejectNonce };
+    const rejectTxHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg);
+
+    let sigs = [...existingSigs];
+    const callerIsOwner = ownerAddrs.some(o => o.toLowerCase() === connectedAddress.toLowerCase());
+    const callerHasSigned = sigs.some(s => s.signer.toLowerCase() === connectedAddress.toLowerCase());
+    if(callerIsOwner && !callerHasSigned) {
+      const sig = await signer.signTypedData(domain, EIP712_TYPES, msg);
+      sigs.push({signer: connectedAddress, sig, sigType: 'ecdsa'});
+      if(v.dbId) {
+        if(!existingTxId) {
+          existingTxId = await dbProposeTx(v.dbId, rejectNonce, v.address, '0', rejectData, rejectTxHash, v.threshold, connectedAddress, `Reject #${nonce}`);
+        }
+        if(existingTxId) await dbAddSig(existingTxId, connectedAddress, sigs[sigs.length-1].sig);
+      }
+    } else if(!callerIsOwner) {
+      flash('ONLY OWNERS CAN REJECT'); return;
+    }
+    sigs.sort((a,b) => a.signer.toLowerCase() < b.signer.toLowerCase() ? -1 : 1);
+
+    if(sigs.length < v.threshold) {
+      flash(`SIGNED REJECT (${sigs.length}/${v.threshold}) — NEED ${v.threshold} SIGS`);
+      await reloadQueue(vi);
+      return;
+    }
+
+    // Sigs are over rejectNonce; execute() hashes against the live nonce.
+    const liveNonce = await fetchLiveNonce(v.address);
+    if(liveNonce !== rejectNonce) {
+      flash('NONCE CHANGED — RELOADING');
+      await reloadVault(vi);
+      return;
+    }
+
+    const ms = new ethers.Contract(v.address, MULTISIG_ABI, signer);
+    flash('REJECTING — SKIPPING NONCE...');
+    const atx = await ms.execute(v.address, 0n, rejectData, packSigs(sigs.slice(0, v.threshold)));
+    flash('TX SENT, WAITING...');
+    const receipt = await atx.wait();
+
+    if(v.dbId) {
+      if(existingTxId) await dbMarkExecuted(existingTxId, Number(receipt.blockNumber), receipt.hash);
+      if(tx.dbId) await dbCancelTx(tx.dbId, connectedAddress);   // retire the skipped proposal
+    }
+    flash(`REJECTED #${nonce} — NONCE SKIPPED`);
+    await reloadVault(vi);
+  } catch(e) {
+    console.error(e);
+    flash(e.shortMessage || e.message || 'REJECT FAILED');
   }
 }
 
