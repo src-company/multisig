@@ -662,7 +662,7 @@ const S = {
 
   // create form
   cf: {
-    name: '', threshold: "1", delayH: "24", net: 0, fastPath: false,
+    name: '', threshold: "1", delayVal: "24", delayUnit: 'h', net: 0, fastPath: false,
     owners: [{ addr: '', label: '' }, { addr: '', label: '' }, { addr: '', label: '' }],
   },
 
@@ -670,6 +670,7 @@ const S = {
   adminTab: "POLICY",
   nt: 2,
   nd: 24,
+  ndUnit: 'h',
 
   // chain / network
   chainId: parseInt(localStorage.getItem('ms_chain') || '1'),
@@ -724,6 +725,22 @@ function fmtD(s) {
   if (h < 1) return `${Math.round(s / 60)}M`;
   return Number.isInteger(h) ? `${h}H` : `${h.toFixed(1)}H`;
 }
+
+// Timelock delay is set in a user-chosen unit (minutes/hours/days) but stored
+// on-chain as uint32 seconds. These convert between the two.
+const UNIT_SEC = { m: 60, h: 3600, d: 86400 };
+const UNIT_LABEL = { m: 'MIN', h: 'HR', d: 'DAY' };
+// value (in `unit`) -> whole seconds
+function toSec(val, unit) { return Math.floor((parseFloat(val) || 0) * (UNIT_SEC[unit] || 3600)); }
+// seconds -> the tidiest {val, unit} that represents it exactly
+function fromSec(sec) {
+  if (!sec || sec <= 0) return { val: 0, unit: 'h' };
+  if (sec % 86400 === 0) return { val: sec / 86400, unit: 'd' };
+  if (sec % 3600 === 0) return { val: sec / 3600, unit: 'h' };
+  return { val: sec / 60, unit: 'm' };
+}
+// set the admin "new delay" value+unit from a seconds figure (picks tidiest unit)
+function setNd(sec) { const p = fromSec(sec); S.nd = p.val; S.ndUnit = p.unit; }
 
 // middle-ellipsis for a full 0x address; passes anything else through unchanged
 function shortAddr(a){return /^0x[0-9a-fA-F]{40}$/.test(a||"")?a.slice(0,6)+"…"+a.slice(-4):(a||"");}
@@ -1240,7 +1257,7 @@ function renderDash(v,mob){
       const on=i===S.sel;
       const {rdy,needsYou}=vaultFlags[i];
       const dot=rdy?'<span class="vtab-dot" style="background:var(--g)"></span>':needsYou?'<span class="vtab-dot" style="background:var(--y)"></span>':"";
-      return`<button class="vtab${on?" on":""}" onclick="S.sel=${i};S.nt=S.vaults[${i}].threshold;S.nd=S.vaults[${i}].delay/3600;S.showTx=false;render()">
+      return`<button class="vtab${on?" on":""}" onclick="S.sel=${i};S.nt=S.vaults[${i}].threshold;setNd(S.vaults[${i}].delay);S.showTx=false;render()">
       <div class="vtab-name">${esc(vt.name)}${dot}</div>
       <div class="vtab-info">${vt.holdings.length?vt.holdings[0].balance+" "+vt.holdings[0].token+(vt.holdings.length>1?" +"+(vt.holdings.length-1)+" MORE":""):"EMPTY"}${vt.queue.length>0?` &middot; ${vt.queue.length} PENDING`:""}</div>
     </button>`}).join("")}
@@ -1551,7 +1568,7 @@ function validateCreate(c, demo){
   });
   const filled = owners.filter(o => o.state !== 'empty').length;
   const t = parseInt(c.threshold) || 0;
-  const delayOk = !c.delayH || (/^\d*\.?\d*$/.test(String(c.delayH)) && parseFloat(c.delayH) >= 0);
+  const delayOk = !c.delayVal || (/^\d*\.?\d*$/.test(String(c.delayVal)) && parseFloat(c.delayVal) >= 0);
   let ready = true, reason = '';
   if(filled < 1) { ready = false; reason = 'ADD AT LEAST ONE OWNER'; }
   else if(!demo && owners.some(o => o.state === 'invalid')) { ready = false; reason = 'ONE OR MORE OWNER ADDRESSES ARE INVALID'; }
@@ -1564,7 +1581,7 @@ function validateCreate(c, demo){
 const _OWNER_STATE_COLOR = { address:'var(--g)', name:'var(--a)', invalid:'var(--r)', dup:'var(--r)', empty:'var(--d)' };
 
 function renderCreate(mob){
-  const c=S.cf,ds=Math.floor((parseFloat(c.delayH)||0)*3600),net=NETS[c.net],toks=DEMO_TOKENS[net.name]||["ETH"];
+  const c=S.cf,ds=toSec(c.delayVal,c.delayUnit),net=NETS[c.net],toks=DEMO_TOKENS[net.name]||["ETH"];
   const explorerBase = CHAINS[net.id]?.explorer || 'https://etherscan.io';
   const val = validateCreate(c, S.demoMode);
   const filled = val.filled;
@@ -1595,10 +1612,10 @@ function renderCreate(mob){
         </div>
         <div>
           <label class="lbl">DELAY</label>
-          <div class="token-pills" style="margin-bottom:10px">${[['0','UNLOCKED'],['6','6H'],['24','24H'],['48','48H'],['72','3D'],['168','1W']].map(([h,lbl])=>`<button class="pill${(parseFloat(c.delayH)||0)===+h?" on":""}" onclick="S.cf.delayH='${h}';${+h===0?"S.cf.fastPath=false;":""}render()">${lbl}</button>`).join("")}</div>
+          <div class="token-pills" style="margin-bottom:10px">${[['0','h','UNLOCKED'],['30','m','30M'],['1','h','1H'],['6','h','6H'],['24','h','24H'],['48','h','48H'],['3','d','3D'],['7','d','1W']].map(([val,unit,lbl])=>`<button class="pill${toSec(val,unit)===ds?" on":""}" onclick="S.cf.delayVal='${val}';S.cf.delayUnit='${unit}';${+val===0?"S.cf.fastPath=false;":""}render()">${lbl}</button>`).join("")}</div>
           <div style="display:flex;align-items:center;gap:10px">
-            <input class="inp" type="number" step="any" min="0" value="${c.delayH}" style="width:88px;margin:0;text-align:center" onchange="S.cf.delayH=this.value;if(!parseFloat(this.value))S.cf.fastPath=false;render()" oninput="S.cf.delayH=this.value">
-            <span class="lbl" style="margin:0">HOURS</span>
+            <input class="inp" type="number" step="any" min="0" value="${c.delayVal}" style="width:80px;margin:0;text-align:center" onchange="S.cf.delayVal=this.value;if(!parseFloat(this.value))S.cf.fastPath=false;render()" oninput="S.cf.delayVal=this.value">
+            <div style="display:flex;gap:4px">${['m','h','d'].map(u=>`<button class="pill${c.delayUnit===u?" on":""}" style="height:34px;padding:0 10px" onclick="S.cf.delayUnit='${u}';render()">${UNIT_LABEL[u]}</button>`).join("")}</div>
             <span style="font-size:11px;letter-spacing:1px;margin-left:auto;color:${ds>0?'var(--m)':'var(--y)'}">${ds>0?fmtD(ds):'UNLOCKED &mdash; NO TIMELOCK'}</span>
           </div>
         </div>
@@ -1615,7 +1632,7 @@ function renderCreate(mob){
       ${!mob?`<label class="lbl">PREVIEW</label><div class="preview-text">NAME        ${esc(c.name||'UNNAMED')}
 OWNERS      ${c.owners.filter(o=>o.addr.trim()).length||0}${c.owners.some(o=>o.label&&o.addr.trim())?" ("+c.owners.filter(o=>o.label&&o.addr.trim()).map(o=>esc(o.label)).join(", ")+")":""}
 THRESHOLD   ${c.threshold}/${c.owners.filter(o=>o.addr.trim()).length||1}
-DELAY       ${ds>0?c.delayH+"h ("+ds+"s)":"0 &mdash; UNLOCKED"}${ds>0?"\nFAST PATH   "+(c.fastPath?"ENABLED (ALL OWNERS)":"DISABLED"):""}
+DELAY       ${ds>0?c.delayVal+c.delayUnit+" ("+ds+"s)":"0 &mdash; UNLOCKED"}${ds>0?"\nFAST PATH   "+(c.fastPath?"ENABLED (ALL OWNERS)":"DISABLED"):""}
 NETWORK     ${net.name} (${net.id})
 TOKENS      ${toks.join(", ")}
 FACTORY     <a href="${explorerBase}/address/${FACTORY}" target="_blank" rel="noopener" style="color:var(--a);text-decoration:none;border-bottom:1px solid var(--ln)">${FACTORY.slice(0,10)}...${FACTORY.slice(-4)}</a>
@@ -1639,11 +1656,11 @@ METHOD      ${c.fastPath&&ds>0?"createWithCalls()":"create()"}</div><div class="
 // ── ADMIN ─────────────────────────────────────────────────────────
 function renderAdmin(v,mob){
   if(!v)return'<div style="padding:80px 0;text-align:center;font-size:24px;font-weight:700">NO VAULT</div>';
-  const tab=S.adminTab,tc=S.nt!==v.threshold,dc=Math.floor(S.nd*3600)!==v.delay;
+  const tab=S.adminTab,tc=S.nt!==v.threshold,ndSec=toSec(S.nd,S.ndUnit),dc=ndSec!==v.delay;
   const explorerBase = S.demoMode ? (EXPLORERS[v.chain]||EXPLORERS.ETHEREUM) : (CHAINS[S.chainId]?CHAINS[S.chainId].explorer:'https://etherscan.io');
   return`
   <div class="vtabs"><div class="vtabs-inner" style="min-width:max-content">
-    ${S.vaults.map((vt,i)=>`<button class="vtab${i===S.sel?" on":""}" style="padding:${mob?"12px 14px":"14px 20px"};font-size:11px" onclick="S.sel=${i};S.nt=S.vaults[${i}].threshold;S.nd=S.vaults[${i}].delay/3600;render()">${esc(vt.name)}</button>`).join("")}
+    ${S.vaults.map((vt,i)=>`<button class="vtab${i===S.sel?" on":""}" style="padding:${mob?"12px 14px":"14px 20px"};font-size:11px" onclick="S.sel=${i};S.nt=S.vaults[${i}].threshold;setNd(S.vaults[${i}].delay);render()">${esc(vt.name)}</button>`).join("")}
   </div></div>
   <div class="admin-note">CHANGES REQUIRE MULTISIG APPROVAL</div>
   <div class="admin-tabs">
@@ -1674,10 +1691,13 @@ function renderAdmin(v,mob){
           <span class="policy-big">${fmtD(v.delay)}</span>
           <span style="font-size:12px;color:var(--d);letter-spacing:1px">CURRENT</span>
         </div>
-        <label class="lbl">NEW DELAY (HOURS)</label>
-        <input class="inp" type="number" step="any" min="0" value="${S.nd}" onchange="S.nd=parseFloat(this.value)||0;render()" oninput="S.nd=parseFloat(this.value)||0">
-        ${dc?`<div style="font-size:10px;color:var(--y);letter-spacing:1px;margin:-6px 0 14px">&rarr; ${fmtD(Math.floor(S.nd*3600))} (${Math.floor(S.nd*3600).toLocaleString()}s)</div>`:`<div style="font-size:10px;color:var(--d);letter-spacing:1px;margin:-6px 0 14px">${Math.floor(S.nd*3600).toLocaleString()}s</div>`}
-        <button class="btn ${dc?"btn-fill":"btn-disabled"} btn-w" onclick="${dc?`doAdminPropose('setDelay',${Math.floor(S.nd*3600)})`:""}">${dc?"PROPOSE":"NO CHANGE"}</button>
+        <label class="lbl">NEW DELAY</label>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+          <input class="inp" type="number" step="any" min="0" value="${S.nd}" style="width:80px;margin:0;text-align:center" onchange="S.nd=parseFloat(this.value)||0;render()" oninput="S.nd=parseFloat(this.value)||0">
+          <div style="display:flex;gap:4px">${['m','h','d'].map(u=>`<button class="pill${S.ndUnit===u?" on":""}" style="height:34px;padding:0 10px" onclick="S.ndUnit='${u}';render()">${UNIT_LABEL[u]}</button>`).join("")}</div>
+          <span style="font-size:10px;letter-spacing:1px;margin-left:auto;color:${dc?'var(--y)':'var(--d)'}">${dc?`&rarr; ${ndSec>0?fmtD(ndSec):'UNLOCKED'} (${ndSec.toLocaleString()}s)`:`${ndSec.toLocaleString()}s`}</span>
+        </div>
+        <button class="btn ${dc?"btn-fill":"btn-disabled"} btn-w" onclick="${dc?`doAdminPropose('setDelay',${ndSec})`:""}">${dc?"PROPOSE":"NO CHANGE"}</button>
       </div>
     </div>
     <div class="sep"></div>
@@ -1923,7 +1943,7 @@ function doDeploy() {
     owners[0].label = owners[0].label || "DEPLOYER";
 
     const id = "V-" + String(S.vaults.length + 1).padStart(3, "0");
-    const delay = Math.floor((parseFloat(c.delayH) || 0) * 3600);
+    const delay = toSec(c.delayVal, c.delayUnit);
     const fp = c.fastPath && delay > 0;
     const addr = "0x" + Math.random().toString(16).slice(2, 6) + "..." + Math.random().toString(16).slice(2, 6);
 
@@ -2285,7 +2305,7 @@ async function loadAllVaults() {
     S.sel = 0;
     if(vaults.length) {
       S.nt = vaults[0].threshold;
-      S.nd = vaults[0].delay / 3600;
+      setNd(vaults[0].delay);
     }
     hideLoading();
     render();
@@ -2618,7 +2638,7 @@ async function loadVaultByAddress() {
       S.vaults.push(vData);
       S.sel = S.vaults.length - 1;
       S.nt = vData.threshold;
-      S.nd = vData.delay / 3600;
+      setNd(vData.delay);
       hideLoading();
       render();
       const li = S.vaults.length - 1;
@@ -2712,7 +2732,7 @@ async function prodDeploy() {
   }
 
   const thresh = Math.min(parseInt(c.threshold) || 1, resolvedOwners.length);
-  const del = Math.floor((parseFloat(c.delayH) || 0) * 3600);
+  const del = toSec(c.delayVal, c.delayUnit);
   const executor = del > 0 ? TIMELOCK_EXECUTOR : ethers.ZeroAddress;
   const wantForward = c.fastPath && del > 0;
 
@@ -3715,7 +3735,7 @@ function handleDeepLink() {
             S.vaults = [vData];
             S.sel = 0;
             S.nt = vData.threshold;
-            S.nd = vData.delay / 3600;
+            setNd(vData.delay);
             hideLoading();
             render();
             await Promise.all([loadVaultQueue(0), loadVaultHistory(0)]);
