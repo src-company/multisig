@@ -1135,7 +1135,7 @@ function renderChainOverlay(mob){
 
 // ── DASHBOARD ─────────────────────────────────────────────────────
 function renderDash(v,mob){
-  if(!v)return`<div class="empty"><div class="empty-title">NO VAULTS</div><div class="empty-sub">${S.demoMode?"":"DEPLOY YOUR FIRST MULTISIG"}</div><button class="btn btn-outline" style="padding:0 32px;height:48px" onclick="S.view='CREATE';render()">CREATE VAULT</button>${!S.demoMode?`<div style="margin-top:32px;display:flex;align-items:center;gap:8px;justify-content:center;flex-wrap:wrap"><input class="inp" id="load-addr" style="max-width:320px;min-width:0;flex:1;margin:0;font-size:16px" placeholder="0x... LOAD EXISTING VAULT"><button class="btn btn-outline btn-sm" onclick="loadVaultByAddress()">LOAD</button></div><div style="margin-top:32px"><button class="btn btn-outline" style="font-size:9px;border-color:var(--ln);color:var(--d)" onclick="S.demoMode=true;S.vaults=seed();S.sel=0;flash('DEMO LOADED');render()">LOAD DEMO</button></div>`:""}</div>`;
+  if(!v)return`<div class="empty"><div class="empty-title">NO VAULTS</div><div class="empty-sub">${S.demoMode?"":"DEPLOY YOUR FIRST MULTISIG"}</div><button class="btn btn-outline" style="padding:0 32px;height:48px" onclick="S.view='CREATE';render()">CREATE VAULT</button>${!S.demoMode?`<div style="margin-top:32px;font-size:10px;font-weight:600;letter-spacing:2px;color:var(--m)">LOAD EXISTING VAULT</div><div style="margin-top:10px;display:flex;align-items:center;gap:8px;justify-content:center;flex-wrap:wrap"><input class="inp" id="load-addr" style="max-width:320px;min-width:0;flex:1;margin:0;font-size:16px" placeholder="0x... or name.eth / name.wei"><button class="btn btn-outline btn-sm" onclick="loadVaultByAddress()">LOAD</button></div><div style="margin-top:32px"><button class="btn btn-outline" style="font-size:9px;border-color:var(--ln);color:var(--d)" onclick="S.demoMode=true;S.vaults=seed();S.sel=0;flash('DEMO LOADED');render()">LOAD DEMO</button></div>`:""}</div>`;
   const you = getYou();
   const h0=v.holdings[0];
 
@@ -2514,13 +2514,23 @@ async function reloadVault(vi) {
 
 async function loadVaultByAddress() {
   const input = document.getElementById('load-addr');
-  const addr = input?.value?.trim();
-  if(!addr || !ethers.isAddress(addr)) { flash('ENTER A VALID ADDRESS'); return; }
-  const checksummed = ethers.getAddress(addr);
+  const raw = input?.value?.trim();
+  if(!raw) { flash('ENTER AN ADDRESS OR NAME'); return; }
+  const isName = !ethers.isAddress(raw);
+  let checksummed;
+  if(isName) showLoading('RESOLVING NAME');
+  try {
+    checksummed = await resolveName(raw);
+  } catch(e) {
+    hideLoading();
+    flash(isName ? 'NAME NOT FOUND' : 'ENTER A VALID ADDRESS OR NAME');
+    return;
+  }
   // Check if already loaded
-  if(S.vaults.some(v => v.address.toLowerCase() === checksummed.toLowerCase())) {
-    const idx = S.vaults.findIndex(v => v.address.toLowerCase() === checksummed.toLowerCase());
-    S.sel = idx;
+  const existing = S.vaults.findIndex(v => v.address.toLowerCase() === checksummed.toLowerCase());
+  if(existing !== -1) {
+    hideLoading();
+    S.sel = existing;
     render();
     return;
   }
