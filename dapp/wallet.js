@@ -5,6 +5,24 @@ const WEINS = '0x0000000000696760E15f265e828DB644A0c242EB';
 const WEINS_ABI = ['function reverseResolve(address) view returns (string)'];
 const WC_PROJECT_ID = '1e8390ef1c1d8a185e035912a1409749';
 
+// WalletConnect (~635KB) is only needed if the user actually picks it, so it is
+// not shipped in the initial page load. Inject it on demand, once, and cache
+// the promise so concurrent/repeat callers share a single download.
+let _wcLoadPromise = null;
+function loadWalletConnect() {
+  if (globalThis['@walletconnect/ethereum-provider']) return Promise.resolve();
+  if (_wcLoadPromise) return _wcLoadPromise;
+  _wcLoadPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = './walletconnect.min.js';
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => { _wcLoadPromise = null; reject(new Error('Failed to load WalletConnect')); };
+    document.head.appendChild(s);
+  });
+  return _wcLoadPromise;
+}
+
 const _escMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;' };
 function _esc(s) { return String(s).replace(/[&<>]/g, m => _escMap[m]); }
 
@@ -112,6 +130,7 @@ async function connectWithWallet(walletKey) {
     closeWalletModal();
     let walletProvider;
     if (walletKey === 'walletconnect') {
+      await loadWalletConnect();
       const wcModule = globalThis['@walletconnect/ethereum-provider'];
       const WCProvider = wcModule?.EthereumProvider;
       if (!WCProvider?.init) throw new Error('WalletConnect not available');
