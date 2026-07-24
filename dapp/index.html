@@ -3610,6 +3610,8 @@ async function prodAdminPropose(action, val) {
         const raw = document.getElementById('admin-add-owner')?.value?.trim();
         if(!raw) { flash('ENTER AN ADDRESS'); return; }
         const addr = await resolveName(raw);
+        // Contract requires _owner > SENTINEL (address(1)); reject 0x0 / 0x1.
+        if(addr === ethers.ZeroAddress || addr.toLowerCase() === SENTINEL.toLowerCase()) { flash('INVALID OWNER ADDRESS'); return; }
         const ownerList = v.loadedOwners || v.owners.map(o => o.addr);
         if(ownerList.some(o => o.toLowerCase() === addr.toLowerCase())) { flash('ALREADY AN OWNER'); return; }
         const addLabel = document.getElementById('admin-add-label')?.value?.trim() || '';
@@ -3624,8 +3626,11 @@ async function prodAdminPropose(action, val) {
         const ownerAddr = v.owners[idx]?.addr;
         if(!ownerAddr) { flash('INVALID OWNER'); return; }
         if(v.ownerCount <= v.threshold) { flash('LOWER THRESHOLD FIRST'); return; }
+        // prevOwner is the linked-list predecessor from getOwners() order; the
+        // contract requires _owners[prevOwner] == ownerAddr, so it must be exact.
         const loadedIdx = v.loadedOwners ? v.loadedOwners.findIndex(o => o.toLowerCase() === ownerAddr.toLowerCase()) : -1;
-        const prevOwner = loadedIdx <= 0 ? SENTINEL : v.loadedOwners[loadedIdx - 1];
+        if(loadedIdx === -1) { flash('OWNER NOT IN ON-CHAIN LIST — RELOAD VAULT'); return; }
+        const prevOwner = loadedIdx === 0 ? SENTINEL : v.loadedOwners[loadedIdx - 1];
         data = msIface.encodeFunctionData('removeOwner', [prevOwner, ownerAddr]);
         desc = `removeOwner(${ownerAddr.slice(0,10)}...)`;
         break;
