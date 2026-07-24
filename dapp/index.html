@@ -1338,7 +1338,7 @@ function renderDash(v,mob){
         :`<span style="border-left:2px solid var(--y);padding-left:10px;margin-left:2px;color:var(--y)"><strong>UNLOCKED</strong></span>`}
       <span>${S.demoMode?v.chain:chainName()}</span>
       ${v.executor===ethers.ZeroAddress||v.executor==="0x0000...0000"?'<span style="color:var(--y)">NO EXECUTOR</span>':""}
-      ${v.fastPath?'<span style="color:var(--g)">FAST PATH</span>':""}
+      ${v.fastPath?'<span style="color:var(--g)" title="Unanimous owner signatures can bypass the timelock — instant execution via the executor">INSTANT &middot; ALL OWNERS</span>':""}
     </div>
   </div>
   <div class="sec"><span>QUEUE</span><span class="line"></span>
