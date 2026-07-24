@@ -185,6 +185,9 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 .pill .tok-ico{margin-right:6px}
 .tok-ico.big svg{width:26px;height:26px}
 .tok-ico.sm svg{width:12px;height:12px}
+.ctok-chip{display:inline-flex;align-items:center;gap:5px;font-size:10px;letter-spacing:1px;border:1px solid var(--ln);padding:3px 4px 3px 8px;color:var(--m)}
+.ctok-chip button{background:none;border:none;color:var(--d);cursor:pointer;font-size:11px;line-height:1;padding:0 2px}
+.ctok-chip button:hover{color:var(--r)}
 .token-pills{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
 .pill{height:34px;padding:0 14px;font-size:10px;font-weight:700;letter-spacing:2px;display:inline-flex;align-items:center;background:transparent;color:var(--d);border:1px solid var(--ln);text-transform:uppercase;transition:border-color .15s,color .15s}
 .pill.on{color:var(--a);border-color:var(--a);background:color-mix(in srgb,var(--a) 10%,transparent)}
@@ -531,6 +534,18 @@ function saveCustomToken(chainId, addr, tok){
   list.push({ address: tok.address, symbol: tok.symbol, decimals: tok.decimals });
   try { localStorage.setItem(_ctokKey(chainId, addr), JSON.stringify(list)); } catch(_){}
 }
+function removeCustomToken(chainId, addr, tokenAddr){
+  const list = customTokensFor(chainId, addr).filter(t => t.address.toLowerCase() !== tokenAddr.toLowerCase());
+  try { localStorage.setItem(_ctokKey(chainId, addr), JSON.stringify(list)); } catch(_){}
+}
+// Decode an ERC-20 symbol() result: string first, then bytes32 (old tokens
+// like MKR return a fixed bytes32 instead of a string).
+function _decodeSymbol(returnData){
+  if(!returnData || returnData === '0x') return null;
+  try { const s = erc20Iface.decodeFunctionResult('symbol', returnData)[0]; if(s && String(s).trim()) return String(s).trim(); } catch(_){}
+  try { const s = ethers.decodeBytes32String(returnData); if(s && s.trim()) return s.trim(); } catch(_){}
+  return null;
+}
 // Fetch {address, symbol, decimals} for an ERC-20; throws if it isn't one.
 async function fetchTokenMeta(address){
   const addr = ethers.getAddress(address);
@@ -539,7 +554,7 @@ async function fetchTokenMeta(address){
     { target: addr, allowFailure: true, callData: erc20Iface.encodeFunctionData('decimals') },
   ]);
   let symbol = null, decimals = null;
-  if(res[0]?.success){ try { symbol = erc20Iface.decodeFunctionResult('symbol', res[0].returnData)[0]; } catch(_){} }
+  if(res[0]?.success) symbol = _decodeSymbol(res[0].returnData);
   if(res[1]?.success){ try { decimals = Number(erc20Iface.decodeFunctionResult('decimals', res[1].returnData)[0]); } catch(_){} }
   if(decimals == null || isNaN(decimals) || decimals < 0 || decimals > 36) throw new Error('NOT AN ERC-20 TOKEN');
   return { address: addr, symbol: (symbol && String(symbol).trim()) || (addr.slice(0,6)+'…'+addr.slice(-4)), decimals };
@@ -1619,6 +1634,15 @@ async function reloadHoldings(vi){
   const v = S.vaults[vi]; if(!v || S.demoMode || !v.address) return;
   try { v.holdings = await loadTokenBalances(v.address, null); render(); } catch(_){}
 }
+function removeCustomTokenFlow(tokenAddr){
+  const v = S.vaults[S.sel]; if(!v) return;
+  const tok = customTokensFor(S.chainId, v.address).find(t => t.address.toLowerCase() === tokenAddr.toLowerCase());
+  removeCustomToken(S.chainId, v.address, tokenAddr);
+  if(tok && S.txToken === tok.symbol) S.txToken = 'ETH';
+  flash(tok ? `REMOVED ${tok.symbol}` : 'REMOVED');
+  render();
+  reloadHoldings(S.sel);
+}
 
 function renderTxBuilder(v,mob){
   const tokenObjs = S.demoMode ? (DEMO_TOKENS[v.chain]||["ETH"]).map(s=>({symbol:s,icon:iconForSym(s)})) : vaultTokens(v);
@@ -1635,7 +1659,7 @@ function renderTxBuilder(v,mob){
       <div>
         <label class="lbl">TOKEN</label>
         <div class="token-pills">${tokenObjs.map(t=>`<button class="pill${S.txToken===t.symbol?" on":""}" onclick="S.txToken='${esc(t.symbol)}';S.showCustomTok=false;render()"><span class="tok-ico">${t.icon||iconForSym(t.symbol)}</span>${esc(t.symbol)}</button>`).join("")}${S.demoMode?"":`<button class="pill" onclick="S.showCustomTok=!S.showCustomTok;render()">+ CUSTOM</button>`}</div>
-        ${(!S.demoMode&&S.showCustomTok)?`<div style="display:flex;gap:8px;margin-bottom:12px"><input class="inp" id="custom-tok-addr" style="margin:0;flex:1;font-size:13px" placeholder="0x... TOKEN ADDRESS" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomTokenFlow()}"><button class="btn btn-outline btn-sm" onclick="addCustomTokenFlow()">ADD</button></div>`:''}
+        ${(!S.demoMode&&S.showCustomTok)?`<div style="margin-bottom:12px"><div style="display:flex;gap:8px"><input class="inp" id="custom-tok-addr" style="margin:0;flex:1;font-size:13px" placeholder="0x... TOKEN ADDRESS" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomTokenFlow()}"><button class="btn btn-outline btn-sm" onclick="addCustomTokenFlow()">ADD</button></div>${(()=>{const cl=customTokensFor(S.chainId,v.address);return cl.length?`<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">${cl.map(t=>`<span class="ctok-chip">${tokIcon(t.symbol,'sm')} ${esc(t.symbol)} <span class="dim">${t.decimals}d</span><button onclick="removeCustomTokenFlow('${t.address}')" title="Remove ${esc(t.symbol)}">&#10005;</button></span>`).join('')}</div>`:''})()}</div>`:''}
         <div style="display:flex;justify-content:space-between;align-items:baseline"><label class="lbl">AMOUNT</label>${availNum>0?`<button class="link-btn" style="font-size:9px;margin:0;padding:0" onclick="fillTxMax('${availStr}',${dec},${availNum},'${unitLabel}')">MAX ${esc(hold.balance)} ${esc(S.txToken)}</button>`:hold?`<span style="font-size:9px;color:var(--d);letter-spacing:1px">BAL ${esc(hold.balance)}</span>`:''}</div>
         <input class="inp" id="tx-amount" placeholder="0.0" oninput="onTxAmount(this.value,${dec},${availNum},'${unitLabel}')" onkeydown="if(event.key==='Enter'){event.preventDefault();submitTransfer()}">
         <div id="tx-units" style="font-size:10px;color:var(--d);margin-top:-12px;word-break:break-all"></div>
@@ -3633,7 +3657,7 @@ async function _assetsFromLogs(logs, self) {
       unknown.forEach((token, i) => {
         let symbol = null, decimals = null;
         const sr = res[i*2], dr = res[i*2+1];
-        if(sr?.success) { try { symbol = erc20Iface.decodeFunctionResult('symbol', sr.returnData)[0]; } catch(_){} }
+        if(sr?.success) symbol = _decodeSymbol(sr.returnData);
         if(dr?.success) { try { decimals = Number(erc20Iface.decodeFunctionResult('decimals', dr.returnData)[0]); } catch(_){} }
         const m = { symbol: symbol || _shortTok(token), decimals: (decimals != null && !isNaN(decimals)) ? decimals : 18 };
         _tokenMetaCache[S.chainId + ':' + token] = m;
