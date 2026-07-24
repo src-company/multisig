@@ -1716,7 +1716,7 @@ function renderAdmin(v,mob){
           <span class="policy-of">/ ${v.ownerCount}</span>
           ${tc?'<span class="changed-tag">CHANGED</span>':""}
         </div>
-        <div class="thresh-btns">${Array.from({length:v.ownerCount},(_,i)=>i+1).map(n=>`<button class="btn btn-outline thresh-btn" style="opacity:${n===S.nt?1:.35};background:${n===S.nt?"color-mix(in srgb,var(--a) 8%,transparent)":"transparent"}" onclick="S.nt=${n};render()">${n}</button>`).join("")}</div>
+        <div class="thresh-btns">${Array.from({length:v.ownerCount},(_,i)=>i+1).map(n=>{const on=n===S.nt;return`<button class="btn btn-outline thresh-btn" style="border-color:${on?'var(--a)':'var(--ln)'};color:${on?'var(--a)':'var(--d)'};background:${on?'color-mix(in srgb,var(--a) 10%,transparent)':'transparent'}" onclick="S.nt=${n};render()">${n}</button>`}).join("")}</div>
         <div style="font-size:10px;color:var(--d);letter-spacing:1px;margin:-6px 0 14px">${S.nt} OF ${v.ownerCount} SIGNATURES REQUIRED</div>
         <button class="btn ${tc?"btn-fill":"btn-disabled"} btn-w" onclick="${tc?`doAdminPropose('setThreshold',${S.nt})`:""}">${tc?"PROPOSE":"NO CHANGE"}</button>
       </div>
@@ -3576,6 +3576,7 @@ async function prodAdminPropose(action, val) {
         break;
       }
       case 'setDelay': {
+        if(val > 4294967295) { flash('DELAY TOO LARGE'); return; }  // setDelay(uint32)
         data = msIface.encodeFunctionData('setDelay', [val]);
         desc = `setDelay(${val})`;
         break;
