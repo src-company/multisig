@@ -48,6 +48,13 @@ button:active{transform:scale(.97)}
 .reject-link{background:transparent;border:1px solid var(--ln);color:var(--d);font-size:9px;font-weight:700;letter-spacing:2px;padding:6px 12px;cursor:pointer;font-family:var(--f);text-transform:uppercase;transition:border-color .15s,color .15s}
 .reject-link:hover{border-color:var(--r);color:var(--r)}
 .reject-link.armed{border-color:var(--r);color:var(--r);background:color-mix(in srgb,var(--r) 8%,transparent)}
+.sim-btn{background:transparent;border:1px solid var(--ln);color:var(--d);font-size:9px;font-weight:700;letter-spacing:2px;padding:6px 12px;cursor:pointer;font-family:var(--f);text-transform:uppercase;transition:border-color .15s,color .15s}
+.sim-btn:hover{border-color:var(--a);color:var(--a)}
+.sim-result{margin-top:10px;padding:10px 14px;font-size:10px;letter-spacing:1px;line-height:1.7;border-left:2px solid var(--ln);color:var(--m)}
+.sim-result.pass{border-left-color:var(--g)}
+.sim-result.revert{border-left-color:var(--r);color:var(--r)}
+.sim-send{color:var(--r)}
+.sim-recv{color:var(--g)}
 .copy-btn{opacity:.4;transition:opacity .15s}
 @media(hover:hover){.copy-btn:hover{opacity:1}}
 @media(hover:hover){
@@ -1444,7 +1451,8 @@ function renderDash(v,mob){
       </div>
       ${blocked?"":progressLine}
       <div class="approvals">${apHtml}${etaHtml}</div>
-      ${(i===firstUnqueued&&!isQueued&&!isCancel&&!blocked)?(()=>{const rsc=tx.rejectSigners?tx.rejectSigners.size:0;const armed=_rejectArmed===tx.nonce;const label=armed?'CONFIRM &middot; SKIP NONCE?':`REJECT &middot; SKIP NONCE${rsc?` (${rsc}/${v.threshold})`:''}`;return `<div style="margin-top:12px"><button class="reject-link${armed?' armed':''}" onclick="armReject(${S.sel},${tx.nonce})" title="Sign a no-op to consume this nonce so later transactions can proceed">${label}</button></div>`;})():''}
+      ${(i===firstUnqueued&&!isQueued&&!isCancel&&!blocked)?(()=>{const rsc=tx.rejectSigners?tx.rejectSigners.size:0;const armed=_rejectArmed===tx.nonce;const rlabel=armed?'CONFIRM &middot; SKIP NONCE?':`REJECT &middot; SKIP NONCE${rsc?` (${rsc}/${v.threshold})`:''}`;return `<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="sim-btn" onclick="simulateProposal(${S.sel},${tx.nonce})" title="Dry-run this proposal against current chain state (from = the vault)">SIMULATE</button><button class="reject-link${armed?' armed':''}" onclick="armReject(${S.sel},${tx.nonce})" title="Sign a no-op to consume this nonce so later transactions can proceed">${rlabel}</button></div>`;})():''}
+      ${tx._sim?renderSimResult(tx._sim):''}
       ${mob&&!blocked&&actionBtn?`<div class="mob-actions">${actionBtn}</div>`:""}
     </div>`}).join("")}
   <div class="sec"><span>SIGNERS</span><span class="line"></span></div>
@@ -3459,6 +3467,101 @@ async function prodReject(vi, nonce) {
     console.error(e);
     flash(e.shortMessage || e.message || 'REJECT FAILED');
   }
+}
+
+// ── PROPOSAL SIMULATION (walletchan-style, adapted for a smart-contract wallet) ──
+// A proposal's on-chain effect is the multisig's inner call:
+//   target.call{value}(data)  with msg.sender == the multisig.
+// We reproduce it faithfully with `from = multisig`. No signatures and no code
+// injection (walletchan's EOA trick) are needed: the multisig is already a
+// contract, so its real batch() / isValidSignature run as-is, and a self-call
+// batch simulates atomically in one frame.
+// Preferred: eth_simulateV1 → status + gasUsed + asset deltas from Transfer logs.
+// Fallback: eth_call + estimateGas (revert check) on RPCs without simulateV1.
+const _TRANSFER_TOPIC = ethers.id('Transfer(address,address,uint256)');
+const _rawRpcCache = {};
+function rawRpc() {
+  const id = S.chainId;
+  if(!_rawRpcCache[id]) _rawRpcCache[id] = new ethers.JsonRpcProvider(CHAINS[id].rpcs[0], id, { staticNetwork: true });
+  return _rawRpcCache[id];
+}
+function _simTx(v, tx) {
+  return {
+    from: v.address, to: tx.target, data: tx.callData || '0x',
+    value: tx.rawValue ? BigInt(tx.rawValue) : (tx.value && tx.value !== '0' ? ethers.parseEther(String(tx.value)) : 0n),
+  };
+}
+function _assetsFromLogs(logs, self) {
+  const selfLc = self.toLowerCase();
+  const deltas = {};
+  for(const log of (logs || [])) {
+    const topics = log.topics || [];
+    if(topics[0] !== _TRANSFER_TOPIC || topics.length < 3) continue;
+    const fromA = ('0x' + topics[1].slice(26)).toLowerCase();
+    const toA = ('0x' + topics[2].slice(26)).toLowerCase();
+    if(fromA !== selfLc && toA !== selfLc) continue;
+    let amt; try { amt = BigInt(log.data); } catch(_) { continue; }
+    const token = log.address.toLowerCase();
+    if(fromA === selfLc) deltas[token] = (deltas[token] || 0n) - amt;
+    if(toA === selfLc) deltas[token] = (deltas[token] || 0n) + amt;
+  }
+  const allTokens = PROD_TOKENS[S.chainId] || [];
+  return Object.entries(deltas).filter(([,d]) => d !== 0n).map(([token, delta]) => {
+    const info = allTokens.find(t => t.address.toLowerCase() === token);
+    return { symbol: info?.symbol || (token.slice(0,6)+'…'+token.slice(-4)), decimals: info?.decimals ?? 18, delta };
+  });
+}
+function _revertReason(data) {
+  if(typeof data === 'string' && data.startsWith('0x08c379a0')) {
+    try { return ethers.AbiCoder.defaultAbiCoder().decode(['string'], '0x' + data.slice(10))[0]; } catch(_){}
+  }
+  return 'execution reverted';
+}
+async function _simViaSimulateV1(s) {
+  const res = await rawRpc().send('eth_simulateV1', [{
+    blockStateCalls: [{ calls: [{ from: s.from, to: s.to, value: '0x' + s.value.toString(16), data: s.data }] }],
+    traceTransfers: true, validation: false,
+  }, 'latest']);
+  const call = res?.[0]?.calls?.[0];
+  if(!call) throw new Error('no simulateV1 result');
+  if(call.status === '0x0' || call.error) return { status:'revert', reason: _revertReason(call.error?.data ?? call.returnData) };
+  return { status:'pass', gas: call.gasUsed ? BigInt(call.gasUsed).toString() : null, assets: _assetsFromLogs(call.logs, s.from) };
+}
+async function _simViaCall(s) {
+  await provider.call({ from: s.from, to: s.to, value: s.value, data: s.data }); // throws on revert
+  let gas = null;
+  try { gas = (await provider.estimateGas({ from: s.from, to: s.to, value: s.value, data: s.data })).toString(); } catch(_){}
+  return { status:'pass', gas, assets: [], basic: true };
+}
+async function simulateProposal(vi, nonce) {
+  const v = S.vaults[vi];
+  const tx = v.queue.find(t => t.nonce === nonce);
+  if(!tx) return;
+  if(S.demoMode) { tx._sim = { status:'pass', demo:true, assets: [] }; render(); return; }
+  tx._sim = { loading:true }; render();
+  const s = _simTx(v, tx);
+  try {
+    let result;
+    try { result = await _simViaSimulateV1(s); }
+    catch(_) { result = await _simViaCall(s); }
+    tx._sim = result;
+  } catch(e) {
+    tx._sim = { status:'revert', reason: e.reason || e.shortMessage || _revertReason(e?.data) };
+  }
+  render();
+}
+function renderSimResult(sim) {
+  if(sim.loading) return `<div class="sim-result">SIMULATING &hellip;</div>`;
+  if(sim.status === 'revert') return `<div class="sim-result revert">&#10007; WOULD REVERT${sim.reason?` &middot; ${esc(sim.reason)}`:''}</div>`;
+  let assetLines = '';
+  if(sim.assets && sim.assets.length) {
+    assetLines = '<div style="margin-top:6px">' + sim.assets.map(a => {
+      const neg = a.delta < 0n, abs = neg ? -a.delta : a.delta;
+      return `<div class="${neg?'sim-send':'sim-recv'}">${neg?'&minus;':'+'}${esc(ethers.formatUnits(abs, a.decimals))} ${esc(a.symbol)}</div>`;
+    }).join('') + '</div>';
+  }
+  const gasLine = sim.gas ? `<div style="color:var(--d);margin-top:2px">GAS ~${Number(sim.gas).toLocaleString()}</div>` : '';
+  return `<div class="sim-result pass">&#10003; SIMULATION PASSED${sim.demo?' &middot; DEMO':''}${sim.basic?' &middot; REVERT-CHECK ONLY':''}${assetLines}${gasLine}</div>`;
 }
 
 async function prodAccelerate(vi, nonce) {
