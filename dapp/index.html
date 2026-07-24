@@ -715,6 +715,9 @@ function fmtD(s) {
   return Number.isInteger(h) ? `${h}H` : `${h.toFixed(1)}H`;
 }
 
+// middle-ellipsis for a full 0x address; passes anything else through unchanged
+function shortAddr(a){return /^0x[0-9a-fA-F]{40}$/.test(a||"")?a.slice(0,6)+"…"+a.slice(-4):(a||"");}
+
 const _selectorLabels = {};
 function selectorToLabel(callData) {
   if(!callData || callData === '0x') return 'TRANSFER';
@@ -1502,7 +1505,7 @@ function renderCreate(mob){
         const noteColor=st==='name'?'var(--d)':'var(--r)';
         return`<div class="owner-row">
         <span class="o-num" style="color:${_OWNER_STATE_COLOR[st]||'var(--d)'}">${String(i+1).padStart(2,"0")}</span>
-        <input class="inp o-addr" style="${st==='invalid'||st==='dup'?'border-bottom-color:var(--r)':''}" placeholder="0x... or name.eth" value="${esc(o.addr)}" oninput="S.cf.owners[${i}].addr=this.value;const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;if(+S.cf.threshold>fc){S.cf.threshold=String(fc)}" onchange="S.cf.owners[${i}].addr=this.value;render()">
+        <input class="inp o-addr" style="${st==='invalid'||st==='dup'?'border-bottom-color:var(--r)':''}" placeholder="0x... or name.eth" value="${esc(shortAddr(o.addr))}" onfocus="this.value=S.cf.owners[${i}].addr" onblur="this.value=shortAddr(S.cf.owners[${i}].addr)" oninput="S.cf.owners[${i}].addr=this.value;const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;if(+S.cf.threshold>fc){S.cf.threshold=String(fc)}" onchange="S.cf.owners[${i}].addr=this.value;render()">
         <input class="inp o-label" placeholder="LABEL" value="${esc(o.label)}" oninput="S.cf.owners[${i}].label=this.value" onchange="render()">
         ${c.owners.length>1?`<button class="x-btn red o-del" onclick="S.cf.owners.splice(${i},1);const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;S.cf.threshold=String(Math.min(+S.cf.threshold||1,fc));render()">&#10005;</button>`:""}
       </div>${note?`<div class="owner-note" style="color:${noteColor}">${note}</div>`:''}`}).join("")}
