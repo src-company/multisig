@@ -219,7 +219,7 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 .owner-row .o-label{grid-area:label;margin:0;font-size:11px;letter-spacing:1px}
 .owner-row .o-del{grid-area:del;margin:0}
 .owner-note{font-size:9px;letter-spacing:1px;margin:2px 0 10px 30px}
-.preview-text{font-size:12px;line-height:2;color:var(--m);padding:16px 0;white-space:pre}
+.preview-text{font-size:12px;line-height:2;color:var(--m);padding:16px 18px;white-space:pre;border-left:2px solid var(--a);background:color-mix(in srgb,var(--a) 4%,transparent);overflow-x:auto}
 
 /* mobile */
 @media(max-width:900px){
@@ -1616,24 +1616,20 @@ function renderCreate(mob){
       </div>${note?`<div class="owner-note" style="color:${noteColor}">${note}</div>`:''}`}).join("")}
       <button class="link-btn" onclick="S.cf.owners.push({addr:'',label:''});S.cf.threshold=String(Math.min(+S.cf.threshold||1,S.cf.owners.length));render()">+ ADD</button>
       <div class="sep"></div>
-      <div class="grid2" style="gap:24px">
-        <div>
-          <label class="lbl">THRESHOLD</label>
-          <div class="thresh-btns">${(()=>{const n=Math.max(filled,1);return Array.from({length:n},(_,i)=>i+1).map(k=>`<button class="btn btn-outline thresh-btn" style="opacity:${k===+c.threshold?1:.3};background:${k===+c.threshold?"color-mix(in srgb,var(--a) 8%,transparent)":"transparent"}" onclick="S.cf.threshold='${k}';render()">${k}</button>`).join("")})()}</div>
-          <div style="font-size:10px;color:var(--d);letter-spacing:1px;margin-top:6px">${c.threshold} OF ${filled||1} SIGNATURES REQUIRED</div>
+      <label class="lbl">THRESHOLD</label>
+      <div class="thresh-btns">${(()=>{const n=Math.max(filled,1);return Array.from({length:n},(_,i)=>i+1).map(k=>{const on=k===+c.threshold;return`<button class="btn btn-outline thresh-btn" style="border-color:${on?'var(--a)':'var(--ln)'};color:${on?'var(--a)':'var(--d)'};background:${on?'color-mix(in srgb,var(--a) 10%,transparent)':'transparent'}" onclick="S.cf.threshold='${k}';render()">${k}</button>`}).join("")})()}</div>
+      <div style="font-size:10px;color:var(--d);letter-spacing:1px;margin-top:6px">${c.threshold} OF ${filled||1} SIGNATURES REQUIRED</div>
+      <div style="margin-top:26px">
+        <label class="lbl">DELAY</label>
+        <div class="token-pills" style="margin-bottom:12px">${[['0','h','UNLOCKED'],['30','m','30M'],['1','h','1H'],['6','h','6H'],['24','h','24H'],['3','d','3D'],['7','d','1W']].map(([val,unit,lbl])=>`<button class="pill${toSec(val,unit)===ds?" on":""}" onclick="S.cf.delayVal='${val}';S.cf.delayUnit='${unit}';${+val===0?"S.cf.fastPath=false;":""}render()">${lbl}</button>`).join("")}</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <input class="inp" type="number" step="any" min="0" value="${c.delayVal}" style="width:80px;margin:0;text-align:center" onchange="S.cf.delayVal=this.value;if(!parseFloat(this.value))S.cf.fastPath=false;render()" oninput="S.cf.delayVal=this.value">
+          <div style="display:flex;gap:4px">${['m','h','d'].map(u=>`<button class="pill${c.delayUnit===u?" on":""}" style="height:34px;padding:0 10px" onclick="S.cf.delayUnit='${u}';render()">${UNIT_LABEL[u]}</button>`).join("")}</div>
+          <span style="font-size:11px;letter-spacing:1px;margin-left:14px;color:${ds>0?'var(--m)':'var(--y)'}">${ds>0?'&rarr; '+fmtD(ds):'&mdash; UNLOCKED, NO TIMELOCK'}</span>
         </div>
-        <div>
-          <label class="lbl">DELAY</label>
-          <div class="token-pills" style="margin-bottom:10px">${[['0','h','UNLOCKED'],['30','m','30M'],['1','h','1H'],['6','h','6H'],['24','h','24H'],['48','h','48H'],['3','d','3D'],['7','d','1W']].map(([val,unit,lbl])=>`<button class="pill${toSec(val,unit)===ds?" on":""}" onclick="S.cf.delayVal='${val}';S.cf.delayUnit='${unit}';${+val===0?"S.cf.fastPath=false;":""}render()">${lbl}</button>`).join("")}</div>
-          <div style="display:flex;align-items:center;gap:10px">
-            <input class="inp" type="number" step="any" min="0" value="${c.delayVal}" style="width:80px;margin:0;text-align:center" onchange="S.cf.delayVal=this.value;if(!parseFloat(this.value))S.cf.fastPath=false;render()" oninput="S.cf.delayVal=this.value">
-            <div style="display:flex;gap:4px">${['m','h','d'].map(u=>`<button class="pill${c.delayUnit===u?" on":""}" style="height:34px;padding:0 10px" onclick="S.cf.delayUnit='${u}';render()">${UNIT_LABEL[u]}</button>`).join("")}</div>
-            <span style="font-size:11px;letter-spacing:1px;margin-left:auto;color:${ds>0?'var(--m)':'var(--y)'}">${ds>0?fmtD(ds):'UNLOCKED &mdash; NO TIMELOCK'}</span>
-          </div>
-          ${ds>0&&ds<SHORT_DELAY_SEC?`<div style="font-size:9px;letter-spacing:1px;color:var(--y);margin-top:8px">SHORT DELAY &middot; LIMITED PROTECTION</div>`:''}
-        </div>
+        ${ds>0&&ds<SHORT_DELAY_SEC?`<div style="font-size:9px;letter-spacing:1px;color:var(--y);margin-top:8px">SHORT DELAY &middot; LIMITED PROTECTION</div>`:''}
       </div>
-      ${ds>0?`<div style="margin-top:20px">
+      ${ds>0?`<div style="margin-top:26px">
         <label class="lbl">INSTANT EXECUTION (ALL OWNERS)</label>
         <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
           <button class="btn ${c.fastPath?"btn-fill":"btn-outline"}" style="padding:0 16px;font-size:10px" onclick="S.cf.fastPath=!S.cf.fastPath;render()">${c.fastPath?"ENABLED":"DISABLED"}</button>
