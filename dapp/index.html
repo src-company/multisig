@@ -7,6 +7,8 @@
 <title>multisig</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://multisig-postgrest.onrender.com" crossorigin>
+<link rel="dns-prefetch" href="https://ethereum.publicnode.com">
 <link rel="preload" href="./ethers.min.js" as="script">
 <link rel="preload" href="./wallet.js" as="script">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&display=swap" rel="stylesheet">
@@ -1062,6 +1064,11 @@ function explorerTxLink(hash) {
 }
 
 // ── RENDER ────────────────────────────────────────────────────────
+// Cached viewport width — reading window.innerWidth forces a synchronous
+// layout, so we read it once and refresh only on resize (which reflows anyway)
+// instead of on every render.
+let _vw = window.innerWidth;
+
 // Coalesce render() calls: multiple state mutations in one tick (or several
 // callers firing in the same frame) collapse into a single full rebuild on the
 // next animation frame, instead of thrashing the DOM once per call.
@@ -1073,7 +1080,7 @@ function render(){
 }
 function renderNow(){
   const v = S.vaults[S.sel] || null;
-  const mob = window.innerWidth <= 640;
+  const mob = _vw <= 640;
   document.body.className = S.dark ? "" : "light";
   if(_lastFaviconDark !== S.dark) {
     _lastFaviconDark = S.dark;
@@ -3711,7 +3718,7 @@ async function fetchBlock() {
     document.querySelectorAll("[data-block]").forEach(el => el.textContent = "BLOCK " + n.toLocaleString());
   } catch (_) {}
 }
-setInterval(() => {
+function pollTick() {
   if (document.hidden) return;
   fetchBlock();
   let anyReady = false;
@@ -3742,7 +3749,11 @@ setInterval(() => {
     '.txb input:focus, .txb textarea:focus, .content input:focus, .content textarea:focus, .content select:focus'
   );
   if (anyReady && !hasFocused) render();
-}, 12000);
+}
+setInterval(pollTick, 12000);
+// Refresh immediately when the tab regains focus instead of waiting out the
+// interval, so the block number and ETAs are current the moment the user returns.
+document.addEventListener("visibilitychange", () => { if (!document.hidden) pollTick(); });
 
 // ── INIT ──────────────────────────────────────────────────────────
 (function init() {
@@ -3775,6 +3786,7 @@ setInterval(() => {
 
   let resizeT;
   window.addEventListener("resize", () => {
+    _vw = window.innerWidth;
     clearTimeout(resizeT);
     resizeT = setTimeout(render, 150);
   });
