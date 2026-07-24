@@ -199,6 +199,8 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 .net-row.on{color:var(--a);border-bottom:none}
 .net-id{font-size:9px;opacity:.4}
 .net-test{font-size:8px;opacity:.5}
+.net-panel{border-left:2px solid var(--a);background:color-mix(in srgb,var(--a) 4%,transparent);padding:2px 16px}
+.net-panel .net-row:last-child,.net-panel .net-tokens:last-child{border-bottom:none}
 .net-tokens{padding:8px 0 12px 16px;border-bottom:1px solid var(--ln);font-size:10px;color:var(--d);display:flex;gap:10px;flex-wrap:wrap}
 .net-tokens span{font-weight:600}
 
@@ -1616,9 +1618,22 @@ function renderCreate(mob){
       </div>${note?`<div class="owner-note" style="color:${noteColor}">${note}</div>`:''}`}).join("")}
       <button class="link-btn" onclick="S.cf.owners.push({addr:'',label:''});S.cf.threshold=String(Math.min(+S.cf.threshold||1,S.cf.owners.length));render()">+ ADD</button>
       <div class="sep"></div>
-      <label class="lbl">THRESHOLD</label>
-      <div class="thresh-btns">${(()=>{const n=Math.max(filled,1);return Array.from({length:n},(_,i)=>i+1).map(k=>{const on=k===+c.threshold;return`<button class="btn btn-outline thresh-btn" style="border-color:${on?'var(--a)':'var(--ln)'};color:${on?'var(--a)':'var(--d)'};background:${on?'color-mix(in srgb,var(--a) 10%,transparent)':'transparent'}" onclick="S.cf.threshold='${k}';render()">${k}</button>`}).join("")})()}</div>
-      <div style="font-size:10px;color:var(--d);letter-spacing:1px;margin-top:6px">${c.threshold} OF ${filled||1} SIGNATURES REQUIRED</div>
+      <div class="grid2" style="gap:32px">
+        <div>
+          <label class="lbl">THRESHOLD</label>
+          <div class="thresh-btns">${(()=>{const n=Math.max(filled,1);return Array.from({length:n},(_,i)=>i+1).map(k=>{const on=k===+c.threshold;return`<button class="btn btn-outline thresh-btn" style="border-color:${on?'var(--a)':'var(--ln)'};color:${on?'var(--a)':'var(--d)'};background:${on?'color-mix(in srgb,var(--a) 10%,transparent)':'transparent'}" onclick="S.cf.threshold='${k}';render()">${k}</button>`}).join("")})()}</div>
+          <div style="font-size:10px;color:var(--d);letter-spacing:1px;margin-top:6px">${c.threshold} OF ${filled||1} SIGNATURES REQUIRED</div>
+        </div>
+        <div>
+          <label class="lbl">INSTANT EXECUTION</label>
+          ${ds>0
+            ? `<div style="display:flex;align-items:center;gap:12px;margin-top:8px;flex-wrap:wrap">
+                 <button class="btn ${c.fastPath?"btn-fill":"btn-outline"}" style="padding:0 16px;font-size:10px" onclick="S.cf.fastPath=!S.cf.fastPath;render()">${c.fastPath?"ENABLED":"DISABLED"}</button>
+                 <span style="font-size:10px;color:var(--d);line-height:1.5">Unanimous (all-owner) signers bypass the timelock</span>
+               </div>`
+            : `<div style="font-size:10px;color:var(--d);line-height:1.6;margin-top:10px">Set a timelock delay below to let unanimous signers execute instantly.</div>`}
+        </div>
+      </div>
       <div style="margin-top:26px">
         <label class="lbl">DELAY</label>
         <div class="token-pills" style="margin-bottom:12px">${[['0','h','UNLOCKED'],['30','m','30M'],['1','h','1H'],['6','h','6H'],['24','h','24H'],['3','d','3D'],['7','d','1W']].map(([val,unit,lbl])=>`<button class="pill${toSec(val,unit)===ds?" on":""}" onclick="S.cf.delayVal='${val}';S.cf.delayUnit='${unit}';${+val===0?"S.cf.fastPath=false;":""}render()">${lbl}</button>`).join("")}</div>
@@ -1629,13 +1644,6 @@ function renderCreate(mob){
         </div>
         ${ds>0&&ds<SHORT_DELAY_SEC?`<div style="font-size:9px;letter-spacing:1px;color:var(--y);margin-top:8px">SHORT DELAY &middot; LIMITED PROTECTION</div>`:''}
       </div>
-      ${ds>0?`<div style="margin-top:26px">
-        <label class="lbl">INSTANT EXECUTION (ALL OWNERS)</label>
-        <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
-          <button class="btn ${c.fastPath?"btn-fill":"btn-outline"}" style="padding:0 16px;font-size:10px" onclick="S.cf.fastPath=!S.cf.fastPath;render()">${c.fastPath?"ENABLED":"DISABLED"}</button>
-          <span style="font-size:10px;color:var(--d);line-height:1.5">Allow unanimous signers to bypass timelock via executor</span>
-        </div>
-      </div>`:""}
     </div>
     <div style="margin-top:${mob?36:0}px">
       ${!mob?`<label class="lbl">PREVIEW</label><div class="preview-text">NAME        ${esc(c.name||'UNNAMED')}
@@ -1648,13 +1656,13 @@ FACTORY     <a href="${explorerBase}/address/${FACTORY}" target="_blank" rel="no
 EXECUTOR    ${ds>0?`<a href="${explorerBase}/address/${TIMELOCK_EXECUTOR}" target="_blank" rel="noopener" style="color:var(--a);text-decoration:none;border-bottom:1px solid var(--ln)">${TIMELOCK_EXECUTOR}</a>`:"NONE &mdash; UNLOCKED VAULT"}
 METHOD      ${c.fastPath&&ds>0?"createWithCalls()":"create()"}</div><div class="sep"></div>`:""}
       <label class="lbl">NETWORK</label>
-      ${NETS.map((n,i)=>{const on=c.net===i,t=DEMO_TOKENS[n.name]||["ETH"];return`<div>
+      <div class="net-panel">${NETS.map((n,i)=>{const on=c.net===i,t=DEMO_TOKENS[n.name]||["ETH"];return`<div>
         <div class="net-row${on?" on":""}" onclick="S.cf.net=${i};render()">
           <span style="font-size:8px">${on?"\u25CF":"\u25CB"}</span><span>${n.name}</span>
           <span class="net-id">${n.id}</span>${n.test?'<span class="net-test">TEST</span>':""}
         </div>
         ${on?`<div class="net-tokens">${t.map(tk=>`<span>${tk}</span>`).join("")}${n.test?'<span style="opacity:.5">+ CUSTOM</span>':""}</div>`:""}
-      </div>`}).join("")}
+      </div>`}).join("")}</div>
       ${!val.ready?`<div style="margin-top:24px;font-size:10px;letter-spacing:1px;color:var(--y);text-align:center">${esc(val.reason)}</div>`:""}
       <button class="btn ${val.ready?"btn-fill":"btn-disabled"} btn-w btn-big" style="margin-top:${val.ready?28:8}px" ${val.ready?"":'title="'+esc(val.reason)+'"'} onclick="${val.ready?"doDeploy()":""}">DEPLOY</button>
       <div style="margin-top:12px;font-size:9px;color:var(--d);letter-spacing:1px;text-align:center">VIA <a href="${explorerBase}/address/${FACTORY}" target="_blank" rel="noopener" style="color:var(--d);border-bottom:1px solid var(--ln);text-decoration:none">MULTISIGFACTORY</a></div>
