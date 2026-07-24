@@ -1338,21 +1338,51 @@ function renderNow(){
 }
 
 function renderDeployOverlay(){
-  const d = S.deploy;
+  const d = S.deploy, phase = d.phase;
   const glyph = { pending:'○', switching:'◐', mining:'◐', deploying:'◐', done:'●', skipped:'●', failed:'✕' };
   const col = { pending:'var(--d)', switching:'var(--y)', mining:'var(--y)', deploying:'var(--y)', done:'var(--g)', skipped:'var(--m)', failed:'var(--r)' };
   const lbl = { pending:'WAITING', switching:'SWITCH CHAIN…', mining:'MINING ADDRESS…', deploying:'DEPLOYING…', done:'DEPLOYED', skipped:'ALREADY DEPLOYED', failed:'FAILED' };
   const anyFail = d.steps.some(s=>s.status==='failed');
+  const nch = d.steps.length, plural = nch>1?'S':'';
+  const title = phase==='preflight' ? `CHECKING ${nch} CHAIN${plural}…`
+    : phase==='review' ? `REVIEW · ${nch} CHAIN${plural}`
+    : `${d.done?(anyFail?'DEPLOY · DONE (WITH ERRORS)':'DEPLOY · DONE'):'DEPLOYING'} · ${nch} CHAIN${plural}`;
+
+  const rows = d.steps.map((s,k)=>{
+    let g = glyph[s.status], gc = col[s.status], right;
+    if(phase==='preflight'){ g='◐'; gc='var(--y)'; right=`<span style="font-size:9px;color:var(--d)">CHECKING…</span>`; }
+    else if(phase==='review'){
+      const bad = s.pf && (s.pf.gasOk===false || s.pf.executorOk===false);
+      const w=[]; if(s.pf&&s.pf.gasOk===false)w.push('NO GAS'); if(s.pf&&s.pf.executorOk===false)w.push('NO EXECUTOR');
+      g = bad?'✕':'●'; gc = bad?'var(--y)':'var(--g)';
+      right = `<span style="font-size:9px;letter-spacing:1px;color:${bad?'var(--y)':'var(--g)'}">${w.length?w.join(' · '):'READY'}</span>`;
+    } else {
+      const canRetry = s.status==='failed' && d.done;
+      right = `<span style="font-size:9px;letter-spacing:1px;color:${gc}">${s.status==='failed'&&s.err?esc(String(s.err).slice(0,30)):lbl[s.status]}</span>${canRetry?` <button class="reject-link" style="padding:2px 9px;margin-left:8px" onclick="retryChain(${k})">RETRY</button>`:''}`;
+    }
+    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--ln)">
+      <span style="color:${gc};font-size:12px;width:14px;text-align:center">${g}</span>
+      <span style="flex:1;font-size:12px;font-weight:700;letter-spacing:1px">${esc(s.name)}</span>${right}</div>`;
+  }).join('');
+
+  let footer;
+  if(phase==='review'){
+    const noExec = d.ctx && d.ctx.wantForward && d.steps.some(s=>s.pf&&s.pf.executorOk===false);
+    const noGas = d.steps.some(s=>s.pf&&s.pf.gasOk===false);
+    footer = `<div style="margin-top:14px;font-size:10px;color:var(--y);letter-spacing:1px;line-height:1.6">${noExec?'No TimelockExecutor on some chains — fast path can’t be enabled there. ':''}${noGas?'No gas in the connected wallet on some chains. ':''}Proceed anyway and those chains may fail.</div>
+      <div style="display:flex;gap:8px;margin-top:16px"><button class="btn btn-outline btn-w" onclick="closeDeploy()">CANCEL</button><button class="btn btn-fill btn-w" onclick="proceedDeploy()">PROCEED</button></div>`;
+  } else if(d.done){
+    footer = `<button class="btn btn-fill btn-w" style="margin-top:20px" onclick="closeDeploy()">${anyFail?'CLOSE':'VIEW VAULT'}</button>`;
+  } else if(phase==='deploying'){
+    footer = `<div style="margin-top:16px;font-size:9px;color:var(--d);letter-spacing:1px;text-align:center">APPROVE EACH WALLET PROMPT TO CONTINUE</div>`;
+  } else { footer = ''; }
+
   return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:300;display:flex;align-items:center;justify-content:center;padding:20px">
     <div style="width:min(460px,94vw);background:var(--bg);border:1px solid var(--a);padding:24px">
-      <div style="font-size:12px;font-weight:700;letter-spacing:2px;margin-bottom:6px">${d.done?(anyFail?'DEPLOY · DONE (WITH ERRORS)':'DEPLOY · DONE'):'DEPLOYING'} &middot; ${d.steps.length} CHAIN${d.steps.length>1?'S':''}</div>
+      <div style="font-size:12px;font-weight:700;letter-spacing:2px;margin-bottom:6px">${title}</div>
       ${d.address?`<div style="font-size:11px;color:var(--m);letter-spacing:1px;margin-bottom:16px;word-break:break-all">${addrLink(d.address)}</div>`:`<div style="font-size:10px;color:var(--d);letter-spacing:1px;margin-bottom:16px">Same vault address on every chain</div>`}
-      <div>${d.steps.map(s=>`<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--ln)">
-        <span style="color:${col[s.status]};font-size:12px;width:14px;text-align:center">${glyph[s.status]}</span>
-        <span style="flex:1;font-size:12px;font-weight:700;letter-spacing:1px">${esc(s.name)}</span>
-        <span style="font-size:9px;letter-spacing:1px;color:${col[s.status]}">${s.status==='failed'&&s.err?esc(String(s.err).slice(0,40)):lbl[s.status]}</span>
-      </div>`).join('')}</div>
-      ${d.done?`<button class="btn btn-fill btn-w" style="margin-top:20px" onclick="closeDeploy()">${anyFail?'CLOSE':'VIEW VAULT'}</button>`:`<div style="margin-top:16px;font-size:9px;color:var(--d);letter-spacing:1px;text-align:center">APPROVE EACH WALLET PROMPT TO CONTINUE</div>`}
+      <div>${rows}</div>
+      ${footer}
     </div>
   </div>`;
 }
@@ -2194,7 +2224,7 @@ async function demoDeploy() {
   const addr = "0x" + Array.from({length:40},()=>((Math.random()*16)|0).toString(16)).join("");
   const chainIdxs = [c.net, ...(c.clone||[])].filter((v,i,a)=>a.indexOf(v)===i);
 
-  S.deploy = { steps: chainIdxs.map(i=>({ id:NETS[i].id, name:NETS[i].name, status:'pending' })), address:null, done:false };
+  S.deploy = { steps: chainIdxs.map(i=>({ id:NETS[i].id, name:NETS[i].name, status:'pending' })), phase:'deploying', address:null, done:false };
   render();
   for (let k=0; k<chainIdxs.length; k++) {
     const st = S.deploy.steps[k];
@@ -3002,76 +3032,106 @@ async function prodDeploy() {
 
   // Deploy chains: primary first, then clone targets. The CREATE2 address is
   // identical on every chain (same factory + salt + init code), so the vault
-  // clones to the same address everywhere. We thread the wallet chain-switch
-  // prompts and deploy txs one chain at a time.
+  // clones to the same address everywhere.
   const chainIdxs = [c.net, ...(c.clone || [])].filter((v,i,a)=>a.indexOf(v)===i);
   const chains = chainIdxs.map(i => NETS[i]).filter(n => CHAINS[n.id]);
   if(!chains.length) { flash('SELECT A NETWORK'); return; }
 
-  S.deploy = { steps: chains.map(n => ({ id:n.id, name:n.name, status:'pending' })), address:null, done:false };
+  // Deploy context shared across chains + retries.
+  S.deploy = {
+    chains,
+    steps: chains.map(n => ({ id:n.id, name:n.name, status:'pending' })),
+    ctx: { resolvedOwners, del, thresh, executor, wantForward, ownerLabels, connectedAddress, cfName: c.name || null, salt:null, minedAddr:null },
+    phase:'preflight', address:null, done:false, lastVaultAddr:null,
+  };
   render();
 
-  let salt = null, minedAddr = null, lastVaultAddr = null;
+  // Preflight (read-only, no chain switch): does the wallet have gas on each
+  // chain, and — when fast-path is on — is the TimelockExecutor deployed there?
+  const pf = await Promise.all(chains.map(async net => {
+    const rp = makeProvider(net.id);
+    let gasOk = null, executorOk = null;
+    try { gasOk = (await rp.getBalance(connectedAddress)) > 0n; } catch(_){}
+    if(wantForward){ try { const code = await rp.getCode(TIMELOCK_EXECUTOR); executorOk = !!code && code !== '0x'; } catch(_){} }
+    return { gasOk, executorOk };
+  }));
+  pf.forEach((r,i)=>{ S.deploy.steps[i].pf = r; });
+  const blocked = wantForward && pf.some(r => r.executorOk === false);   // executor truly missing
+  const warn = pf.some(r => r.gasOk === false);
+  if(blocked || warn){ S.deploy.phase = 'review'; render(); return; }    // wait for user to PROCEED
+  runDeploy();
+}
 
-  for(let k=0; k<chains.length; k++) {
-    const net = chains[k], step = S.deploy.steps[k];
-    try {
-      step.status = 'switching'; render();
-      if(net.id !== S.chainId) await switchChain(net.id, true);
-      if(window._connectedWalletProvider) {
-        const wc = await window._connectedWalletProvider.request({method:'eth_chainId'});
-        if(parseInt(wc,16) !== net.id) { step.status='failed'; step.err='CHAIN NOT SWITCHED'; render(); continue; }
-      }
-      const signer = requireSigner()?.signer;
-      if(!signer) { step.status='failed'; step.err='NO SIGNER'; render(); continue; }
-
-      // Mine the vanity salt once (on the first chain reached); reuse everywhere.
-      if(!salt) {
-        step.status='mining'; render();
-        const mined = await mineVanitySalt(FACTORY, IMPLEMENTATION, connectedAddress);
-        salt = mined.salt; minedAddr = mined.address;
-        S.deploy.address = minedAddr; render();
-      }
-
-      // Skip chains where this address is already deployed (e.g. a retry).
-      const existing = await provider.getCode(minedAddr);
-      if(existing && existing !== '0x') { step.status='skipped'; step.address=minedAddr; lastVaultAddr=minedAddr; render(); continue; }
-
-      step.status='deploying'; render();
-      const factory = new ethers.Contract(FACTORY, FACTORY_ABI, signer);
-      let tx;
-      if(wantForward) {
-        const enableData = tlIface.encodeFunctionData('enableForward', [true]);
-        tx = await factory.createWithCalls(resolvedOwners, del, thresh, executor, salt, [TIMELOCK_EXECUTOR], [0], [enableData]);
-      } else {
-        tx = await factory.create(resolvedOwners, del, thresh, executor, salt);
-      }
-      const receipt = await tx.wait();
-      let walletAddr = minedAddr;
-      const iface = new ethers.Interface(FACTORY_ABI);
-      for(const log of receipt.logs) { try { const p = iface.parseLog(log); if(p?.name === 'Created') { walletAddr = p.args[0]; break; } } catch(_){} }
-      lastVaultAddr = walletAddr;
-
-      try {
-        const ms = new ethers.Contract(walletAddr, MULTISIG_ABI, provider);
-        const onchainNonce = Number(await ms.nonce());
-        await dbRegisterWallet(walletAddr, connectedAddress, salt, resolvedOwners, thresh, del, executor, Number(receipt.blockNumber), receipt.hash, c.name || null, ownerLabels, onchainNonce);
-      } catch(e) { console.error('DB register failed:', e); }
-
-      step.status='done'; step.address=walletAddr; render();
-    } catch(e) {
-      console.error('deploy on', net.name, e);
-      step.status='failed'; step.err = e.shortMessage || e.message || 'FAILED'; render();
-      // Continue to the remaining chains — partial success is allowed.
+// Deploy the vault on one chain (used by the run loop and per-chain retry).
+async function deployOnChain(k){
+  const d = S.deploy; if(!d) return false;
+  const net = d.chains[k], step = d.steps[k], ctx = d.ctx;
+  try {
+    step.status='switching'; step.err=null; render();
+    if(net.id !== S.chainId) await switchChain(net.id, true);
+    if(window._connectedWalletProvider){
+      const wc = await window._connectedWalletProvider.request({method:'eth_chainId'});
+      if(parseInt(wc,16) !== net.id){ step.status='failed'; step.err='CHAIN NOT SWITCHED'; render(); return false; }
     }
+    const signer = requireSigner()?.signer;
+    if(!signer){ step.status='failed'; step.err='NO SIGNER'; render(); return false; }
+    if(!ctx.salt){
+      step.status='mining'; render();
+      const mined = await mineVanitySalt(FACTORY, IMPLEMENTATION, ctx.connectedAddress);
+      ctx.salt = mined.salt; ctx.minedAddr = mined.address; d.address = mined.address; render();
+    }
+    const existing = await provider.getCode(ctx.minedAddr);
+    if(existing && existing !== '0x'){ step.status='skipped'; step.address=ctx.minedAddr; d.lastVaultAddr=ctx.minedAddr; render(); return true; }
+    step.status='deploying'; render();
+    const factory = new ethers.Contract(FACTORY, FACTORY_ABI, signer);
+    let tx;
+    if(ctx.wantForward){
+      const enableData = tlIface.encodeFunctionData('enableForward', [true]);
+      tx = await factory.createWithCalls(ctx.resolvedOwners, ctx.del, ctx.thresh, ctx.executor, ctx.salt, [TIMELOCK_EXECUTOR], [0], [enableData]);
+    } else {
+      tx = await factory.create(ctx.resolvedOwners, ctx.del, ctx.thresh, ctx.executor, ctx.salt);
+    }
+    const receipt = await tx.wait();
+    let walletAddr = ctx.minedAddr;
+    const iface = new ethers.Interface(FACTORY_ABI);
+    for(const log of receipt.logs){ try { const p = iface.parseLog(log); if(p?.name === 'Created'){ walletAddr = p.args[0]; break; } } catch(_){} }
+    d.lastVaultAddr = walletAddr;
+    try {
+      const ms = new ethers.Contract(walletAddr, MULTISIG_ABI, provider);
+      const onchainNonce = Number(await ms.nonce());
+      await dbRegisterWallet(walletAddr, ctx.connectedAddress, ctx.salt, ctx.resolvedOwners, ctx.thresh, ctx.del, ctx.executor, Number(receipt.blockNumber), receipt.hash, ctx.cfName, ctx.ownerLabels, onchainNonce);
+    } catch(e){ console.error('DB register failed:', e); }
+    step.status='done'; step.address=walletAddr; render();
+    return true;
+  } catch(e){
+    console.error('deploy on', net.name, e);
+    step.status='failed'; step.err = e.shortMessage || e.message || 'FAILED'; render();
+    return false;
   }
-
+}
+async function _finishDeploy(){
   S.deploy.done = true; render();
-
-  // Pull the freshly deployed vault into state (on whatever chain we're on).
-  if(lastVaultAddr && !S.vaults.some(v => v.address && v.address.toLowerCase() === lastVaultAddr.toLowerCase())) {
-    try { const vData = await loadSingleVaultData(lastVaultAddr); if(vData) { S.vaults.push(vData); S.sel = S.vaults.length - 1; render(); } } catch(e) { console.error('Load new vault:', e); }
+  const addr = S.deploy.lastVaultAddr;
+  if(addr && !S.vaults.some(v => v.address && v.address.toLowerCase() === addr.toLowerCase())){
+    try { const vData = await loadSingleVaultData(addr); if(vData){ S.vaults.push(vData); S.sel = S.vaults.length - 1; render(); } } catch(e){ console.error('Load new vault:', e); }
   }
+}
+async function runDeploy(){
+  if(!S.deploy) return;
+  S.deploy.phase = 'deploying'; render();
+  for(let k=0; k<S.deploy.chains.length; k++){
+    const st = S.deploy.steps[k];
+    if(st.status === 'done' || st.status === 'skipped') continue;
+    await deployOnChain(k);
+  }
+  await _finishDeploy();
+}
+function proceedDeploy(){ if(S.deploy){ S.deploy.phase='deploying'; render(); runDeploy(); } }
+async function retryChain(k){
+  if(!S.deploy) return;
+  S.deploy.done = false; render();
+  await deployOnChain(k);
+  await _finishDeploy();
 }
 
 // ── PRODUCTION: SIGN ──────────────────────────────────────────────
