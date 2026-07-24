@@ -12,13 +12,13 @@
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html{-webkit-text-size-adjust:100%}
 :root{
-  --a:#0A0A0A;--bg:#2D5FE8;--d:#0A0A0A99;--m:#0A0A0ACC;
-  --ln:#0A0A0A1A;--fr:#0A0A0A38;--g:#7DFFBA;--gc:#000;--r:#FF6B6B;--y:#FFD600;
+  --a:#0A0A0A;--bg:#2D5FE8;--d:#0A0A0AB3;--m:#0A0A0AE6;
+  --ln:#0A0A0A24;--fr:#0A0A0A45;--g:#7DFFBA;--gc:#000;--r:#FF6B6B;--y:#FFD600;
   --f:'IBM Plex Mono','Courier New',monospace;
 }
 .light{
-  --a:#0099B3;--bg:#FDFDFD;--d:#007A8FAA;--m:#006A7DDD;
-  --ln:#0099B31A;--fr:#0099B332;--g:#059669;--gc:#fff;--r:#DC2626;--y:#B45309;
+  --a:#00788C;--bg:#FDFDFD;--d:#006A7DCC;--m:#005E70F2;
+  --ln:#0099B326;--fr:#0099B340;--g:#059669;--gc:#fff;--r:#DC2626;--y:#B45309;
 }
 body{font-family:var(--f);background:var(--bg);color:var(--a);min-height:100vh;padding:10px;position:relative;overflow-x:hidden;transition:background .3s,color .3s}
 input,select,button,textarea{font-family:var(--f);font-size:16px;color:var(--a)}
@@ -201,6 +201,12 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 .changed-tag{font-size:10px;color:var(--y);letter-spacing:2px}
 .thresh-btns{display:flex;gap:6px;margin-bottom:16px}
 .thresh-btn{flex:1;padding:0 4px}
+.owner-row{display:grid;grid-template-columns:22px 1fr 132px 40px;grid-template-areas:"num addr label del";gap:8px;align-items:center;margin-bottom:2px}
+.owner-row .o-num{grid-area:num;font-size:10px;font-weight:700}
+.owner-row .o-addr{grid-area:addr;margin:0}
+.owner-row .o-label{grid-area:label;margin:0;font-size:11px;letter-spacing:1px}
+.owner-row .o-del{grid-area:del;margin:0}
+.owner-note{font-size:9px;letter-spacing:1px;margin:2px 0 10px 30px}
 .preview-text{font-size:12px;line-height:2;color:var(--m);padding:16px 0;white-space:pre}
 
 /* mobile */
@@ -248,6 +254,8 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
   .btn-big{height:52px}
   .thresh-btns{gap:4px}
   .thresh-btn{min-height:44px}
+  .owner-row{grid-template-columns:22px 1fr 40px;grid-template-areas:"num addr del" ". label label";row-gap:6px}
+  .owner-row .o-label{grid-column:label}
   .toast{bottom:max(20px,env(safe-area-inset-bottom));max-width:88vw}
   .footer{font-size:8px;letter-spacing:1px}
   .footer-l,.footer-r{gap:8px}
@@ -1071,7 +1079,7 @@ function render(){
       </div>
     </div>
     <div class="nav">
-      ${[{k:"DASH",l:"DASHBOARD",m:"DASH"},{k:"CREATE",l:"CREATE",m:"NEW"},{k:"ADMIN",l:"ADMIN",m:"ADMIN"}].map(i=>`<button class="${S.view===i.k?"on":""}" onclick="S.view='${i.k}';S.showTx=false;render()">${mob?i.m:i.l}</button>`).join("")}
+      ${[{k:"DASH",l:"DASHBOARD",m:"DASH"},{k:"CREATE",l:"CREATE",m:"CREATE"},{k:"ADMIN",l:"ADMIN",m:"ADMIN"}].map(i=>`<button class="${S.view===i.k?"on":""}" onclick="S.view='${i.k}';S.showTx=false;render()">${mob?i.m:i.l}</button>`).join("")}
     </div>
     <div class="content">${S.view==="DASH"?renderDash(v,mob):S.view==="CREATE"?renderCreate(mob):renderAdmin(v,mob)}</div>
     <div class="footer">
@@ -1491,12 +1499,12 @@ function renderCreate(mob){
         const st=val.owners[i].state;
         const note=st==='invalid'?'NOT A VALID ADDRESS OR .eth / .wei NAME':st==='dup'?'DUPLICATE — ALREADY LISTED ABOVE':st==='name'?'NAME &middot; RESOLVES AT DEPLOY':'';
         const noteColor=st==='name'?'var(--d)':'var(--r)';
-        return`<div style="display:flex;gap:8px;align-items:center;margin-bottom:2px">
-        <span style="font-size:10px;font-weight:700;color:${_OWNER_STATE_COLOR[st]||'var(--d)'};width:20px">${String(i+1).padStart(2,"0")}</span>
-        <input class="inp" style="margin-bottom:8px;flex:2${st==='invalid'||st==='dup'?';border-bottom-color:var(--r)':''}" placeholder="0x... or name.eth / name.wei" value="${esc(o.addr)}" oninput="S.cf.owners[${i}].addr=this.value;const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;if(+S.cf.threshold>fc){S.cf.threshold=String(fc)}" onchange="S.cf.owners[${i}].addr=this.value;render()">
-        <input class="inp" style="margin-bottom:8px;flex:1;font-size:11px;letter-spacing:1px" placeholder="LABEL" value="${esc(o.label)}" oninput="S.cf.owners[${i}].label=this.value" onchange="render()">
-        ${c.owners.length>1?`<button class="x-btn red" onclick="S.cf.owners.splice(${i},1);const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;S.cf.threshold=String(Math.min(+S.cf.threshold||1,fc));render()">&#10005;</button>`:""}
-      </div>${note?`<div style="font-size:9px;letter-spacing:1px;color:${noteColor};margin:-6px 0 8px 28px">${note}</div>`:''}`}).join("")}
+        return`<div class="owner-row">
+        <span class="o-num" style="color:${_OWNER_STATE_COLOR[st]||'var(--d)'}">${String(i+1).padStart(2,"0")}</span>
+        <input class="inp o-addr" style="${st==='invalid'||st==='dup'?'border-bottom-color:var(--r)':''}" placeholder="0x... or name.eth" value="${esc(o.addr)}" oninput="S.cf.owners[${i}].addr=this.value;const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;if(+S.cf.threshold>fc){S.cf.threshold=String(fc)}" onchange="S.cf.owners[${i}].addr=this.value;render()">
+        <input class="inp o-label" placeholder="LABEL" value="${esc(o.label)}" oninput="S.cf.owners[${i}].label=this.value" onchange="render()">
+        ${c.owners.length>1?`<button class="x-btn red o-del" onclick="S.cf.owners.splice(${i},1);const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;S.cf.threshold=String(Math.min(+S.cf.threshold||1,fc));render()">&#10005;</button>`:""}
+      </div>${note?`<div class="owner-note" style="color:${noteColor}">${note}</div>`:''}`}).join("")}
       <button class="link-btn" onclick="S.cf.owners.push({addr:'',label:''});S.cf.threshold=String(Math.min(+S.cf.threshold||1,S.cf.owners.length));render()">+ ADD</button>
       <div class="sep"></div>
       <div class="grid2" style="gap:24px">
@@ -1506,10 +1514,13 @@ function renderCreate(mob){
           <div style="font-size:10px;color:var(--d);letter-spacing:1px;margin-top:6px">${c.threshold} OF ${filled||1} SIGNATURES REQUIRED</div>
         </div>
         <div>
-          <label class="lbl">DELAY (HOURS)</label>
-          <div class="token-pills" style="margin-bottom:8px">${[['0','UNLOCKED'],['6','6H'],['24','24H'],['48','48H'],['72','3D'],['168','1W']].map(([h,lbl])=>`<button class="pill${(parseFloat(c.delayH)||0)===+h?" on":""}" onclick="S.cf.delayH='${h}';${+h===0?"S.cf.fastPath=false;":""}render()">${lbl}</button>`).join("")}</div>
-          <input class="inp" type="number" step="any" min="0" value="${c.delayH}" onchange="S.cf.delayH=this.value;if(!parseFloat(this.value))S.cf.fastPath=false;render()" oninput="S.cf.delayH=this.value">
-          ${ds>0?`<div style="font-size:10px;color:var(--d);margin-top:-10px">${fmtD(ds)}</div>`:`<div style="font-size:10px;color:var(--y);margin-top:-10px;letter-spacing:2px">UNLOCKED &mdash; NO TIMELOCK</div>`}
+          <label class="lbl">DELAY</label>
+          <div class="token-pills" style="margin-bottom:10px">${[['0','UNLOCKED'],['6','6H'],['24','24H'],['48','48H'],['72','3D'],['168','1W']].map(([h,lbl])=>`<button class="pill${(parseFloat(c.delayH)||0)===+h?" on":""}" onclick="S.cf.delayH='${h}';${+h===0?"S.cf.fastPath=false;":""}render()">${lbl}</button>`).join("")}</div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <input class="inp" type="number" step="any" min="0" value="${c.delayH}" style="width:88px;margin:0;text-align:center" onchange="S.cf.delayH=this.value;if(!parseFloat(this.value))S.cf.fastPath=false;render()" oninput="S.cf.delayH=this.value">
+            <span class="lbl" style="margin:0">HOURS</span>
+            <span style="font-size:11px;letter-spacing:1px;margin-left:auto;color:${ds>0?'var(--m)':'var(--y)'}">${ds>0?fmtD(ds):'UNLOCKED &mdash; NO TIMELOCK'}</span>
+          </div>
         </div>
       </div>
       ${ds>0?`<div style="margin-top:20px">
@@ -1520,7 +1531,7 @@ function renderCreate(mob){
         </div>
       </div>`:""}
     </div>
-    <div>
+    <div style="margin-top:${mob?36:0}px">
       ${!mob?`<label class="lbl">PREVIEW</label><div class="preview-text">NAME        ${esc(c.name||'UNNAMED')}
 OWNERS      ${c.owners.filter(o=>o.addr.trim()).length||0}${c.owners.some(o=>o.label&&o.addr.trim())?" ("+c.owners.filter(o=>o.label&&o.addr.trim()).map(o=>esc(o.label)).join(", ")+")":""}
 THRESHOLD   ${c.threshold}/${c.owners.filter(o=>o.addr.trim()).length||1}
@@ -1539,7 +1550,7 @@ METHOD      ${c.fastPath&&ds>0?"createWithCalls()":"create()"}</div><div class="
         ${on?`<div class="net-tokens">${t.map(tk=>`<span>${tk}</span>`).join("")}${n.test?'<span style="opacity:.5">+ CUSTOM</span>':""}</div>`:""}
       </div>`}).join("")}
       ${!val.ready?`<div style="margin-top:24px;font-size:10px;letter-spacing:1px;color:var(--y);text-align:center">${esc(val.reason)}</div>`:""}
-      <button class="btn btn-fill btn-w btn-big" style="margin-top:${val.ready?28:8}px;opacity:${val.ready?1:.4};cursor:${val.ready?"pointer":"not-allowed"}" ${val.ready?"":'title="'+esc(val.reason)+'"'} onclick="${val.ready?"doDeploy()":""}">DEPLOY</button>
+      <button class="btn ${val.ready?"btn-fill":"btn-outline"} btn-w btn-big" style="margin-top:${val.ready?28:8}px;${val.ready?"":"border-color:var(--fr);color:var(--m);"}cursor:${val.ready?"pointer":"not-allowed"}" ${val.ready?"":'title="'+esc(val.reason)+'"'} onclick="${val.ready?"doDeploy()":""}">DEPLOY</button>
       <div style="margin-top:12px;font-size:9px;color:var(--d);letter-spacing:1px;text-align:center">VIA <a href="${explorerBase}/address/${FACTORY}" target="_blank" rel="noopener" style="color:var(--d);border-bottom:1px solid var(--ln);text-decoration:none">MULTISIGFACTORY</a></div>
     </div>
   </div>`;
