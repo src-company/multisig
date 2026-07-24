@@ -803,14 +803,14 @@ function addrLink(addr, chain) {
     ? (EXPLORERS[chain] || EXPLORERS.ETHEREUM)
     : (CHAINS[S.chainId]?.explorer || 'https://etherscan.io');
   if (ethers.isAddress(addr)) {
-    return `<a href="${base}/address/${safe}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;border-bottom:1px solid var(--ln)">${safe}</a>`;
+    return `<a href="${base}/address/${safe}" target="_blank" rel="noopener" title="${safe}" style="color:inherit;text-decoration:none;border-bottom:1px solid var(--ln)">${esc(shortAddr(addr))}</a>`;
   }
   return `<span style="border-bottom:1px solid var(--ln)">${safe}</span>`;
 }
 
 // Small copy-to-clipboard button (⧉) with a flash confirmation.
 function copyBtn(text, msg) {
-  return `<button class="x-btn copy-btn" style="min-width:auto;min-height:auto;padding:2px 5px;font-size:9px;vertical-align:middle" onclick="event.stopPropagation();navigator.clipboard.writeText('${esc(text)}');flash('${msg||'ADDRESS COPIED'}')" title="Copy address">⧉</button>`;
+  return `<button class="x-btn copy-btn" style="display:inline-flex;min-width:auto;min-height:auto;padding:2px 5px;font-size:9px;vertical-align:middle" onclick="event.stopPropagation();navigator.clipboard.writeText('${esc(text)}');flash('${msg||'ADDRESS COPIED'}')" title="Copy address">⧉</button>`;
 }
 
 // Briefly flash a queue row (by nonce) — reused after sign/approve.
@@ -1071,11 +1071,11 @@ function render(){
   const you = getYou();
   let walletLabel;
   if(S.demoMode){
-    walletLabel = DEMO_YOU.slice(0,6)+"..."+DEMO_YOU.slice(-4);
+    walletLabel = shortAddr(DEMO_YOU);
   } else if(window._walletConnecting){
     walletLabel = "...";
   } else if(window._connectedAddress){
-    walletLabel = window._walletDisplayName || (window._connectedAddress.slice(0,6)+"..."+window._connectedAddress.slice(-4));
+    walletLabel = window._walletDisplayName || shortAddr(window._connectedAddress);
   } else {
     walletLabel = "CONNECT";
   }
