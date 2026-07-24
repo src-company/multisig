@@ -26,7 +26,8 @@ html{-webkit-text-size-adjust:100%}
   --a:#00788C;--bg:#FDFDFD;--d:#006A7DCC;--m:#005E70F2;
   --ln:#0099B326;--fr:#0099B340;--g:#059669;--gc:#fff;--r:#DC2626;--y:#B45309;
 }
-body{font-family:var(--f);background:var(--bg);color:var(--a);min-height:100vh;padding:10px;position:relative;overflow-x:hidden;transition:background .3s,color .3s}
+body{font-family:var(--f);background:var(--bg);color:var(--a);min-height:100vh;padding:10px;position:relative;overflow-x:hidden;transition:background .3s,color .3s;display:flex;flex-direction:column}
+#app{flex:1;display:flex;flex-direction:column}
 input,select,button,textarea{font-family:var(--f);font-size:16px;color:var(--a)}
 input:focus,textarea:focus,select:focus{border-bottom-color:var(--a)!important;outline:none;box-shadow:inset 0 -1px 0 var(--a);caret-color:var(--a)}
 button:focus-visible,a:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--a);outline-offset:2px}
@@ -62,7 +63,7 @@ button:active{transform:scale(.97)}
 .light .scan{background:repeating-linear-gradient(0deg,transparent,transparent 3px,#0099B302 3px,#0099B302 6px)}
 
 /* frame */
-.frame{position:relative;padding:0 24px;max-width:1060px;margin:0 auto}
+.frame{position:relative;padding:0 24px;max-width:1060px;margin:0 auto;display:flex;flex-direction:column;flex:1}
 .rail{position:absolute;top:0;bottom:0;width:12px;overflow:hidden;writing-mode:vertical-lr;font-size:11px;letter-spacing:1px;color:var(--fr);user-select:none;line-height:12px}
 .rail-l{left:0}.rail-r{right:0}
 .hbar{font-size:11px;letter-spacing:1px;color:var(--fr);user-select:none;overflow:hidden;white-space:nowrap;line-height:1}
@@ -90,7 +91,7 @@ button:active{transform:scale(.97)}
 .nav button.on{color:var(--a);border-bottom-color:var(--a)}
 
 /* content */
-.content{padding:8px 0;min-height:60vh}
+.content{padding:8px 0;min-height:60vh;display:flex;flex-direction:column;flex:1}
 
 /* section divider */
 .sec{display:flex;align-items:center;gap:10px;margin:40px 0 16px;user-select:none}
@@ -189,7 +190,7 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 .toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:var(--a);color:var(--bg);padding:12px 24px;padding-bottom:max(12px,env(safe-area-inset-bottom));font-size:11px;font-weight:700;letter-spacing:2px;z-index:999;animation:toastIn .2s ease;text-align:center}
 
 /* empty */
-.empty{text-align:center;padding:120px 0}
+.empty{text-align:center;padding:40px 0;margin:auto 0}
 .empty-title{font-size:44px;font-weight:700;letter-spacing:-2px}
 .empty-sub{font-size:12px;color:var(--m);letter-spacing:2px;margin:12px 0 32px}
 
@@ -730,6 +731,8 @@ function fmtD(s) {
 // on-chain as uint32 seconds. These convert between the two.
 const UNIT_SEC = { m: 60, h: 3600, d: 86400 };
 const UNIT_LABEL = { m: 'MIN', h: 'HR', d: 'DAY' };
+// Below this a non-zero timelock offers little practical protection — warn, don't block.
+const SHORT_DELAY_SEC = 600;
 // value (in `unit`) -> whole seconds
 function toSec(val, unit) { return Math.floor((parseFloat(val) || 0) * (UNIT_SEC[unit] || 3600)); }
 // seconds -> the tidiest {val, unit} that represents it exactly
@@ -1618,6 +1621,7 @@ function renderCreate(mob){
             <div style="display:flex;gap:4px">${['m','h','d'].map(u=>`<button class="pill${c.delayUnit===u?" on":""}" style="height:34px;padding:0 10px" onclick="S.cf.delayUnit='${u}';render()">${UNIT_LABEL[u]}</button>`).join("")}</div>
             <span style="font-size:11px;letter-spacing:1px;margin-left:auto;color:${ds>0?'var(--m)':'var(--y)'}">${ds>0?fmtD(ds):'UNLOCKED &mdash; NO TIMELOCK'}</span>
           </div>
+          ${ds>0&&ds<SHORT_DELAY_SEC?`<div style="font-size:9px;letter-spacing:1px;color:var(--y);margin-top:8px">SHORT DELAY &middot; LIMITED PROTECTION</div>`:''}
         </div>
       </div>
       ${ds>0?`<div style="margin-top:20px">
@@ -1697,6 +1701,7 @@ function renderAdmin(v,mob){
           <div style="display:flex;gap:4px">${['m','h','d'].map(u=>`<button class="pill${S.ndUnit===u?" on":""}" style="height:34px;padding:0 10px" onclick="S.ndUnit='${u}';render()">${UNIT_LABEL[u]}</button>`).join("")}</div>
           <span style="font-size:10px;letter-spacing:1px;margin-left:auto;color:${dc?'var(--y)':'var(--d)'}">${dc?`&rarr; ${ndSec>0?fmtD(ndSec):'UNLOCKED'} (${ndSec.toLocaleString()}s)`:`${ndSec.toLocaleString()}s`}</span>
         </div>
+        ${dc&&ndSec>0&&ndSec<SHORT_DELAY_SEC?`<div style="font-size:9px;letter-spacing:1px;color:var(--y);margin:-6px 0 14px">SHORT DELAY &middot; LIMITED PROTECTION</div>`:''}
         <button class="btn ${dc?"btn-fill":"btn-disabled"} btn-w" onclick="${dc?`doAdminPropose('setDelay',${ndSec})`:""}">${dc?"PROPOSE":"NO CHANGE"}</button>
       </div>
     </div>
