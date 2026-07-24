@@ -107,7 +107,7 @@ OVERVIEW:`
 <p>Setting delay to 0 creates an <strong>unlocked</strong> vault — transactions execute immediately once threshold is met, with no timelock. The fast path toggle is hidden since there is no delay to bypass.</p>
 
 <h2>CHAINS</h2>
-<p>Ethereum, Base, Arbitrum, Optimism. Same contract, same address via CREATE2. Testnets: Sepolia, Base Sepolia.</p>
+<p>Ethereum, Base, MegaETH, Arbitrum, Optimism. Same contract, same address via CREATE2. Testnets: Sepolia, Base Sepolia.</p>
 
 <h2>TOKENS</h2>
 <p>ETH (18 decimals), USDC (6), USDT (6), DAI (18), WBTC (8, cbBTC on Base), wstETH (18). Native ETH receiving and ERC-721/1155 callbacks supported via the fallback function. The UI converts human-readable amounts to raw token units automatically.</p>
@@ -115,7 +115,7 @@ OVERVIEW:`
 
 CONTRACT:`
 <h2>MULTISIG.SOL</h2>
-<p>Single contract, ~200 lines. Owners stored as a sorted linked list (sentinel pattern). Sequential nonce. EIP-712 signatures. ERC-1271 support via <code>isValidSignature</code>.</p>
+<p>Single contract, ~200 lines. Owners stored as a linked list (sentinel pattern). Sequential nonce. EIP-712 signatures. ERC-1271 support via <code>isValidSignature</code>.</p>
 
 <h2>STATE</h2>
 <pre>uint32  delay        // timelock in seconds (0 = unlocked)
@@ -164,7 +164,7 @@ address executor     // bypass role (typically TimelockExecutor)</pre>
 <div class="desc">Set to TimelockExecutor address for the default plugin. Set 0x0 to disable bypass entirely. The executor can call execute() without signatures and without timelock delay.</div>
 
 <div class="sig">addOwner<span class="params">(owner)</span> / removeOwner<span class="params">(prev, owner)</span></div>
-<div class="desc">Linked list ops. Owners must be sorted ascending — addOwner prepends to the list. removeOwner requires prevOwner pointer and enforces ownerCount > threshold.</div>
+<div class="desc">Linked list ops. addOwner inserts the new owner right after the sentinel (list order isn't kept sorted). removeOwner takes the prevOwner pointer and enforces ownerCount > threshold. Sorting is only required for the init owner array and for signature bundles.</div>
 
 <h2>FACTORY</h2>
 <p><code>MultisigFactory.create()</code> deploys minimal proxy clones via CREATE2 with PUSH0 and calls <code>init()</code> on the new proxy. Salt must start with 0x0 or msg.sender for frontrun protection.</p>
@@ -218,6 +218,7 @@ INTERFACE:`
 <h2>DASHBOARD</h2>
 <p>Vault selector tabs across the top with inline status dots — green (pulsing) for executable transactions, yellow for transactions needing your signature. Primary holding displayed large, secondary tokens inline below. Vaults with no balances show a clean empty state. Metadata line shows threshold ratio, timelock duration (or UNLOCKED in yellow for delay=0), chain, and FAST PATH indicator when enabled.</p>
 <p>An action counter above the tabs summarizes pending items across all vaults: signatures needed, ready to execute, ready to submit.</p>
+<p>With no vaults loaded, the empty state offers CREATE VAULT or loading any existing vault by address or <code>.eth</code> / <code>.wei</code> name.</p>
 
 <h2>SIGNING</h2>
 <p>Two paths: <strong>SIGN</strong> (off-chain EIP-712, free, filled button) or <strong>APPROVE</strong> (on-chain approve() call, costs gas, outline button). Both count toward threshold. <strong>UNSIGN</strong> (outline) withdraws your approval — calls approve(hash, false). Visual hierarchy: filled = primary action, outline = secondary or already completed.</p>
