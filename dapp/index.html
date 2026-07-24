@@ -139,7 +139,7 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 .meta{display:flex;gap:24px;font-size:11px;letter-spacing:2px;color:var(--m);margin-top:12px;flex-wrap:wrap}
 
 /* queue */
-.tx{padding:22px 8px;border-bottom:1px solid var(--ln);transition:opacity .3s,background .15s}
+.tx{padding:18px 8px;border-bottom:1px solid var(--ln);transition:opacity .3s,background .15s}
 .tx.blocked{opacity:.3}
 .tx-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:10px}
 .tx-nonce{font-size:10px;font-weight:700;color:var(--d)}
@@ -302,6 +302,7 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 .loading-overlay.light-bg .loading-text{color:#0099B3AA}
 .loading-overlay.fade-out{opacity:0;pointer-events:none}
 @media(max-width:640px){.loading-overlay .loading-svg{width:56px;height:56px}.loading-overlay .loading-text{font-size:8px;letter-spacing:3px}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}}
 </style>
 </head>
 <body>
@@ -312,9 +313,11 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
   var d=!localStorage.getItem('ms_light');
   var el=document.getElementById('loading');
   el.className='loading-overlay '+(d?'dark-bg':'light-bg');
-  el.innerHTML=d
+  var svg=d
     ?'<svg class="loading-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#2D5FE8"/><defs><path id="l0t" d="M4,4 H60" fill="none"/><path id="l0r" d="M60,4 V60" fill="none"/><path id="l0b" d="M60,60 H4" fill="none"/><path id="l0l" d="M4,60 V4" fill="none"/></defs><text font-family="\'Courier New\',monospace" font-size="4.2" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l0t"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="\'Courier New\',monospace" font-size="4.2" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l0r"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="\'Courier New\',monospace" font-size="4.2" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l0b"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="\'Courier New\',monospace" font-size="4.2" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l0l"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><path d="M16,48 V16 H22 L32,32 L42,16 H48 V48 H42 V26 L32,42 L22,26 V48 Z" fill="#0A0A0A"/></svg><div class="loading-text">LOADING</div>'
     :'<svg class="loading-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#FDFDFD"/><defs><path id="l1t" d="M4,4 H60" fill="none"/><path id="l1r" d="M60,4 V60" fill="none"/><path id="l1b" d="M60,60 H4" fill="none"/><path id="l1l" d="M4,60 V4" fill="none"/></defs><text font-family="\'Courier New\',monospace" font-size="4.2" fill="#0099B3" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l1t"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="\'Courier New\',monospace" font-size="4.2" fill="#0099B3" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l1r"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="\'Courier New\',monospace" font-size="4.2" fill="#0099B3" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l1b"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="\'Courier New\',monospace" font-size="4.2" fill="#0099B3" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l1l"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><path d="M16,48 V16 H22 L32,32 L42,16 H48 V48 H42 V26 L32,42 L22,26 V48 Z" fill="#0099B3"/></svg><div class="loading-text">LOADING</div>';
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches) svg=svg.replace(/<animate\b[^>]*>/g,'');
+  el.innerHTML=svg;
 })();
 </script>
 <div id="app"></div>
@@ -870,6 +873,12 @@ let _lastFaviconDark = null;
 
 const LOADING_SVG_DARK = `<svg class="loading-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#2D5FE8"/><defs><path id="l2t" d="M4,4 H60" fill="none"/><path id="l2r" d="M60,4 V60" fill="none"/><path id="l2b" d="M60,60 H4" fill="none"/><path id="l2l" d="M4,60 V4" fill="none"/></defs><text font-family="'Courier New',monospace" font-size="4.2" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l2t"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l2r"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l2b"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l2l"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><path d="M16,48 V16 H22 L32,32 L42,16 H48 V48 H42 V26 L32,42 L22,26 V48 Z" fill="#0A0A0A"/></svg>`;
 const LOADING_SVG_LIGHT = `<svg class="loading-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#FDFDFD"/><defs><path id="l3t" d="M4,4 H60" fill="none"/><path id="l3r" d="M60,4 V60" fill="none"/><path id="l3b" d="M60,60 H4" fill="none"/><path id="l3l" d="M4,60 V4" fill="none"/></defs><text font-family="'Courier New',monospace" font-size="4.2" fill="#0099B3" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l3t"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#0099B3" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l3r"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#0099B3" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l3b"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#0099B3" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l3l"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><path d="M16,48 V16 H22 L32,32 L42,16 H48 V48 H42 V26 L32,42 L22,26 V48 Z" fill="#0099B3"/></svg>`;
+// Loading mark for the current theme, with the marching-slash SMIL animation
+// stripped when the viewer prefers reduced motion.
+function loadingSvg() {
+  const s = S.dark ? LOADING_SVG_DARK : LOADING_SVG_LIGHT;
+  return matchMedia('(prefers-reduced-motion: reduce)').matches ? s.replace(/<animate\b[^>]*>/g, '') : s;
+}
 
 // ── ABI FETCH (Sourcify) ─────────────────────────────────────────
 // Cache: false=EOA, []=unverified contract, [...]=verified fns, undefined=not fetched
@@ -1037,10 +1046,10 @@ function showLoading(msg) {
   if(wasVisible && el.className === targetClass) {
     const textEl = el.querySelector('.loading-text');
     if(textEl) { textEl.textContent = msg || 'LOADING'; }
-    else { el.className = targetClass; el.innerHTML = (S.dark ? LOADING_SVG_DARK : LOADING_SVG_LIGHT) + `<div class="loading-text">${esc(msg||'LOADING')}</div>`; }
+    else { el.className = targetClass; el.innerHTML = loadingSvg() + `<div class="loading-text">${esc(msg||'LOADING')}</div>`; }
   } else {
     el.className = targetClass;
-    el.innerHTML = (S.dark ? LOADING_SVG_DARK : LOADING_SVG_LIGHT) + `<div class="loading-text">${esc(msg||'LOADING')}</div>`;
+    el.innerHTML = loadingSvg() + `<div class="loading-text">${esc(msg||'LOADING')}</div>`;
   }
   _safetyLoadingTimer = setTimeout(hideLoading, 15000);
 }
@@ -1226,7 +1235,7 @@ function renderChainOverlay(mob){
 
 // ── DASHBOARD ─────────────────────────────────────────────────────
 function renderDash(v,mob){
-  if(!v)return`<div class="empty"><div class="empty-title">NO VAULTS</div><div class="empty-sub">${S.demoMode?"":"DEPLOY YOUR FIRST MULTISIG"}</div><button class="btn btn-outline" style="padding:0 32px;height:48px" onclick="S.view='CREATE';render()">CREATE VAULT</button>${!S.demoMode?`<div style="margin-top:32px;font-size:10px;font-weight:600;letter-spacing:2px;color:var(--m)">LOAD EXISTING VAULT</div><div style="margin-top:10px;display:flex;align-items:center;gap:8px;justify-content:center;flex-wrap:wrap"><input class="inp" id="load-addr" style="max-width:320px;min-width:0;flex:1;margin:0;font-size:16px" placeholder="0x... or name.eth / name.wei" oninput="updateLoadStatus(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();loadVaultByAddress()}"><button class="btn btn-outline btn-sm" onclick="loadVaultByAddress()">LOAD</button></div><div id="load-status" style="font-size:9px;letter-spacing:1px;text-align:center;min-height:12px;margin-top:6px"></div><div style="margin-top:32px"><button class="btn btn-outline" style="font-size:9px;border-color:var(--ln);color:var(--d)" onclick="S.demoMode=true;S.vaults=seed();S.sel=0;flash('DEMO LOADED');render()">LOAD DEMO</button></div>`:""}</div>`;
+  if(!v)return`<div class="empty"><div class="empty-title">NO VAULTS</div><div class="empty-sub">${S.demoMode?"":"DEPLOY YOUR FIRST MULTISIG"}</div><button class="btn btn-outline" style="padding:0 32px;height:48px" onclick="S.view='CREATE';render()">CREATE VAULT</button>${!S.demoMode?`<div style="max-width:400px;margin:44px auto 0;padding-top:32px;border-top:1px solid var(--ln)"><div style="font-size:10px;font-weight:600;letter-spacing:2px;color:var(--m)">LOAD EXISTING VAULT</div><div style="margin-top:12px;display:flex;align-items:center;gap:8px;justify-content:center;flex-wrap:wrap"><input class="inp" id="load-addr" style="max-width:320px;min-width:0;flex:1;margin:0;font-size:16px" placeholder="0x... or name.eth / name.wei" oninput="updateLoadStatus(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();loadVaultByAddress()}"><button class="btn btn-outline btn-sm" onclick="loadVaultByAddress()">LOAD</button></div><div id="load-status" style="font-size:9px;letter-spacing:1px;text-align:center;min-height:12px;margin-top:6px"></div><div style="margin-top:24px"><button class="btn btn-outline" style="font-size:9px;border-color:var(--ln);color:var(--d)" onclick="S.demoMode=true;S.vaults=seed();S.sel=0;flash('DEMO LOADED');render()">LOAD DEMO</button></div></div>`:""}</div>`;
   const you = getYou();
   const h0=v.holdings[0];
 
@@ -1387,7 +1396,7 @@ function renderDash(v,mob){
             <span class="tx-nonce">#${tx.nonce}${isCancel?" VIA EXECUTOR":i===firstUnqueued&&!isQueued?" NEXT":""}${txLink?` <button class="x-btn" style="font-size:8px;opacity:.4;display:inline-flex;min-width:auto;min-height:auto;padding:2px 4px;vertical-align:middle" onclick="event.stopPropagation();navigator.clipboard.writeText('${txLink}');flash('TX LINK COPIED')" title="${txLink}">\u29C9</button>`:""}</span>
             <span class="tx-val">${esc(display)}</span>
           </div>
-          <div class="tx-to">&rarr; ${S.demoMode?addrLink(tx.target,v.chain):addrLink(tx.displayTo||tx.target)}</div>
+          <div class="tx-to">&rarr; ${S.demoMode?addrLink(tx.target,v.chain):addrLink(tx.displayTo||tx.target)}${(()=>{const a=S.demoMode?tx.target:(tx.displayTo||tx.target);return ethers.isAddress(a)?copyBtn(a):'';})()}</div>
         </div>
         ${!mob&&!blocked?`<div class="tx-actions"><span class="tx-status" style="color:${s.c}"${tx.eta>0&&!s.exec?` data-eta-status="${tx.eta}"`:``}>&bull; ${s.l}</span>${actionBtn}</div>`:""}
         ${mob&&!blocked?`<span class="tx-status" style="color:${s.c}"${tx.eta>0&&!s.exec?` data-eta-status="${tx.eta}"`:``}>&bull; ${s.l}</span>`:""}
@@ -1709,7 +1718,7 @@ function renderAdmin(v,mob){
     <div class="grid2" style="gap:${mob?32:48}px">
       <div>
         <label class="lbl"><span class="dim">SET &middot;</span> EXECUTOR</label>
-        <div style="font-size:12px;font-weight:700;margin:8px 0 4px;word-break:break-all">${S.demoMode?addrLink(v.executor,v.chain):addrLink(v.executor)}</div>
+        <div style="font-size:12px;font-weight:700;margin:8px 0 4px;word-break:break-all">${S.demoMode?addrLink(v.executor,v.chain):addrLink(v.executor)}${ethers.isAddress(v.executor)?copyBtn(v.executor):""}</div>
         <div style="font-size:10px;color:var(--d);letter-spacing:1px;margin-bottom:14px">${v.executor===TIMELOCK_EXECUTOR?"TIMELOCK EXECUTOR (DEFAULT)":(v.executor===ethers.ZeroAddress||v.executor==="0x0000...0000")?"DISABLED":"CUSTOM EXECUTOR"}</div>
         <input class="inp" id="admin-executor-input" placeholder="0x... NEW EXECUTOR" onkeydown="if(event.key==='Enter'){event.preventDefault();doAdminPropose('setExecutor')}">
         <button class="btn btn-outline btn-w" onclick="doAdminPropose('setExecutor')">PROPOSE EXECUTOR</button>
