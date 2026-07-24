@@ -1342,7 +1342,7 @@ function renderDash(v,mob){
     </div>
   </div>
   <div class="sec"><span>QUEUE</span><span class="line"></span>
-    ${S.showTx?"":`<button class="btn btn-outline btn-sm" onclick="S.showTx=true;S.txMode='TRANSFER';S.txToken='ETH';render()">+ NEW</button>`}
+    ${S.showTx?"":`<button class="btn btn-outline btn-sm" onclick="S.showTx=true;S.txMode='TRANSFER';S.txToken='ETH';_builderSim=null;render()">+ NEW</button>`}
   </div>
   ${S.showTx?renderTxBuilder(v,mob):""}
   ${v.queue.length===0&&!S.showTx?`<div style="padding:48px 0;text-align:center;font-size:13px;color:var(--d);letter-spacing:2px">NO PENDING TRANSACTIONS</div>`:v.queue.map((tx,i)=>{
@@ -1526,7 +1526,7 @@ function onBatchData(i, val){
 
 function renderTxBuilder(v,mob){
   const tokens = S.demoMode ? (DEMO_TOKENS[v.chain]||["ETH"]) : getProdTokenSymbols();
-  const tabs=["TRANSFER","CUSTOM","BATCH"].map(m=>`<button class="txb-tab${S.txMode===m?" on":""}" onclick="S.txMode='${m}';render()">${m}</button>`).join("");
+  const tabs=["TRANSFER","CUSTOM","BATCH"].map(m=>`<button class="txb-tab${S.txMode===m?" on":""}" onclick="S.txMode='${m}';_builderSim=null;render()">${m}</button>`).join("");
   let body="";
   if(S.txMode==="TRANSFER"){
     const dec=DECIMALS[S.txToken]||18;
@@ -1602,7 +1602,9 @@ function renderTxBuilder(v,mob){
       `<button class="link-btn" onclick="S.batch.push({t:'',v:'',d:''});render()">+ ADD CALL</button>
        <button class="btn btn-fill btn-w" style="margin-top:16px" onclick="submitBatch()">SIGN + SUBMIT BATCH</button>`;
   }
-  return`<div class="txb"><div class="txb-tabs">${tabs}<button class="x-btn" onclick="S.showTx=false;render()">&#10005;</button></div>${body}</div>`;
+  return`<div class="txb"><div class="txb-tabs">${tabs}<button class="x-btn" onclick="S.showTx=false;_builderSim=null;render()">&#10005;</button></div>${body}
+    <div style="margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="sim-btn" onclick="simulateBuilder()" title="Dry-run this transaction against current chain state before proposing">SIMULATE</button><span style="font-size:9px;color:var(--d);letter-spacing:1px">DRY-RUN BEFORE PROPOSING</span></div>
+    ${_builderSim?renderSimResult(_builderSim):''}</div>`;
 }
 
 function getProdTokenSymbols(){
@@ -3491,7 +3493,9 @@ function _simTx(v, tx) {
     value: tx.rawValue ? BigInt(tx.rawValue) : (tx.value && tx.value !== '0' ? ethers.parseEther(String(tx.value)) : 0n),
   };
 }
-function _assetsFromLogs(logs, self) {
+const _tokenMetaCache = {};  // "chainId:token" -> { symbol, decimals }
+function _shortTok(token){ return token.slice(0,6)+'…'+token.slice(-4); }
+async function _assetsFromLogs(logs, self) {
   const selfLc = self.toLowerCase();
   const deltas = {};
   for(const log of (logs || [])) {
@@ -3505,11 +3509,40 @@ function _assetsFromLogs(logs, self) {
     if(fromA === selfLc) deltas[token] = (deltas[token] || 0n) - amt;
     if(toA === selfLc) deltas[token] = (deltas[token] || 0n) + amt;
   }
+  const tokens = Object.keys(deltas).filter(t => deltas[t] !== 0n);
+  if(!tokens.length) return [];
   const allTokens = PROD_TOKENS[S.chainId] || [];
-  return Object.entries(deltas).filter(([,d]) => d !== 0n).map(([token, delta]) => {
-    const info = allTokens.find(t => t.address.toLowerCase() === token);
-    return { symbol: info?.symbol || (token.slice(0,6)+'…'+token.slice(-4)), decimals: info?.decimals ?? 18, delta };
-  });
+  const meta = {}, unknown = [];
+  for(const token of tokens) {
+    const known = allTokens.find(t => t.address.toLowerCase() === token);
+    if(known) { meta[token] = { symbol: known.symbol, decimals: known.decimals }; continue; }
+    const ck = S.chainId + ':' + token;
+    if(_tokenMetaCache[ck]) { meta[token] = _tokenMetaCache[ck]; continue; }
+    unknown.push(token);
+  }
+  // Resolve symbol()/decimals() for non-listed tokens in one Multicall3 call.
+  if(unknown.length) {
+    try {
+      const calls = [];
+      unknown.forEach(token => {
+        calls.push({ target: token, allowFailure: true, callData: erc20Iface.encodeFunctionData('symbol') });
+        calls.push({ target: token, allowFailure: true, callData: erc20Iface.encodeFunctionData('decimals') });
+      });
+      const res = await getMC3().aggregate3(calls);
+      unknown.forEach((token, i) => {
+        let symbol = null, decimals = null;
+        const sr = res[i*2], dr = res[i*2+1];
+        if(sr?.success) { try { symbol = erc20Iface.decodeFunctionResult('symbol', sr.returnData)[0]; } catch(_){} }
+        if(dr?.success) { try { decimals = Number(erc20Iface.decodeFunctionResult('decimals', dr.returnData)[0]); } catch(_){} }
+        const m = { symbol: symbol || _shortTok(token), decimals: (decimals != null && !isNaN(decimals)) ? decimals : 18 };
+        _tokenMetaCache[S.chainId + ':' + token] = m;
+        meta[token] = m;
+      });
+    } catch(_) {
+      unknown.forEach(token => { meta[token] = { symbol: _shortTok(token), decimals: 18 }; });
+    }
+  }
+  return tokens.map(token => ({ symbol: meta[token].symbol, decimals: meta[token].decimals, delta: deltas[token] }));
 }
 function _revertReason(data) {
   if(typeof data === 'string' && data.startsWith('0x08c379a0')) {
@@ -3525,7 +3558,7 @@ async function _simViaSimulateV1(s) {
   const call = res?.[0]?.calls?.[0];
   if(!call) throw new Error('no simulateV1 result');
   if(call.status === '0x0' || call.error) return { status:'revert', reason: _revertReason(call.error?.data ?? call.returnData) };
-  return { status:'pass', gas: call.gasUsed ? BigInt(call.gasUsed).toString() : null, assets: _assetsFromLogs(call.logs, s.from) };
+  return { status:'pass', gas: call.gasUsed ? BigInt(call.gasUsed).toString() : null, assets: await _assetsFromLogs(call.logs, s.from) };
 }
 async function _simViaCall(s) {
   await provider.call({ from: s.from, to: s.to, value: s.value, data: s.data }); // throws on revert
@@ -3533,21 +3566,68 @@ async function _simViaCall(s) {
   try { gas = (await provider.estimateGas({ from: s.from, to: s.to, value: s.value, data: s.data })).toString(); } catch(_){}
   return { status:'pass', gas, assets: [], basic: true };
 }
+// Run a simulation for {from,to,value,data}; never throws (returns a revert result).
+async function runSim(s) {
+  try {
+    try { return await _simViaSimulateV1(s); }
+    catch(_) { return await _simViaCall(s); }
+  } catch(e) {
+    return { status:'revert', reason: e.reason || e.shortMessage || _revertReason(e?.data) };
+  }
+}
 async function simulateProposal(vi, nonce) {
   const v = S.vaults[vi];
   const tx = v.queue.find(t => t.nonce === nonce);
   if(!tx) return;
   if(S.demoMode) { tx._sim = { status:'pass', demo:true, assets: [] }; render(); return; }
   tx._sim = { loading:true }; render();
-  const s = _simTx(v, tx);
-  try {
-    let result;
-    try { result = await _simViaSimulateV1(s); }
-    catch(_) { result = await _simViaCall(s); }
-    tx._sim = result;
-  } catch(e) {
-    tx._sim = { status:'revert', reason: e.reason || e.shortMessage || _revertReason(e?.data) };
+  tx._sim = await runSim(_simTx(v, tx));
+  render();
+}
+
+// Build {from,to,value,data} from the current tx-builder inputs, mirroring the
+// prodSubmit* construction so the dry-run matches what would be proposed.
+async function buildSimInput() {
+  const v = S.vaults[S.sel];
+  if(!v) return null;
+  const from = v.address;
+  if(S.txMode === 'TRANSFER') {
+    const amt = stripCommas(document.getElementById('tx-amount')?.value || '0');
+    const to = document.getElementById('tx-to')?.value || '';
+    if(!to || !amt || !(parseFloat(amt) > 0)) throw new Error('FILL IN AMOUNT AND RECIPIENT');
+    const toAddr = await resolveName(to);
+    const allTokens = PROD_TOKENS[S.chainId] || ETH_ONLY;
+    const tokenInfo = allTokens.find(t => t.symbol === S.txToken) || allTokens[0];
+    if(tokenInfo.address === ethers.ZeroAddress) return { from, to: toAddr, value: ethers.parseEther(amt), data: '0x' };
+    return { from, to: tokenInfo.address, value: 0n, data: erc20Iface.encodeFunctionData('transfer', [toAddr, ethers.parseUnits(amt, tokenInfo.decimals)]) };
   }
+  if(S.txMode === 'CUSTOM') {
+    const target = S.cxTarget || document.getElementById('cx-target')?.value || '';
+    if(!target) throw new Error('ENTER TARGET');
+    const val = stripCommas(S.cxValue || document.getElementById('cx-value')?.value || '0');
+    const d = getCxCalldata(); if(d === null) throw new Error('INVALID CALLDATA');
+    const resolvedTarget = await resolveName(target);
+    return { from, to: resolvedTarget, value: ethers.parseEther(val), data: d };
+  }
+  if(S.txMode === 'BATCH') {
+    const calls = S.batch.filter(c => c.t.trim());
+    if(!calls.length) throw new Error('ADD AT LEAST 1 CALL');
+    const targets = await Promise.all(calls.map(c => resolveName(c.t)));
+    const values = calls.map(c => ethers.parseEther(stripCommas(c.v || '0')));
+    const datas = calls.map(c => (c.d || '0x').trim());
+    return { from, to: v.address, value: 0n, data: msIface.encodeFunctionData('batch', [targets, values, datas]) };
+  }
+  return null;
+}
+let _builderSim = null;
+async function simulateBuilder() {
+  if(S.demoMode) { _builderSim = { status:'pass', demo:true, assets: [] }; render(); return; }
+  _builderSim = { loading:true }; render();
+  let s;
+  try { s = await buildSimInput(); }
+  catch(e) { _builderSim = null; flash(e.message || 'CHECK INPUTS'); render(); return; }
+  if(!s) { _builderSim = null; render(); return; }
+  _builderSim = await runSim(s);
   render();
 }
 function renderSimResult(sim) {
