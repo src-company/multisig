@@ -324,7 +324,8 @@ function makeProvider(id) {
           provider: new ethers.JsonRpcProvider(url, id, { staticNetwork: true }),
           priority: i + 1, stallTimeout: 2000
         })),
-        id
+        id,
+        { quorum: 1 }
       );
   _providerCache[id] = p;
   return p;
@@ -647,7 +648,6 @@ const S = {
   // chain / network
   chainId: parseInt(localStorage.getItem('ms_chain') || '1'),
   showChains: false,
-  statusMsg: null,
   latestBlock: 0,
 
   // custom call builder
@@ -1077,8 +1077,7 @@ function render(){
     </div>
     <div class="hbar">${ASC200}</div>
   </div>
-  ${S.showChains?renderChainOverlay(mob):""}
-  ${S.statusMsg?`<div style="position:fixed;bottom:60px;left:50%;transform:translateX(-50%);background:${S.statusMsg.ok?"var(--a)":"var(--r)"};color:var(--bg);padding:10px 20px;font-size:10px;letter-spacing:2px;z-index:200;max-width:90vw;text-align:center">${esc(S.statusMsg.text)}</div>`:""}`;
+  ${S.showChains?renderChainOverlay(mob):""}`;
 }
 
 function renderChainOverlay(mob){
@@ -1824,13 +1823,11 @@ async function loadTokenBalances(walletAddr, ethBalance) {
   const ethPrice = prices['ETH'] || 0;
   const stableSymbols = new Set(['USDC', 'USDT', 'USDT0', 'DAI']);
   const holdings = [];
-  let totalUsd = 0;
 
   // ETH
   if(ethBalance > 0n) {
     const ethAmount = Number(ethers.formatEther(ethBalance));
     const ethUsd = ethPrice > 0 ? ethAmount * ethPrice : 0;
-    totalUsd += ethUsd;
     holdings.push({token:'ETH', balance:ethers.formatEther(ethBalance).slice(0,10), usd: ethUsd > 0 ? `$${ethUsd.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}` : ''});
   }
 
@@ -1842,9 +1839,9 @@ async function loadTokenBalances(walletAddr, ethBalance) {
     const display = t.decimals <= 8 ? amount.toFixed(2) : amount.toFixed(4).replace(/\.?0+$/, '');
     let usd = 0;
     if(stableSymbols.has(t.symbol)) {
-      usd = amount; totalUsd += amount;
+      usd = amount;
     } else if(prices[t.symbol]) {
-      usd = amount * prices[t.symbol]; totalUsd += usd;
+      usd = amount * prices[t.symbol];
     }
     holdings.push({token:t.symbol, balance:display, usd: usd > 0 ? `$${usd.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}` : ''});
   });
@@ -2047,7 +2044,7 @@ async function loadSingleVaultData(addr, dbWallet) {
   if(!dbW && window._connectedAddress) {
     try {
       const ownerList = [...s.owners];
-      const dbId = await dbRegisterWallet(addr, window._connectedAddress, 0, ownerList, Number(s.threshold), Number(s.delay), s.executor, 0, '', null, null);
+      const dbId = await dbRegisterWallet(addr, window._connectedAddress, 0, ownerList, Number(s.threshold), Number(s.delay), s.executor, 0, '', null, null, Number(s.nonce));
       if(dbId) dbW = { id: dbId, name: null };
     } catch(e) { console.error('Auto-register vault:', e); }
   }
@@ -2699,6 +2696,14 @@ function verifySigs(sigs, domain, types, msg, owners) {
   return verified;
 }
 
+// Read the wallet's current on-chain nonce. execute() and executor.forward()
+// both hash the tx against the live nonce, so off-chain sigs made over a
+// different nonce silently fail — check up front for a clear message.
+async function fetchLiveNonce(vAddr) {
+  const ms = new ethers.Contract(vAddr, MULTISIG_ABI, provider);
+  return Number(await ms.nonce());
+}
+
 async function prodSubmit(vi, nonce) {
   const w = requireSigner(); if(!w) return;
   const { signer, addr: connectedAddress } = w;
@@ -2712,6 +2717,15 @@ async function prodSubmit(vi, nonce) {
     const data = tx.callData || '0x';
 
     const { sigs } = collectSigs(tx, v, connectedAddress);
+
+    // Sigs are made over tx.nonce; execute()/forward() hash against the live
+    // nonce, so a stale entry would revert opaquely — surface it clearly.
+    const liveNonce = await fetchLiveNonce(v.address);
+    if(liveNonce !== nonce) {
+      flash('NONCE CHANGED — RELOADING');
+      await reloadVault(vi);
+      return;
+    }
 
     const ms = new ethers.Contract(v.address, MULTISIG_ABI, signer);
 
@@ -2831,6 +2845,14 @@ async function prodFastExecute(vi, nonce) {
       return;
     }
 
+    // forward() hashes against the live nonce — bail early if it moved.
+    const liveNonce = await fetchLiveNonce(v.address);
+    if(liveNonce !== nonce) {
+      flash('NONCE CHANGED — RELOADING');
+      await reloadVault(vi);
+      return;
+    }
+
     const target = tx.target;
     const value = tx.rawValue ? BigInt(tx.rawValue) : ethers.parseEther(tx.value || '0');
     const data = tx.callData || '0x';
@@ -2917,8 +2939,7 @@ async function prodCancel(vi, nonce) {
     }
 
     // Verify nonce still matches on-chain
-    const ms = new ethers.Contract(v.address, MULTISIG_ABI, provider);
-    const liveNonce = Number(await ms.nonce());
+    const liveNonce = await fetchLiveNonce(v.address);
     if(liveNonce !== cancelNonce) {
       flash('NONCE CHANGED — RESIGNING NEEDED');
       if(existingTxId) {
@@ -3021,8 +3042,7 @@ async function prodAccelerate(vi, nonce) {
     }
 
     // Verify nonce still matches on-chain before executing
-    const ms = new ethers.Contract(v.address, MULTISIG_ABI, provider);
-    const liveNonce = Number(await ms.nonce());
+    const liveNonce = await fetchLiveNonce(v.address);
     if(liveNonce !== accelNonce) {
       flash('NONCE CHANGED — RESIGNING NEEDED');
       // Invalidate stale sigs in DB
@@ -3200,6 +3220,7 @@ async function prodAdminPropose(action, val) {
   try {
     switch(action) {
       case 'setThreshold': {
+        if(!val || val < 1 || val > v.ownerCount) { flash('THRESHOLD MUST BE 1..' + v.ownerCount); return; }
         data = msIface.encodeFunctionData('setThreshold', [val]);
         desc = `setThreshold(${val})`;
         break;
@@ -3239,6 +3260,8 @@ async function prodAdminPropose(action, val) {
         const raw = document.getElementById('admin-add-owner')?.value?.trim();
         if(!raw) { flash('ENTER AN ADDRESS'); return; }
         const addr = await resolveName(raw);
+        const ownerList = v.loadedOwners || v.owners.map(o => o.addr);
+        if(ownerList.some(o => o.toLowerCase() === addr.toLowerCase())) { flash('ALREADY AN OWNER'); return; }
         const addLabel = document.getElementById('admin-add-label')?.value?.trim() || '';
         data = msIface.encodeFunctionData('addOwner', [addr]);
         desc = `addOwner(${addr.slice(0,10)}...)`;
@@ -3250,6 +3273,7 @@ async function prodAdminPropose(action, val) {
         const idx = val;
         const ownerAddr = v.owners[idx]?.addr;
         if(!ownerAddr) { flash('INVALID OWNER'); return; }
+        if(v.ownerCount <= v.threshold) { flash('LOWER THRESHOLD FIRST'); return; }
         const loadedIdx = v.loadedOwners ? v.loadedOwners.findIndex(o => o.toLowerCase() === ownerAddr.toLowerCase()) : -1;
         const prevOwner = loadedIdx <= 0 ? SENTINEL : v.loadedOwners[loadedIdx - 1];
         data = msIface.encodeFunctionData('removeOwner', [prevOwner, ownerAddr]);
