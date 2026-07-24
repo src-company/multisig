@@ -34,6 +34,8 @@ button:active{transform:scale(.97)}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
 @keyframes txLinked{0%,40%{background:color-mix(in srgb,var(--g) 15%,transparent)}100%{background:transparent}}
 .tx-linked{animation:txLinked 2s ease}
+.copy-btn{opacity:.4;transition:opacity .15s}
+@media(hover:hover){.copy-btn:hover{opacity:1}}
 @media(hover:hover){
   button:hover{opacity:.85}
   .btn:hover{opacity:.9}
@@ -806,6 +808,28 @@ function addrLink(addr, chain) {
   return `<span style="border-bottom:1px solid var(--ln)">${safe}</span>`;
 }
 
+// Small copy-to-clipboard button (⧉) with a flash confirmation.
+function copyBtn(text, msg) {
+  return `<button class="x-btn copy-btn" style="min-width:auto;min-height:auto;padding:2px 5px;font-size:9px;vertical-align:middle" onclick="event.stopPropagation();navigator.clipboard.writeText('${esc(text)}');flash('${msg||'ADDRESS COPIED'}')" title="Copy address">⧉</button>`;
+}
+
+// Briefly flash a queue row (by nonce) — reused after sign/approve.
+function highlightTx(nonce) {
+  const el = document.querySelector(`[data-tx-nonce="${nonce}"]`);
+  if (el) { el.classList.remove('tx-linked'); void el.offsetWidth; el.classList.add('tx-linked'); }
+}
+
+// Inline validity hint for the load-existing-vault field.
+function updateLoadStatus(val) {
+  const el = document.getElementById('load-status');
+  if (!el) return;
+  const t = (val || '').trim();
+  if (!t) { el.textContent = ''; return; }
+  if (ethers.isAddress(t)) { el.textContent = 'VALID ADDRESS'; el.style.color = 'var(--g)'; }
+  else if (/\.(eth|wei)$/i.test(t)) { el.textContent = 'NAME · RESOLVES ON LOAD'; el.style.color = 'var(--a)'; }
+  else { el.textContent = 'ENTER AN ADDRESS OR .eth / .wei NAME'; el.style.color = 'var(--r)'; }
+}
+
 function chainName() {
   if (S.demoMode) {
     const v = S.vaults[S.sel];
@@ -1137,7 +1161,7 @@ function renderChainOverlay(mob){
 
 // ── DASHBOARD ─────────────────────────────────────────────────────
 function renderDash(v,mob){
-  if(!v)return`<div class="empty"><div class="empty-title">NO VAULTS</div><div class="empty-sub">${S.demoMode?"":"DEPLOY YOUR FIRST MULTISIG"}</div><button class="btn btn-outline" style="padding:0 32px;height:48px" onclick="S.view='CREATE';render()">CREATE VAULT</button>${!S.demoMode?`<div style="margin-top:32px;font-size:10px;font-weight:600;letter-spacing:2px;color:var(--m)">LOAD EXISTING VAULT</div><div style="margin-top:10px;display:flex;align-items:center;gap:8px;justify-content:center;flex-wrap:wrap"><input class="inp" id="load-addr" style="max-width:320px;min-width:0;flex:1;margin:0;font-size:16px" placeholder="0x... or name.eth / name.wei" onkeydown="if(event.key==='Enter'){event.preventDefault();loadVaultByAddress()}"><button class="btn btn-outline btn-sm" onclick="loadVaultByAddress()">LOAD</button></div><div style="margin-top:32px"><button class="btn btn-outline" style="font-size:9px;border-color:var(--ln);color:var(--d)" onclick="S.demoMode=true;S.vaults=seed();S.sel=0;flash('DEMO LOADED');render()">LOAD DEMO</button></div>`:""}</div>`;
+  if(!v)return`<div class="empty"><div class="empty-title">NO VAULTS</div><div class="empty-sub">${S.demoMode?"":"DEPLOY YOUR FIRST MULTISIG"}</div><button class="btn btn-outline" style="padding:0 32px;height:48px" onclick="S.view='CREATE';render()">CREATE VAULT</button>${!S.demoMode?`<div style="margin-top:32px;font-size:10px;font-weight:600;letter-spacing:2px;color:var(--m)">LOAD EXISTING VAULT</div><div style="margin-top:10px;display:flex;align-items:center;gap:8px;justify-content:center;flex-wrap:wrap"><input class="inp" id="load-addr" style="max-width:320px;min-width:0;flex:1;margin:0;font-size:16px" placeholder="0x... or name.eth / name.wei" oninput="updateLoadStatus(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();loadVaultByAddress()}"><button class="btn btn-outline btn-sm" onclick="loadVaultByAddress()">LOAD</button></div><div id="load-status" style="font-size:9px;letter-spacing:1px;text-align:center;min-height:12px;margin-top:6px"></div><div style="margin-top:32px"><button class="btn btn-outline" style="font-size:9px;border-color:var(--ln);color:var(--d)" onclick="S.demoMode=true;S.vaults=seed();S.sel=0;flash('DEMO LOADED');render()">LOAD DEMO</button></div>`:""}</div>`;
   const you = getYou();
   const h0=v.holdings[0];
 
@@ -1307,7 +1331,7 @@ function renderDash(v,mob){
   <div class="sec"><span>SIGNERS</span><span class="line"></span></div>
   ${v.owners.map(o=>`<div class="row">
     <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;min-width:0">
-      <span class="signer-addr">${S.demoMode?addrLink(o.addr,v.chain):addrLink(o.addr)}</span>${o.name?`<span class="signer-name">${esc(o.name)}</span>`:""}<span class="signer-label">${esc(o.label)}</span>
+      <span class="signer-addr">${S.demoMode?addrLink(o.addr,v.chain):addrLink(o.addr)}</span>${ethers.isAddress(o.addr)?copyBtn(o.addr):""}${o.name?`<span class="signer-name">${esc(o.name)}</span>`:""}<span class="signer-label">${esc(o.label)}</span>
     </div>
     ${o.you?'<span class="signer-you">YOU</span>':""}
   </div>`).join("")}`;
@@ -1625,7 +1649,7 @@ function renderAdmin(v,mob){
   `:tab==="OWNERS"?`<div>
     ${v.owners.map((o,oi)=>{const isYouLbl=o.label&&o.label.trim().toUpperCase()==='YOU';return`<div class="row" style="${mob?"flex-direction:column;align-items:stretch;gap:10px":""}">
       <div style="min-width:0">
-        <div class="signer-addr">${S.demoMode?addrLink(o.addr,v.chain):addrLink(o.addr)}${o.name?` <span class="signer-name">${esc(o.name)}</span>`:""}${o.you?` <span style="font-size:9px;font-weight:700;letter-spacing:1px;color:var(--m);border:1px solid var(--fr);padding:1px 6px;margin-left:6px">YOU</span>`:""}</div>
+        <div class="signer-addr">${S.demoMode?addrLink(o.addr,v.chain):addrLink(o.addr)}${ethers.isAddress(o.addr)?copyBtn(o.addr):""}${o.name?` <span class="signer-name">${esc(o.name)}</span>`:""}${o.you?` <span style="font-size:9px;font-weight:700;letter-spacing:1px;color:var(--m);border:1px solid var(--fr);padding:1px 6px;margin-left:6px">YOU</span>`:""}</div>
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-shrink:0${mob?";width:100%":""}">
           <input class="inp" style="margin:0;${mob?"flex:1":"width:120px"};font-size:11px;letter-spacing:1px;border-bottom-color:var(--ln)" placeholder="LABEL" value="${isYouLbl?"":esc(o.label)}" onchange="updateOwnerLabel(${S.sel},${oi},this.value)">
@@ -1731,6 +1755,7 @@ function doSign(vi, nonce) {
     tx.approvals[DEMO_YOU] = true;
     flash(`SIGNED #${nonce} (OFF-CHAIN)`);
     render();
+    highlightTx(nonce);
   } else {
     guardSubmit(prodSign)(vi, nonce);
   }
@@ -1743,6 +1768,7 @@ function doApprove(vi, nonce) {
     tx.approvals[DEMO_YOU] = true;
     flash(`APPROVED #${nonce} (ON-CHAIN)`);
     render();
+    highlightTx(nonce);
   } else {
     guardSubmit(prodApprove)(vi, nonce);
   }
