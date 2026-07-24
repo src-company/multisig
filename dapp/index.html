@@ -506,7 +506,62 @@ const PROD_TOKENS = {
 // actually show logos — the icons were defined but never rendered.
 const SYMBOL_ICONS = {};
 Object.values(PROD_TOKENS).forEach(list => list.forEach(t => { if(t.icon && !SYMBOL_ICONS[t.symbol]) SYMBOL_ICONS[t.symbol] = t.icon; }));
-function tokIcon(sym, cls){ const ic = SYMBOL_ICONS[sym]; return ic ? `<span class="tok-ico${cls?' '+cls:''}">${ic}</span>` : ''; }
+// Placeholder logo for a token with no built-in icon: neutral circle + ticker.
+function placeholderIcon(sym){
+  const t = (sym || '?').replace(/[^A-Za-z0-9]/g,'').slice(0,3).toUpperCase() || '?';
+  const fs = t.length >= 3 ? 9 : t.length === 2 ? 12 : 15;
+  return `<svg width="14" height="14" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><circle cx="16" cy="16" r="16" fill="#5B7CFF"/><text x="16" y="17" fill="#fff" font-family="'Courier New',monospace" font-weight="700" font-size="${fs}" text-anchor="middle" dominant-baseline="middle">${esc(t)}</text></svg>`;
+}
+function iconForSym(sym){ return SYMBOL_ICONS[sym] || placeholderIcon(sym); }
+function tokIcon(sym, cls){ if(!sym) return ''; return `<span class="tok-ico${cls?' '+cls:''}">${iconForSym(sym)}</span>`; }
+
+// ── CUSTOM TOKENS ─────────────────────────────────────────────────
+// Users can add any ERC-20 by address; we fetch symbol()/decimals() and
+// persist it per vault (localStorage) so it's selectable for sends and shows
+// up in the treasury holdings. Symbol is a display ticker; decimals drive the
+// real amount math — never assume 18.
+function _ctokKey(chainId, addr){ return `ms_ctok:${chainId}:${(addr||'').toLowerCase()}`; }
+function customTokensFor(chainId, addr){
+  if(!addr) return [];
+  try { const v = JSON.parse(localStorage.getItem(_ctokKey(chainId, addr)) || '[]'); return Array.isArray(v) ? v : []; } catch(_) { return []; }
+}
+function saveCustomToken(chainId, addr, tok){
+  const list = customTokensFor(chainId, addr);
+  if(list.some(t => t.address.toLowerCase() === tok.address.toLowerCase())) return;
+  list.push({ address: tok.address, symbol: tok.symbol, decimals: tok.decimals });
+  try { localStorage.setItem(_ctokKey(chainId, addr), JSON.stringify(list)); } catch(_){}
+}
+// Fetch {address, symbol, decimals} for an ERC-20; throws if it isn't one.
+async function fetchTokenMeta(address){
+  const addr = ethers.getAddress(address);
+  const res = await getMC3().aggregate3([
+    { target: addr, allowFailure: true, callData: erc20Iface.encodeFunctionData('symbol') },
+    { target: addr, allowFailure: true, callData: erc20Iface.encodeFunctionData('decimals') },
+  ]);
+  let symbol = null, decimals = null;
+  if(res[0]?.success){ try { symbol = erc20Iface.decodeFunctionResult('symbol', res[0].returnData)[0]; } catch(_){} }
+  if(res[1]?.success){ try { decimals = Number(erc20Iface.decodeFunctionResult('decimals', res[1].returnData)[0]); } catch(_){} }
+  if(decimals == null || isNaN(decimals) || decimals < 0 || decimals > 36) throw new Error('NOT AN ERC-20 TOKEN');
+  return { address: addr, symbol: (symbol && String(symbol).trim()) || (addr.slice(0,6)+'…'+addr.slice(-4)), decimals };
+}
+// Effective token list for a vault: built-ins + its saved custom tokens.
+function vaultTokens(v){
+  const base = PROD_TOKENS[S.chainId] || ETH_ONLY;
+  if(S.demoMode || !v || !v.address) return base;
+  const seen = new Set(base.map(t => t.address.toLowerCase()));
+  const custom = customTokensFor(S.chainId, v.address)
+    .filter(t => !seen.has(t.address.toLowerCase()))
+    .map(t => ({ symbol: t.symbol, address: t.address, decimals: t.decimals, icon: iconForSym(t.symbol), custom: true }));
+  return [...base, ...custom];
+}
+// The currently-selected transfer token, resolved to {symbol,address,decimals}.
+function curTok(v){
+  if(!S.demoMode){
+    const t = vaultTokens(v).find(t => t.symbol === S.txToken);
+    if(t) return t;
+  }
+  return { symbol: S.txToken, address: S.txToken === 'ETH' ? ethers.ZeroAddress : '', decimals: DECIMALS[S.txToken] || 18, icon: iconForSym(S.txToken) };
+}
 
 const CHAINLINK_FEEDS = {
   1: {
@@ -694,6 +749,7 @@ const S = {
   showTx: false,
   txMode: "TRANSFER",
   txToken: "ETH",
+  showCustomTok: false,
   batch: [{ t: "", v: "", d: "" }, { t: "", v: "", d: "" }],
 
   // create form
@@ -1537,12 +1593,40 @@ function onBatchData(i, val){
   if(el){ const s = _hexState(val); el.textContent = s.txt; el.style.color = s.color; }
 }
 
+// Add a custom ERC-20 by address: fetch symbol()/decimals(), persist it for the
+// vault, select it for the transfer, and refresh holdings so it's tracked.
+async function addCustomTokenFlow(){
+  const v = S.vaults[S.sel]; if(!v) return;
+  const raw = document.getElementById('custom-tok-addr')?.value?.trim();
+  if(!raw || !ethers.isAddress(raw)){ flash('ENTER A VALID TOKEN ADDRESS'); return; }
+  const addr = ethers.getAddress(raw);
+  const existing = vaultTokens(v).find(t => t.address && t.address.toLowerCase() === addr.toLowerCase());
+  if(existing){ S.txToken = existing.symbol; S.showCustomTok = false; render(); return; }
+  flash('FETCHING TOKEN…');
+  try {
+    const meta = await fetchTokenMeta(addr);
+    if(vaultTokens(v).some(t => t.symbol === meta.symbol)){ flash(`SYMBOL "${meta.symbol}" ALREADY LISTED`); return; }
+    saveCustomToken(S.chainId, v.address, meta);
+    S.txToken = meta.symbol; S.showCustomTok = false;
+    flash(`ADDED ${meta.symbol} · ${meta.decimals} DEC`);
+    render();
+    reloadHoldings(S.sel);
+  } catch(e){
+    flash(e.shortMessage || e.message || 'COULD NOT LOAD TOKEN');
+  }
+}
+async function reloadHoldings(vi){
+  const v = S.vaults[vi]; if(!v || S.demoMode || !v.address) return;
+  try { v.holdings = await loadTokenBalances(v.address, null); render(); } catch(_){}
+}
+
 function renderTxBuilder(v,mob){
-  const tokens = S.demoMode ? (DEMO_TOKENS[v.chain]||["ETH"]) : getProdTokenSymbols();
+  const tokenObjs = S.demoMode ? (DEMO_TOKENS[v.chain]||["ETH"]).map(s=>({symbol:s,icon:iconForSym(s)})) : vaultTokens(v);
   const tabs=["TRANSFER","CUSTOM","BATCH"].map(m=>`<button class="txb-tab${S.txMode===m?" on":""}" onclick="S.txMode='${m}';_builderSim=null;render()">${m}</button>`).join("");
   let body="";
   if(S.txMode==="TRANSFER"){
-    const dec=DECIMALS[S.txToken]||18;
+    const ct=curTok(v);
+    const dec=ct.decimals;
     const unitLabel=S.txToken==="ETH"?"WEI":"UNITS ("+dec+" DECIMALS)";
     const hold=(v.holdings||[]).find(h=>h.token===S.txToken);
     const availStr=hold?(hold.raw!=null?ethers.formatUnits(hold.raw,hold.decimals||dec):stripCommas(hold.balance)):'';
@@ -1550,7 +1634,8 @@ function renderTxBuilder(v,mob){
     body=`<div class="grid2">
       <div>
         <label class="lbl">TOKEN</label>
-        <div class="token-pills">${tokens.map(t=>`<button class="pill${S.txToken===t?" on":""}" onclick="S.txToken='${t}';render()">${tokIcon(t)}${t}</button>`).join("")}</div>
+        <div class="token-pills">${tokenObjs.map(t=>`<button class="pill${S.txToken===t.symbol?" on":""}" onclick="S.txToken='${esc(t.symbol)}';S.showCustomTok=false;render()"><span class="tok-ico">${t.icon||iconForSym(t.symbol)}</span>${esc(t.symbol)}</button>`).join("")}${S.demoMode?"":`<button class="pill" onclick="S.showCustomTok=!S.showCustomTok;render()">+ CUSTOM</button>`}</div>
+        ${(!S.demoMode&&S.showCustomTok)?`<div style="display:flex;gap:8px;margin-bottom:12px"><input class="inp" id="custom-tok-addr" style="margin:0;flex:1;font-size:13px" placeholder="0x... TOKEN ADDRESS" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomTokenFlow()}"><button class="btn btn-outline btn-sm" onclick="addCustomTokenFlow()">ADD</button></div>`:''}
         <div style="display:flex;justify-content:space-between;align-items:baseline"><label class="lbl">AMOUNT</label>${availNum>0?`<button class="link-btn" style="font-size:9px;margin:0;padding:0" onclick="fillTxMax('${availStr}',${dec},${availNum},'${unitLabel}')">MAX ${esc(hold.balance)} ${esc(S.txToken)}</button>`:hold?`<span style="font-size:9px;color:var(--d);letter-spacing:1px">BAL ${esc(hold.balance)}</span>`:''}</div>
         <input class="inp" id="tx-amount" placeholder="0.0" oninput="onTxAmount(this.value,${dec},${availNum},'${unitLabel}')" onkeydown="if(event.key==='Enter'){event.preventDefault();submitTransfer()}">
         <div id="tx-units" style="font-size:10px;color:var(--d);margin-top:-12px;word-break:break-all"></div>
@@ -2178,7 +2263,10 @@ async function multicallLoad(addr) {
 }
 
 async function loadTokenBalances(walletAddr, ethBalance) {
-  const allTokens = PROD_TOKENS[S.chainId] || ETH_ONLY;
+  const base = PROD_TOKENS[S.chainId] || ETH_ONLY;
+  const seen = new Set(base.map(t => t.address.toLowerCase()));
+  const custom = customTokensFor(S.chainId, walletAddr).filter(t => t.address && !seen.has(t.address.toLowerCase()));
+  const allTokens = [...base, ...custom];
   const erc20Tokens = allTokens.filter(t => t.address !== ethers.ZeroAddress);
 
   const feeds = CHAINLINK_FEEDS[S.chainId] || {};
@@ -3609,8 +3697,7 @@ async function buildSimInput() {
     const to = document.getElementById('tx-to')?.value || '';
     if(!to || !amt || !(parseFloat(amt) > 0)) throw new Error('FILL IN AMOUNT AND RECIPIENT');
     const toAddr = await resolveName(to);
-    const allTokens = PROD_TOKENS[S.chainId] || ETH_ONLY;
-    const tokenInfo = allTokens.find(t => t.symbol === S.txToken) || allTokens[0];
+    const tokenInfo = curTok(v);
     if(tokenInfo.address === ethers.ZeroAddress) return { from, to: toAddr, value: ethers.parseEther(amt), data: '0x' };
     return { from, to: tokenInfo.address, value: 0n, data: erc20Iface.encodeFunctionData('transfer', [toAddr, ethers.parseUnits(amt, tokenInfo.decimals)]) };
   }
@@ -3773,8 +3860,7 @@ async function prodSubmitTransfer() {
 
   try {
     const toAddr = await resolveName(to);
-    const allTokens = PROD_TOKENS[S.chainId] || ETH_ONLY;
-    const tokenInfo = allTokens.find(t => t.symbol === S.txToken) || allTokens[0];
+    const tokenInfo = curTok(v);
 
     let target, value, data, desc;
     if(tokenInfo.address === ethers.ZeroAddress) {
