@@ -555,7 +555,7 @@ let provider = null;
 function getMC3() { return new ethers.Contract(MC3, MC3_ABI, provider); }
 const SENTINEL = '0x0000000000000000000000000000000000000001';
 // ── DEMO DATA ─────────────────────────────────────────────────────
-const DEMO_YOU = "0x1a2B...3c4D";
+const DEMO_YOU = "0x1a2bc8e5c135b427a7b75e21483ae304399c3c4d";
 const NETS = [{name:"ETHEREUM",id:1},{name:"BASE",id:8453},{name:"MEGAETH",id:4326},{name:"ARBITRUM",id:42161},{name:"OP MAINNET",id:10},{name:"SEPOLIA",id:11155111,test:true},{name:"BASE SEPOLIA",id:84532,test:true}];
 const EXPLORERS = {ETHEREUM:"https://etherscan.io",BASE:"https://basescan.org",MEGAETH:"https://mega.etherscan.io",ARBITRUM:"https://arbiscan.io","OP MAINNET":"https://optimistic.etherscan.io",SEPOLIA:"https://sepolia.etherscan.io","BASE SEPOLIA":"https://sepolia.basescan.org"};
 
@@ -567,7 +567,7 @@ const ASC200 = asc(200);
 function seed() {
   return [
     {
-      id: "V-001", name: "TREASURY_ALPHA", chain: "ETHEREUM", address: "0x8F3a...E7d1",
+      id: "V-001", name: "TREASURY_ALPHA", chain: "ETHEREUM", address: "0x8f3a700c444912532413045090f932634456e7d1",
       threshold: 2, ownerCount: 3, delay: 86400, nonce: 43, executor: TIMELOCK_EXECUTOR, fastPath: true,
       holdings: [
         { token: "ETH", balance: "14.2", usd: "$29,181" },
@@ -576,18 +576,18 @@ function seed() {
       ],
       owners: [
         { addr: DEMO_YOU, label: "DEPLOYER", you: true },
-        { addr: "0x5e6F...7A8B", label: "TREASURY" },
-        { addr: "0x9A0B...cD1E", label: "OPS" },
+        { addr: "0x5e6fd6e4e48b38cc4174bf3ff39d1931928f7a8b", label: "TREASURY" },
+        { addr: "0x9a0bfffb4d67c3e6a5cb2481bcad3c13e8d7cd1e", label: "OPS" },
       ],
       queue: [
-        { nonce: 40, target: "0x7a25...f3e1", value: "2.5", token: "ETH", dataLabel: "TRANSFER",
-          eta: NOW() - 3600, approvals: { [DEMO_YOU]: true, "0x5e6F...7A8B": true, "0x9A0B...cD1E": false } },
-        { nonce: 41, target: "0x3bc1...a8d4", value: "10,000", token: "USDC", dataLabel: "ERC20 TRANSFER",
-          eta: NOW() + 72000, approvals: { [DEMO_YOU]: true, "0x5e6F...7A8B": true, "0x9A0B...cD1E": false } },
+        { nonce: 40, target: "0x7a2554e5e32eb9471d41f656bbb45c4fa90af3e1", value: "2.5", token: "ETH", dataLabel: "TRANSFER",
+          eta: NOW() - 3600, approvals: { [DEMO_YOU]: true, "0x5e6fd6e4e48b38cc4174bf3ff39d1931928f7a8b": true, "0x9a0bfffb4d67c3e6a5cb2481bcad3c13e8d7cd1e": false } },
+        { nonce: 41, target: "0x3bc112caf371d8fe6f75acaf6b69a30dfc5da8d4", value: "10,000", token: "USDC", dataLabel: "ERC20 TRANSFER",
+          eta: NOW() + 72000, approvals: { [DEMO_YOU]: true, "0x5e6fd6e4e48b38cc4174bf3ff39d1931928f7a8b": true, "0x9a0bfffb4d67c3e6a5cb2481bcad3c13e8d7cd1e": false } },
       ],
     },
     {
-      id: "V-002", name: "OPS_PAYROLL", chain: "BASE", address: "0x42Bf...1aE9",
+      id: "V-002", name: "OPS_PAYROLL", chain: "BASE", address: "0x42bf8989cbc44f461369845f47dd0311c20c1ae9",
       threshold: 3, ownerCount: 5, delay: 172800, nonce: 109, executor: TIMELOCK_EXECUTOR,
       holdings: [
         { token: "USDC", balance: "127,450", usd: "$127,450" },
@@ -595,31 +595,31 @@ function seed() {
       ],
       owners: [
         { addr: DEMO_YOU, label: "DEPLOYER", you: true },
-        { addr: "0xAa11...Bb22", label: "CFO" },
-        { addr: "0xCc33...Dd44", label: "HR" },
-        { addr: "0xEe55...Ff66", label: "COO" },
-        { addr: "0x7788...9900", label: "LEGAL" },
+        { addr: "0xaa11852f4fd5a4ee33e0fa9c662966ac7c6fbb22", label: "CFO" },
+        { addr: "0xcc337d3a8edeea6dcbdc8d92285f118f18e1dd44", label: "HR" },
+        { addr: "0xee55bcd84afadc3cedc21b81ef9d7c63876cff66", label: "COO" },
+        { addr: "0x77881b9586cdc5aef266409aebad3e7094d99900", label: "LEGAL" },
       ],
       queue: [
-        { nonce: 108, target: "0x9A44...0eF1", value: "32,000", token: "USDC", dataLabel: "ERC20 TRANSFER",
-          eta: NOW() + 129600, approvals: { [DEMO_YOU]: true, "0xAa11...Bb22": true, "0xCc33...Dd44": true, "0xEe55...Ff66": false, "0x7788...9900": false } },
+        { nonce: 108, target: "0x9a44b95628a8b75d5a1a275e6e1215ca1d450ef1", value: "32,000", token: "USDC", dataLabel: "ERC20 TRANSFER",
+          eta: NOW() + 129600, approvals: { [DEMO_YOU]: true, "0xaa11852f4fd5a4ee33e0fa9c662966ac7c6fbb22": true, "0xcc337d3a8edeea6dcbdc8d92285f118f18e1dd44": true, "0xee55bcd84afadc3cedc21b81ef9d7c63876cff66": false, "0x77881b9586cdc5aef266409aebad3e7094d99900": false } },
       ],
     },
     {
-      id: "V-003", name: "NFT_VAULT", chain: "ETHEREUM", address: "0xC1d8...93Fa",
+      id: "V-003", name: "NFT_VAULT", chain: "ETHEREUM", address: "0xc1d8e1e32ad8846f9c1841ed9baa5255dc1093fa",
       threshold: 2, ownerCount: 2, delay: 43200, nonce: 13, executor: TIMELOCK_EXECUTOR,
       holdings: [{ token: "ETH", balance: "3.8", usd: "$7,809" }],
       owners: [
         { addr: DEMO_YOU, label: "DEPLOYER", you: true },
-        { addr: "0xA4d1...5e99", label: "CURATOR" },
+        { addr: "0xa4d1b74f87113c7851dabdfd20ce2a8f96c15e99", label: "CURATOR" },
       ],
       queue: [
-        { nonce: 12, target: "0xC1d8...93Fa", value: "0", token: "", dataLabel: "setDelay(86400)",
-          eta: NOW() + 28800, approvals: { [DEMO_YOU]: true, "0xA4d1...5e99": true } },
+        { nonce: 12, target: "0xc1d8e1e32ad8846f9c1841ed9baa5255dc1093fa", value: "0", token: "", dataLabel: "setDelay(86400)",
+          eta: NOW() + 28800, approvals: { [DEMO_YOU]: true, "0xa4d1b74f87113c7851dabdfd20ce2a8f96c15e99": true } },
       ],
     },
     {
-      id: "V-004", name: "DEV_GRANTS", chain: "ARBITRUM", address: "0x7E2a...Bb04",
+      id: "V-004", name: "DEV_GRANTS", chain: "ARBITRUM", address: "0x7e2aba7ddaaef82c666a204eb824974af273bb04",
       threshold: 2, ownerCount: 4, delay: 259200, nonce: 8, executor: TIMELOCK_EXECUTOR,
       holdings: [
         { token: "ETH", balance: "42.7", usd: "$87,749" },
@@ -629,13 +629,13 @@ function seed() {
       ],
       owners: [
         { addr: DEMO_YOU, label: "DEPLOYER", you: true },
-        { addr: "0xDE01...1eAd", label: "ENG" },
-        { addr: "0x64A2...B4c1", label: "GRANTS" },
-        { addr: "0xC044...dA01", label: "DAO" },
+        { addr: "0xde016277fd5b47233e210137d39e33626dfe1ead", label: "ENG" },
+        { addr: "0x64a2d1f61c61bb493b20cc1746df2e04bb55b4c1", label: "GRANTS" },
+        { addr: "0xc0449b3063467188ad67d17a4063bc16dfe4da01", label: "DAO" },
       ],
       queue: [
-        { nonce: 7, target: "0x64A2...F00d", value: "5,000", token: "USDC", dataLabel: "ERC20 TRANSFER",
-          eta: 0, approvals: { [DEMO_YOU]: false, "0xDE01...1eAd": true, "0x64A2...B4c1": false, "0xC044...dA01": false } },
+        { nonce: 7, target: "0x64a2510b8756a4fcc845c198d75444985834f00d", value: "5,000", token: "USDC", dataLabel: "ERC20 TRANSFER",
+          eta: 0, approvals: { [DEMO_YOU]: false, "0xde016277fd5b47233e210137d39e33626dfe1ead": true, "0x64a2d1f61c61bb493b20cc1746df2e04bb55b4c1": false, "0xc0449b3063467188ad67d17a4063bc16dfe4da01": false } },
       ],
     },
   ];
@@ -1664,7 +1664,7 @@ function renderAdmin(v,mob){
   </div>`:`<div>
     ${(()=>{
       const hist = S.demoMode
-        ? [{nonce:42,act:"TRANSFER",desc:"0.3 ETH \u2192 0xab12",age:"1H",status:"executed"},{nonce:39,act:"TRANSFER",desc:"1.2 ETH \u2192 0x4f21",age:"4H",status:"executed"},{nonce:38,act:"THRESHOLD",desc:"1 \u2192 2",age:"18H",status:"executed"},{nonce:37,act:"ADD OWNER",desc:"0x9A0B...cD1E",age:"2D",status:"executed"},{nonce:36,act:"TRANSFER",desc:"5K USDC \u2192 0x8bc2",age:"3D",status:"executed"}]
+        ? [{nonce:42,act:"TRANSFER",desc:"0.3 ETH \u2192 0xab12",age:"1H",status:"executed"},{nonce:39,act:"TRANSFER",desc:"1.2 ETH \u2192 0x4f21",age:"4H",status:"executed"},{nonce:38,act:"THRESHOLD",desc:"1 \u2192 2",age:"18H",status:"executed"},{nonce:37,act:"ADD OWNER",desc:"0x9a0bfffb4d67c3e6a5cb2481bcad3c13e8d7cd1e",age:"2D",status:"executed"},{nonce:36,act:"TRANSFER",desc:"5K USDC \u2192 0x8bc2",age:"3D",status:"executed"}]
         : (v.history||[]);
       if(!hist.length) return '<div style="padding:48px 0;text-align:center;font-size:11px;color:var(--d);letter-spacing:2px">NO HISTORY YET</div>';
       return hist.map(tx=>`<div class="row">
