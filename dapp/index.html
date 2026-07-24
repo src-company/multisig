@@ -140,6 +140,10 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 .ap-ok{color:var(--g);font-weight:600}
 .ap-no{color:var(--d);font-weight:600}
 .eta{color:var(--d);margin-left:auto;font-size:10px}
+.tx-progress{display:flex;align-items:center;gap:10px;margin:12px 0 2px;font-size:9px;font-weight:700;letter-spacing:2px;color:var(--d)}
+.tx-progress>.plabel{min-width:78px}
+.pbar{height:4px;background:var(--ln);overflow:hidden;flex:1;min-width:70px;max-width:220px}
+.pbar>i{display:block;height:100%;transition:width .4s ease}
 .mob-actions{margin-top:14px}
 
 /* tx builder */
@@ -161,6 +165,7 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 /* signers */
 .signer-addr{font-size:14px;font-weight:700;word-break:break-all}
 .signer-label{font-size:10px;color:var(--m);letter-spacing:2px;margin-top:2px}
+.signer-name{font-size:11px;font-weight:700;color:var(--a);letter-spacing:1px}
 .signer-you{font-size:9px;font-weight:700;color:var(--a);letter-spacing:2px}
 
 /* footer */
@@ -520,7 +525,9 @@ const WEINS = '0x0000000000696760E15f265e828DB644A0c242EB';
 const WEINS_ABI = [
   'function computeId(string) pure returns (uint256)',
   'function ownerOf(uint256) view returns (address)',
+  'function reverseResolve(address) view returns (string)',
 ];
+const weinsIface = new ethers.Interface(WEINS_ABI);
 
 // ── EIP-712 ───────────────────────────────────────────────────────
 const EIP712_DOMAIN = { name:'Multisig', version:'1' };
@@ -767,6 +774,12 @@ function getYou(){
   return window._connectedAddress || null;
 }
 
+// Best short identity for an owner: custom label, else resolved .wei/ENS name,
+// else a shortened address.
+function ownerIdent(o){
+  return o.label || o.name || (o.addr && ethers.isAddress(o.addr) ? o.addr.slice(0,6)+'…'+o.addr.slice(-4) : (o.addr || ''));
+}
+
 function addrLink(addr, chain) {
   const safe = esc(addr);
   const base = S.demoMode
@@ -876,6 +889,7 @@ async function fetchContractAbi(addr) {
 function onCxTargetChange(val) {
   S.cxTarget = val;
   clearTimeout(_cxDebounce);
+  updateCxTargetStatus(val);
   if(!val || !ethers.isAddress(val)) {
     if(S.cxAbi !== null || S.cxLoading) { S.cxAbi = null; S.cxFn = null; S.cxArgs = {}; S.cxAddr = ''; S.cxLoading = false; }
     return;
@@ -1176,7 +1190,16 @@ function renderDash(v,mob){
     const blocked=!isQueued&&!isCancel&&i!==firstUnqueued;
     const dv=tx.displayValue||tx.value,dt=tx.displayToken||tx.token;
     const display=dv&&dv!=="0"?`${dv} ${dt}`:tx.dataLabel;
-    const apHtml=v.owners.map(o=>`<span class="${tx.approvals[o.addr]?"ap-ok":"ap-no"}">${tx.approvals[o.addr]?"\u2713":"\u25CB"} ${esc(o.label)}${o.you?"*":""}</span>`).join("");
+    const acCount=Object.values(tx.approvals).filter(Boolean).length;
+    let progressLine="";
+    if(!isCancel&&!isQueued&&!blocked){
+      const pct=v.threshold?Math.min(1,acCount/v.threshold):0,done=acCount>=v.threshold;
+      progressLine=`<div class="tx-progress"><span class="plabel">SIGNATURES</span><div class="pbar"><i style="width:${Math.round(pct*100)}%;background:${done?"var(--g)":"var(--y)"}"></i></div><span style="color:${done?"var(--g)":"var(--m)"}">${acCount}/${v.threshold}${done&&acCount>=v.ownerCount?" \u00B7 ALL":""}</span></div>`;
+    }else if(isQueued&&v.delay>0&&fmtEta(tx.eta)!=="READY"){
+      const queuedAt=tx.eta-v.delay,pct=Math.min(1,Math.max(0,(NOW()-queuedAt)/v.delay));
+      progressLine=`<div class="tx-progress"><span class="plabel">TIMELOCK</span><div class="pbar"><i data-tl-eta="${tx.eta}" data-tl-delay="${v.delay}" style="width:${Math.round(pct*100)}%;background:var(--a)"></i></div></div>`;
+    }
+    const apHtml=v.owners.map(o=>`<span class="${tx.approvals[o.addr]?"ap-ok":"ap-no"}">${tx.approvals[o.addr]?"\u2713":"\u25CB"} ${esc(ownerIdent(o))}${o.you?"*":""}</span>`).join("");
     const etaHtml=tx.eta>0&&fmtEta(tx.eta)!=="READY"?`<span class="eta" data-eta="${tx.eta}">${new Date(tx.eta*1000).toLocaleString("en-US",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"})}</span>`:"";
     const signedByYou=you&&tx.approvals[you];
     let actionBtn="";
@@ -1262,19 +1285,79 @@ function renderDash(v,mob){
         ${mob&&!blocked?`<span class="tx-status" style="color:${s.c}"${tx.eta>0&&!s.exec?` data-eta-status="${tx.eta}"`:``}>&bull; ${s.l}</span>`:""}
         ${blocked?'<span style="font-size:10px;color:var(--d);letter-spacing:2px">BLOCKED</span>':""}
       </div>
+      ${blocked?"":progressLine}
       <div class="approvals">${apHtml}${etaHtml}</div>
       ${mob&&!blocked&&actionBtn?`<div class="mob-actions">${actionBtn}</div>`:""}
     </div>`}).join("")}
   <div class="sec"><span>SIGNERS</span><span class="line"></span></div>
   ${v.owners.map(o=>`<div class="row">
     <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;min-width:0">
-      <span class="signer-addr">${S.demoMode?addrLink(o.addr,v.chain):addrLink(o.addr)}</span><span class="signer-label">${esc(o.label)}</span>
+      <span class="signer-addr">${S.demoMode?addrLink(o.addr,v.chain):addrLink(o.addr)}</span>${o.name?`<span class="signer-name">${esc(o.name)}</span>`:""}<span class="signer-label">${esc(o.label)}</span>
     </div>
     ${o.you?'<span class="signer-you">YOU</span>':""}
   </div>`).join("")}`;
 }
 
 // ── TX BUILDER ────────────────────────────────────────────────────
+// DOM-only field feedback — updates sibling status nodes without a full
+// re-render so the input keeps focus while typing.
+function onTxAmount(val, dec, avail, unit){
+  const u = document.getElementById('tx-units');
+  if(u) u.textContent = val ? toUnits(val, dec) + ' ' + unit : '';
+  const w = document.getElementById('tx-amount-warn');
+  if(w){ const n = parseFloat(String(val).replace(/,/g,'')) || 0; w.textContent = (avail > 0 && n > avail) ? 'EXCEEDS AVAILABLE BALANCE' : ''; }
+}
+function onTxRecipient(val){
+  const s = document.getElementById('tx-to-status');
+  if(!s) return;
+  const t = (val || '').trim();
+  if(!t){ s.textContent = ''; return; }
+  if(ethers.isAddress(t)){ s.textContent = 'VALID ADDRESS'; s.style.color = 'var(--g)'; }
+  else if(/\.(eth|wei)$/i.test(t)){ s.textContent = 'NAME · RESOLVES AT SIGN'; s.style.color = 'var(--a)'; }
+  else { s.textContent = 'NOT A VALID ADDRESS OR NAME'; s.style.color = 'var(--r)'; }
+}
+function fillTxMax(amountStr, dec, avail, unit){
+  const el = document.getElementById('tx-amount');
+  if(!el) return;
+  el.value = amountStr;
+  onTxAmount(amountStr, dec, avail, unit);
+}
+// Shared address/name field feedback (returns state; writes to a status node).
+function _addrState(t){
+  t = (t || '').trim();
+  if(!t) return { txt:'', color:'' };
+  if(ethers.isAddress(t)) return { txt:'VALID ADDRESS', color:'var(--g)' };
+  if(/\.(eth|wei)$/i.test(t)) return { txt:'NAME · RESOLVES AT SIGN', color:'var(--a)' };
+  return { txt:'NOT A VALID ADDRESS OR NAME', color:'var(--r)' };
+}
+function _hexState(d){
+  d = (d || '').trim();
+  if(!d || d === '0x') return { txt:'', color:'' };
+  if(!/^0x[0-9a-fA-F]*$/.test(d)) return { txt:'NOT HEX', color:'var(--r)' };
+  if(d.length % 2 !== 0) return { txt:'ODD LENGTH', color:'var(--r)' };
+  return { txt:'OK', color:'var(--g)' };
+}
+// CUSTOM target — mirrors onCxTargetChange's ABI fetch with an inline hint for
+// the name / invalid cases the ABI status doesn't cover.
+function updateCxTargetStatus(val){
+  const el = document.getElementById('cx-target-status');
+  if(!el) return;
+  const t = (val || '').trim();
+  if(!t || ethers.isAddress(t)){ el.textContent = ''; return; }
+  const s = _addrState(t);
+  el.textContent = s.txt; el.style.color = s.color;
+}
+function onBatchTarget(i, val){
+  S.batch[i].t = val;
+  const el = document.getElementById('batch-t-' + i);
+  if(el){ const s = _addrState(val); el.textContent = s.txt ? (ethers.isAddress((val||'').trim()) ? '✓' : s.txt) : ''; el.style.color = s.color; }
+}
+function onBatchData(i, val){
+  S.batch[i].d = val;
+  const el = document.getElementById('batch-d-' + i);
+  if(el){ const s = _hexState(val); el.textContent = s.txt; el.style.color = s.color; }
+}
+
 function renderTxBuilder(v,mob){
   const tokens = S.demoMode ? (DEMO_TOKENS[v.chain]||["ETH"]) : getProdTokenSymbols();
   const tabs=["TRANSFER","CUSTOM","BATCH"].map(m=>`<button class="txb-tab${S.txMode===m?" on":""}" onclick="S.txMode='${m}';render()">${m}</button>`).join("");
@@ -1282,15 +1365,21 @@ function renderTxBuilder(v,mob){
   if(S.txMode==="TRANSFER"){
     const dec=DECIMALS[S.txToken]||18;
     const unitLabel=S.txToken==="ETH"?"WEI":"UNITS ("+dec+" DECIMALS)";
+    const hold=(v.holdings||[]).find(h=>h.token===S.txToken);
+    const availStr=hold?(hold.raw!=null?ethers.formatUnits(hold.raw,hold.decimals||dec):stripCommas(hold.balance)):'';
+    const availNum=availStr?Number(availStr):0;
     body=`<div class="grid2">
       <div>
         <label class="lbl">TOKEN</label>
         <div class="token-pills">${tokens.map(t=>`<button class="pill${S.txToken===t?" on":""}" onclick="S.txToken='${t}';render()">${t}</button>`).join("")}</div>
-        <label class="lbl">AMOUNT</label><input class="inp" id="tx-amount" placeholder="0.0" oninput="document.getElementById('tx-units').textContent=this.value?toUnits(this.value,${dec})+' ${unitLabel}':''">
-        <div id="tx-units" style="font-size:10px;color:var(--d);margin-top:-12px;margin-bottom:12px;word-break:break-all"></div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline"><label class="lbl">AMOUNT</label>${availNum>0?`<button class="link-btn" style="font-size:9px;margin:0;padding:0" onclick="fillTxMax('${availStr}',${dec},${availNum},'${unitLabel}')">MAX ${esc(hold.balance)} ${esc(S.txToken)}</button>`:hold?`<span style="font-size:9px;color:var(--d);letter-spacing:1px">BAL ${esc(hold.balance)}</span>`:''}</div>
+        <input class="inp" id="tx-amount" placeholder="0.0" oninput="onTxAmount(this.value,${dec},${availNum},'${unitLabel}')">
+        <div id="tx-units" style="font-size:10px;color:var(--d);margin-top:-12px;word-break:break-all"></div>
+        <div id="tx-amount-warn" style="font-size:10px;color:var(--r);letter-spacing:1px;margin-bottom:12px;min-height:12px"></div>
       </div><div>
-        <label class="lbl">RECIPIENT</label><input class="inp" id="tx-to" placeholder="0x... or name.eth / name.wei">
-        ${S.txToken!=="ETH"?`<div style="font-size:10px;color:var(--d);margin-top:-12px;margin-bottom:12px">ON-CHAIN: transfer(recipient, amount) on ${S.txToken} contract</div>`:""}
+        <label class="lbl">RECIPIENT</label><input class="inp" id="tx-to" placeholder="0x... or name.eth / name.wei" oninput="onTxRecipient(this.value)">
+        <div id="tx-to-status" style="font-size:9px;letter-spacing:1px;margin-top:-12px;margin-bottom:12px;min-height:11px"></div>
+        ${S.txToken!=="ETH"?`<div style="font-size:10px;color:var(--d);margin-top:-4px;margin-bottom:12px">ON-CHAIN: transfer(recipient, amount) on ${S.txToken} contract</div>`:""}
         <button class="btn btn-fill btn-w" style="margin-top:${mob?8:16}px" onclick="submitTransfer()">SIGN + SUBMIT</button>
       </div></div>`;
   }else if(S.txMode==="CUSTOM"){
@@ -1328,7 +1417,8 @@ function renderTxBuilder(v,mob){
     }
     body=`<div class="grid2">
       <div>
-        <label class="lbl">TARGET</label><input class="inp" id="cx-target" placeholder="0x..." value="${esc(S.cxTarget)}" oninput="onCxTargetChange(this.value)">
+        <label class="lbl">TARGET</label><input class="inp" id="cx-target" placeholder="0x... or name.eth / name.wei" value="${esc(S.cxTarget)}" oninput="onCxTargetChange(this.value)">
+        <div id="cx-target-status" style="font-size:9px;letter-spacing:1px;margin-top:-8px;margin-bottom:8px;min-height:11px"></div>
         ${abiStatus}${fnPills}
         <label class="lbl">VALUE (ETH)</label><input class="inp" id="cx-value" placeholder="0" value="${esc(S.cxValue)}" oninput="S.cxValue=this.value;document.getElementById('cx-wei').textContent=this.value?toUnits(this.value,18)+' WEI':''">
         <div id="cx-wei" style="font-size:10px;color:var(--d);margin-top:-12px;margin-bottom:12px;word-break:break-all">${S.cxValue?toUnits(S.cxValue,18)+' WEI':''}</div>
@@ -1339,9 +1429,9 @@ function renderTxBuilder(v,mob){
     body=S.batch.map((c,i)=>`<div class="batch-call">
       <div class="call-hdr"><span>CALL ${String(i+1).padStart(2,"0")}</span>${S.batch.length>1?`<button class="x-btn" onclick="S.batch.splice(${i},1);render()">&#10005;</button>`:""}</div>
       <div class="grid3">
-        <div><label class="lbl">TARGET</label><input class="inp" data-bi="${i}" data-bf="t" placeholder="0x..." value="${esc(c.t)}" oninput="S.batch[${i}].t=this.value"></div>
-        <div><label class="lbl">VALUE (ETH)</label><input class="inp" data-bi="${i}" data-bf="v" placeholder="0" value="${esc(c.v)}" oninput="S.batch[${i}].v=this.value;this.nextElementSibling.textContent=this.value?toUnits(this.value,18)+' WEI':''"><div style="font-size:10px;color:var(--d);margin-top:-12px;margin-bottom:8px;word-break:break-all"></div></div>
-        <div><label class="lbl">CALLDATA</label><input class="inp" data-bi="${i}" data-bf="d" placeholder="0x..." value="${esc(c.d)}" oninput="S.batch[${i}].d=this.value"></div>
+        <div><label class="lbl">TARGET</label><input class="inp" data-bi="${i}" data-bf="t" placeholder="0x... or name.eth" value="${esc(c.t)}" oninput="onBatchTarget(${i},this.value)"><div id="batch-t-${i}" style="font-size:9px;letter-spacing:1px;margin-top:-12px;margin-bottom:8px;min-height:11px">${(()=>{const s=_addrState(c.t);return s.txt?`<span style="color:${s.color}">${ethers.isAddress((c.t||'').trim())?'✓':s.txt}</span>`:''})()}</div></div>
+        <div><label class="lbl">VALUE (ETH)</label><input class="inp" data-bi="${i}" data-bf="v" placeholder="0" value="${esc(c.v)}" oninput="S.batch[${i}].v=this.value;this.nextElementSibling.textContent=this.value?toUnits(this.value,18)+' WEI':''"><div style="font-size:10px;color:var(--d);margin-top:-12px;margin-bottom:8px;word-break:break-all">${c.v?toUnits(c.v,18)+' WEI':''}</div></div>
+        <div><label class="lbl">CALLDATA</label><input class="inp" data-bi="${i}" data-bf="d" placeholder="0x..." value="${esc(c.d)}" oninput="onBatchData(${i},this.value)"><div id="batch-d-${i}" style="font-size:9px;letter-spacing:1px;margin-top:-12px;margin-bottom:8px;min-height:11px">${(()=>{const s=_hexState(c.d);return s.txt?`<span style="color:${s.color}">${s.txt}</span>`:''})()}</div></div>
       </div></div>`).join("")+
       `<button class="link-btn" onclick="S.batch.push({t:'',v:'',d:''});render()">+ ADD CALL</button>
        <button class="btn btn-fill btn-w" style="margin-top:16px" onclick="submitBatch()">SIGN + SUBMIT BATCH</button>`;
@@ -1508,7 +1598,7 @@ function renderAdmin(v,mob){
   </div>`:tab==="OWNERS"?`<div>
     ${v.owners.map((o,oi)=>`<div class="row" style="${mob?"flex-direction:column;align-items:stretch":""}">
       <div>
-        <div class="signer-addr">${S.demoMode?addrLink(o.addr,v.chain):addrLink(o.addr)}</div>
+        <div class="signer-addr">${S.demoMode?addrLink(o.addr,v.chain):addrLink(o.addr)}${o.name?` <span class="signer-name">${esc(o.name)}</span>`:""}</div>
         <div class="signer-label">${esc(o.label)}${o.you?" &middot; YOU":""}</div>
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-shrink:0${mob?";width:100%":""}">
@@ -1800,6 +1890,47 @@ async function resolveName(input) {
   throw new Error('Enter an address, .eth, or .wei name');
 }
 
+// Reverse-resolve owner addresses to human-readable names. Primary: WNS
+// (.wei) reverse resolution batched into ONE Multicall3 call on mainnet.
+// Fallback: ENS reverse for any still-unnamed owners (best-effort, parallel).
+// Returns a lowercased-address → name map; never throws.
+const _ownerNameCache = {};
+async function resolveOwnerNames(addrs) {
+  const out = {};
+  if(!addrs || !addrs.length) return out;
+  const need = [];
+  for(const a of addrs) {
+    const k = a.toLowerCase();
+    if(_ownerNameCache[k] !== undefined) { if(_ownerNameCache[k]) out[k] = _ownerNameCache[k]; }
+    else need.push(a);
+  }
+  if(!need.length) return out;
+  // 1) Batched .wei reverse resolution via Multicall3 on mainnet
+  try {
+    const mc = new ethers.Contract(MC3, MC3_ABI, ethMainRpc);
+    const calls = need.map(a => ({ target: WEINS, allowFailure: true, callData: weinsIface.encodeFunctionData('reverseResolve', [a]) }));
+    const res = await mc.aggregate3(calls);
+    res.forEach((r, i) => {
+      if(r.success) {
+        try {
+          const nm = weinsIface.decodeFunctionResult('reverseResolve', r.returnData)[0];
+          if(nm) out[need[i].toLowerCase()] = nm.toLowerCase();
+        } catch(_) {}
+      }
+    });
+  } catch(e) { console.error('wei reverse resolve:', e); }
+  // 2) ENS fallback for owners without a .wei name
+  const unnamed = need.filter(a => !out[a.toLowerCase()]);
+  if(unnamed.length) {
+    await Promise.all(unnamed.map(async a => {
+      try { const nm = await ethMainRpc.lookupAddress(a); if(nm) out[a.toLowerCase()] = nm; } catch(_) {}
+    }));
+  }
+  // Cache results (including negative lookups) to avoid repeat network calls
+  for(const a of need) { const k = a.toLowerCase(); _ownerNameCache[k] = out[k] || null; }
+  return out;
+}
+
 // ── PRODUCTION: MULTICALL ─────────────────────────────────────────
 
 async function multicallLoad(addr) {
@@ -1865,7 +1996,7 @@ async function loadTokenBalances(walletAddr, ethBalance) {
   if(ethBalance > 0n) {
     const ethAmount = Number(ethers.formatEther(ethBalance));
     const ethUsd = ethPrice > 0 ? ethAmount * ethPrice : 0;
-    holdings.push({token:'ETH', balance:ethers.formatEther(ethBalance).slice(0,10), usd: ethUsd > 0 ? `$${ethUsd.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}` : ''});
+    holdings.push({token:'ETH', balance:ethers.formatEther(ethBalance).slice(0,10), usd: ethUsd > 0 ? `$${ethUsd.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}` : '', raw: ethBalance.toString(), decimals: 18});
   }
 
   // ERC20s
@@ -1880,7 +2011,7 @@ async function loadTokenBalances(walletAddr, ethBalance) {
     } else if(prices[t.symbol]) {
       usd = amount * prices[t.symbol];
     }
-    holdings.push({token:t.symbol, balance:display, usd: usd > 0 ? `$${usd.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}` : ''});
+    holdings.push({token:t.symbol, balance:display, usd: usd > 0 ? `$${usd.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}` : '', raw: balances[i].bal.toString(), decimals: t.decimals});
   });
 
   return holdings;
@@ -2086,8 +2217,8 @@ async function loadSingleVaultData(addr, dbWallet) {
     } catch(e) { console.error('Auto-register vault:', e); }
   }
 
-  // Phase 2: owner labels + executor check + token balances in parallel
-  const [labelsRaw, fpResult, holdings] = await Promise.all([
+  // Phase 2: owner labels + executor check + token balances + owner names in parallel
+  const [labelsRaw, fpResult, holdings, ownerNames] = await Promise.all([
     dbW?.id ? dbGetOwnerLabels(dbW.id) : Promise.resolve([]),
     s.executor !== ethers.ZeroAddress ? (async () => {
       try {
@@ -2095,7 +2226,8 @@ async function loadSingleVaultData(addr, dbWallet) {
         return { isTE: true, fpEnabled: await tlContract.forwardEnabled(addr) };
       } catch(_) { return { isTE: false, fpEnabled: false }; }
     })() : Promise.resolve({ isTE: false, fpEnabled: false }),
-    loadTokenBalances(addr, s.balance)
+    loadTokenBalances(addr, s.balance),
+    resolveOwnerNames([...s.owners])
   ]);
 
   const ownerLabels = {};
@@ -2104,6 +2236,7 @@ async function loadSingleVaultData(addr, dbWallet) {
   const owners = [...s.owners].map(o => ({
     addr: o,
     label: ownerLabels[o.toLowerCase()] || (o.toLowerCase() === you?.toLowerCase() ? 'YOU' : ''),
+    name: ownerNames[o.toLowerCase()] || null,
     you: o.toLowerCase() === you?.toLowerCase()
   }));
   const { isTE, fpEnabled } = fpResult;
@@ -2310,15 +2443,16 @@ async function reloadVault(vi) {
     v.nonce = Number(s.nonce);
     v.executor = s.executor;
     const you = window._connectedAddress;
-    // Preserve existing labels
-    const oldLabels = {};
-    v.owners.forEach(o => { if(o.label) oldLabels[o.addr.toLowerCase()] = o.label; });
+    // Preserve existing labels + resolved names (avoids display flicker)
+    const oldLabels = {}, oldNames = {};
+    v.owners.forEach(o => { if(o.label) oldLabels[o.addr.toLowerCase()] = o.label; if(o.name) oldNames[o.addr.toLowerCase()] = o.name; });
     if(v._pendingLabel && v._pendingLabel.label) {
       oldLabels[v._pendingLabel.addr] = v._pendingLabel.label;
     }
     v.owners = [...s.owners].map(o => ({
       addr: o,
       label: oldLabels[o.toLowerCase()] || (o.toLowerCase() === you?.toLowerCase() ? 'YOU' : ''),
+      name: oldNames[o.toLowerCase()] || null,
       you: o.toLowerCase() === you?.toLowerCase()
     }));
     v.loadedOwners = [...s.owners];
@@ -2329,8 +2463,8 @@ async function reloadVault(vi) {
       if(match) dbUpdateOwnerLabel(v.dbId, match.addr, pl.label);
     }
     delete v._pendingLabel;
-    // Executor check + token balances + queue + history in parallel
-    const [fpResult, holdings] = await Promise.all([
+    // Executor check + token balances + queue + history + owner names in parallel
+    const [fpResult, holdings, , , ownerNames] = await Promise.all([
       s.executor !== ethers.ZeroAddress ? (async () => {
         try {
           const tlContract = new ethers.Contract(s.executor, TIMELOCK_EXECUTOR_ABI, provider);
@@ -2339,8 +2473,10 @@ async function reloadVault(vi) {
       })() : Promise.resolve({ isTE: false, fpEnabled: false }),
       loadTokenBalances(v.address, s.balance),
       loadVaultQueue(vi),
-      loadVaultHistory(vi)
+      loadVaultHistory(vi),
+      resolveOwnerNames([...s.owners])
     ]);
+    v.owners.forEach(o => { if(ownerNames[o.addr.toLowerCase()]) o.name = ownerNames[o.addr.toLowerCase()]; });
     v.isTimelockExecutor = fpResult.isTE;
     v.fastPath = fpResult.fpEnabled;
     v.holdings = holdings;
@@ -3523,6 +3659,10 @@ setInterval(() => {
       el.textContent = "\u2022 " + f;
       el.style.color = f === "READY" ? "var(--g)" : "var(--d)";
     }
+  });
+  document.querySelectorAll("[data-tl-eta]").forEach(el => {
+    const eta = +el.dataset.tlEta, delay = +el.dataset.tlDelay;
+    if (delay > 0) el.style.width = Math.round(Math.min(1, Math.max(0, (NOW() - (eta - delay)) / delay)) * 100) + "%";
   });
   const hasFocused = document.querySelector(
     '.txb input:focus, .txb textarea:focus, .content input:focus, .content textarea:focus, .content select:focus'
