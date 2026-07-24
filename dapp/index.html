@@ -1069,6 +1069,29 @@ function explorerTxLink(hash) {
 // instead of on every render.
 let _vw = window.innerWidth;
 
+// A full innerHTML rebuild drops the focused field and its caret. When the
+// focused element has a stable id (form inputs do), remember it so we can put
+// focus, selection, and its own scroll back after the swap. Only id'd active
+// elements are touched, so navigation renders are unaffected.
+function captureFocus(root){
+  const el = document.activeElement;
+  if(!el || !el.id || !root.contains(el)) return null;
+  const state = { id: el.id, scrollTop: el.scrollTop, scrollLeft: el.scrollLeft };
+  if(typeof el.selectionStart === 'number'){ state.selStart = el.selectionStart; state.selEnd = el.selectionEnd; }
+  return state;
+}
+function restoreFocus(state){
+  if(!state) return;
+  const el = document.getElementById(state.id);
+  if(!el) return;
+  el.focus({ preventScroll: true });
+  if(state.selStart != null && typeof el.setSelectionRange === 'function'){
+    try { el.setSelectionRange(state.selStart, state.selEnd); } catch(_){}
+  }
+  el.scrollTop = state.scrollTop;
+  el.scrollLeft = state.scrollLeft;
+}
+
 // Coalesce render() calls: multiple state mutations in one tick (or several
 // callers firing in the same frame) collapse into a single full rebuild on the
 // next animation frame, instead of thrashing the DOM once per call.
@@ -1113,7 +1136,9 @@ function renderNow(){
     if(location.hash) history.replaceState(null, '', location.pathname);
   }
 
-  document.getElementById("app").innerHTML = `
+  const _appEl = document.getElementById("app");
+  const _focusState = captureFocus(_appEl);
+  _appEl.innerHTML = `
   <div class="frame">
     ${mob?"":`<div class="rail rail-l">${ASC400}</div><div class="rail rail-r">${ASC400}</div>`}
     <div class="hbar">${ASC200}</div>
@@ -1150,6 +1175,7 @@ function renderNow(){
     <div class="hbar">${ASC200}</div>
   </div>
   ${S.showChains?renderChainOverlay(mob):""}`;
+  restoreFocus(_focusState);
 }
 
 function renderChainOverlay(mob){
@@ -1184,14 +1210,19 @@ function renderDash(v,mob){
   const you = getYou();
   const h0=v.holdings[0];
 
+  // Single pass over every vault's queue: accumulate the global action counts
+  // and, per vault, the flags the tabs below need — so txSt() is evaluated once
+  // per tx instead of again for each tab dot.
   let needsSig=0,readyExec=0,pendingSubmit=0;
-  S.vaults.forEach((vt,vi)=>{
+  const vaultFlags=S.vaults.map(vt=>{
+    let rdy=false,needsYou=false;
     vt.queue.forEach(tx=>{
       const st=txSt(tx,vt);
-      if(st.sign&&you&&!tx.approvals[you])needsSig++;
-      if(st.exec||st.instant)readyExec++;
+      if(st.sign&&you&&!tx.approvals[you]){needsSig++;needsYou=true;}
+      if(st.exec||st.instant){readyExec++;rdy=true;}
       else if(st.queue)pendingSubmit++;
     });
+    return{rdy,needsYou};
   });
   const totalActions=needsSig+readyExec+pendingSubmit;
   const attnParts=[];
@@ -1207,8 +1238,7 @@ function renderDash(v,mob){
   <div class="vtabs"><div class="vtabs-inner">
     ${S.vaults.map((vt,i)=>{
       const on=i===S.sel;
-      const rdy=vt.queue.some(tx=>{const st=txSt(tx,vt);return st.exec||st.instant});
-      const needsYou=vt.queue.some(tx=>{const st=txSt(tx,vt);return st.sign&&you&&!tx.approvals[you]});
+      const {rdy,needsYou}=vaultFlags[i];
       const dot=rdy?'<span class="vtab-dot" style="background:var(--g)"></span>':needsYou?'<span class="vtab-dot" style="background:var(--y)"></span>':"";
       return`<button class="vtab${on?" on":""}" onclick="S.sel=${i};S.nt=S.vaults[${i}].threshold;S.nd=S.vaults[${i}].delay/3600;S.showTx=false;render()">
       <div class="vtab-name">${esc(vt.name)}${dot}</div>
