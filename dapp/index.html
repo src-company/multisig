@@ -199,9 +199,10 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 .policy-big{font-size:44px;font-weight:700;letter-spacing:-2px}
 .policy-of{font-size:18px;font-weight:700;color:var(--m)}
 .changed-tag{font-size:10px;color:var(--y);letter-spacing:2px}
-.thresh-btns{display:flex;gap:6px;margin-bottom:16px}
-.thresh-btn{flex:1;padding:0 4px}
-.owner-row{display:grid;grid-template-columns:22px 1fr 132px 40px;grid-template-areas:"num addr label del";gap:8px;align-items:center;margin-bottom:2px}
+.thresh-btns{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap}
+.thresh-btn{flex:0 0 auto;min-width:60px;padding:0 10px}
+.btn-disabled{border:1px solid var(--fr)!important;color:var(--d)!important;background:transparent!important;cursor:not-allowed}
+.owner-row{display:grid;grid-template-columns:22px minmax(0,1fr) 120px 40px;grid-template-areas:"num addr label del";gap:12px;align-items:center;margin-bottom:2px}
 .owner-row .o-num{grid-area:num;font-size:10px;font-weight:700}
 .owner-row .o-addr{grid-area:addr;margin:0}
 .owner-row .o-label{grid-area:label;margin:0;font-size:11px;letter-spacing:1px}
@@ -1550,7 +1551,7 @@ METHOD      ${c.fastPath&&ds>0?"createWithCalls()":"create()"}</div><div class="
         ${on?`<div class="net-tokens">${t.map(tk=>`<span>${tk}</span>`).join("")}${n.test?'<span style="opacity:.5">+ CUSTOM</span>':""}</div>`:""}
       </div>`}).join("")}
       ${!val.ready?`<div style="margin-top:24px;font-size:10px;letter-spacing:1px;color:var(--y);text-align:center">${esc(val.reason)}</div>`:""}
-      <button class="btn ${val.ready?"btn-fill":"btn-outline"} btn-w btn-big" style="margin-top:${val.ready?28:8}px;${val.ready?"":"border-color:var(--fr);color:var(--m);"}cursor:${val.ready?"pointer":"not-allowed"}" ${val.ready?"":'title="'+esc(val.reason)+'"'} onclick="${val.ready?"doDeploy()":""}">DEPLOY</button>
+      <button class="btn ${val.ready?"btn-fill":"btn-disabled"} btn-w btn-big" style="margin-top:${val.ready?28:8}px" ${val.ready?"":'title="'+esc(val.reason)+'"'} onclick="${val.ready?"doDeploy()":""}">DEPLOY</button>
       <div style="margin-top:12px;font-size:9px;color:var(--d);letter-spacing:1px;text-align:center">VIA <a href="${explorerBase}/address/${FACTORY}" target="_blank" rel="noopener" style="color:var(--d);border-bottom:1px solid var(--ln);text-decoration:none">MULTISIGFACTORY</a></div>
     </div>
   </div>`;
@@ -1569,59 +1570,67 @@ function renderAdmin(v,mob){
   <div class="admin-tabs">
     ${["POLICY","OWNERS","HISTORY"].map(t=>`<button class="admin-tab${tab===t?" on":""}" onclick="S.adminTab='${t}';render()">${t}</button>`).join("")}
   </div>
-  ${tab==="POLICY"?`<div class="grid2" style="gap:${mob?32:48}px">
-    <div>
-      <label class="lbl">VAULT NAME</label>
-      <div style="display:flex;gap:8px;margin-bottom:24px">
-        <input class="inp" id="admin-vault-name" style="margin:0;flex:1" placeholder="${esc(v.name)}" value="${esc(v.name)}">
-        <button class="btn btn-outline btn-sm" style="flex-shrink:0" onclick="renameVault()">SAVE</button>
-      </div>
-      <label class="lbl"><span class="dim">SET &middot;</span> THRESHOLD</label>
-      <div style="display:flex;align-items:baseline;gap:8px;margin:8px 0 20px">
-        <span class="policy-big">${S.nt}</span>
-        <span class="policy-of">/ ${v.ownerCount}</span>
-        ${tc?'<span class="changed-tag">CHANGED</span>':""}
-      </div>
-      <div class="thresh-btns">${Array.from({length:v.ownerCount},(_,i)=>i+1).map(n=>`<button class="btn btn-outline thresh-btn" style="opacity:${n===S.nt?1:.3};background:${n===S.nt?"color-mix(in srgb,var(--a) 8%,transparent)":"transparent"}" onclick="S.nt=${n};render()">${n}</button>`).join("")}</div>
-      <button class="btn btn-fill btn-w" style="opacity:${tc?1:.3}" onclick="${tc?`doAdminPropose('setThreshold',${S.nt})`:""}" >PROPOSE</button>
+  ${tab==="POLICY"?`
+    <label class="lbl">VAULT NAME</label>
+    <div style="display:flex;gap:8px;max-width:520px">
+      <input class="inp" id="admin-vault-name" style="margin:0;flex:1" placeholder="${esc(v.name)}" value="${esc(v.name)}">
+      <button class="btn btn-outline btn-sm" style="flex-shrink:0" onclick="renameVault()">SAVE</button>
     </div>
-    <div>
-      <label class="lbl"><span class="dim">SET &middot;</span> DELAY</label>
-      <div style="display:flex;align-items:baseline;gap:8px;margin:8px 0 20px">
-        <span class="policy-big">${fmtD(v.delay)}</span>
-        <span style="font-size:13px;color:var(--m)">${v.delay/3600}h</span>
-      </div>
-      <label class="lbl">NEW DELAY (HOURS)</label>
-      <input class="inp" type="number" step="any" min="0" value="${S.nd}" onchange="S.nd=parseFloat(this.value)||0;render()" oninput="S.nd=parseFloat(this.value)||0">
-      ${dc?`<div style="font-size:10px;color:var(--y);letter-spacing:2px;margin-top:-10px;margin-bottom:10px">&rarr; ${fmtD(Math.floor(S.nd*3600))} (${Math.floor(S.nd*3600)}s)</div>`:""}
-      <button class="btn btn-fill btn-w" style="opacity:${dc?1:.3}" onclick="${dc?`doAdminPropose('setDelay',${Math.floor(S.nd*3600)})`:""}" >PROPOSE</button>
-      <div class="sep"></div>
-      <label class="lbl"><span class="dim">SET &middot;</span> EXECUTOR</label>
-      <div style="font-size:12px;font-weight:700;margin:8px 0 4px;word-break:break-all">${S.demoMode?addrLink(v.executor,v.chain):addrLink(v.executor)}</div>
-      <div style="font-size:10px;color:var(--d);margin-bottom:14px">${v.executor===TIMELOCK_EXECUTOR?"TIMELOCK EXECUTOR (DEFAULT)":(v.executor===ethers.ZeroAddress||v.executor==="0x0000...0000")?"DISABLED":"CUSTOM EXECUTOR"}</div>
-      <input class="inp" id="admin-executor-input" placeholder="0x...">
-      <button class="btn btn-fill btn-w" style="opacity:.5" onclick="doAdminPropose('setExecutor')">PROPOSE</button>
-      ${v.delay>0&&v.executor!==ethers.ZeroAddress&&v.executor!=="0x0000...0000"?`<div class="sep"></div>
-      <label class="lbl"><span class="dim">EXECUTOR &middot;</span> INSTANT PATH</label>
-      <div style="font-size:11px;color:var(--m);margin:8px 0 14px;line-height:1.7">Unanimous (${v.ownerCount}/${v.ownerCount}) signatures bypass timelock via TimelockExecutor.forward(). Cancel path (${v.threshold}/${v.ownerCount}) is always available.</div>
-      <button class="btn ${v.fastPath?"btn-fill":"btn-outline"}" style="font-size:10px;padding:0 16px" onclick="doAdminPropose('enableForward')">${v.fastPath?"ENABLED":"DISABLED"}</button>`:""}
-    </div>
-  </div>`:tab==="OWNERS"?`<div>
-    ${v.owners.map((o,oi)=>`<div class="row" style="${mob?"flex-direction:column;align-items:stretch":""}">
+    <div class="sep"></div>
+    <div class="grid2" style="gap:${mob?32:48}px">
       <div>
-        <div class="signer-addr">${S.demoMode?addrLink(o.addr,v.chain):addrLink(o.addr)}${o.name?` <span class="signer-name">${esc(o.name)}</span>`:""}</div>
-        <div class="signer-label">${esc(o.label)}${o.you?" &middot; YOU":""}</div>
+        <label class="lbl"><span class="dim">SET &middot;</span> THRESHOLD</label>
+        <div style="display:flex;align-items:baseline;gap:8px;margin:8px 0 20px">
+          <span class="policy-big">${S.nt}</span>
+          <span class="policy-of">/ ${v.ownerCount}</span>
+          ${tc?'<span class="changed-tag">CHANGED</span>':""}
+        </div>
+        <div class="thresh-btns">${Array.from({length:v.ownerCount},(_,i)=>i+1).map(n=>`<button class="btn btn-outline thresh-btn" style="opacity:${n===S.nt?1:.35};background:${n===S.nt?"color-mix(in srgb,var(--a) 8%,transparent)":"transparent"}" onclick="S.nt=${n};render()">${n}</button>`).join("")}</div>
+        <div style="font-size:10px;color:var(--d);letter-spacing:1px;margin:-6px 0 14px">${S.nt} OF ${v.ownerCount} SIGNATURES REQUIRED</div>
+        <button class="btn ${tc?"btn-fill":"btn-disabled"} btn-w" onclick="${tc?`doAdminPropose('setThreshold',${S.nt})`:""}">${tc?"PROPOSE":"NO CHANGE"}</button>
+      </div>
+      <div>
+        <label class="lbl"><span class="dim">SET &middot;</span> DELAY</label>
+        <div style="display:flex;align-items:baseline;gap:8px;margin:8px 0 20px">
+          <span class="policy-big">${fmtD(v.delay)}</span>
+          <span style="font-size:12px;color:var(--d);letter-spacing:1px">CURRENT</span>
+        </div>
+        <label class="lbl">NEW DELAY (HOURS)</label>
+        <input class="inp" type="number" step="any" min="0" value="${S.nd}" onchange="S.nd=parseFloat(this.value)||0;render()" oninput="S.nd=parseFloat(this.value)||0">
+        ${dc?`<div style="font-size:10px;color:var(--y);letter-spacing:1px;margin:-6px 0 14px">&rarr; ${fmtD(Math.floor(S.nd*3600))} (${Math.floor(S.nd*3600).toLocaleString()}s)</div>`:`<div style="font-size:10px;color:var(--d);letter-spacing:1px;margin:-6px 0 14px">${Math.floor(S.nd*3600).toLocaleString()}s</div>`}
+        <button class="btn ${dc?"btn-fill":"btn-disabled"} btn-w" onclick="${dc?`doAdminPropose('setDelay',${Math.floor(S.nd*3600)})`:""}">${dc?"PROPOSE":"NO CHANGE"}</button>
+      </div>
+    </div>
+    <div class="sep"></div>
+    <div class="grid2" style="gap:${mob?32:48}px">
+      <div>
+        <label class="lbl"><span class="dim">SET &middot;</span> EXECUTOR</label>
+        <div style="font-size:12px;font-weight:700;margin:8px 0 4px;word-break:break-all">${S.demoMode?addrLink(v.executor,v.chain):addrLink(v.executor)}</div>
+        <div style="font-size:10px;color:var(--d);letter-spacing:1px;margin-bottom:14px">${v.executor===TIMELOCK_EXECUTOR?"TIMELOCK EXECUTOR (DEFAULT)":(v.executor===ethers.ZeroAddress||v.executor==="0x0000...0000")?"DISABLED":"CUSTOM EXECUTOR"}</div>
+        <input class="inp" id="admin-executor-input" placeholder="0x... NEW EXECUTOR">
+        <button class="btn btn-outline btn-w" onclick="doAdminPropose('setExecutor')">PROPOSE EXECUTOR</button>
+      </div>
+      ${v.delay>0&&v.executor!==ethers.ZeroAddress&&v.executor!=="0x0000...0000"?`<div>
+        <label class="lbl"><span class="dim">EXECUTOR &middot;</span> INSTANT PATH</label>
+        <div style="font-size:11px;color:var(--m);margin:8px 0 14px;line-height:1.7">Unanimous (${v.ownerCount}/${v.ownerCount}) signatures bypass the timelock via TimelockExecutor.forward(). The cancel path (${v.threshold}/${v.ownerCount}) is always available.</div>
+        <button class="btn ${v.fastPath?"btn-fill":"btn-outline"}" style="font-size:10px;padding:0 20px" onclick="doAdminPropose('enableForward')">${v.fastPath?"ENABLED":"ENABLE"}</button>
+      </div>`:""}
+    </div>
+  `:tab==="OWNERS"?`<div>
+    ${v.owners.map((o,oi)=>{const isYouLbl=o.label&&o.label.trim().toUpperCase()==='YOU';return`<div class="row" style="${mob?"flex-direction:column;align-items:stretch;gap:10px":""}">
+      <div style="min-width:0">
+        <div class="signer-addr">${S.demoMode?addrLink(o.addr,v.chain):addrLink(o.addr)}${o.name?` <span class="signer-name">${esc(o.name)}</span>`:""}${o.you?` <span style="font-size:9px;font-weight:700;letter-spacing:1px;color:var(--m);border:1px solid var(--fr);padding:1px 6px;margin-left:6px">YOU</span>`:""}</div>
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-shrink:0${mob?";width:100%":""}">
-          <input class="inp" style="margin:0;width:80px;font-size:10px;letter-spacing:1px;border-bottom-color:var(--ln)" placeholder="LABEL" value="${esc(o.label)}" onchange="updateOwnerLabel(${S.sel},${oi},this.value)">
+          <input class="inp" style="margin:0;${mob?"flex:1":"width:120px"};font-size:11px;letter-spacing:1px;border-bottom-color:var(--ln)" placeholder="LABEL" value="${isYouLbl?"":esc(o.label)}" onchange="updateOwnerLabel(${S.sel},${oi},this.value)">
           ${!o.you?`<button class="btn btn-danger btn-sm" onclick="doAdminPropose('removeOwner',${oi})">REMOVE</button>`:""}
         </div>
-    </div>`).join("")}
+    </div>`}).join("")}
     <div class="sep"></div>
     <label class="lbl"><span class="dim">ADD &middot;</span> OWNER</label>
     <input class="inp" id="admin-add-owner" style="margin-top:8px" placeholder="0x... or name.eth / name.wei">
     <input class="inp" id="admin-add-label" style="font-size:11px;letter-spacing:1px" placeholder="LABEL (OPTIONAL)">
-    <button class="btn btn-fill btn-w" style="opacity:.5" onclick="doAdminPropose('addOwner')">PROPOSE</button>
+    <button class="btn btn-outline btn-w" onclick="doAdminPropose('addOwner')">PROPOSE OWNER</button>
   </div>`:`<div>
     ${(()=>{
       const hist = S.demoMode
@@ -1632,7 +1641,7 @@ function renderAdmin(v,mob){
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;flex:1">
           <span style="font-size:10px;font-weight:700;color:var(--d)">#${tx.nonce}</span>
           <span style="font-size:10px;font-weight:700;color:var(--m);letter-spacing:2px">${esc(tx.act)}</span>
-          <span style="font-size:12px">${esc(tx.desc)}</span>
+          ${tx.desc&&tx.desc!==tx.act?`<span style="font-size:12px">${esc(tx.desc)}</span>`:""}
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
           <span style="font-size:10px;color:var(--m)">${esc(tx.age)}</span>
