@@ -86,7 +86,7 @@ td a:hover{border-bottom-color:var(--a)}
 
 <script>
 const asc=n=>"/".repeat(n);
-let dark=true,tab="OVERVIEW";
+let dark=!localStorage.getItem('ms_light'),tab="OVERVIEW";
 const mob=()=>window.innerWidth<=640;
 
 const TABS=["OVERVIEW","CONTRACT","EXECUTOR","INTERFACE"];
@@ -271,7 +271,7 @@ function render(){
         <div class="logo"><a href="javascript:history.back()">MULTISIG</a></div>
         <div class="logo-sub">DOCUMENTATION</div>
       </div>
-      <button class="theme-btn" onclick="dark=!dark;render()">${dark?"☀":"●"}</button>
+      <button class="theme-btn" onclick="dark=!dark;localStorage.setItem('ms_light',dark?'':'1');render()">${dark?"☀":"●"}</button>
     </div>
     <div class="tabs">
       ${TABS.map(t=>`<button class="tab${tab===t?" on":""}" onclick="tab='${t}';render()">${t}</button>`).join("")}
@@ -279,7 +279,7 @@ function render(){
     <div class="content">${CONTENT[tab]}</div>
     <div class="footer">
       <span>MULTISIG.SOFTWARE</span>
-      <a href="https://github.com/z0r0z/multisig" target="_blank" rel="noopener">GITHUB</a>
+      <a href="https://github.com/src-company/multisig" target="_blank" rel="noopener">GITHUB</a>
       <a href="javascript:history.back()">&larr; BACK TO APP</a>
     </div>
     <div class="hbar">${asc(200)}</div>
