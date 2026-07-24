@@ -180,6 +180,11 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 .x-btn.red{color:var(--r)}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:32px}
 .grid3{display:grid;grid-template-columns:1fr 1fr 2fr;gap:16px}
+.tok-ico{display:inline-flex;align-items:center;vertical-align:middle;line-height:0}
+.tok-ico svg{width:15px;height:15px;display:block}
+.pill .tok-ico{margin-right:6px}
+.tok-ico.big svg{width:26px;height:26px}
+.tok-ico.sm svg{width:12px;height:12px}
 .token-pills{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
 .pill{height:34px;padding:0 14px;font-size:10px;font-weight:700;letter-spacing:2px;display:inline-flex;align-items:center;background:transparent;color:var(--d);border:1px solid var(--ln);text-transform:uppercase;transition:border-color .15s,color .15s}
 .pill.on{color:var(--a);border-color:var(--a);background:color-mix(in srgb,var(--a) 10%,transparent)}
@@ -495,6 +500,12 @@ const PROD_TOKENS = {
     { symbol:'wstETH', address:'0x1F32b1c2345538c0c6f582fCB022739c4A194Ebb',   decimals:18, icon:WSTETH_ICON },
   ],
 };
+
+// Symbol → icon SVG (built from PROD_TOKENS) so token pills and balances can
+// actually show logos — the icons were defined but never rendered.
+const SYMBOL_ICONS = {};
+Object.values(PROD_TOKENS).forEach(list => list.forEach(t => { if(t.icon && !SYMBOL_ICONS[t.symbol]) SYMBOL_ICONS[t.symbol] = t.icon; }));
+function tokIcon(sym, cls){ const ic = SYMBOL_ICONS[sym]; return ic ? `<span class="tok-ico${cls?' '+cls:''}">${ic}</span>` : ''; }
 
 const CHAINLINK_FEEDS = {
   1: {
@@ -1320,12 +1331,13 @@ function renderDash(v,mob){
     </button>`}).join("")}
   </div></div>
   <div class="stats">
-    ${h0?`<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+    ${h0?`<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      ${tokIcon(h0.token,'big')}
       <span class="stat-big">${h0.balance}</span>
       <span class="stat-token">${h0.token}</span>
       <span class="stat-usd">${h0.usd}</span>
     </div>
-    ${v.holdings.length>1?`<div class="holdings">${v.holdings.slice(1).map(h=>`<span>${h.balance} <strong>${h.token}</strong><span class="usd">${h.usd}</span></span>`).join("")}</div>`:""}`
+    ${v.holdings.length>1?`<div class="holdings">${v.holdings.slice(1).map(h=>`<span>${tokIcon(h.token,'sm')} ${h.balance} <strong>${h.token}</strong><span class="usd">${h.usd}</span></span>`).join("")}</div>`:""}`
     :`<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
       <span class="stat-big" style="color:var(--d)">0</span>
       <span class="stat-token">ETH</span>
@@ -1537,7 +1549,7 @@ function renderTxBuilder(v,mob){
     body=`<div class="grid2">
       <div>
         <label class="lbl">TOKEN</label>
-        <div class="token-pills">${tokens.map(t=>`<button class="pill${S.txToken===t?" on":""}" onclick="S.txToken='${t}';render()">${t}</button>`).join("")}</div>
+        <div class="token-pills">${tokens.map(t=>`<button class="pill${S.txToken===t?" on":""}" onclick="S.txToken='${t}';render()">${tokIcon(t)}${t}</button>`).join("")}</div>
         <div style="display:flex;justify-content:space-between;align-items:baseline"><label class="lbl">AMOUNT</label>${availNum>0?`<button class="link-btn" style="font-size:9px;margin:0;padding:0" onclick="fillTxMax('${availStr}',${dec},${availNum},'${unitLabel}')">MAX ${esc(hold.balance)} ${esc(S.txToken)}</button>`:hold?`<span style="font-size:9px;color:var(--d);letter-spacing:1px">BAL ${esc(hold.balance)}</span>`:''}</div>
         <input class="inp" id="tx-amount" placeholder="0.0" oninput="onTxAmount(this.value,${dec},${availNum},'${unitLabel}')" onkeydown="if(event.key==='Enter'){event.preventDefault();submitTransfer()}">
         <div id="tx-units" style="font-size:10px;color:var(--d);margin-top:-12px;word-break:break-all"></div>
