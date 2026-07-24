@@ -47,6 +47,7 @@ button:active{transform:scale(.97)}
 .tx-share button:hover{opacity:1}
 .reject-link{background:transparent;border:1px solid var(--ln);color:var(--d);font-size:9px;font-weight:700;letter-spacing:2px;padding:6px 12px;cursor:pointer;font-family:var(--f);text-transform:uppercase;transition:border-color .15s,color .15s}
 .reject-link:hover{border-color:var(--r);color:var(--r)}
+.reject-link.armed{border-color:var(--r);color:var(--r);background:color-mix(in srgb,var(--r) 8%,transparent)}
 .copy-btn{opacity:.4;transition:opacity .15s}
 @media(hover:hover){.copy-btn:hover{opacity:1}}
 @media(hover:hover){
@@ -1443,7 +1444,7 @@ function renderDash(v,mob){
       </div>
       ${blocked?"":progressLine}
       <div class="approvals">${apHtml}${etaHtml}</div>
-      ${(i===firstUnqueued&&!isQueued&&!isCancel&&!blocked)?`<div style="margin-top:12px"><button class="reject-link" onclick="doReject(${S.sel},${tx.nonce})" title="Sign a no-op to consume this nonce so later transactions can proceed">REJECT &middot; SKIP NONCE</button></div>`:''}
+      ${(i===firstUnqueued&&!isQueued&&!isCancel&&!blocked)?(()=>{const rsc=tx.rejectSigners?tx.rejectSigners.size:0;const armed=_rejectArmed===tx.nonce;const label=armed?'CONFIRM &middot; SKIP NONCE?':`REJECT &middot; SKIP NONCE${rsc?` (${rsc}/${v.threshold})`:''}`;return `<div style="margin-top:12px"><button class="reject-link${armed?' armed':''}" onclick="armReject(${S.sel},${tx.nonce})" title="Sign a no-op to consume this nonce so later transactions can proceed">${label}</button></div>`;})():''}
       ${mob&&!blocked&&actionBtn?`<div class="mob-actions">${actionBtn}</div>`:""}
     </div>`}).join("")}
   <div class="sec"><span>SIGNERS</span><span class="line"></span></div>
@@ -1987,6 +1988,17 @@ function doReject(vi, nonce) {
   }
 }
 
+// Two-click guard so a stray click can't skip a nonce: first click arms
+// (button flips to CONFIRM, auto-disarms after a few seconds), second commits.
+let _rejectArmed = null, _rejectArmTimer = null;
+function armReject(vi, nonce) {
+  clearTimeout(_rejectArmTimer);
+  if (_rejectArmed === nonce) { _rejectArmed = null; doReject(vi, nonce); return; }
+  _rejectArmed = nonce;
+  _rejectArmTimer = setTimeout(() => { _rejectArmed = null; render(); }, 4000);
+  render();
+}
+
 function doAccelerate(vi, nonce) {
   if (S.demoMode) {
     const vt = S.vaults[vi];
@@ -2488,8 +2500,8 @@ async function loadVaultQueue(vi) {
     // Track stale txs to clean up in DB
     const staleTxIds = [];
 
-    // Build accelerate and cancel sig counts: map original nonce → set of signers
-    const accelSigs = {}, cancelSigs = {};
+    // Build accelerate/cancel/reject sig counts: map original nonce → set of signers
+    const accelSigs = {}, cancelSigs = {}, rejectSigs = {};
     for(let ti = 0; ti < txs.length; ti++) {
       const t = txs[ti];
       if(t.description && t.description.startsWith('Accelerate #')) {
@@ -2501,6 +2513,11 @@ async function loadVaultQueue(vi) {
         const origNonce = parseInt(t.description.replace('Cancel #', ''));
         if(!isNaN(origNonce)) {
           cancelSigs[origNonce] = new Set(allSigs[ti].map(s => s.signer.toLowerCase()));
+        }
+      } else if(t.description && t.description.startsWith('Reject #')) {
+        const origNonce = parseInt(t.description.replace('Reject #', ''));
+        if(!isNaN(origNonce)) {
+          rejectSigs[origNonce] = new Set(allSigs[ti].map(s => s.signer.toLowerCase()));
         }
       }
     }
@@ -2514,8 +2531,8 @@ async function loadVaultQueue(vi) {
         continue;
       }
 
-      // Skip accelerate/cancel entries — they collect sigs via forward(), not the regular queue
-      if(t.description && (t.description.startsWith('Accelerate #') || t.description.startsWith('Cancel #'))) continue;
+      // Skip accelerate/cancel/reject companions — they aggregate sigs separately
+      if(t.description && (t.description.startsWith('Accelerate #') || t.description.startsWith('Cancel #') || t.description.startsWith('Reject #'))) continue;
 
       // Prune queued txs that are no longer queued on-chain (executed or cancelled externally)
       if(t.status === 'queued' && t.tx_hash && t.tx_hash in onchainQueued) {
@@ -2572,7 +2589,8 @@ async function loadVaultQueue(vi) {
         rawValue: t.value,
         signatures: sigs.map(s => ({signer: s.signer, sig: s.signature, sigType: s.sig_type})),
         accelSigners: accelSigs[t.nonce] || null,
-        cancelSigners: cancelSigs[t.nonce] || null
+        cancelSigners: cancelSigs[t.nonce] || null,
+        rejectSigners: rejectSigs[t.nonce] || null
       });
     }
     v.queue = queue;
