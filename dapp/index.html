@@ -1110,7 +1110,7 @@ function render(){
       </div>
     </div>
     <div class="nav">
-      ${[{k:"DASH",l:"DASHBOARD",m:"DASH"},{k:"CREATE",l:"CREATE",m:"CREATE"},{k:"ADMIN",l:"ADMIN",m:"ADMIN"}].map(i=>`<button class="${S.view===i.k?"on":""}" onclick="S.view='${i.k}';S.showTx=false;render()">${mob?i.m:i.l}</button>`).join("")}
+      ${[{k:"DASH",l:"DASHBOARD",m:"DASH"},{k:"ADMIN",l:"ADMIN",m:"ADMIN"},{k:"CREATE",l:"CREATE",m:"CREATE"}].map(i=>`<button class="${S.view===i.k?"on":""}" onclick="S.view='${i.k}';S.showTx=false;render()">${mob?i.m:i.l}</button>`).join("")}
     </div>
     <div class="content">${S.view==="DASH"?renderDash(v,mob):S.view==="CREATE"?renderCreate(mob):renderAdmin(v,mob)}</div>
     <div class="footer">
