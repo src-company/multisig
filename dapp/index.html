@@ -41,6 +41,10 @@ button:active{transform:scale(.97)}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
 @keyframes txLinked{0%,40%{background:color-mix(in srgb,var(--g) 15%,transparent)}100%{background:transparent}}
 .tx-linked{animation:txLinked 2s ease}
+.tx-focus{box-shadow:inset 2px 0 0 var(--a);background:color-mix(in srgb,var(--a) 5%,transparent)}
+.tx-share{display:inline-flex;align-items:center;gap:8px;font-size:8px;font-weight:700;letter-spacing:1px;color:var(--a);border:1px solid var(--a);padding:3px 4px 3px 8px;text-transform:uppercase}
+.tx-share button{background:none;border:none;color:var(--a);cursor:pointer;font-size:11px;line-height:1;padding:0 2px;opacity:.6}
+.tx-share button:hover{opacity:1}
 .copy-btn{opacity:.4;transition:opacity .15s}
 @media(hover:hover){.copy-btn:hover{opacity:1}}
 @media(hover:hover){
@@ -1027,7 +1031,11 @@ function requireSigner() {
 
 const _todayStr = new Date().toLocaleDateString("en-US", { year: "2-digit", month: "short", day: "numeric" }).toUpperCase();
 let toastTimer, hideLoadingTimer, _initLoadingTimer, _safetyLoadingTimer;
-let _submitting = false, _linkedNonce = null;
+let _submitting = false;
+// Deep-linked transaction focus (someone was sent a /tx/<nonce> link to co-sign).
+// Persists across re-renders so the shared tx stays highlighted until dismissed.
+let _focusNonce = null, _focusVaultAddr = null, _focusScroll = false;
+function dismissFocus(){ _focusNonce = null; _focusVaultAddr = null; _focusScroll = false; render(); }
 
 function guardSubmit(fn) {
   return async function(...args) {
@@ -1207,6 +1215,11 @@ function renderNow(){
   </div>
   ${S.showChains?renderChainOverlay(mob):""}`;
   restoreFocus(_focusState);
+  // Scroll a freshly deep-linked tx into view once, when it first appears.
+  if(_focusScroll){
+    const fel = document.querySelector(`[data-tx-nonce="${_focusNonce}"]`);
+    if(fel){ _focusScroll = false; fel.scrollIntoView({behavior:'smooth',block:'center'}); fel.classList.remove('tx-linked'); void fel.offsetWidth; fel.classList.add('tx-linked'); }
+  }
 }
 
 function renderChainOverlay(mob){
@@ -1391,11 +1404,13 @@ function renderDash(v,mob){
           </div>`;
     }
     const txLink=!S.demoMode&&v.address&&ethers.isAddress(v.address)?`${location.origin}/#${S.chainId}/${v.address}/tx/${tx.nonce}`:'';
-    return`<div class="tx${blocked?" blocked":""}" data-tx-nonce="${tx.nonce}">
+    const isFocus=_focusNonce!==null&&tx.nonce===_focusNonce&&!!v.address&&v.address.toLowerCase()===(_focusVaultAddr||'').toLowerCase();
+    return`<div class="tx${blocked?" blocked":""}${isFocus?" tx-focus":""}" data-tx-nonce="${tx.nonce}">
+      ${isFocus?`<div style="margin-bottom:10px"><span class="tx-share">SHARED FOR REVIEW${txLink?` <button onclick="event.stopPropagation();navigator.clipboard.writeText('${txLink}');flash('CO-SIGN LINK COPIED')" title="Copy co-sign link">⧉</button>`:''}<button onclick="dismissFocus()" title="Dismiss">&#10005;</button></span></div>`:''}
       <div class="tx-top">
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
-            <span class="tx-nonce">#${tx.nonce}${isCancel?" VIA EXECUTOR":i===firstUnqueued&&!isQueued?" NEXT":""}${txLink?` <button class="x-btn" style="font-size:8px;opacity:.4;display:inline-flex;min-width:auto;min-height:auto;padding:2px 4px;vertical-align:middle" onclick="event.stopPropagation();navigator.clipboard.writeText('${txLink}');flash('TX LINK COPIED')" title="${txLink}">\u29C9</button>`:""}</span>
+            <span class="tx-nonce">#${tx.nonce}${isCancel?" VIA EXECUTOR":i===firstUnqueued&&!isQueued?" NEXT":""}${txLink?` <button class="x-btn" style="font-size:8px;opacity:.4;display:inline-flex;min-width:auto;min-height:auto;padding:2px 4px;vertical-align:middle" onclick="event.stopPropagation();navigator.clipboard.writeText('${txLink}');flash('CO-SIGN LINK COPIED')" title="Copy co-sign link">\u29C9</button>`:""}</span>
             <span class="tx-val">${esc(display)}</span>
           </div>
           <div class="tx-to">&rarr; ${S.demoMode?addrLink(tx.target,v.chain):addrLink(tx.displayTo||tx.target)}${(()=>{const a=S.demoMode?tx.target:(tx.displayTo||tx.target);return ethers.isAddress(a)?copyBtn(a):'';})()}</div>
@@ -3744,7 +3759,7 @@ function handleDeepLink() {
       }).catch(_=>{});
       // Load this specific vault
       const addr = match[2];
-      if(matchTx) _linkedNonce = parseInt(match[3]);
+      if(matchTx){ _focusNonce = parseInt(match[3]); _focusVaultAddr = addr; _focusScroll = true; }
       showLoading('LOADING VAULT');
       (async () => {
         try {
@@ -3758,10 +3773,11 @@ function handleDeepLink() {
             render();
             await Promise.all([loadVaultQueue(0), loadVaultHistory(0)]);
             render();
-            if(_linkedNonce !== null) {
-              const el = document.querySelector(`[data-tx-nonce="${_linkedNonce}"]`);
-              if(el) { el.scrollIntoView({behavior:'smooth',block:'center'}); el.classList.add('tx-linked'); }
-              _linkedNonce = null;
+            // If the linked tx isn't in the queue (already executed or cancelled),
+            // tell the co-signer instead of silently doing nothing.
+            if(_focusNonce !== null && !S.vaults[0].queue.some(t => t.nonce === _focusNonce)) {
+              flash(`TX #${_focusNonce} NOT IN QUEUE — MAY BE EXECUTED OR CANCELLED`);
+              _focusNonce = null; _focusVaultAddr = null; _focusScroll = false;
             }
           } else {
             hideLoading();
