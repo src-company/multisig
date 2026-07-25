@@ -451,6 +451,20 @@ input.amt-in:focus{outline:none;box-shadow:none!important;border-bottom-color:tr
 .sim-foot{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;font-size:10px;letter-spacing:1px;color:var(--d);padding-top:10px;border-top:1px solid var(--ln)}
 .sim-reason{font-size:11px;line-height:1.6;color:var(--r);word-break:break-all;padding:10px 12px;background:color-mix(in srgb,var(--r) 14%,transparent);border-left:2px solid var(--r)}
 
+/* ── STAKE ─────────────────────────────────────────────────────────
+   One field and a diagram: the transfer is trivial, so the tab's job
+   is making what it triggers legible before anyone signs it. */
+.stake-flow{display:flex;align-items:stretch;justify-content:center;gap:44px;border:1px solid var(--ln);border-left:2px solid var(--a);background:color-mix(in srgb,var(--a) 4%,transparent);padding:20px 16px}
+.stake-node{flex:0 1 180px;min-width:0;display:flex;flex-direction:column;align-items:center;text-align:center;gap:7px}
+.stake-node b{font-size:14px;font-weight:700;letter-spacing:-.2px;word-break:break-all}
+.stake-node span:last-child{font-size:8px;font-weight:700;letter-spacing:1.5px;color:var(--d);line-height:1.4}
+.stake-arrow{align-self:center;font-size:18px;color:var(--a);opacity:.65;flex-shrink:0}
+.stake-note{font-size:10px;letter-spacing:1px;line-height:1.75;color:var(--d);margin-top:12px}
+.stake-note b{color:var(--m);font-weight:700}
+.stake-after{font-size:10px;letter-spacing:1px;line-height:1.75;color:var(--d);border-top:1px solid var(--ln);padding-top:14px}
+.stake-after b{color:var(--m);font-weight:700}
+.tx-kind.stake{color:var(--a);border-color:var(--fr);display:inline-flex;align-items:center;gap:5px}
+
 /* ── QUEUE CARDS ───────────────────────────────────────────────── */
 .tx-kind{font-size:8px;font-weight:700;letter-spacing:2px;border:1px solid var(--ln);color:var(--d);padding:2px 6px;white-space:nowrap}
 .tx-kind.slow{color:var(--a);border-color:var(--fr)}
@@ -474,6 +488,16 @@ input.amt-in:focus{outline:none;box-shadow:none!important;border-bottom-color:tr
   .qbtn{height:30px;padding:0 11px}
   .review-amt{font-size:22px}
   .sim-row{font-size:12px}
+  /* Narrow enough that side-by-side nodes squeeze the tickers — stack and
+     turn the arrow to match the reading direction. */
+  .stake-flow{flex-direction:column;gap:10px;padding:16px 14px}
+  /* flex-basis becomes a HEIGHT once the container stacks — reset it, or each
+     node reserves 180px of empty vertical space. */
+  .stake-node{flex:0 0 auto;flex-direction:row;justify-content:flex-start;text-align:left;gap:10px;align-items:center}
+  .stake-node b{font-size:13px}
+  .stake-node span:last-child{margin-left:auto;text-align:right}
+  .stake-arrow{align-self:flex-start;margin-left:6px;transform:rotate(90deg);font-size:15px}
+  .tx-kind{white-space:normal}
 }
 </style>
 </head>
@@ -595,6 +619,46 @@ const ERC20_ABI = [
   'function approve(address spender, uint256 amount) returns (bool)',
 ];
 const erc20Iface = new ethers.Interface(ERC20_ABI);
+
+// ── STAKE: ETH → wstETH via Lido (Ethereum mainnet only) ──────────
+// https://etherscan.io/address/0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0
+// wstETH's receive() fallback submits the incoming ETH to Lido and mints the
+// resulting wstETH straight back to the sender. So the whole integration is a
+// plain value transfer from the vault: no approval, no router, no calldata to
+// get wrong — which is exactly what makes it safe to offer as a one-field tab.
+const WSTETH_ADDRESS = '0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0';
+const WSTETH_ABI = ['function stEthPerToken() view returns (uint256)'];
+const STAKE_CHAIN_ID = 1;
+function stakeAvailable(){ return !S.demoMode && S.chainId === STAKE_CHAIN_ID; }
+// A queued proposal is a stake when it sends ETH to wstETH with empty calldata.
+// Derived from the call itself, so proposals made elsewhere are flagged too.
+function isStakeCall(target, callData){
+  return !!target && target.toLowerCase() === WSTETH_ADDRESS.toLowerCase()
+    && (!callData || callData === '0x');
+}
+// stETH per wstETH, 1e18-scaled. Cached per page load: it drifts with rewards,
+// far slower than anything the user does inside one visit to the builder.
+let _stEthPerToken = null;
+async function loadStakeRate(){
+  if(!stakeAvailable() || _stEthPerToken != null) return _stEthPerToken;
+  try {
+    const c = new ethers.Contract(WSTETH_ADDRESS, WSTETH_ABI, provider);
+    _stEthPerToken = BigInt(await c.stEthPerToken());
+    render();
+  } catch(_) {}
+  return _stEthPerToken;
+}
+// wstETH minted for an ETH amount at the current rate. Lido's submit() is 1:1
+// ETH→stETH, so the wrap rate is the only conversion. An estimate by nature —
+// the rate that settles is the one at execution, after the timelock.
+function wstethOut(ethAmountStr){
+  if(!_stEthPerToken || _stEthPerToken === 0n) return null;
+  try {
+    const wei = ethers.parseEther(stripCommas(String(ethAmountStr || '')));
+    if(wei <= 0n) return null;
+    return (wei * (10n ** 18n)) / _stEthPerToken;
+  } catch(_) { return null; }
+}
 
 // ── SLOW: time-delayed transfer protocol (Ethereum mainnet only) ──
 // https://etherscan.io/address/0x000000000000888741b254d37e1b27128afeaabc
@@ -1175,6 +1239,7 @@ const S = {
   // review card can mirror the fields without a full rebuild.
   txAmount: "",
   txTo: "",
+  stakeAmount: "",       // ETH to wrap into wstETH (STAKE tab, mainnet only)
   showCustomTok: false,
   txSlow: false,          // outbound delivery mode: false = INSTANT, true = SLOW (delayed)
   txSlowDelaySec: 86400,  // SLOW timelock in seconds (default 1 day)
@@ -2024,8 +2089,13 @@ function renderDash(v,mob){
     }
     // Kind badge — what sort of call this is. Suppressed when the headline
     // line already says it (a bare "BATCH (3)" needs no "BATCH" tag beside it).
-    const kindLabel=tx.slowDelay?`SLOW &middot; ${fmtDelay(tx.slowDelay)}`:(tx.dataLabel||'');
-    const kindTag=(kindLabel&&kindLabel!==display)?`<span class="tx-kind${tx.slowDelay?' slow':''}"${tx.slowDelay?` title="Time-delayed via SLOW — the recipient can claim after ${esc(fmtDelay(tx.slowDelay))}; the vault can reverse it until then"`:''}>${kindLabel}</span>`:'';
+    const kindLabel=tx.isStake?`STAKE &middot; ETH &rarr; wstETH`:tx.slowDelay?`SLOW &middot; ${fmtDelay(tx.slowDelay)}`:(tx.dataLabel||'');
+    const kindTag=(kindLabel&&kindLabel!==display)
+      ?`<span class="tx-kind${tx.slowDelay?' slow':''}${tx.isStake?' stake':''}"${
+          tx.isStake?` title="Sends ETH to the wstETH contract — its receive() fallback submits to Lido and mints wstETH back to the vault"`
+          :tx.slowDelay?` title="Time-delayed via SLOW — the recipient can claim after ${esc(fmtDelay(tx.slowDelay))}; the vault can reverse it until then"`:''
+        }>${tx.isStake?`${tokIcon('wstETH','sm')} `:''}${kindLabel}</span>`
+      :'';
     const txLink=!S.demoMode&&v.address&&ethers.isAddress(v.address)?`${location.origin}/#${S.chainId}/${v.address}/tx/${tx.nonce}`:'';
     const isFocus=_focusNonce!==null&&tx.nonce===_focusNonce&&!!v.address&&v.address.toLowerCase()===(_focusVaultAddr||'').toLowerCase();
     return`<div class="tx${blocked?" blocked":""}${isFocus?" tx-focus":""}" data-tx-nonce="${tx.nonce}">
@@ -2113,6 +2183,7 @@ function closeTxBuilder(){
 function resetTxFields(){
   S.txAmount = '';
   S.txTo = '';
+  S.stakeAmount = '';
   _builderSim = null;
 }
 // Token switch keeps the typed amount but drops the stale unit/USD echo and
@@ -2135,6 +2206,26 @@ function fillTxPct(frac, amountStr, dec, avail, unit){
   el.value = out;
   onTxAmount(out, dec, avail, unit);
 }
+function onStakeAmount(val, avail){
+  S.stakeAmount = val;
+  const n = parseFloat(stripCommas(String(val))) || 0;
+  const u = document.getElementById('stake-units');
+  if(u) u.textContent = val ? toUnits(val, 18) + ' WEI' : '';
+  const w = document.getElementById('stake-amount-warn');
+  if(w) w.textContent = (avail > 0 && n > avail) ? 'EXCEEDS VAULT ETH BALANCE' : '';
+  const usd = document.getElementById('stake-amount-usd');
+  if(usd){ const r = Number(usd.dataset.rate) || 0; usd.textContent = (r > 0 && n > 0) ? fmtUsd(n * r) : ''; }
+  updateTxReview();
+}
+function fillStakePct(frac, amountStr, avail){
+  const el = document.getElementById('stake-amount');
+  if(!el) return;
+  let out;
+  if(frac >= 1) out = amountStr;
+  else { const n = Number(amountStr) * frac; out = n > 0 ? n.toFixed(8).replace(/\.?0+$/, '') : '0'; }
+  el.value = out;
+  onStakeAmount(out, avail);
+}
 // USD rate for a holding, derived from the balance/usd pair the treasury
 // loader already priced (0 when the asset has no feed).
 function tokRate(hold){
@@ -2155,10 +2246,55 @@ function groupInt(s){
 // What the builder is still missing before it can be signed.
 function txMissing(){
   const miss = [];
+  if(S.txMode === 'STAKE'){
+    if(!(parseFloat(stripCommas(S.stakeAmount || '')) > 0)) miss.push('AN AMOUNT TO STAKE');
+    return miss;
+  }
   if(!(parseFloat(stripCommas(S.txAmount || '')) > 0)) miss.push('AMOUNT');
   const t = (S.txTo || '').trim();
   if(!t || !(ethers.isAddress(t) || /\.(eth|wei)$/i.test(t))) miss.push('RECIPIENT');
   return miss;
+}
+// Live summary for the STAKE tab. The wstETH figure is an estimate by
+// construction: the rate that settles is the one at execution, which for a
+// vault with a timelock is hours or days after this is signed.
+function stakeReviewBody(v){
+  const amtStr = stripCommas(S.stakeAmount || '').trim();
+  const amtNum = parseFloat(amtStr) || 0;
+  const hold = (v.holdings || []).find(h => h.token === 'ETH');
+  const rate = tokRate(hold);
+  const availNum = hold ? Number(hold.raw != null ? ethers.formatUnits(hold.raw, hold.decimals || 18) : stripCommas(hold.balance)) : 0;
+  const out = wstethOut(amtStr);
+
+  const amtHtml = amtNum > 0
+    ? `<div class="review-amt">${tokIcon('ETH')}<span>${esc(groupInt(amtStr))}</span><span style="font-size:13px;color:var(--m)">ETH</span></div>
+       ${rate > 0 ? `<div class="review-usd">${esc(fmtUsd(amtNum * rate))}</div>` : ''}`
+    : `<div class="review-amt ph">${tokIcon('ETH')}<span>0.0</span><span style="font-size:13px">ETH</span></div>`;
+  const outHtml = out
+    ? `<div class="review-to" style="display:flex;align-items:center;gap:8px">${tokIcon('wstETH')}<span>&asymp; ${esc(groupInt(Number(ethers.formatUnits(out, 18)).toFixed(6).replace(/\.?0+$/, '')))} wstETH</span></div>`
+    : `<div class="review-to ph">${amtNum > 0 ? 'RATE UNAVAILABLE' : 'NOTHING TO STAKE YET'}</div>`;
+
+  const rows = [
+    ['PROTOCOL', '<b>LIDO &middot; wstETH</b>'],
+    ['CONTRACT', `<b>${esc(shortAddr(WSTETH_ADDRESS))}</b>`],
+    _stEthPerToken ? ['RATE', `<b>1 wstETH = ${esc(Number(ethers.formatUnits(_stEthPerToken, 18)).toFixed(5))} stETH</b>`] : null,
+    ['SIGNATURES', `<b>${v.threshold} OF ${v.ownerCount}</b>`],
+    ['TIMELOCK', v.delay > 0
+      ? `<b>${esc(fmtD(v.delay))}${v.fastPath ? ' &middot; SKIPPABLE' : ''}</b>`
+      : '<b>NONE &middot; EXECUTES AT QUORUM</b>'],
+    ['CALL', '<b>NATIVE SEND &rarr; wstETH</b>'],
+  ].filter(Boolean).map(([k, val]) => `<div class="rrow"><span>${k}</span>${val}</div>`).join('');
+
+  const warns = [];
+  if(availNum > 0 && amtNum > availNum) warns.push('AMOUNT EXCEEDS THE VAULT ETH BALANCE — THIS WILL REVERT ON EXECUTION.');
+  else if(!hold && amtNum > 0) warns.push('THE VAULT HOLDS NO ETH — THIS WILL REVERT ON EXECUTION.');
+  if(amtNum > 0) warns.push('THE wstETH FIGURE IS AN ESTIMATE. THE RATE THAT SETTLES IS THE ONE AT EXECUTION, NOT NOW.');
+
+  return `${amtHtml}
+    <div class="review-arrow">&darr; VAULT RECEIVES</div>
+    ${outHtml}
+    <div class="review-rows">${rows}</div>
+    ${warns.map(w => `<div class="review-warn">${w}</div>`).join('')}`;
 }
 // The live proposal summary: exactly what SIGN + SUBMIT will construct,
 // down to the call it encodes and the nonce it will occupy.
@@ -2219,6 +2355,24 @@ function updateTxReview(){
   if(!host) return;
   const v = S.vaults[S.sel];
   if(!v) return;
+  if(S.txMode === 'STAKE'){
+    host.innerHTML = stakeReviewBody(v);
+    const sHold = (v.holdings || []).find(h => h.token === 'ETH');
+    const sAvail = sHold ? Number(sHold.raw != null ? ethers.formatUnits(sHold.raw, sHold.decimals || 18) : stripCommas(sHold.balance)) : 0;
+    const sN = parseFloat(stripCommas(S.stakeAmount || '')) || 0;
+    const sU = document.getElementById('stake-units');
+    if(sU) sU.textContent = S.stakeAmount ? toUnits(S.stakeAmount, 18) + ' WEI' : '';
+    const sW = document.getElementById('stake-amount-warn');
+    if(sW) sW.textContent = (sAvail > 0 && sN > sAvail) ? 'EXCEEDS VAULT ETH BALANCE' : '';
+    const sUsd = document.getElementById('stake-amount-usd');
+    if(sUsd){ const r = Number(sUsd.dataset.rate) || 0; sUsd.textContent = (r > 0 && sN > 0) ? fmtUsd(sN * r) : ''; }
+    const sMiss = txMissing();
+    const sBtn = document.getElementById('tx-submit');
+    if(sBtn) sBtn.classList.toggle('btn-pending', sMiss.length > 0);
+    const sNote = document.getElementById('tx-ready-note');
+    if(sNote) sNote.textContent = sMiss.length ? 'ENTER ' + sMiss.join(' + ') : '';
+    return;
+  }
   host.innerHTML = txReviewBody(v);
 
   // Re-derive the field echoes too — they are wiped by each rebuild, but the
@@ -2498,7 +2652,11 @@ function renderTopUp(){
 
 function renderTxBuilder(v,mob){
   const tokenObjs = S.demoMode ? (DEMO_TOKENS[v.chain]||["ETH"]).map(s=>({symbol:s,icon:iconForSym(s)})) : vaultTokens(v);
-  const tabs=["TRANSFER","CUSTOM","BATCH"].map(m=>`<button class="txb-tab${S.txMode===m?" on":""}" onclick="S.txMode='${m}';_builderSim=null;render()">${m}</button>`).join("");
+  // STAKE is mainnet-only; if the chain changed underneath a selected STAKE tab,
+  // fall back rather than render an empty builder.
+  if(S.txMode==="STAKE"&&!stakeAvailable()) S.txMode="TRANSFER";
+  const modes=["TRANSFER",...(stakeAvailable()?["STAKE"]:[]),"CUSTOM","BATCH"];
+  const tabs=modes.map(m=>`<button class="txb-tab${S.txMode===m?" on":""}" onclick="S.txMode='${m}';_builderSim=null;render()">${m}</button>`).join("");
   let body="";
   if(S.txMode==="TRANSFER"){
     const ct=curTok(v);
@@ -2569,6 +2727,61 @@ function renderTxBuilder(v,mob){
           <div id="tx-review">${txReviewBody(v)}</div>
         </div>
         <button class="btn btn-fill btn-w btn-big" id="tx-submit" style="margin-top:14px" onclick="submitTransfer()">SIGN + SUBMIT</button>
+        <div class="review-miss" id="tx-ready-note"></div>
+      </div></div>`;
+  }else if(S.txMode==="STAKE"){
+    // One field. The proposal is a bare ETH transfer to wstETH, so the rest of
+    // the tab is spent making it obvious what that transfer does.
+    const hold=(v.holdings||[]).find(h=>h.token==='ETH');
+    const availStr=hold?(hold.raw!=null?ethers.formatUnits(hold.raw,hold.decimals||18):stripCommas(hold.balance)):'';
+    const availNum=availStr?Number(availStr):0;
+    const rate=tokRate(hold);
+    if(_stEthPerToken==null) loadStakeRate();
+    body=`<div class="send-grid">
+      <div>
+        <div class="fset">
+          <div class="stake-flow">
+            <div class="stake-node">
+              <span class="tok-ico big">${iconForSym('ETH')}</span>
+              <b>ETH</b><span>OUT OF THE VAULT</span>
+            </div>
+            <div class="stake-arrow" aria-hidden="true">&rarr;</div>
+            <div class="stake-node">
+              <span class="tok-ico big">${iconForSym('wstETH')}</span>
+              <b>wstETH</b><span>BACK TO THE VAULT</span>
+            </div>
+          </div>
+          <div class="stake-note">A PLAIN ETH TRANSFER TO THE <b>wstETH</b> CONTRACT. ITS <b>receive()</b> FALLBACK SUBMITS THE ETH TO LIDO AND MINTS wstETH STRAIGHT BACK TO THE VAULT &mdash; NO APPROVAL, NO ROUTER, NO CALLDATA.</div>
+        </div>
+
+        <div class="fset">
+          <div class="fhead"><label class="lbl">AMOUNT TO STAKE</label><span class="fhint" id="stake-units"></span></div>
+          <div class="amt">
+            <input class="amt-in" id="stake-amount" inputmode="decimal" placeholder="0.0" value="${esc(S.stakeAmount)}" oninput="onStakeAmount(this.value,${availNum})" onkeydown="if(event.key==='Enter'){event.preventDefault();submitStake()}">
+            <span class="amt-tok">${tokIcon('ETH')}ETH</span>
+          </div>
+          <div class="amt-foot">
+            <span class="amt-usd" id="stake-amount-usd" data-rate="${rate||0}"></span>
+            ${availNum>0?`<span class="qbtns">${[['25%',.25],['50%',.5],['MAX',1]].map(([l,f])=>`<button class="qbtn" onclick="fillStakePct(${f},'${availStr}',${availNum})">${l}</button>`).join('')}</span>`:''}
+            <span class="amt-warn" id="stake-amount-warn"></span>
+          </div>
+          <div class="fhint" style="margin-top:10px">VAULT HOLDS <b>${hold?esc(hold.balance):'0'} ETH</b>${hold&&hold.usd?` &middot; ${esc(hold.usd)}`:''}</div>
+        </div>
+
+        <div class="fset">
+          <div class="stake-after">
+            <div class="lbl" style="margin-bottom:8px">AFTER IT EXECUTES</div>
+            <div>wstETH LANDS IN THE VAULT LIKE ANY OTHER TOKEN &mdash; IT SHOWS UP IN TREASURY AND CAN BE SENT FROM THE <b>TRANSFER</b> TAB. IT ACCRUES STAKING REWARDS BY RISING AGAINST stETH RATHER THAN BY CHANGING BALANCE.</div>
+            <div style="margin-top:10px">UNWRAPPING BACK TO ETH IS NOT DONE HERE &mdash; IT GOES THROUGH LIDO'S WITHDRAWAL QUEUE, WHICH YOU CAN PROPOSE FROM THE <b>CUSTOM</b> TAB.</div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="review">
+          <div class="review-h"><span>REVIEW</span><span class="review-tag">NONCE #${nextNonce(v)}</span></div>
+          <div id="tx-review">${stakeReviewBody(v)}</div>
+        </div>
+        <button class="btn btn-fill btn-w btn-big" id="tx-submit" style="margin-top:14px" onclick="submitStake()">SIGN + SUBMIT</button>
         <div class="review-miss" id="tx-ready-note"></div>
       </div></div>`;
   }else if(S.txMode==="CUSTOM"){
@@ -2891,6 +3104,12 @@ function submitTransfer() {
   } else {
     guardSubmit(prodSubmitTransfer)();
   }
+}
+
+// STAKE is mainnet-only and has no demo path — the tab is not offered there.
+function submitStake() {
+  if(!stakeAvailable()){ flash('STAKING IS ETHEREUM MAINNET ONLY'); return; }
+  guardSubmit(prodSubmitStake)();
 }
 
 function getCxCalldata() {
@@ -3670,6 +3889,9 @@ async function loadVaultQueue(vi) {
       const value = ethVal === '0' ? '0' : ethVal;
       const token = (t.call_data === '0x' || !t.call_data) && ethVal !== '0' ? 'ETH' : '';
       let displayValue = value, displayToken = token, displayTo = null, slowDelay = 0;
+      // Flag a stake from the call shape, so proposals raised outside this UI
+      // are labelled the same way.
+      const isStake = S.chainId === STAKE_CHAIN_ID && ethVal !== '0' && isStakeCall(t.target, t.call_data);
       // Decode a SLOW deposit so the queue shows the asset and the real
       // recipient rather than "0 → the SLOW contract".
       if(dataLabel === 'SLOW TRANSFER' && t.call_data && t.call_data.length >= 10) {
@@ -3711,6 +3933,7 @@ async function loadVaultQueue(vi) {
         token: token,
         dataLabel: dataLabel,
         slowDelay: slowDelay,
+        isStake: isStake,
         eta: t.eta || 0,
         approvals: approvals,
         dbId: t.id,
@@ -4792,13 +5015,16 @@ async function simulateProposal(vi, nonce) {
 
 // Build {from,to,value,data} from the current tx-builder inputs, mirroring the
 // prodSubmit* construction so the dry-run matches what would be proposed.
+// Reads state first: oninput writes every keystroke to S and each render writes
+// S back into the field, so the two cannot drift — and state-first means a
+// programmatic change can never simulate one thing and propose another.
 async function buildSimInput() {
   const v = S.vaults[S.sel];
   if(!v) return null;
   const from = v.address;
   if(S.txMode === 'TRANSFER') {
-    const amt = stripCommas(document.getElementById('tx-amount')?.value || S.txAmount || '0');
-    const to = document.getElementById('tx-to')?.value || S.txTo || '';
+    const amt = stripCommas(S.txAmount || document.getElementById('tx-amount')?.value || '0');
+    const to = S.txTo || document.getElementById('tx-to')?.value || '';
     if(!to || !amt || !(parseFloat(amt) > 0)) throw new Error('FILL IN AMOUNT AND RECIPIENT');
     const toAddr = await resolveName(to);
     const tokenInfo = curTok(v);
@@ -4814,6 +5040,11 @@ async function buildSimInput() {
     }
     if(isEth) return { from, to: toAddr, value: amountRaw, data: '0x' };
     return { from, to: tokenInfo.address, value: 0n, data: erc20Iface.encodeFunctionData('transfer', [toAddr, amountRaw]) };
+  }
+  if(S.txMode === 'STAKE') {
+    const amt = stripCommas(S.stakeAmount || document.getElementById('stake-amount')?.value || '0');
+    if(!amt || !(parseFloat(amt) > 0)) throw new Error('ENTER AN AMOUNT TO STAKE');
+    return { from, to: WSTETH_ADDRESS, value: ethers.parseEther(amt), data: '0x' };
   }
   if(S.txMode === 'CUSTOM') {
     const target = S.cxTarget || document.getElementById('cx-target')?.value || '';
@@ -5037,6 +5268,46 @@ async function prodSubmitTransfer() {
       data = erc20Iface.encodeFunctionData('transfer', [toAddr, amountRaw]);
       desc = `${amt} ${tokenInfo.symbol} \u2192 ${toAddr.slice(0,8)}...`;
     }
+
+    const domain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address };
+    const nonce = nextNonce(v);
+    const msg = { target, value: BigInt(value), data, nonce };
+    const sig = await signer.signTypedData(domain, EIP712_TYPES, msg);
+    const txHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg);
+
+    if(v.dbId) {
+      const txId = await dbProposeTx(v.dbId, nonce, target, value, data, txHash, v.threshold, connectedAddress, desc);
+      if(txId) await dbAddSig(txId, connectedAddress, sig);
+    }
+
+    flash(`TX #${nonce} CREATED`);
+    S.showTx = false;
+    resetTxFields();
+    await reloadQueue(S.sel);
+  } catch(e) {
+    console.error(e);
+    flash(e.shortMessage || e.message || 'FAILED');
+  }
+}
+
+// Stake: a bare value transfer to wstETH. Its receive() does the submit and the
+// wrap, so there is no calldata here at all — the proposal is target + value.
+async function prodSubmitStake() {
+  const w = requireSigner(); if(!w) return;
+  const { signer, addr: connectedAddress } = w;
+  const v = S.vaults[S.sel];
+  if(!v) return;
+  if(S.chainId !== STAKE_CHAIN_ID){ flash('STAKING IS ETHEREUM MAINNET ONLY'); return; }
+
+  const amt = stripCommas(S.stakeAmount || document.getElementById('stake-amount')?.value || '0');
+  if(!amt || !(parseFloat(amt) > 0)) { flash('ENTER AN AMOUNT TO STAKE'); return; }
+
+  try {
+    const amountRaw = ethers.parseEther(amt);
+    const target = WSTETH_ADDRESS;
+    const value = amountRaw.toString();
+    const data = '0x';
+    const desc = `STAKE ${amt} ETH → wstETH`;
 
     const domain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address };
     const nonce = nextNonce(v);
