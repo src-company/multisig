@@ -101,6 +101,8 @@ The executor doubles as a transaction guard when deployed to a vanity address. G
 The guard receives an `execute(target, value, data, sigs)` call — it can inspect the transaction and revert to block it, or no-op to allow. Both `execute` and `executeQueued` trigger guard calls (`executeQueued` passes empty sigs). Mining a 4-byte vanity address (2 leading + 2 trailing) is comparable to mining a 4-byte prefix, feasible in minutes on a GPU.
 
 > **Warning:** If the guard contract cannot handle the forwarded `execute` call (i.e. always reverts), the wallet is bricked — `execute`, `executeQueued`, and `setExecutor` all trigger the guard, so there is no recovery path. Ensure the guard contract correctly implements the `execute` interface before assigning it.
+>
+> The same applies to a wallet at a `0x1111`-marked address that sets itself as its own executor: each `execute` re-enters itself through the guard hook until it runs out of gas, and `setExecutor` is only reachable through `execute`. **Never call `setExecutor(address(this))`.** Clone wallets have no recovery; an EIP-7702 wallet can recover by revoking its delegation. (Shred Security L-1 — see [`SECURITY.md`](SECURITY.md).)
 
 ## Modules
 
@@ -187,6 +189,23 @@ Safe composes features as separate contracts (modules, guards, fallback handlers
 | TimelockExecutor | [`0x00000000a72A30AdBf38e14d36BCE2610ec3973F`](https://contractscan.xyz/contract/0x00000000a72A30AdBf38e14d36BCE2610ec3973F) |
 
 Deployed via [SafeSummoner](https://contractscan.xyz/contract/0x00000000004473e1f31C8266612e7FD5504e6f2a) on Ethereum, Base, Arbitrum, Optimism, Sepolia, and Base Sepolia.
+
+Every wallet is the same 45-byte clone, so its runtime code can be checked against the audited build directly:
+
+```
+0x5f5f365f5f37365f73D54cb65224410F3Ff97a8E72f363f224419f4FB05af43d5f5f3e6029573d5ffd5b3d5ff3
+```
+
+> **Warning:** neither the factory nor the implementation has a withdrawal path, and the implementation is never initialized, so it has no owners who could authorize one. **ETH or tokens sent directly to either address are unrecoverable by anyone.** Value passed to `create()` / `createWithCalls()` is unaffected — the factory forwards it into the CREATE2 as the new wallet's opening balance. (Shred Security L-2.)
+
+## Audits
+
+| Date | Auditor | Scope | Result | Report |
+|---|---|---|---|---|
+| 2026-07-11 | [Shred Security](https://www.shredsecurity.io/) (kenzo, yashar) | `Multisig.sol` @ `2329339`, plus stateful invariant fuzzing | 0 high, 0 medium, 2 low, 2 informational | [Reproduction + our response](audit/report-shred-security.md) &middot; [PDF](https://audit.multisig.wei.limo) — marked DRAFT |
+| 2026-04-03 | Pashov Skills | `Multisig.sol`, modules, TimelockExecutor | see reports | [`audit/report-multisig.md`](audit/report-multisig.md), [`audit/report-mods.md`](audit/report-mods.md), [`audit/report-timelock-executor.md`](audit/report-timelock-executor.md) |
+
+Findings and their dispositions are tracked in [`SECURITY.md`](SECURITY.md). The contracts are immutable singletons; the low and informational findings from the 2026-07-11 review are mitigated in the dapp rather than by redeployment.
 
 ## License
 

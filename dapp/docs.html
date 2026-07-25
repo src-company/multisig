@@ -91,10 +91,20 @@ td a:hover{border-bottom-color:var(--a)}
 
 <script>
 const asc=n=>"/".repeat(n);
-let dark=!localStorage.getItem('ms_light'),tab="OVERVIEW";
 const mob=()=>window.innerWidth<=640;
 
-const TABS=["OVERVIEW","CONTRACT","EXECUTOR","INTERFACE"];
+const TABS=["OVERVIEW","CONTRACT","EXECUTOR","INTERFACE","AUDITS"];
+
+// Tabs are addressable by hash, so a link can open the page on one — the app
+// footer's AUDIT link is docs.html#audits. An unknown or absent hash falls back
+// to OVERVIEW rather than rendering an empty page.
+const tabFromHash=()=>{
+  const h=decodeURIComponent(location.hash.replace(/^#/,'')).toUpperCase();
+  return TABS.includes(h)?h:"OVERVIEW";
+};
+let dark=!localStorage.getItem('ms_light'),tab=tabFromHash();
+// Writing the hash keeps a tab shareable and gives Back something to return to.
+function go(t){ if(!TABS.includes(t)) return; tab=t; location.hash=t.toLowerCase(); render(); }
 
 const CONTENT={
 OVERVIEW:`
@@ -186,6 +196,58 @@ address executor     // bypass role (typically TimelockExecutor)</pre>
 <tr><td>TimelockExecutor</td><td><a href="https://contractscan.xyz/contract/0x00000000a72A30AdBf38e14d36BCE2610ec3973F" target="_blank" rel="noopener">0x00000000a72A30AdBf38e14d36BCE2610ec3973F</a></td></tr>
 </table>
 <p>Same addresses on all supported chains. Proxy clones deployed via CREATE2 inherit the implementation. View on <a href="https://contractscan.xyz" target="_blank" rel="noopener" style="color:var(--a);border-bottom:1px solid var(--ln);text-decoration:none">contractscan.xyz</a> for multichain verification.</p>
+
+<div class="note">Neither the factory nor the implementation has a withdrawal path, and the implementation is never initialized, so it has no owners who could authorize one. <strong>ETH or tokens sent directly to either address are unrecoverable by anyone, permanently.</strong> This app will not build a transaction that sends value to them. Value passed to <code>create()</code> is unaffected — the factory forwards it into the CREATE2 as the new vault's opening balance. See <a href="#audits">AUDITS</a> — finding L-2.</div>
+
+<p>Every wallet is the same 45-byte clone, so its runtime code can be checked against the audited build directly:</p>
+<pre>0x5f5f365f5f37365f73D54cb65224410F3Ff97a8E72f363f224419f4FB0
+  5af43d5f5f3e6029573d5ffd5b3d5ff3</pre>
+`,
+
+AUDITS:`
+<h2>AUDITS</h2>
+<table>
+<tr><th>DATE</th><th>AUDITOR</th><th>SCOPE</th><th>RESULT</th><th>REPORT</th></tr>
+<tr>
+  <td>2026-07-11</td>
+  <td><a href="https://www.shredsecurity.io/" target="_blank" rel="noopener">Shred Security</a><br><span style="color:var(--d);font-size:11px">kenzo &middot; yashar</span></td>
+  <td>Multisig.sol @ 2329339<br>+ stateful invariant fuzzing</td>
+  <td>0 high &middot; 0 medium<br>2 low &middot; 2 info</td>
+  <td><a href="https://audit.multisig.wei.limo" target="_blank" rel="noopener">READ &nearr;</a></td>
+</tr>
+<tr>
+  <td>2026-04-03</td>
+  <td>Internal review<br><span style="color:var(--d);font-size:11px">Pashov Skills methodology</span></td>
+  <td>Multisig.sol, modules,<br>TimelockExecutor</td>
+  <td>8-agent parallel review,<br>four passes</td>
+  <td><a href="https://github.com/src-company/multisig/tree/main/audit" target="_blank" rel="noopener">READ &nearr;</a></td>
+</tr>
+</table>
+<div class="note">The Shred Security report is stamped DRAFT on its cover page. Findings and the maintainers' response to each are tracked in <code>SECURITY.md</code>; the reports themselves live in <code>audit/</code>.</div>
+
+<h2>FINDINGS &amp; RESPONSE</h2>
+<p>Shred Security raised four issues — no high or medium severity. The factory, the implementation and the TimelockExecutor are immutable singletons already deployed at mined addresses across every supported chain, with live vaults holding funds. Nothing found warrants redeploying them, and none of the four can be reached without a client building the transaction that triggers it. All four are answered here, where the transaction is built.</p>
+
+<div class="sig">L-1 &middot; SELF-REFERENTIAL EXECUTOR <span class="params">— low, mitigated</span></div>
+<div class="desc">A vault whose address carries the 0x1111 guard marker and whose executor is set to itself recurses through the guard hook on every execute() until it reverts — and setExecutor is only reachable through execute(), so there is no way back. This app refuses to raise that proposal, and flags an inbound one as SET EXECUTOR &middot; LOCKS VAULT with "do not sign". Executors carrying the marker are permitted but need a second confirming press. Salts mined here always produce a 0x00 address prefix, so a vault deployed from this app can never carry the marker at all.</div>
+
+<div class="sig">L-2 &middot; UNRECOVERABLE DESTINATIONS <span class="params">— low, mitigated</span></div>
+<div class="desc">Both singleton constructors are payable and neither contract has a withdrawal path, so value sent to them is gone. Transfers, custom calls and batch legs that send value to the factory, the implementation, address(0) or the owner-list sentinel are refused outright; an inbound proposal doing the same is labelled UNRECOVERABLE. Value passed to create() is unaffected.</div>
+
+<div class="sig">I-1 &middot; QUEUE ERRORS <span class="params">— informational, mitigated</span></div>
+<div class="desc">executeQueued reverts NotReady(eta) both when nothing is queued and when the timelock has not elapsed. The two cases are already distinguishable from the revert data — eta is 0 in one and a future timestamp in the other — so this app decodes them and reports them separately, rather than showing one undecoded revert for two unrelated problems.</div>
+
+<div class="sig">I-2 &middot; DOMAIN SEPARATOR GAS <span class="params">— informational, accepted</span></div>
+<div class="desc">The EIP-712 domain separator is recomputed per call rather than cached, costing ~500–800 gas. Accepted as intended design: reading block.chainid live is what makes signatures fork-safe by construction, with no cached value that can go stale. Nothing for a client to mitigate.</div>
+
+<h2>DEPLOY &amp; LOAD VERIFICATION</h2>
+<p>The audit's deployment checklist asked for the audited build to be confirmed on-chain rather than assumed. It now is:</p>
+<div class="sig">PREFLIGHT</div>
+<div class="desc">Before deploying, the factory on every target chain is asked for its implementation() and must name the audited one. Code being present at the factory address proved nothing on its own.</div>
+<div class="sig">POST-DEPLOY</div>
+<div class="desc">A mined receipt is not a deployment — on a chain without the factory, create() is a plain transfer that mines with status 1. The vault's runtime bytecode is read back and compared against the audited 45-byte clone, and its owners, threshold, delay and executor are matched against what was requested. A chain that will not answer reads DEPLOYED &middot; UNVERIFIED rather than counting as verified.</div>
+<div class="sig">ON EVERY LOAD</div>
+<div class="desc">The same bytecode check runs each time a vault is loaded, and anything that is not the audited build is badged UNVERIFIED CODE. A vault can arrive from a pasted address, where answering threshold() and getOwners() proves only that something implements the shape.</div>
 `,
 
 EXECUTOR:`
@@ -281,7 +343,7 @@ function render(){
       <button class="theme-btn" onclick="dark=!dark;localStorage.setItem('ms_light',dark?'':'1');render()">${dark?"☀":"●"}</button>
     </div>
     <div class="tabs">
-      ${TABS.map(t=>`<button class="tab${tab===t?" on":""}" onclick="tab='${t}';render()">${t}</button>`).join("")}
+      ${TABS.map(t=>`<button class="tab${tab===t?" on":""}" onclick="go('${t}')">${t}</button>`).join("")}
     </div>
     <div class="content">${CONTENT[tab]}</div>
     <div class="footer">
@@ -295,6 +357,8 @@ function render(){
 
 render();
 window.addEventListener("resize",render);
+// Back/forward between tabs, and links that only change the hash.
+window.addEventListener("hashchange",()=>{ tab=tabFromHash(); render(); });
 </script>
 </body>
 </html>
