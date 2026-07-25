@@ -17,6 +17,7 @@
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html{-webkit-text-size-adjust:100%}
+a,button,[role=button],[onclick]{-webkit-tap-highlight-color:transparent;touch-action:manipulation}
 :root{
   --a:#0A0A0A;--bg:#2D5FE8;--d:#0A0A0AB3;--m:#0A0A0AE6;
   --ln:#0A0A0A24;--fr:#0A0A0A45;--g:#7DFFBA;--gc:#000;--r:#FF6B6B;--y:#FFD600;
@@ -26,7 +27,7 @@ html{-webkit-text-size-adjust:100%}
   --a:#00788C;--bg:#FDFDFD;--d:#006A7DCC;--m:#005E70F2;
   --ln:#0099B326;--fr:#0099B340;--g:#059669;--gc:#fff;--r:#DC2626;--y:#B45309;
 }
-body{font-family:var(--f);background:var(--bg);color:var(--a);min-height:100vh;padding:10px;position:relative;overflow-x:hidden;transition:background .3s,color .3s;display:flex;flex-direction:column}
+body{font-family:var(--f);background:var(--bg);color:var(--a);min-height:100vh;min-height:100dvh;padding:10px;position:relative;overflow-x:hidden;transition:background .3s,color .3s;display:flex;flex-direction:column}
 #app{flex:1;display:flex;flex-direction:column}
 input,select,button,textarea{font-family:var(--f);font-size:16px;color:var(--a)}
 input:focus,textarea:focus,select:focus{border-bottom-color:var(--a)!important;outline:none;box-shadow:inset 0 -1px 0 var(--a);caret-color:var(--a)}
@@ -88,7 +89,7 @@ button:active{transform:scale(.97)}
 .sub{font-size:10px;letter-spacing:13px;color:var(--m);margin-top:2px;opacity:.5;user-select:none}
 .info-i{font-size:10px;font-weight:400;width:20px;height:20px;border-radius:50%;border:1px solid var(--a);color:var(--a);display:inline-flex;align-items:center;justify-content:center;letter-spacing:0;opacity:.35;transition:opacity .2s;cursor:pointer;vertical-align:middle;margin-left:2px}
 @media(hover:hover){.info-i:hover{opacity:.8}}
-.info-tip{display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:min(400px,88vw);padding:24px;background:var(--a);color:var(--bg);font-size:13px;line-height:1.9;letter-spacing:.3px;z-index:300;text-transform:none;font-weight:500}
+.info-tip{display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:min(400px,88vw);max-height:85vh;max-height:85dvh;overflow-y:auto;padding:24px;background:var(--a);color:var(--bg);font-size:13px;line-height:1.9;letter-spacing:.3px;z-index:300;text-transform:none;font-weight:500}
 .info-tip.open{display:block}
 .info-tip .x{position:absolute;top:12px;right:12px;background:transparent;border:none;color:var(--bg);font-size:14px;cursor:pointer;opacity:.6;padding:4px 8px}
 .info-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:299}
@@ -254,6 +255,9 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 }
 @media(max-width:640px){
   body{padding:6px}
+  /* Force all form controls to >=16px so iOS Safari doesn't auto-zoom on focus.
+     Every .inp is full-width at this breakpoint, so the larger size never overflows. */
+  .inp{font-size:16px!important}
   .frame{padding:0 6px}
   .rail{display:none}
   .hbar{font-size:10px}
@@ -318,15 +322,27 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
   .nav button{font-size:10px;padding:12px 0}
 }
 /* loading overlay */
-.loading-overlay{position:fixed;inset:0;z-index:500;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:20px;transition:opacity .3s}
+.loading-overlay{position:fixed;inset:0;z-index:500;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:18px;transition:opacity .35s ease}
 .loading-overlay.dark-bg{background:#2D5FE8}
 .loading-overlay.light-bg{background:#FDFDFD}
-.loading-overlay .loading-svg{width:80px;height:80px}
-.loading-overlay .loading-text{font-family:var(--f,'IBM Plex Mono',monospace);font-size:9px;font-weight:700;letter-spacing:4px;animation:pulse 2s infinite}
+/* mark: settle-in on appear, then a slow breathing scale (GPU transform only) */
+.loading-overlay .loading-svg{width:96px;height:96px;will-change:transform;transform:translateZ(0);animation:markIn .55s cubic-bezier(.2,.85,.25,1) both,markBreath 3.2s ease-in-out .55s infinite}
+@keyframes markIn{from{opacity:0;transform:scale(.82)}to{opacity:1;transform:scale(1)}}
+@keyframes markBreath{0%,100%{transform:scale(1)}50%{transform:scale(1.045)}}
+.loading-overlay .loading-text{font-family:var(--f,'IBM Plex Mono',monospace);font-size:9px;font-weight:700;letter-spacing:4px;animation:pulse 2s ease-in-out infinite}
 .loading-overlay.dark-bg .loading-text{color:#0A0A0A99}
 .loading-overlay.light-bg .loading-text{color:#0099B3AA}
+/* scanning progress bar — echoes the queue .pbar motion so it reads as one system */
+.loading-overlay::after{content:"";width:132px;max-width:44vw;height:2px;opacity:.55;background-size:200% 100%;background-repeat:no-repeat;animation:loadSweep 1.4s cubic-bezier(.65,0,.35,1) infinite}
+.loading-overlay.dark-bg::after{background-image:linear-gradient(90deg,transparent,#0A0A0A,transparent)}
+.loading-overlay.light-bg::after{background-image:linear-gradient(90deg,transparent,#0099B3,transparent)}
+@keyframes loadSweep{0%{background-position:200% 0}100%{background-position:-200% 0}}
 .loading-overlay.fade-out{opacity:0;pointer-events:none}
-@media(max-width:640px){.loading-overlay .loading-svg{width:56px;height:56px}.loading-overlay .loading-text{font-size:8px;letter-spacing:3px}}
+/* exit: mark shrinks slightly as the splash fades */
+.loading-overlay.fade-out .loading-svg{animation:none;transform:scale(.92);opacity:0;transition:transform .35s ease,opacity .35s ease}
+.loading-overlay.fade-out::after{opacity:0}
+@media(max-width:640px){.loading-overlay{gap:16px}.loading-overlay .loading-svg{width:68px;height:68px}.loading-overlay .loading-text{font-size:8px;letter-spacing:3px}.loading-overlay::after{width:104px}}
+@media(prefers-reduced-motion:reduce){.loading-overlay::after{display:none}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}}
 </style>
 </head>
@@ -774,6 +790,7 @@ const S = {
   txToken: "ETH",
   showCustomTok: false,
   deploy: null,
+  topup: null,
   batch: [{ t: "", v: "", d: "" }, { t: "", v: "", d: "" }],
 
   // create form
@@ -1191,7 +1208,7 @@ function hideLoading() {
   clearTimeout(_safetyLoadingTimer);
   const el = document.getElementById('loading');
   el.classList.add('fade-out');
-  hideLoadingTimer = setTimeout(() => { el.style.display = 'none'; }, 300);
+  hideLoadingTimer = setTimeout(() => { el.style.display = 'none'; }, 350);
 }
 function flash(msg) {
   const el = document.getElementById("toast-el");
@@ -1307,7 +1324,7 @@ function renderNow(){
       <div>
         <div class="logo">MULTISIG <span class="info-i" onclick="toggleInfo()">?</span></div>
         <div class="sub">.software</div>
-        ${v?`<div class="addr">${vAddr}${!S.demoMode&&v.address&&ethers.isAddress(v.address)?` <button class="x-btn" style="font-size:9px;opacity:.5;vertical-align:middle" onclick="navigator.clipboard.writeText(location.href);flash('LINK COPIED')" title="${location.origin}/#${S.chainId}/${v.address}">\u29C9</button>`:""}</div>`:""}
+        ${v?`<div class="addr">${vAddr}${!S.demoMode&&v.address&&ethers.isAddress(v.address)?` <button class="x-btn copy-btn" style="display:inline-flex;min-width:auto;min-height:auto;padding:2px 5px;font-size:9px;vertical-align:middle" onclick="navigator.clipboard.writeText(location.href);flash('LINK COPIED')" title="Copy shareable link \u00B7 ${location.origin}/#${S.chainId}/${v.address}">\u29C9</button>`:""}</div>`:""}
       </div>
       <div class="hdr-r">
         <button class="theme-btn" onclick="S.dark=!S.dark;localStorage.setItem('ms_light',S.dark?'':'1');render()">${S.dark?"\u2600":"\u25CF"}</button>
@@ -1336,7 +1353,8 @@ function renderNow(){
     <div class="hbar">${ASC200}</div>
   </div>
   ${S.showChains?renderChainOverlay(mob):""}
-  ${S.deploy?renderDeployOverlay():""}`;
+  ${S.deploy?renderDeployOverlay():""}
+  ${S.topup?renderTopUp():""}`;
   restoreFocus(_focusState);
   // Scroll a freshly deep-linked tx into view once, when it first appears.
   if(_focusScroll){
@@ -1349,7 +1367,7 @@ function renderDeployOverlay(){
   const d = S.deploy, phase = d.phase;
   const glyph = { pending:'○', switching:'◐', mining:'◐', deploying:'◐', done:'●', skipped:'●', failed:'✕' };
   const col = { pending:'var(--d)', switching:'var(--y)', mining:'var(--y)', deploying:'var(--y)', done:'var(--g)', skipped:'var(--m)', failed:'var(--r)' };
-  const lbl = { pending:'WAITING', switching:'SWITCH CHAIN…', mining:'MINING ADDRESS…', deploying:'DEPLOYING…', done:'DEPLOYED', skipped:'ALREADY DEPLOYED', failed:'FAILED' };
+  const lbl = { pending:'WAITING', switching:'SWITCH IN WALLET…', mining:'MINING ADDRESS…', deploying:'CONFIRM IN WALLET…', done:'DEPLOYED', skipped:'ALREADY DEPLOYED', failed:'FAILED' };
   const anyFail = d.steps.some(s=>s.status==='failed');
   const nch = d.steps.length, plural = nch>1?'S':'';
   const title = phase==='preflight' ? `CHECKING ${nch} CHAIN${plural}…`
@@ -1386,7 +1404,7 @@ function renderDeployOverlay(){
   } else { footer = ''; }
 
   return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:300;display:flex;align-items:center;justify-content:center;padding:20px">
-    <div style="width:min(460px,94vw);background:var(--bg);border:1px solid var(--a);padding:24px">
+    <div style="width:min(460px,94vw);max-height:90vh;max-height:90dvh;overflow-y:auto;background:var(--bg);border:1px solid var(--a);padding:24px">
       <div style="font-size:12px;font-weight:700;letter-spacing:2px;margin-bottom:6px">${title}</div>
       ${d.address?`<div style="font-size:11px;color:var(--m);letter-spacing:1px;margin-bottom:16px;word-break:break-all">${addrLink(d.address)}</div>`:`<div style="font-size:10px;color:var(--d);letter-spacing:1px;margin-bottom:16px">Same vault address on every chain</div>`}
       <div>${rows}</div>
@@ -1456,9 +1474,14 @@ function renderDash(v,mob){
       const on=i===S.sel;
       const {rdy,needsYou}=vaultFlags[i];
       const dot=rdy?'<span class="vtab-dot" style="background:var(--g)"></span>':needsYou?'<span class="vtab-dot" style="background:var(--y)"></span>':"";
+      const pending=vt.queue.length>0?`${vt.queue.length} PENDING`:"";
+      // The balance summary is a comparison aid for choosing between vaults; with a
+      // single vault it only echoes the hero stat below, so drop it and keep pending.
+      const bal=vt.holdings.length?tokIcon(vt.holdings[0].token,'sm')+" "+vt.holdings[0].balance+" "+vt.holdings[0].token+(vt.holdings.length>1?" +"+(vt.holdings.length-1)+" MORE":""):"EMPTY";
+      const info=S.vaults.length===1?pending:bal+(pending?` &middot; ${pending}`:"");
       return`<button class="vtab${on?" on":""}" onclick="S.sel=${i};S.nt=S.vaults[${i}].threshold;setNd(S.vaults[${i}].delay);S.showTx=false;render()">
       <div class="vtab-name">${esc(vt.name)}${dot}</div>
-      <div class="vtab-info">${vt.holdings.length?tokIcon(vt.holdings[0].token,'sm')+" "+vt.holdings[0].balance+" "+vt.holdings[0].token+(vt.holdings.length>1?" +"+(vt.holdings.length-1)+" MORE":""):"EMPTY"}${vt.queue.length>0?` &middot; ${vt.queue.length} PENDING`:""}</div>
+      ${info?`<div class="vtab-info">${info}</div>`:""}
     </button>`}).join("")}
   </div></div>
   <div class="stats">
@@ -1474,6 +1497,7 @@ function renderDash(v,mob){
       <span class="stat-token">ETH</span>
     </div>
     <div style="font-size:11px;color:var(--d);letter-spacing:2px;margin-top:8px">NO BALANCES</div>`}
+    ${!S.demoMode&&v.address&&ethers.isAddress(v.address)?`<div style="margin-top:16px"><button class="btn btn-outline btn-sm" style="display:inline-flex;align-items:center;gap:6px" onclick="openTopUp()"><span style="font-size:13px;line-height:1">&#8595;</span> TOP UP</button></div>`:""}
     <div class="meta">
       <span>${v.threshold}/${v.ownerCount} SIG</span>
       ${v.delay>0
@@ -1601,7 +1625,7 @@ function renderDash(v,mob){
   <div class="sec"><span>SIGNERS</span><span class="line"></span></div>
   ${v.owners.map(o=>`<div class="row">
     <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;min-width:0">
-      <span class="signer-addr">${S.demoMode?addrLink(o.addr,v.chain):addrLink(o.addr)}</span>${ethers.isAddress(o.addr)?copyBtn(o.addr):""}${o.name?`<span class="signer-name">${esc(o.name)}</span>`:""}<span class="signer-label">${esc(o.label)}</span>
+      <span class="signer-addr">${S.demoMode?addrLink(o.addr,v.chain):addrLink(o.addr)}</span>${ethers.isAddress(o.addr)?copyBtn(o.addr):""}${o.name?`<span class="signer-name">${esc(o.name)}</span>`:""}${o.label&&o.label.trim().toUpperCase()!=='YOU'?`<span class="signer-label">${esc(o.label)}</span>`:""}
     </div>
     ${o.you?'<span class="signer-you">YOU</span>':""}
   </div>`).join("")}`;
@@ -1701,6 +1725,173 @@ function removeCustomTokenFlow(tokenAddr){
   flash(tok ? `REMOVED ${tok.symbol}` : 'REMOVED');
   render();
   reloadHoldings(S.sel);
+}
+
+// ── TOP UP (deposit into the multisig from the connected wallet) ───
+// Sends ETH or an ERC-20 straight from the connected EOA to the vault address
+// on the vault's own chain. Decimals are handled per-token via parseUnits.
+
+function _amtTrim(s){ s=String(s||''); if(!s) return '0'; if(s.indexOf('.')<0) return s; s=s.replace(/0+$/,'').replace(/\.$/,''); return s||'0'; }
+function _amtDisp(s){ s=_amtTrim(s); const i=s.indexOf('.'); return i<0?s:s.slice(0,i+7).replace(/\.$/,''); }
+
+// Read the connected wallet's balance for each listed token (+ ETH) on the
+// current chain. Returns a symbol -> {raw, decimals} map; never throws.
+async function fetchTopUpBalances(walletAddr, toks){
+  const out = {};
+  const erc = toks.filter(t => t.address && t.address !== ethers.ZeroAddress);
+  try {
+    const mc = getMC3();
+    const calls = erc.map(t => ({ target:t.address, allowFailure:true, callData: erc20Iface.encodeFunctionData('balanceOf',[walletAddr]) }));
+    const res = await mc.aggregate3(calls);
+    res.forEach((r,i)=>{ if(r.success){ try { const b=erc20Iface.decodeFunctionResult('balanceOf', r.returnData)[0]; out[erc[i].symbol]={ raw:b.toString(), decimals:erc[i].decimals }; } catch(_){} } });
+  } catch(_){
+    await Promise.all(erc.map(async t => {
+      try { const c=new ethers.Contract(t.address, ERC20_ABI, provider); const b=await c.balanceOf(walletAddr); out[t.symbol]={ raw:b.toString(), decimals:t.decimals }; } catch(_){}
+    }));
+  }
+  try { const e = await provider.getBalance(walletAddr); out['ETH']={ raw:e.toString(), decimals:18 }; } catch(_){}
+  return out;
+}
+
+async function openTopUp(){
+  const v = S.vaults[S.sel]; if(!v) return;
+  if(S.demoMode){ flash('CONNECT A WALLET TO TOP UP'); return; }
+  if(!window._connectedAddress || !window._signer){ flash('CONNECT WALLET FIRST'); return; }
+  if(!v.address || !ethers.isAddress(v.address)){ flash('NO VAULT ADDRESS'); return; }
+  S.topup = { sym:'ETH', bals:null, loading:true, sending:false, err:null, showCustom:false, txHash:null };
+  render();
+  try {
+    const bals = await fetchTopUpBalances(window._connectedAddress, vaultTokens(v));
+    if(S.topup){ S.topup.bals = bals; S.topup.loading = false; render(); }
+  } catch(_){ if(S.topup){ S.topup.loading = false; render(); } }
+}
+function closeTopUp(){ S.topup = null; render(); }
+function selectTopUpToken(sym){ if(S.topup){ S.topup.sym = sym; S.topup.showCustom = false; S.topup.err = null; render(); } }
+function onTopUpAmount(val, dec, avail, unit){
+  const u = document.getElementById('topup-units');
+  if(u) u.textContent = val ? toUnits(val, dec) + ' ' + unit : '';
+  const w = document.getElementById('topup-warn');
+  if(w){ const n = parseFloat(String(val).replace(/,/g,'')) || 0; w.textContent = (avail > 0 && n > avail) ? 'EXCEEDS WALLET BALANCE' : ''; }
+}
+function fillTopUpMax(amountStr, dec, avail, unit){
+  const el = document.getElementById('topup-amount'); if(!el) return;
+  el.value = amountStr; onTopUpAmount(amountStr, dec, avail, unit); el.focus();
+}
+async function addTopUpCustom(){
+  const v = S.vaults[S.sel]; if(!v || !S.topup) return;
+  const raw = document.getElementById('topup-custom-addr')?.value?.trim();
+  if(!raw || !ethers.isAddress(raw)){ flash('ENTER A VALID TOKEN ADDRESS'); return; }
+  const addr = ethers.getAddress(raw);
+  const existing = vaultTokens(v).find(t => t.address && t.address.toLowerCase() === addr.toLowerCase());
+  if(existing){ S.topup.sym = existing.symbol; S.topup.showCustom = false; render(); return; }
+  flash('FETCHING TOKEN…');
+  try {
+    const meta = await fetchTokenMeta(addr);
+    if(vaultTokens(v).some(t => t.symbol === meta.symbol)){ flash(`SYMBOL "${meta.symbol}" ALREADY LISTED`); return; }
+    saveCustomToken(S.chainId, v.address, meta);
+    if(S.topup){
+      S.topup.sym = meta.symbol; S.topup.showCustom = false;
+      try { S.topup.bals = await fetchTopUpBalances(window._connectedAddress, vaultTokens(v)); } catch(_){}
+      render();
+    }
+    flash(`ADDED ${meta.symbol} · ${meta.decimals} DEC`);
+  } catch(e){ flash(e.shortMessage || e.message || 'COULD NOT LOAD TOKEN'); }
+}
+async function submitTopUp(){
+  const v = S.vaults[S.sel]; if(!v) return;
+  const t = S.topup; if(!t || t.sending) return;
+  const w = requireSigner(); if(!w) return;
+  const { signer } = w;
+  const sel = vaultTokens(v).find(x => x.symbol === t.sym) || vaultTokens(v)[0];
+  const amtStr = (document.getElementById('topup-amount')?.value || '').trim();
+  if(!amtStr){ flash('ENTER AN AMOUNT'); return; }
+  let amount;
+  try { amount = ethers.parseUnits(stripCommas(amtStr), sel.decimals); }
+  catch(_){ flash('INVALID AMOUNT'); return; }
+  if(amount <= 0n){ flash('ENTER AN AMOUNT'); return; }
+
+  t.sending = true; t.err = null; render();
+  // Make sure the wallet is on the vault's chain before sending — otherwise the
+  // funds would land at the same address on the wrong chain.
+  if(window._connectedWalletProvider){
+    let wc = null;
+    try { wc = parseInt(await window._connectedWalletProvider.request({method:'eth_chainId'}), 16); } catch(_){}
+    if(wc !== S.chainId){
+      try { await walletSwitchChain({ chainId:S.chainId, chainHex:CHAINS[S.chainId].hex, rpc:CHAINS[S.chainId].rpcs[0], addChainParams:ADD_CHAIN_PARAMS[S.chainId]||null }); } catch(_){}
+      if(!(await waitForWalletChain(S.chainId))){ t.sending=false; t.err = 'SWITCH WALLET TO ' + (CHAINS[S.chainId]?.name||'CHAIN').toUpperCase(); render(); return; }
+    }
+  }
+  try {
+    let tx;
+    if(sel.symbol === 'ETH' || sel.address === ethers.ZeroAddress){
+      tx = await signer.sendTransaction({ to: v.address, value: amount });
+    } else {
+      const erc = new ethers.Contract(sel.address, ERC20_ABI, signer);
+      tx = await erc.transfer(v.address, amount);
+    }
+    if(S.topup){ S.topup.txHash = tx.hash; render(); }
+    await tx.wait();
+    flash(`TOPPED UP ${_amtDisp(amtStr)} ${sel.symbol}`);
+    S.topup = null; render();
+    reloadHoldings(S.sel);
+  } catch(e){
+    console.error('Top up:', e);
+    if(S.topup){ S.topup.sending = false; S.topup.err = e.shortMessage || e.message || 'FAILED'; render(); }
+  }
+}
+
+function renderTopUp(){
+  const v = S.vaults[S.sel]; if(!v || !S.topup) return '';
+  const t = S.topup;
+  const toks = vaultTokens(v);
+  const sel = toks.find(x => x.symbol === t.sym) || toks[0];
+  const dec = sel.decimals;
+  const unitLabel = sel.symbol === 'ETH' ? 'WEI' : 'UNITS (' + dec + ' DECIMALS)';
+  const balInfo = t.bals ? t.bals[sel.symbol] : null;
+  const availStr = balInfo ? ethers.formatUnits(balInfo.raw, balInfo.decimals) : '';
+  const availNum = availStr ? Number(availStr) : 0;
+  const hasBal = balInfo && BigInt(balInfo.raw) > 0n;
+
+  const pills = toks.map(x => {
+    const b = t.bals ? t.bals[x.symbol] : null;
+    const owns = b && BigInt(b.raw) > 0n;
+    return `<button class="pill${t.sym===x.symbol?' on':''}" style="${owns?'':'opacity:.55'}" onclick="selectTopUpToken('${esc(x.symbol)}')"><span class="tok-ico">${x.icon||iconForSym(x.symbol)}</span>${esc(x.symbol)}</button>`;
+  }).join('');
+
+  const availRow = t.loading
+    ? `<span style="font-size:9px;color:var(--d);letter-spacing:1px;animation:pulse 2s infinite">CHECKING WALLET…</span>`
+    : hasBal
+      ? `<button class="link-btn" style="font-size:9px;margin:0;padding:0" onclick="fillTopUpMax('${availStr}',${dec},${availNum},'${unitLabel}')">MAX ${esc(_amtDisp(availStr))} ${esc(sel.symbol)}</button>`
+      : `<span style="font-size:9px;color:var(--y);letter-spacing:1px">NO ${esc(sel.symbol)} IN WALLET</span>`;
+
+  const sending = t.sending;
+  const btnLabel = sending ? (t.txHash ? 'CONFIRMING…' : 'CONFIRM IN WALLET…') : `SEND ${esc(sel.symbol)} TO VAULT`;
+
+  return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:300;display:flex;align-items:center;justify-content:center;padding:16px" onclick="if(event.target===this&&!S.topup.sending)closeTopUp()">
+    <div style="width:min(440px,96vw);max-height:92vh;max-height:92dvh;overflow-y:auto;background:var(--bg);border:1px solid var(--a);padding:22px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:4px">
+        <div style="font-size:12px;font-weight:700;letter-spacing:2px">TOP UP &middot; ${esc(v.name)}</div>
+        <button class="x-btn" style="margin:0;${sending?'opacity:.4':''}" onclick="closeTopUp()" ${sending?'disabled':''}>&#10005;</button>
+      </div>
+      <div style="font-size:10px;color:var(--m);letter-spacing:1px;margin-bottom:18px;word-break:break-all">DEPOSIT FROM YOUR WALLET &rarr; ${shortAddr(v.address)} ON ${esc(chainName())}</div>
+
+      <label class="lbl">ASSET</label>
+      <div class="token-pills">${pills}<button class="pill" onclick="S.topup.showCustom=!S.topup.showCustom;render()">+ CUSTOM</button></div>
+      ${t.showCustom?`<div style="margin:4px 0 12px"><div style="display:flex;gap:8px"><input class="inp" id="topup-custom-addr" style="margin:0;flex:1;min-width:0;font-size:16px" placeholder="0x... TOKEN ADDRESS" onkeydown="if(event.key==='Enter'){event.preventDefault();addTopUpCustom()}"><button class="btn btn-outline btn-sm" onclick="addTopUpCustom()">ADD</button></div></div>`:''}
+
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-top:16px"><label class="lbl">AMOUNT</label>${availRow}</div>
+      <input class="inp" id="topup-amount" inputmode="decimal" style="font-size:16px" placeholder="0.0" ${sending?'disabled':''} oninput="onTopUpAmount(this.value,${dec},${availNum},'${unitLabel}')" onkeydown="if(event.key==='Enter'){event.preventDefault();submitTopUp()}">
+      <div id="topup-units" style="font-size:10px;color:var(--d);margin-top:-12px;word-break:break-all"></div>
+      <div id="topup-warn" style="font-size:10px;color:var(--r);letter-spacing:1px;min-height:12px;margin-bottom:4px"></div>
+      ${sel.symbol==='ETH'?`<div style="font-size:9px;color:var(--d);letter-spacing:1px;margin-bottom:4px">KEEP SOME ETH FOR GAS</div>`:''}
+
+      ${t.err?`<div style="font-size:10px;color:var(--r);letter-spacing:1px;line-height:1.5;margin:8px 0">${esc(String(t.err).slice(0,120))}</div>`:''}
+      ${t.txHash?`<div style="font-size:9px;color:var(--m);letter-spacing:1px;margin:8px 0;word-break:break-all">TX ${esc(t.txHash.slice(0,14))}… &middot; ${addrLink(v.address)}</div>`:''}
+
+      <button class="btn ${sending?'btn-disabled':'btn-fill'} btn-w btn-big" style="margin-top:14px" ${sending?'disabled':''} onclick="submitTopUp()">${btnLabel}</button>
+      <div style="margin-top:10px;font-size:9px;color:var(--d);letter-spacing:1px;text-align:center;line-height:1.5">A DIRECT TRANSFER FROM YOUR WALLET &mdash; NO SIGNATURES OR TIMELOCK NEEDED TO DEPOSIT</div>
+    </div>
+  </div>`;
 }
 
 function renderTxBuilder(v,mob){
@@ -1895,6 +2086,7 @@ METHOD      ${c.fastPath&&ds>0?"createWithCalls()":"create()"}</div><div class="
       </div>`}).join("")}</div>
       <label class="lbl" style="margin-top:20px">CLONE TO OTHER CHAINS <span class="dim">&middot; SAME ADDRESS</span></label>
       <div class="token-pills">${NETS.map((n,i)=>i===c.net?'':`<button class="pill${(c.clone||[]).includes(i)?' on':''}" onclick="toggleClone(${i})">${chainIcon(n.id)}${esc(n.name)}${n.test?' <span class="dim" style="font-size:7px">TEST</span>':''}</button>`).filter(Boolean).join('')}</div>
+      ${(()=>{const sel=[c.net,...(c.clone||[])].map(i=>NETS[i]).filter(Boolean);const mixed=sel.some(n=>n.test)&&sel.some(n=>!n.test);return mixed?`<div style="margin-top:12px;font-size:9px;letter-spacing:1px;color:var(--y);line-height:1.5">MIXING MAINNET &amp; TESTNET &mdash; DEPLOYING TO BOTH IN ONE GO. UNCHECK IF UNINTENDED.</div>`:'';})()}
       ${!val.ready?`<div style="margin-top:24px;font-size:10px;letter-spacing:1px;color:var(--y);text-align:center">${esc(val.reason)}</div>`:""}
       ${(()=>{const nc=1+(c.clone||[]).length;return `<button class="btn ${val.ready?"btn-fill":"btn-disabled"} btn-w btn-big" style="margin-top:${val.ready?28:8}px" ${val.ready?"":'title="'+esc(val.reason)+'"'} onclick="${val.ready?"doDeploy()":""}">${nc>1?`DEPLOY TO ${nc} CHAINS`:"DEPLOY"}</button>${nc>1?`<div style="margin-top:8px;font-size:9px;color:var(--d);letter-spacing:1px;text-align:center">Same vault address on ${net.name}${(c.clone||[]).map(i=>", "+NETS[i].name).join("")}</div>`:""}`;})()}
       <div style="margin-top:12px;font-size:9px;color:var(--d);letter-spacing:1px;text-align:center">VIA <a href="${explorerBase}/address/${FACTORY}" target="_blank" rel="noopener" style="color:var(--d);border-bottom:1px solid var(--ln);text-decoration:none">MULTISIGFACTORY</a></div>
@@ -2985,7 +3177,8 @@ function buildInitcode(impl) {
   return '0x602d5f8160095f39f35f5f365f5f37365f73' + impl.slice(2).toLowerCase() + '5af43d5f5f3e6029573d5ffd5b3d5ff3';
 }
 
-async function mineVanitySalt(factory, impl, caller) {
+async function mineVanitySalt(factory, impl, caller, rp) {
+  rp = rp || provider;
   const hash = ethers.keccak256(buildInitcode(impl));
   const base = BigInt(caller) << 96n;
   const MAX_ITER = 2000000n;
@@ -2993,7 +3186,7 @@ async function mineVanitySalt(factory, impl, caller) {
     const salt = '0x' + (base | n).toString(16).padStart(64, '0');
     const addr = ethers.getCreate2Address(factory, salt, hash);
     if(addr.slice(2, 4) === '00') {
-      const code = await provider.getCode(addr);
+      const code = await rp.getCode(addr);
       if(code !== '0x') continue; // already deployed on this chain
       return { salt: base | n, address: addr, nonce: n };
     }
@@ -3056,18 +3249,42 @@ async function prodDeploy() {
 
   // Preflight (read-only, no chain switch): does the wallet have gas on each
   // chain, and — when fast-path is on — is the TimelockExecutor deployed there?
-  const pf = await Promise.all(chains.map(async net => {
+  const pfPromise = Promise.all(chains.map(async net => {
     const rp = makeProvider(net.id);
     let gasOk = null, executorOk = null;
     try { gasOk = (await rp.getBalance(connectedAddress)) > 0n; } catch(_){}
     if(wantForward){ try { const code = await rp.getCode(TIMELOCK_EXECUTOR); executorOk = !!code && code !== '0x'; } catch(_){} }
     return { gasOk, executorOk };
   }));
+  // Mine the CREATE2 salt up front (chain-independent), dedup-checked against the
+  // primary chain, so the actual vault address is known and shown in the review /
+  // deploy overlay before the user approves any wallet prompt. Runs concurrently
+  // with preflight; if it fails we fall back to lazy mining inside deployOnChain.
+  const minePromise = (async () => {
+    try {
+      const mined = await mineVanitySalt(FACTORY, IMPLEMENTATION, connectedAddress, makeProvider(chains[0].id));
+      if(S.deploy){ S.deploy.ctx.salt = mined.salt; S.deploy.ctx.minedAddr = mined.address; S.deploy.address = mined.address; render(); }
+    } catch(e){ console.error('Vanity mining (preflight):', e); }
+  })();
+  const pf = await pfPromise;
+  await minePromise;
+  if(!S.deploy) return;   // user cancelled during preflight
   pf.forEach((r,i)=>{ S.deploy.steps[i].pf = r; });
   const blocked = wantForward && pf.some(r => r.executorOk === false);   // executor truly missing
   const warn = pf.some(r => r.gasOk === false);
   if(blocked || warn){ S.deploy.phase = 'review'; render(); return; }    // wait for user to PROCEED
   runDeploy();
+}
+
+// Wait for the connected wallet's active chain to match `id`, polling to absorb
+// wallets that switch asynchronously. Resolves true once matched, false on timeout.
+async function waitForWalletChain(id, tries=8, gap=400){
+  const wp = window._connectedWalletProvider; if(!wp) return true;
+  for(let i=0;i<tries;i++){
+    try { const wc = await wp.request({method:'eth_chainId'}); if(parseInt(wc,16)===id) return true; } catch(_){}
+    if(i<tries-1) await new Promise(r=>setTimeout(r,gap));
+  }
+  return false;
 }
 
 // Deploy the vault on one chain (used by the run loop and per-chain retry).
@@ -3077,9 +3294,11 @@ async function deployOnChain(k){
   try {
     step.status='switching'; step.err=null; render();
     if(net.id !== S.chainId) await switchChain(net.id, true);
-    if(window._connectedWalletProvider){
-      const wc = await window._connectedWalletProvider.request({method:'eth_chainId'});
-      if(parseInt(wc,16) !== net.id){ step.status='failed'; step.err='CHAIN NOT SWITCHED'; render(); return false; }
+    // Confirm the wallet landed on this chain before signing. Poll briefly: some
+    // wallets (esp. over WalletConnect) resolve the switch request before the
+    // active chain actually flips, so a single immediate read can false-negative.
+    if(window._connectedWalletProvider && !(await waitForWalletChain(net.id))){
+      step.status='failed'; step.err=`SWITCH TO ${net.name} IN WALLET`; render(); return false;
     }
     const signer = requireSigner()?.signer;
     if(!signer){ step.status='failed'; step.err='NO SIGNER'; render(); return false; }
@@ -3118,9 +3337,21 @@ async function deployOnChain(k){
   }
 }
 async function _finishDeploy(){
-  S.deploy.done = true; render();
-  const addr = S.deploy.lastVaultAddr;
-  if(addr && !S.vaults.some(v => v.address && v.address.toLowerCase() === addr.toLowerCase())){
+  const d = S.deploy; if(!d) return;
+  d.done = true; render();
+  const addr = d.lastVaultAddr;
+  if(!addr) return;
+  // Land on a chain where the vault actually exists: the primary if it deployed,
+  // otherwise the first chain that succeeded. loadSingleVaultData reads the live
+  // `provider`, so pointing at a chain without the vault (e.g. after a trailing
+  // clone failed) would make the multicall revert and the vault silently vanish.
+  const ok = i => d.steps[i] && (d.steps[i].status==='done' || d.steps[i].status==='skipped');
+  let landIdx = ok(0) ? 0 : d.steps.findIndex((_,i)=>ok(i));
+  if(landIdx >= 0){
+    const homeId = d.chains[landIdx].id;
+    if(homeId !== S.chainId){ try { await switchChain(homeId, true); } catch(e){ console.error('Return to home chain:', e); } }
+  }
+  if(!S.vaults.some(v => v.address && v.address.toLowerCase() === addr.toLowerCase())){
     try { const vData = await loadSingleVaultData(addr); if(vData){ S.vaults.push(vData); S.sel = S.vaults.length - 1; render(); } } catch(e){ console.error('Load new vault:', e); }
   }
 }
@@ -4235,8 +4466,10 @@ async function switchChain(id, skipLoad) {
         addChainParams: ADD_CHAIN_PARAMS[id] || null
       });
     } catch(e) { console.error('Chain switch:', e); }
-    // Warn if wallet rejected the switch (browsing still works, signing won't)
-    try {
+    // Warn if wallet rejected the switch (browsing still works, signing won't).
+    // Suppressed for programmatic switches (skipLoad) — e.g. the multi-chain
+    // deploy loop, which surfaces per-chain switch state in its own overlay.
+    if(!skipLoad) try {
       const wc = await window._connectedWalletProvider.request({method:'eth_chainId'});
       if(parseInt(wc, 16) !== id) flash('WALLET ON DIFFERENT CHAIN — SWITCH TO SIGN');
     } catch(_) {}
