@@ -197,7 +197,7 @@ address executor     // bypass role (typically TimelockExecutor)</pre>
 </table>
 <p>Same addresses on all supported chains. Proxy clones deployed via CREATE2 inherit the implementation. View on <a href="https://contractscan.xyz" target="_blank" rel="noopener" style="color:var(--a);border-bottom:1px solid var(--ln);text-decoration:none">contractscan.xyz</a> for multichain verification.</p>
 
-<div class="note">Neither the factory nor the implementation has a withdrawal path, and the implementation is never initialized, so it has no owners who could authorize one. <strong>ETH or tokens sent directly to either address are unrecoverable by anyone, permanently.</strong> This app will not build a transaction that sends value to them. Value passed to <code>create()</code> is unaffected — the factory forwards it into the CREATE2 as the new vault's opening balance. See <a href="#audits">AUDITS</a> — finding L-2.</div>
+<div class="note">None of the three singletons above has a withdrawal path, and the implementation is never initialized, so it has no owners who could authorize one. <strong>ETH or tokens sent directly to the factory, the implementation or the TimelockExecutor are unrecoverable by anyone, permanently.</strong> This app will not build a transaction that sends value to them. Value passed to <code>create()</code> is unaffected — the factory forwards it into the CREATE2 as the new vault's opening balance. See <a href="#audits">AUDITS</a> — finding L-2.</div>
 
 <p>Every wallet is the same 45-byte clone, so its runtime code can be checked against the audited build directly:</p>
 <pre>0x5f5f365f5f37365f73D54cb65224410F3Ff97a8E72f363f224419f4FB0
@@ -216,6 +216,20 @@ AUDITS:`
   <td><a href="https://audit.multisig.wei.limo" target="_blank" rel="noopener">READ &nearr;</a></td>
 </tr>
 <tr>
+  <td>2026-07-26</td>
+  <td>GPT-5.6 Sol<br><span style="color:var(--d);font-size:11px">Pro, independent</span></td>
+  <td>Multisig.sol +<br>TimelockExecutor.sol<br>composition review</td>
+  <td>1 high &middot; 1 medium<br>4 low &middot; 5 info</td>
+  <td><a href="https://github.com/src-company/multisig/blob/main/audit/report-gpt56-sol.md" target="_blank" rel="noopener">READ &nearr;</a><br><a href="https://chatgpt.com/share/6a650af3-f6bc-83ea-b5f3-f83452e9c744" target="_blank" rel="noopener">TRANSCRIPT &nearr;</a></td>
+</tr>
+<tr>
+  <td>2026-07-26</td>
+  <td>Claude Opus 5<br><span style="color:var(--d);font-size:11px">max effort, adversarial</span></td>
+  <td>Multisig.sol +<br>TimelockExecutor.sol<br>+ 20 PoC tests</td>
+  <td>2 high &middot; 6 medium<br>6 low &middot; 9 info<br><span style="color:var(--d);font-size:11px">all config-dependent</span></td>
+  <td><a href="https://github.com/src-company/multisig/blob/main/audit/report-opus5-max.md" target="_blank" rel="noopener">READ &nearr;</a><br><a href="https://claude.ai/share/c8a3a7d4-962f-4cb3-9fea-5690e9c7c7a2" target="_blank" rel="noopener">TRANSCRIPT &nearr;</a></td>
+</tr>
+<tr>
   <td>2026-04-03</td>
   <td>Internal review<br><span style="color:var(--d);font-size:11px">Pashov Skills methodology</span></td>
   <td>Multisig.sol, modules,<br>TimelockExecutor</td>
@@ -223,10 +237,25 @@ AUDITS:`
   <td><a href="https://github.com/src-company/multisig/tree/main/audit" target="_blank" rel="noopener">READ &nearr;</a></td>
 </tr>
 </table>
-<div class="note">The Shred Security report is stamped DRAFT on its cover page. Findings and the maintainers' response to each are tracked in <code>SECURITY.md</code>; the reports themselves live in <code>audit/</code>.</div>
+<div class="note">The Shred Security report is stamped DRAFT on its cover page. Every report is reproduced in full in <code>audit/</code> with the maintainers' response inline against each finding; dispositions are summarised in <code>SECURITY.md</code>. <strong>No finding from either review lets an unauthorised party move funds from a correctly configured vault</strong>, and none warranted redeploying the contracts — they are immutable singletons already live at mined addresses on every supported chain. Each is answered here instead, where the transaction is built.</div>
+
+<h2>TIMELOCK &amp; THE FAST PATH</h2>
+<p>The clearest thing to understand before configuring a vault, because two reviews raised issues that both live here.</p>
+<div class="sig">THE EXECUTOR IS WHAT MAKES A TIMELOCK CANCELLABLE</div>
+<div class="desc">With a delay and no executor, queueing works fine and third parties get their full notice period — but nothing can be stopped. cancelQueued is onlySelf, so a cancel routes through execute() and is queued for the same delay, maturing no earlier than what it cancels. Setting the TimelockExecutor as executor adds the missing piece: a cancel on threshold signatures, executing immediately. This app always pairs a non-zero delay with it, and will not remove it while a delay is set.</div>
+<div class="sig">CANCELLING NEVER NEEDS THE FAST PATH</div>
+<div class="desc">The cancel route requires only threshold signatures and does not check forwardEnabled, so the brake works on every vault using this executor whether or not the fast path is on. If you are considering enabling the fast path for emergencies, you already have what you need.</div>
+<div class="sig">BUT A CANCEL MUST BE SUBMITTED BY A SIGNER</div>
+<div class="desc">Both routes verify the same signatures, so a cancel bundle copied from the mempool can be replayed through execute() instead — where it is queued for the full delay rather than executing now, and burns the nonce so the real one reverts. The proposal it was meant to stop was queued first, matures first, and anyone can run it. This app defends against that by spending one slot of every executor bundle on a sender slot bound to whoever submits: a copier is not that address, so the bundle is useless to them. It works only if the submitter is one of the signers — if it cannot be bound, the app says so before sending.</div>
+<div class="sig">WHAT THE FAST PATH IS ACTUALLY FOR</div>
+<div class="desc">Velocity, not emergencies. A vault that needs only partial consensus to act slowly can act immediately when everyone is aligned — routine payments, trading. Signatures accrue: collect the threshold and a proposal is queueable; if a further owner signs the same proposal before it is submitted, it becomes instantly executable, with nobody re-signing.</div>
+<div class="sig">EXCEPT WHERE THE THRESHOLD IS THE OWNER COUNT</div>
+<div class="desc">On a 2-of-2 or 3-of-3 every quorum is already unanimous, so there is no higher bar to escalate to — the same signatures queue or execute, at the submitter's choice, including anyone who sees them in the mempool. The delay becomes the default route rather than a guarantee. Legitimate if that is what you want; this app flags it at create and needs a second press in admin rather than refusing. The cancel brake is unaffected.</div>
+<div class="sig">SIGNED MESSAGES ESCAPE THE DELAY ENTIRELY</div>
+<div class="desc">A timelock constrains transactions, not ERC-1271 message signing. Anything expressible as a signed order — Permit2, Seaport, intent systems — is authorised instantly with threshold signatures on any vault, however long the delay. Worth knowing if you assume the delay gates every outflow.</div>
 
 <h2>FINDINGS &amp; RESPONSE</h2>
-<p>Shred Security raised four issues — no high or medium severity. The factory, the implementation and the TimelockExecutor are immutable singletons already deployed at mined addresses across every supported chain, with live vaults holding funds. Nothing found warrants redeploying them, and none of the four can be reached without a client building the transaction that triggers it. All four are answered here, where the transaction is built.</p>
+<p>Shred Security raised four issues, no high or medium. The Opus 5 review raised two high and six medium, all configuration-dependent — four of which re-file tradeoffs already documented as accepted, and two of which we downgraded on the evidence. What follows is what changed here as a result.</p>
 
 <div class="sig">L-1 &middot; SELF-REFERENTIAL EXECUTOR <span class="params">— low, mitigated</span></div>
 <div class="desc">A vault whose address carries the 0x1111 guard marker and whose executor is set to itself recurses through the guard hook on every execute() until it reverts — and setExecutor is only reachable through execute(), so there is no way back. This app refuses to raise that proposal, and flags an inbound one as SET EXECUTOR &middot; LOCKS VAULT with "do not sign". Executors carrying the marker are permitted but need a second confirming press. Salts mined here always produce a 0x00 address prefix, so a vault deployed from this app can never carry the marker at all.</div>
@@ -239,6 +268,32 @@ AUDITS:`
 
 <div class="sig">I-2 &middot; DOMAIN SEPARATOR GAS <span class="params">— informational, accepted</span></div>
 <div class="desc">The EIP-712 domain separator is recomputed per call rather than cached, costing ~500–800 gas. Accepted as intended design: reading block.chainid live is what makes signatures fork-safe by construction, with no cached value that can go stale. Nothing for a client to mitigate.</div>
+
+<div class="sig">M-1 &middot; CODELESS GUARD EXECUTOR <span class="params">— medium, mitigated</span></div>
+<div class="desc">The guard hook is a high-level call, so the compiler checks the target has code first. A 0x1111 address holding none — an EOA, or a guard planned but not yet deployed — reverts every execute() and executeQueued(), and every route back is onlySelf and so runs through the execute() that is already reverting. This app reads the chain before proposing such an executor and refuses one with no code.</div>
+
+<div class="sig">M-2 &middot; M-3 &middot; UNRECOVERABLE TIMELOCK STATES <span class="params">— medium, mitigated</span></div>
+<div class="desc">setDelay takes any uint32, up to ~136 years, and the proposal that would undo a bad one waits it out first. Removing the executor while a delay is set strands every queued proposal, since a cancel is queued too. Delays over 30 days need a second press and are refused outright on a vault with no executor; setExecutor(0) is refused while a delay is live.</div>
+
+<div class="sig">H-01 &middot; ROUTE-UNBOUND SIGNATURES <span class="params">— high, mitigated</span></div>
+<div class="desc">The most serious issue any review has raised here, and the only one that touches the cancel path — which needs no forwardEnabled, so it reached every vault with a timelock and this executor. Every executor bundle this app builds now spends one slot on a sender slot bound to the submitter, so a copied bundle is inert on either route. For a cancel the protection is complete: the bundle is exactly threshold slots, so binding one leaves a copier a signature short. For unanimous accelerate or instant execute on a k-of-n vault it is partial — an adversary can still extract a threshold subset from the remaining signatures to queue the action and burn the nonce, which delays rather than defeats it. Private submission is the remaining mitigation there.</div>
+
+<div class="sig">L-04 &middot; EXECUTOR AS A DEAD END <span class="params">— low, mitigated</span></div>
+<div class="desc">The TimelockExecutor has no withdrawal path either. Plain ETH bounces since it has no receive function, but tokens sent to it are stuck forever. It is now refused as a destination alongside the factory and the implementation.</div>
+
+<div class="sig">L-2b &middot; SILENT SELF-CALL NO-OPS <span class="params">— low, mitigated</span></div>
+<div class="desc">The vault's fallback returns success for selectors it has no function for, so a mistyped governance self-call emits ExecutionSuccess, burns the nonce and changes nothing — monitoring agrees it worked. A proposal carrying a self-call the vault cannot answer is flagged SELF-CALL &middot; SILENT NO-OP.</div>
+
+<h2>ACCEPTED, NOT FIXED</h2>
+<p>Recorded so they are not surprises. Each is documented design rather than an oversight:</p>
+<div class="sig">THE EXECUTOR IS A FULL KEY</div>
+<div class="desc">It bypasses both signatures and the delay by design. A guard is installed <em>as</em> the executor, so installing one grants full custody — unlike Safe, where a Guard can only block. Treat any guard address as a co-owner and hold it to the same standard as the vault itself.</div>
+<div class="sig">STALE APPROVALS SURVIVE REMOVAL</div>
+<div class="desc">On-chain approvals are keyed by address and never cleared, so removing an owner neutralises their approvals but re-adding the same address restores them. An address removed because it was compromised must never be re-added, even after rotating the key.</div>
+<div class="sig">EIP-7702 CONFIGURATION IS EFFECTIVELY PERMANENT</div>
+<div class="desc">Storage survives revoking the delegation and init() cannot be re-run, so a 7702 delegation to this implementation cannot be cleanly reconfigured afterwards. The EOA key also remains a superuser throughout.</div>
+<div class="sig">ZERO-PREFIX SALTS ARE NOT FRONT-RUN PROTECTED</div>
+<div class="desc">The factory accepts a salt starting with either the zero address or the caller's. Only the caller-bound form protects a counterfactual address from being claimed first. This app mines sender-bound salts exclusively — there is no code path here that produces the open form.</div>
 
 <h2>DEPLOY &amp; LOAD VERIFICATION</h2>
 <p>The audit's deployment checklist asked for the audited build to be confirmed on-chain rather than assumed. It now is:</p>

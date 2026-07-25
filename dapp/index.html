@@ -752,14 +752,106 @@ function executorRisk(next, vaultAddr) {
   return isGuardHookAddr(next) ? 'hook' : null;
 }
 
+// H-01 (third review). Every signature in a `forward()` bundle is equally valid
+// for `Multisig.execute()` — the two routes verify the same EIP-712 Execute
+// digest, and nothing in it says which route was intended. So an observer who
+// copies a bundle out of the mempool can submit it down the *other* route.
+//
+// For a cancellation that is fatal, and it needs no `forwardEnabled`: the honest
+// owners sign a cancel meaning it to land immediately via `forward()`; the
+// attacker front-runs with `execute()`, which — not being the executor — queues
+// the cancellation for the full delay and consumes the nonce, so the real
+// forward() reverts. The dangerous transaction was queued first, matures first,
+// and anyone may execute it. The cancellation arrives afterwards and deletes an
+// entry that is already gone, without reverting. The brake is neutralised.
+//
+// The binding: give one slot of the bundle to the submitter as a v=0 "sender
+// slot" — 32 bytes naming an owner, 32 unused, then v=0 — which the contract
+// accepts only when `msg.sender` is that owner (or they hold an on-chain
+// approval for the hash). A copier is neither, so the bundle is inert in their
+// hands on either route. Costs nothing: the slot replaces that owner's own
+// signature, and they are the one submitting anyway.
+function senderSlot(owner) {
+  return ethers.zeroPadValue(ethers.getAddress(owner), 32).slice(2) + '0'.repeat(64) + '00';
+}
+// forward() demands exactly `required * 65` bytes, so a bundle carrying more
+// signatures than the route asks for reverts. Trim to `n`, keeping the
+// submitter's slot — it is the one that binds the bundle, and sorted order
+// alone would sometimes drop it. Re-sorted after, since the contract walks the
+// slots expecting strictly ascending signers.
+function pickSigs(sigs, n, submitter) {
+  if(sigs.length <= n) return sigs;
+  const mine = submitter ? sigs.filter(s => s.signer && s.signer.toLowerCase() === submitter.toLowerCase()) : [];
+  const rest = sigs.filter(s => !mine.includes(s));
+  return [...mine, ...rest].slice(0, n).sort((a, b) => a.signer.toLowerCase() < b.signer.toLowerCase() ? -1 : 1);
+}
+// Pack a forward() bundle bound to `submitter` where possible. Returns the
+// packed bytes plus whether the binding actually took, so callers can say so
+// rather than quietly assuming protection they did not get.
+async function packSigsBound(sigs, submitter, msAddr, hash) {
+  const packedPlain = packSigs(sigs);
+  if(!submitter) return { packed: packedPlain, bound: false, why: 'NO SUBMITTER' };
+  const i = sigs.findIndex(s => s.signer && s.signer.toLowerCase() === submitter.toLowerCase());
+  if(i < 0) return { packed: packedPlain, bound: false, why: 'SUBMITTER IS NOT ONE OF THE SIGNERS' };
+  // An on-chain approval for this hash makes the slot usable by anyone, which
+  // is the one case where the sender slot buys nothing. Read it rather than
+  // assume — this is the emergency path.
+  if(msAddr && hash) {
+    try {
+      const ms = new ethers.Contract(msAddr, MULTISIG_ABI, provider);
+      if(await ms.approved(sigs[i].signer, hash)) {
+        return { packed: packedPlain, bound: false, why: 'SUBMITTER HAS AN ON-CHAIN APPROVAL FOR THIS HASH' };
+      }
+    } catch(_) { /* unreadable — fall through and bind anyway; worst case it reverts */ }
+  }
+  let packed = '0x';
+  sigs.forEach((s, k) => { packed += k === i ? senderSlot(s.signer) : (s.sig || s.signature).slice(2); });
+  return { packed, bound: true };
+}
+
+// M-2. Past this, a timelock stops being a review window and starts being a
+// liability: every proposal that would shorten it again waits it out first.
+// A month is already far beyond any operational use.
+const DELAY_SANE_MAX = 30 * 24 * 60 * 60;
+
+// H-1. forward() distinguishes "execute now" from "queue for review" only by
+// signature count — ownerCount vs threshold — over one shared Execute digest.
+// Where those counts coincide the distinction does not exist.
+function fastPathVoidsTimelock(v) {
+  return !!v && v.delay > 0 && v.ownerCount > 0 && v.ownerCount === v.threshold;
+}
+
+// L-2 (second review). The wallet's fallback answers the three ERC-721/1155
+// receiver selectors and returns empty success for everything else instead of
+// reverting. A self-call carrying a mistyped selector therefore "succeeds":
+// execute() sees ok == true, emits ExecutionSuccess, burns the nonce, and
+// changes nothing — and the event says it worked, so monitoring agrees. Only
+// governance runs as self-calls, so this converts exactly the class of mistake
+// that should be loudest into the quietest one.
+let _msSelectors = null;
+function isKnownMultisigSelector(sel) {
+  if(!_msSelectors) {
+    _msSelectors = new Set();
+    msIface.forEachFunction(f => _msSelectors.add(f.selector));
+    // Answered by the fallback for real, not swallowed by it.
+    ['0x150b7a02','0xf23a6e61','0xbc197c81'].forEach(s => _msSelectors.add(s));
+  }
+  return _msSelectors.has(sel);
+}
+
 // L-2. Both singleton constructors are payable and neither contract exposes a
 // withdrawal path, so ETH — or any token — that reaches the factory or the
 // implementation is unrecoverable by anyone. These are plausible paste targets:
 // they are printed in this UI and on every deploy receipt. Nothing built here
 // is allowed to send value to one.
+// The TimelockExecutor belongs here too (third review, L-04): it has no
+// withdrawal path and no arbitrary-execution function of its own. Plain ETH
+// bounces — it has neither `receive` nor a payable fallback — but a token
+// transfer succeeds and is then stuck forever.
 const NO_WITHDRAWAL = {
   [FACTORY.toLowerCase()]: 'THE MULTISIG FACTORY',
   [IMPLEMENTATION.toLowerCase()]: 'THE MULTISIG IMPLEMENTATION',
+  [TIMELOCK_EXECUTOR.toLowerCase()]: 'THE TIMELOCK EXECUTOR',
   [ethers.ZeroAddress]: 'THE ZERO ADDRESS',
   '0x0000000000000000000000000000000000000001': 'THE OWNER-LIST SENTINEL',
 };
@@ -1683,6 +1775,11 @@ function txKind(tx, v) {
     const d = dec('setDelay');
     const s = d ? Number(d[0]) : null;
     const shorter = s != null && s < v.delay;
+    // Audit M-2 — a delay nobody can walk back.
+    const noExec = !v.executor || v.executor === ethers.ZeroAddress || v.executor === '0x0000...0000';
+    if(s != null && s > DELAY_SANE_MAX) return { label:'SET TIMELOCK · EXTREME', tone:'danger', warn:true,
+      note:`SETS THE TIMELOCK TO ${fmtDelay(s)}. EVERY LATER PROPOSAL WAITS THAT LONG — INCLUDING THE ONE THAT WOULD SHORTEN IT AGAIN, BECAUSE setDelay IS ITSELF QUEUED.` +
+        (noExec ? ` THIS VAULT HAS NO EXECUTOR, SO THERE IS NO BYPASS AND NO CANCEL: THIS IS PERMANENT.` : ` ONLY A UNANIMOUS FAST-PATH FORWARD COULD UNDO IT.`) };
     return { label:'SET TIMELOCK', tone:'policy', warn:shorter,
       note:`TIMELOCK BECOMES ${s == null ? '?' : s === 0 ? 'NONE' : fmtD(s)}, FROM ${v.delay ? fmtD(v.delay) : 'NONE'} NOW.` +
         (s === 0 ? ` AT ZERO THERE IS NO DELAY AT ALL — PROPOSALS EXECUTE THE MOMENT THEY REACH QUORUM, WITH NO WINDOW TO CANCEL ONE.` :
@@ -1695,6 +1792,12 @@ function txKind(tx, v) {
     // Audit L-1, read off the calldata rather than off anything this UI
     // recorded — the proposal that matters most here is the one raised
     // somewhere else and brought to a co-signer for a second signature.
+    // Audit M-3 — clearing the executor under a live timelock is not a
+    // downgrade, it is the removal of the only role that can act inside the
+    // window. cancelQueued is onlySelf, so a cancel is queued for `delay` too
+    // and matures no earlier than what it cancels.
+    if(clearing && v.delay > 0) return { label:'SET EXECUTOR · STRANDS THE QUEUE', tone:'danger', warn:true,
+      note:`REMOVES THE EXECUTOR WHILE A ${fmtD(v.delay)} TIMELOCK IS SET. THE EXECUTOR IS THE ONLY ROLE THAT CAN CANCEL INSIDE THE DELAY WINDOW — A CANCEL RAISED WITHOUT ONE IS ITSELF QUEUED FOR ${fmtD(v.delay)} AND MATURES NO EARLIER THAN THE PROPOSAL IT MEANS TO STOP. AFTER THIS, ANYTHING QUEUED — INCLUDING WHAT IS ALREADY WAITING — EXECUTES ON SCHEDULE AND NOTHING CAN STOP IT.` };
     const risk = a ? executorRisk(a, v.address) : null;
     if(risk === 'lock') return { label:'SET EXECUTOR · LOCKS VAULT', tone:'danger', warn:true,
       note:`DO NOT SIGN. THIS POINTS THE VAULT AT ITSELF, AND THIS VAULT'S ADDRESS CARRIES THE 0x1111 GUARD-HOOK MARKER — SO EVERY execute() WOULD CALL BACK INTO ITSELF UNTIL IT RAN OUT OF GAS. NOTHING WOULD EXECUTE AGAIN, INCLUDING THE PROPOSAL THAT WOULD UNDO THIS. THE VAULT AND EVERYTHING IN IT WOULD BE FROZEN PERMANENTLY.` };
@@ -1710,6 +1813,10 @@ function txKind(tx, v) {
   if(is(tlIface, 'enableForward')) {
     const d = dec('enableForward', tlIface);
     const on = d ? !!d[0] : null;
+    // Audit H-1 — where unanimity and quorum are the same number, "skip the
+    // timelock once everyone signs" and "skip the timelock" are the same offer.
+    if(on && fastPathVoidsTimelock(v)) return { label:'FAST PATH · TIMELOCK BECOMES ADVISORY', tone:'danger', warn:true,
+      note:`ON A ${v.threshold}-OF-${v.ownerCount} VAULT EVERY QUORUM IS ALREADY UNANIMOUS, SO THE SIGNATURES THAT QUEUE A PROPOSAL ARE THE SAME BYTES THAT EXECUTE IT INSTANTLY — WHOEVER HOLDS THEM DECIDES WHICH, AND THAT INCLUDES ANYONE WHO SEES THEM IN THE MEMPOOL. AFTER THIS THE ${fmtD(v.delay)} DELAY IS THE DEFAULT ROUTE, NOT A GUARANTEE. THE CANCEL BRAKE IS UNAFFECTED — IT NEEDS ${v.threshold} SIGNATURES EITHER WAY.` };
     return { label:'EXECUTOR FAST PATH', tone:'policy', warn:on === true,
       note:on
         ? `TURNS ON THE FAST PATH — ONCE EVERY OWNER SIGNS, A PROPOSAL CAN SKIP THE TIMELOCK ENTIRELY.`
@@ -1739,6 +1846,10 @@ function txKind(tx, v) {
       note:`RUNS ${at(d && d[0])}'S CODE INSIDE THE VAULT'S OWN STORAGE. IT CAN REACH EVERY ASSET THE VAULT HOLDS AND REWRITE EVERY SETTING IT HAS, INCLUDING THE OWNER SET. ONLY APPROVE THIS IF YOU HAVE READ THAT CODE.` };
   }
 
+  // Audit L-2 — a self-call the wallet has no function for is not a call, it is
+  // a nonce burn that reports success. Say so, because nothing downstream will.
+  if(self && sel && !isKnownMultisigSelector(sel)) return { label:'SELF-CALL · SILENT NO-OP', tone:'danger', warn:true,
+    note:`THE VAULT HAS NO FUNCTION WITH SELECTOR ${sel}, AND ITS FALLBACK RETURNS SUCCESS INSTEAD OF REVERTING. THIS WOULD CONSUME NONCE ${tx.nonce != null ? tx.nonce : 'ITS NONCE'}, EMIT ExecutionSuccess, AND CHANGE NOTHING — A MISTYPED GOVERNANCE CALL THAT LOOKS EXECUTED EVERYWHERE AFTERWARDS. CHECK THE FUNCTION NAME BEFORE SIGNING.` };
   return { label:`CALL ${sel || '?'}`, tone:'code', warn:true,
     note:`UNRECOGNISED FUNCTION. NOTHING IN THIS INTERFACE CAN TELL YOU WHAT IT DOES — READ THE TARGET CONTRACT AND THE CALLDATA, OR SIMULATE IT, BEFORE SIGNING.` };
 }
@@ -2301,7 +2412,8 @@ function renderDeployOverlay(){
     const noFac = d.steps.some(s=>s.pf&&s.pf.factoryOk===false);
     const badImpl = d.steps.some(s=>s.pf&&s.pf.implOk===false);
     const notOwner = d.ctx && d.ctx.deployerIsOwner === false;
-    footer = `<div style="margin-top:14px;font-size:10px;color:var(--y);letter-spacing:1px;line-height:1.6">${noFac?'No factory on some chains — the vault cannot be deployed there. ':''}${badImpl?'On some chains the factory address holds code that does not name the audited implementation — a vault deployed there would not be the reviewed contract. ':''}${noExec?'No TimelockExecutor on some chains — fast path can’t be enabled there. ':''}${noGas?'No gas in the connected wallet on some chains. ':''}${notOwner?'You are not one of the owners — the vault will deploy, but it will not appear in your history. ':''}Proceed anyway and those chains may fail.</div>
+    const fpVoid = d.ctx && d.ctx.fastPathVoid === true;
+    footer = `<div style="margin-top:14px;font-size:10px;color:var(--y);letter-spacing:1px;line-height:1.6">${fpVoid?`At ${d.ctx.thresh}-of-${d.ctx.resolvedOwners.length} every quorum is already unanimous, so instant execution makes the timelock advisory rather than enforced — the same signatures can queue or execute, whichever the submitter picks. Lower the threshold, or leave instant execution off, to keep the delay enforced. `:''}${noFac?'No factory on some chains — the vault cannot be deployed there. ':''}${badImpl?'On some chains the factory address holds code that does not name the audited implementation — a vault deployed there would not be the reviewed contract. ':''}${noExec?'No TimelockExecutor on some chains — fast path can’t be enabled there. ':''}${noGas?'No gas in the connected wallet on some chains. ':''}${notOwner?'You are not one of the owners — the vault will deploy, but it will not appear in your history. ':''}Proceed anyway and those chains may fail.</div>
       <div style="display:flex;gap:8px;margin-top:16px"><button class="btn btn-outline btn-w" onclick="closeDeploy()">CANCEL</button><button class="btn btn-fill btn-w" onclick="proceedDeploy()">PROCEED</button></div>`;
   } else if(d.done){
     const dbWarn = d.steps.some(s=>s.dbWarn);
@@ -3754,6 +3866,11 @@ function doReject(vi, nonce) {
 // press-again idiom as REJECT below, keyed by the address rather than a nonce
 // so editing the field disarms it.
 let _hookArmed = null, _hookArmTimer = null;
+// Same idiom for an over-long timelock (audit M-2), keyed by the value.
+let _delayArmed = null, _delayArmTimer = null;
+// And for turning the fast path on where it makes the timelock advisory
+// (audit H-1), keyed by the vault.
+let _fpArmed = null, _fpArmTimer = null;
 
 let _rejectArmed = null, _rejectArmTimer = null;
 function armReject(vi, nonce) {
@@ -5115,6 +5232,14 @@ async function prodDeploy() {
   const del = toSec(c.delayVal, c.delayUnit);
   const executor = del > 0 ? TIMELOCK_EXECUTOR : ethers.ZeroAddress;
   const wantForward = c.fastPath && del > 0;
+  // Audit H-1. The fast path lets a unanimous signature set skip the timelock.
+  // Where the threshold already is the owner count, unanimity is just quorum,
+  // so the timelock stops being enforced and becomes a default that anyone
+  // holding the signatures can waive. That is a legitimate thing to want — it
+  // is what delay=0 gives you, with queuing still the normal path — so it is
+  // surfaced in the review screen rather than refused. Raised before the deploy
+  // because turning it off afterwards costs a full delay period.
+  const fastPathVoid = wantForward && thresh === resolvedOwners.length;
   // register_wallet() requires the deployer to be one of the owners. Cloning a
   // Safe you only watch produces exactly that vault, so surface it before the
   // deploy rather than losing the record afterwards.
@@ -5131,7 +5256,7 @@ async function prodDeploy() {
   S.deploy = {
     chains,
     steps: chains.map(n => ({ id:n.id, name:n.name, status:'pending' })),
-    ctx: { resolvedOwners, del, thresh, executor, wantForward, ownerLabels, connectedAddress, cfName: c.name || null, salt:null, minedAddr:null, deployerIsOwner },
+    ctx: { resolvedOwners, del, thresh, executor, wantForward, ownerLabels, connectedAddress, cfName: c.name || null, salt:null, minedAddr:null, deployerIsOwner, fastPathVoid },
     phase:'preflight', address:null, done:false, lastVaultAddr:null,
   };
   render();
@@ -5179,7 +5304,7 @@ async function prodDeploy() {
   const badImpl = pf.some(r => r.implOk === false);                      // wrong code at the factory address
   const blocked = wantForward && pf.some(r => r.executorOk === false);   // executor truly missing
   const warn = pf.some(r => r.gasOk === false);
-  if(noFactory || badImpl || blocked || warn || !deployerIsOwner){ S.deploy.phase = 'review'; render(); return; }  // wait for user to PROCEED
+  if(noFactory || badImpl || blocked || warn || !deployerIsOwner || fastPathVoid){ S.deploy.phase = 'review'; render(); return; }  // wait for user to PROCEED
   runDeploy();
 }
 
@@ -5567,8 +5692,12 @@ async function prodSubmit(vi, nonce) {
     if(canCancel) {
       const executorAddr = v.executor;
       const tlContract = new ethers.Contract(executorAddr, TIMELOCK_EXECUTOR_ABI, signer);
+      // Audit H-01 — a cancel raised as an ordinary proposal reaches the same
+      // forward() route, so it needs the same binding.
+      const bnd = await packSigsBound(sigs.slice(0, v.threshold), connectedAddress, v.address, tx.txHash);
+      if(!bnd.bound) flash(`CANCEL NOT BOUND TO YOU (${bnd.why}) — THESE SIGNATURES CAN BE REPLAYED TO QUEUE THE CANCEL INSTEAD.`);
       flash('CANCELLING VIA EXECUTOR...');
-      atx = await tlContract.forward(v.address, target, value, data, packSigs(sigs.slice(0, v.threshold)));
+      atx = await tlContract.forward(v.address, target, value, data, bnd.packed);
     } else {
       // Contract requires exactly threshold * 65 bytes of sigs
       const packedSigs = packSigs(sigs.slice(0, v.threshold));
@@ -5682,8 +5811,12 @@ async function prodFastExecute(vi, nonce) {
     const value = tx.rawValue ? BigInt(tx.rawValue) : ethers.parseEther(tx.value || '0');
     const data = tx.callData || '0x';
     const tlContract = new ethers.Contract(v.executor, TIMELOCK_EXECUTOR_ABI, signer);
+    // Audit H-01 — bind to this submitter. Copied, this bundle would queue the
+    // transaction through execute() and burn the nonce instead of running it.
+    const bnd = await packSigsBound(sigs, connectedAddress, v.address, tx.txHash);
+    if(!bnd.bound) flash(`NOT BOUND TO YOU (${bnd.why}) — THESE SIGNATURES CAN BE REPLAYED TO QUEUE THIS INSTEAD.`);
     flash('INSTANT EXECUTING VIA EXECUTOR...');
-    const atx = await tlContract.forward(v.address, target, value, data, packSigs(sigs));
+    const atx = await tlContract.forward(v.address, target, value, data, bnd.packed);
     flash('TX SENT, WAITING...');
     const receipt = await atx.wait();
 
@@ -5776,8 +5909,16 @@ async function prodCancel(vi, nonce) {
 
     // Threshold met — execute via forward()
     const tlContract = new ethers.Contract(v.executor, TIMELOCK_EXECUTOR_ABI, signer);
+    // Audit H-01 — bind the bundle to this submitter. A cancel is the one call
+    // that must not be replayable down the execute() route: queued instead of
+    // immediate, it matures after the transaction it was meant to stop.
+    // Trimmed to exactly threshold: the route requires that byte length, and a
+    // tight bundle is also what makes the binding airtight — one slot bound
+    // leaves threshold-1 usable signatures, one short of what execute() needs.
+    const bnd = await packSigsBound(pickSigs(sigs, v.threshold, connectedAddress), connectedAddress, v.address, cancelTxHash);
+    if(!bnd.bound) flash(`CANCEL NOT BOUND TO YOU (${bnd.why}) — THESE SIGNATURES CAN BE REPLAYED TO QUEUE THE CANCEL INSTEAD. SUBMIT FROM A SIGNING OWNER IF YOU CAN.`);
     flash('CANCELLING VIA EXECUTOR...');
-    const atx = await tlContract.forward(v.address, v.address, 0n, cancelData, packSigs(sigs));
+    const atx = await tlContract.forward(v.address, v.address, 0n, cancelData, bnd.packed);
     flash('TX SENT, WAITING...');
     const receipt = await atx.wait();
 
@@ -6221,8 +6362,13 @@ async function prodAccelerate(vi, nonce) {
 
     // All sigs collected — execute via forward()
     const tlContract = new ethers.Contract(v.executor, TIMELOCK_EXECUTOR_ABI, signer);
+    // Audit H-01 — same binding. A copied accelerate bundle routed through
+    // execute() queues the acceleration behind the delay it meant to skip and
+    // burns the nonce, so the real one reverts.
+    const bnd = await packSigsBound(sigs, connectedAddress, v.address, accelTxHash);
+    if(!bnd.bound) flash(`ACCELERATE NOT BOUND TO YOU (${bnd.why}) — THESE SIGNATURES CAN BE REPLAYED TO QUEUE IT INSTEAD.`);
     flash('ACCELERATING VIA EXECUTOR...');
-    const atx = await tlContract.forward(v.address, v.address, 0n, accelData, packSigs(sigs));
+    const atx = await tlContract.forward(v.address, v.address, 0n, accelData, bnd.packed);
     flash('TX SENT, WAITING...');
     const receipt = await atx.wait();
 
@@ -6459,6 +6605,26 @@ async function prodAdminPropose(action, val) {
       }
       case 'setDelay': {
         if(val > 4294967295) { flash('DELAY TOO LARGE'); return; }  // setDelay(uint32)
+        // Audit M-2. setDelay takes any uint32 — up to ~136 years — and the fix
+        // for a bad one is itself subject to the delay just set, because
+        // setDelay is onlySelf and so routes through execute(). Units confusion
+        // is the realistic path here: 3153600000 for 3153600 reads the same at
+        // a glance in hex calldata. With no executor there is no bypass and no
+        // cancel, so a fat finger is terminal; with one, an unanimous forward()
+        // can still undo it. Gate on that difference rather than on the number.
+        const noExec = !v.executor || v.executor === ethers.ZeroAddress || v.executor === '0x0000...0000';
+        if(val > DELAY_SANE_MAX && noExec) {
+          flash(`REFUSED — ${fmtDelay(val)} WITH NO EXECUTOR IS UNRECOVERABLE. THE PROPOSAL THAT UNDOES IT WOULD ITSELF WAIT ${fmtDelay(val)}.`);
+          return;
+        }
+        if(val > DELAY_SANE_MAX && _delayArmed !== val) {
+          clearTimeout(_delayArmTimer);
+          _delayArmed = val;
+          _delayArmTimer = setTimeout(() => { _delayArmed = null; }, 6000);
+          flash(`${fmtDelay(val)} IS AN UNUSUALLY LONG TIMELOCK — EVERY PROPOSAL, INCLUDING ONE SHORTENING IT AGAIN, WOULD WAIT THAT LONG. PRESS AGAIN TO PROPOSE IT.`);
+          return;
+        }
+        _delayArmed = null;
         data = msIface.encodeFunctionData('setDelay', [val]);
         desc = `setDelay(${val})`;
         break;
@@ -6466,6 +6632,16 @@ async function prodAdminPropose(action, val) {
       case 'setExecutor': {
         const addr = document.getElementById('admin-executor-input')?.value?.trim();
         if(!addr || !ethers.isAddress(addr)) { flash('INVALID ADDRESS'); return; }
+        // Audit M-3. cancelQueued is onlySelf, so a cancel has to be routed
+        // through execute() — where it is queued for `delay` like anything
+        // else, maturing no earlier than the proposal it means to stop. The
+        // executor is the only role that can act inside the window, so clearing
+        // it under a live timelock does not "disable the executor": it makes
+        // every queued proposal, including any already waiting, irrevocable.
+        if(BigInt(addr) === 0n && v.delay > 0) {
+          flash('REFUSED — REMOVING THE EXECUTOR WHILE A TIMELOCK IS SET MAKES QUEUED PROPOSALS IMPOSSIBLE TO CANCEL. SET THE DELAY TO ZERO FIRST.');
+          return;
+        }
         // Audit L-1. A vault pointed at itself can never be pointed anywhere
         // else again — setExecutor is onlySelf, so the only route to it is the
         // execute() that the guard hook is busy recursing through. Refuse to
@@ -6478,15 +6654,34 @@ async function prodAdminPropose(action, val) {
             : 'REFUSED — A VAULT CANNOT BE ITS OWN EXECUTOR');
           return;
         }
-        // A distinct executor carrying the marker is the legitimate guardian
-        // pattern, so it is allowed — but a guard that reverts stops the vault
-        // dead, so it does not get raised on one click.
-        if(risk === 'hook' && _hookArmed !== addr.toLowerCase()) {
-          clearTimeout(_hookArmTimer);
-          _hookArmed = addr.toLowerCase();
-          _hookArmTimer = setTimeout(() => { _hookArmed = null; }, 6000);
-          flash('0x1111 GUARD HOOK — THIS EXECUTOR RUNS BEFORE EVERY TX AND CAN BLOCK THE VAULT. PRESS AGAIN TO PROPOSE IT.');
-          return;
+        if(risk === 'hook') {
+          // Audit M-1. The hook is a high-level Solidity call, so solc emits an
+          // extcodesize check ahead of it: a marked address holding no code
+          // reverts every execute() and executeQueued(), and every route back —
+          // setExecutor, batch, delegateCall — is onlySelf and therefore runs
+          // through the execute() that is already reverting. An EOA here, or a
+          // guard address planned but not yet deployed, is a one-way door.
+          // Read the chain rather than warn: this is not a judgement call.
+          let code = null;
+          try { code = await provider.getCode(ethers.getAddress(addr)); } catch(_) {}
+          if(code === '0x') {
+            flash('REFUSED — NO CONTRACT AT THIS 0x1111 ADDRESS. THE GUARD HOOK WOULD REVERT EVERY TRANSACTION AND LOCK THE VAULT PERMANENTLY.');
+            return;
+          }
+          if(code === null) {
+            flash('CANNOT VERIFY THIS ADDRESS HAS CODE — CHAIN UNREACHABLE. NOT PROPOSING.');
+            return;
+          }
+          // A distinct executor carrying the marker is the legitimate guardian
+          // pattern, so it is allowed — but a guard that reverts stops the vault
+          // dead, so it does not get raised on one click.
+          if(_hookArmed !== addr.toLowerCase()) {
+            clearTimeout(_hookArmTimer);
+            _hookArmed = addr.toLowerCase();
+            _hookArmTimer = setTimeout(() => { _hookArmed = null; }, 6000);
+            flash('0x1111 GUARD HOOK — THIS EXECUTOR RUNS BEFORE EVERY TX AND CAN BLOCK THE VAULT. PRESS AGAIN TO PROPOSE IT.');
+            return;
+          }
         }
         _hookArmed = null;
         data = msIface.encodeFunctionData('setExecutor', [ethers.getAddress(addr)]);
@@ -6495,6 +6690,27 @@ async function prodAdminPropose(action, val) {
       }
       case 'enableForward': {
         const newState = !v.fastPath;
+        // Audit H-1. forward() and execute() verify against the same EIP-712
+        // Execute digest; the only thing separating "run this now" from "queue
+        // this for review" is how many signatures came with it — all owners for
+        // the first, threshold for the second. On an n-of-n vault those two
+        // numbers are the same, so one signature set opens both doors and
+        // whoever holds it picks; the signers see one struct either way.
+        // Not refused. The owners authorised the transaction, and on an n-of-n
+        // vault the cancel path needs unanimity too (forward() asks for
+        // threshold sigs), so the window this gives up could only ever have
+        // been used by unanimous agreement — it was mistake-recovery, never a
+        // defence against a compromised co-signer. What it does cost is the
+        // guarantee: the timelock stops being enforced and becomes a default
+        // anyone holding the signatures can waive. Worth one deliberate press.
+        if(newState && fastPathVoidsTimelock(v) && _fpArmed !== v.address) {
+          clearTimeout(_fpArmTimer);
+          _fpArmed = v.address;
+          _fpArmTimer = setTimeout(() => { _fpArmed = null; }, 6000);
+          flash(`ON A ${v.threshold}-OF-${v.ownerCount} VAULT EVERY QUORUM IS ALREADY UNANIMOUS, SO THIS MAKES THE ${fmtD(v.delay)} TIMELOCK ADVISORY — THE SAME SIGNATURES CAN QUEUE OR EXECUTE, AT THE SUBMITTER'S CHOICE. PRESS AGAIN TO PROPOSE IT.`);
+          return;
+        }
+        _fpArmed = null;
         data = tlIface.encodeFunctionData('enableForward', [newState]);
         desc = `enableForward(${newState})`;
         // For enableForward, target is the executor, not self

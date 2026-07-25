@@ -202,6 +202,8 @@ Every wallet is the same 45-byte clone, so its runtime code can be checked again
 
 | Date | Auditor | Scope | Result | Report |
 |---|---|---|---|---|
+| 2026-07-26 | GPT-5.6 Sol (Pro) | `Multisig.sol` + `TimelockExecutor.sol` composition @ `main` | 1 high, 1 medium, 4 low, 5 informational | [Reproduction + our response](audit/report-gpt56-sol.md) &middot; [transcript](https://chatgpt.com/share/6a650af3-f6bc-83ea-b5f3-f83452e9c744) |
+| 2026-07-26 | Claude Opus 5 (max effort) | `Multisig.sol` + `TimelockExecutor.sol` @ `09e2c38`, plus 20 adversarial PoC tests | 2 high, 6 medium, 6 low, 9 informational — all configuration-dependent | [Reproduction + our response](audit/report-opus5-max.md) &middot; [transcript](https://claude.ai/share/c8a3a7d4-962f-4cb3-9fea-5690e9c7c7a2) |
 | 2026-07-11 | [Shred Security](https://www.shredsecurity.io/) (kenzo, yashar) | `Multisig.sol` @ `2329339`, plus stateful invariant fuzzing | 0 high, 0 medium, 2 low, 2 informational | [Reproduction + our response](audit/report-shred-security.md) &middot; [PDF](https://audit.multisig.wei.limo) — marked DRAFT |
 | 2026-04-03 | Pashov Skills | `Multisig.sol`, modules, TimelockExecutor | see reports | [`audit/report-multisig.md`](audit/report-multisig.md), [`audit/report-mods.md`](audit/report-mods.md), [`audit/report-timelock-executor.md`](audit/report-timelock-executor.md) |
 

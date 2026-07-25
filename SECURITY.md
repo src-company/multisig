@@ -55,6 +55,245 @@ reentrancy via malicious call targets, and cross-chain or cross-wallet replay.
 Per the auditor these remain covered by the 280-test Foundry suite and prior
 manual review. Do not cite Appendix B as coverage for any of the above.
 
+---
+
+## Third Review (GPT-5.6 Sol, 2026-07-26) — Disposition
+
+**Full report with our responses inline:**
+[`audit/report-gpt56-sol.md`](audit/report-gpt56-sol.md) ·
+[transcript](https://chatgpt.com/share/6a650af3-f6bc-83ea-b5f3-f83452e9c744)
+
+**This review found the most consequential issue raised to date, and corrected an
+error in our response to the second review.**
+
+### H-01 — route-unbound signatures suppress emergency cancellation
+
+Both routes verify the same EIP-712 `Execute` digest, so a cancellation bundle
+can be copied and replayed down the *other* route. Submitted through
+`execute()` by a non-executor it is **queued** for the full delay rather than
+executed immediately, and `nonce++` invalidates the pending `forward()`. The
+dangerous transaction was queued first, matures first, and `executeQueued` is
+permissionless. The late cancellation then deletes an already-empty entry —
+`cancelQueued` does not revert on an absent hash — so it is a silent no-op.
+
+**Why this is worse than the prior route-substitution findings:** the cancel
+branch of `forward()` requires only `threshold` signatures and **does not check
+`forwardEnabled`**. Every previously identified issue lived behind that opt-in.
+This one applies to **every wallet with `delay > 0` and this executor installed**.
+
+**Correction to our own record.** In responding to the Opus 5 review we wrote
+that a wallet never enabling `forwardEnabled` has "zero exposure — structurally
+absent, not mitigated," and that the cancel path "carries none of the findings."
+That holds for the bypass direction and is false for this one. Because the cancel
+brake is the principal reason we recommend this executor at all, the error was
+load-bearing.
+
+**It also suppresses a documented mitigation.** The False Positive Patterns entry
+for "executeQueued doesn't re-check signers" answers it with "the delay window +
+`cancelQueued` is the intended mitigation" — which H-01 shows can be neutralised.
+Combined with L-01 (queued entries never expire and survive owner rotation), this
+is the sharpest composite issue in any review so far.
+
+**Mitigation shipped.** Every `forward()` bundle the dapp builds spends one slot
+on a **v=0 sender slot** naming the submitting owner, which the contract accepts
+only when `msg.sender` is that owner. A copier is neither that owner nor
+pre-approved, so the bundle is inert on either route. Applied at all four
+`forward()` call sites.
+
+- **The cancel path is fully closed.** That route takes exactly `threshold`
+  slots, so binding one leaves `threshold - 1` usable signatures — one short of
+  what `execute()` requires. This also required fixing a latent bug: the cancel
+  path passed *all* collected signatures to `forward()`, which demands exactly
+  `required * 65` bytes and would revert when more than `threshold` owners had
+  signed. Bundles are now trimmed to exactly `threshold`, keeping the submitter.
+- **The unanimous paths are reduced, not closed.** Accelerate and instant execute
+  carry `n` slots; binding one leaves `n - 1 ≥ k` copyable signatures whenever
+  `k < n`, so a threshold subset can still be extracted to queue the action and
+  burn the nonce. Impact is delay and forced re-signing rather than a neutralised
+  brake. Protected submission is the remaining mitigation.
+
+### Other findings
+
+| ID | Filed | Our position |
+|---|---|---|
+| M-01 | Medium | **Rejected as filed** (F-1) — recommendation already implemented; the dapp's salt miner is sender-bound by construction. The "actual factory caller" warning is worth keeping for relayer integrations. |
+| L-01 | Low | **Accepted.** Re-validation is pre-answered as L16, but the no-expiry framing is new and the interaction with H-01 matters. Clear the queue before any configuration change or major deposit. |
+| L-02 | Low | Acknowledged (N-005). Adds the unusable-wallet angle to the known self-as-owner issue. |
+| L-03 | Low | Already mitigated (Shred L-1, Opus M-1). |
+| L-04 | Low | **Accepted, mitigated.** A real gap: `TimelockExecutor` has no `receive` and no withdrawal path, so plain ETH bounces but **tokens sent to it are stuck permanently**. It is now in the refused-destination set alongside the factory and implementation. |
+| I-01 | Info | Accepted. `ownerCount` wrapping to zero makes `required = 0` and `forward()` fail-open on an empty bundle — impractical at ~65,536 owner additions, but a `require(required != 0)` belongs in any future module. |
+| I-02 | Info | Accepted. Signatures have no deadline and stay valid until some transaction consumes the nonce. |
+| I-03 | Info | **Independently confirms** the `forwardEnabled` stickiness we found during the second review. Set the flag explicitly on both installation and removal. |
+| I-04 | Info | Accepted — all four tooling notes already handled in this client. |
+| I-05 | Info | **Accepted.** A regression test that replays a cancellation bundle down the `execute()` route and asserts the original queued transaction matures first is the single most valuable test that could be added here. |
+
+### On the prior fuzzing campaign
+
+The reviewer notes that Shred Security's invariant campaign — 10/10 invariants
+across ~327,680 handler calls — expressly excluded executor bypass and guardian
+hooks, the factory paths, malformed signatures, and cross-wallet replay. **A
+clean result over a scope that excludes the executor says nothing about a
+composition defect in the executor.** Do not cite that number as broader
+assurance than it is.
+
+### Does this change the redeployment answer?
+
+**Not for `Multisig` or `MultisigFactory`.** H-01 is a composition defect between
+the wallet and the module, and the reviewer's own mitigation is client-side.
+
+**It does move a `TimelockExecutorV2` from optional to first on the post-launch
+list.** The reviewer's proposed struct — binding wallet, mode, target, value,
+data hash, nonce and a deadline into a module-specific digest — is a better
+design than the minimal typehash split the second review proposed, because it
+closes the mode and expiry gaps too. A V2 remains adoptable per-wallet through
+one threshold-signed `setExecutor`, with no migration, no address changes and no
+funds moving.
+
+---
+
+## Second Review (Opus 5, 2026-07-26) — Disposition
+
+**Full report with our responses inline:**
+[`audit/report-opus5-max.md`](audit/report-opus5-max.md) ·
+[transcript](https://claude.ai/share/c8a3a7d4-962f-4cb3-9fea-5690e9c7c7a2)
+
+An independent review of `Multisig.sol` and `TimelockExecutor.sol` at commit
+`09e2c38`, with 20 proof-of-concept tests. It re-filed four items that this
+document's False Positive Patterns table already answers (its own status column
+discloses this), and made one factual error: it reports the `Multisig`
+implementation address as unpublished, when it appears in `README.md`,
+`docs/src/README.md`, this file, and both dapp pages.
+
+Setting those aside, it produced one significant new finding and several correct
+smaller ones. **No contract was changed and none will be redeployed.** Five new
+dapp-side guards were added.
+
+| ID | Severity as filed | Our position | Mitigation |
+|---|---|---|---|
+| H-1 | High | **Accepted as a mechanism; downgraded to Low/Medium.** See below — the review window it removes was, on an n-of-n vault, never usable against a compromised co-signer in the first place. | The dapp surfaces it at deploy and requires a deliberate second press in admin; `txKind()` flags an inbound `enableForward(true)` as `FAST PATH · TIMELOCK BECOMES ADVISORY`. Not refused. |
+| H-2 | High | **Rejected as filed.** "Executor can steal all funds" is in the False Positive Patterns table and `README.md` states "The executor has full control by design." The guard-specific *framing* is a fair documentation point — Safe's Guard restricts, ours grants custody — so it is worth a Low. | Documented. |
+| M-1 | Medium | **Accepted, mitigated.** Correctly generalises Shred L-1 past self-reference: solc's `extcodesize` check means *any* codeless `0x1111` address is fatal. | The dapp now reads the chain and hard-blocks a `setExecutor` naming a marked address with no code. |
+| M-2 | Medium | **Accepted, mitigated.** `setDelay` is an unbounded `uint32`. | Delays over 30 days require a second press, and are refused outright when the vault has no executor (no bypass, no cancel). `txKind()` flags them `SET TIMELOCK · EXTREME`. |
+| M-3 | Medium | **Accepted, mitigated.** Correct: with `delay > 0` and no executor, a cancel is queued too and matures no earlier than what it cancels. | Deploy already always pairs `delay > 0` with the TimelockExecutor. The dapp now also refuses `setExecutor(0)` while a delay is set, and flags an inbound one `SET EXECUTOR · STRANDS THE QUEUE`. |
+| M-4, M-5, L-6 | Medium/Low | **Rejected as filed** — F-1, F-2 and F-4 in the False Positive Patterns table. | Unchanged. |
+| M-6 | Medium | **Downgraded to Info.** The outcome (revert on a nonce race) is right, but the stated mechanism is not: both nonce reads are in one transaction and cannot be interleaved. Signatures binding to the nonce at execution time is ordinary multisig behaviour that `execute()` shares. | None needed. |
+| L-2 | Low | **Accepted, mitigated.** Correct and new — the fallback returns empty success for unrecognised selectors, so a mistyped governance self-call emits `ExecutionSuccess` and does nothing. | `txKind()` flags a self-call carrying a selector the wallet has no function for as `SELF-CALL · SILENT NO-OP`. |
+| L-3 | Low | **Accepted.** `approved[owner][hash]` survives removal and reactivates on re-add. | Documented: an address removed for compromise must never be re-added. |
+| L-5 | Low | **Acknowledged, no change.** Correct, but `Queued(hash, 0, 0)` as a cancellation signal is deliberate and recorded under Changes Made. | Unchanged. |
+| I-1..I-9 | Info | **Accepted as informational.** I-7 (EIP-7702 storage is sticky across delegation changes) is the one worth propagating to users. | Documented. |
+
+### H-1 — the shared typehash is deliberate, and why
+
+The reviewer identifies the shared `Execute` typehash as "a deliberate UX
+decision" without recovering the design goal. It is this: **signatures are meant
+to accrue monotonically.** One signature is one signature, valid wherever it is
+presented. Collect `threshold` and you hold a queueable transaction; if a further
+owner signs the same digest before submission, you hold an instantly-executable
+one — **with nobody re-signing anything.**
+
+A 2-of-3 collects Alice and Bob; the proposal is queueable. Carol signs an hour
+later; the set is now unanimous and can execute immediately. Alice and Bob are
+never asked to sign a second, differently-named struct.
+
+Bifurcating the domain is exactly what would destroy that. Every transaction
+would need an up-front decision about which kind of signature to gather, and a
+late-arriving signer would trigger a full re-collection. The convenience the
+reviewer identifies as "the vulnerability" is the mechanism the whole collection
+flow is built on.
+
+The convenience lives in the pre-submission window. Once queued, the nonce
+advances, the original digest is dead, and accelerating requires a fresh
+unanimous round over the `executeQueued` wrapper — which is the right place for
+friction, since that is where a delay already running is being overridden.
+
+This is why the auditor's recommended `ForwardExecute` typehash is deferred to a
+possible `TimelockExecutorV2` rather than treated as a fix to apply now.
+
+### H-1 — why we downgraded it, and two properties the reviewer missed
+
+**Cancellation requires `threshold` signatures, not unanimity.**
+[`TimelockExecutor.forward()`](../src/mods/TimelockExecutor.sol#L42-L43) routes a
+`cancelQueued` self-call on `threshold` sigs and — importantly — *without*
+requiring `forwardEnabled`. So the emergency brake is available on every wallet
+using this executor, fast path or not.
+
+The consequence the reviewer did not draw: **on an n-of-n wallet, `threshold` is
+everyone.** An honest owner cannot reach cancel quorum without the compromised
+key. So the review window on an n-of-n vault was never a defence against a
+compromised co-signer — it is mistake-recovery requiring unanimous agreement,
+and third-party notice. That is true with or without H-1.
+
+The asymmetry is the whole story: on a 2-of-3, two honest owners *can* cancel
+around a compromised third. On a 2-of-2, nobody can. The timelock's
+anti-compromise value only ever existed where `threshold < ownerCount` — exactly
+the configuration H-1 does not affect.
+
+What H-1 genuinely costs, therefore, is narrower than "the timelock provides no
+guarantee":
+
+1. **Third-party notice.** A wallet acting as a protocol admin advertises "you
+   get N days' warning before anything changes." On n-of-n with the fast path
+   on, that promise is void. This is the case where it still deserves Medium.
+2. **Mistake recovery against an interested counterparty.** Owners queue a
+   transfer, spot a wrong address, and move to cancel — but the recipient, who
+   can see the signatures in the mempool, front-runs with `forward()` to deny
+   the window.
+
+For ordinary self-custody it is closer to Low: the owners authorised the
+transaction, and the window they gave up needed their own unanimous agreement to
+use. Hence a flag, not a refusal — the configuration is legitimate, it just must
+not be a surprise.
+
+**Two further properties, both new:**
+
+- **On-chain approvals are a stronger form of the same collapse.**
+  `forward()`'s `v=0` branch accepts `approved(signer, hash)` — *public
+  contract state*, not a signature. On an n-of-n vault with the fast path on,
+  once every owner has called `approve(hash, true)`, **any address at all** can
+  call `forward()` with `v=0` slots naming them and execute immediately. There
+  is no signature blob to obtain and no mempool race; the authorisation sits in
+  public storage until the nonce moves past it. This dapp exposes that approval
+  path directly. It is the same failure as H-1 with the access requirement
+  removed entirely.
+- **`forwardEnabled` is sticky across executor rotation.** It is keyed by wallet
+  address in the module and never cleared. A wallet that enables the fast path,
+  rotates its executor away, and later returns to the TimelockExecutor has the
+  fast path back on with no proposal ever having re-enabled it. The wallet's own
+  storage records nothing. This dapp reads `forwardEnabled` live from the
+  module on every load, so its display stays correct, but operators reasoning
+  from the wallet's state alone will be wrong. Compounds L-4.
+
+### Does any of this require redeployment?
+
+**No — not of `Multisig` or `MultisigFactory`.** Every accepted finding is either
+configuration-dependent and blocked client-side (H-1, M-1, M-2, M-3), or
+informational (L-2, L-3, I-*). None is reachable by an unauthorised party against
+a correctly configured wallet; the reviewer states this explicitly.
+
+The one item that would genuinely benefit from new bytecode is **H-1**, and it
+does not need a migration. `TimelockExecutor` is a *swappable singleton*: the
+executor is per-wallet mutable storage, so a fixed `TimelockExecutorV2` — with
+its own `ForwardExecute` typehash (H-1) and an explicit `expectedNonce` parameter
+(M-6) — can be deployed alongside the current one and adopted by any wallet
+through an ordinary threshold-signed `setExecutor`. No wallet is redeployed, no
+funds move, no address changes. Until then, the n-of-n block above removes the
+exposure for anything built through this dapp.
+
+Fixing **H-2** is what would require redeploying `Multisig` and the factory: it
+needs a second storage slot to split the guard role from the executor role, and
+slot 0 is full at 32 bytes. Given that the executor's full authority is
+documented design and on the false-positive list, that is not a trade we are
+making.
+
+**Residual risk we accept**, all of it outside this dapp: a wallet driven by
+other tooling can still be pointed at a codeless `0x1111` executor (M-1), given
+an unbounded delay with no executor (M-2), stripped of its executor under a live
+timelock (M-3), or have the fast path enabled at n-of-n (H-1). These are one-way
+doors reachable only by a threshold of owners deliberately signing for them, and
+none is fixable without redeploying the singletons.
+
+---
+
 ### L-1 — why the dapp, not the contract
 
 The DoS needs two deliberate steps that only ever happen through a client: a
