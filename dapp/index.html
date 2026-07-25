@@ -864,11 +864,32 @@ function customTokensFor(chainId, addr){
   if(!addr) return [];
   try { const v = JSON.parse(localStorage.getItem(_ctokKey(chainId, addr)) || '[]'); return Array.isArray(v) ? v : []; } catch(_) { return []; }
 }
+// Persist a custom token against the vault it was added for. Returns whether
+// the token is on disk afterwards: without a vault address there is no key we
+// could ever read back, and localStorage can refuse the write outright (quota,
+// private browsing). Both cases used to be swallowed, so the token survived
+// until the next reload and then silently vanished — callers now report it.
 function saveCustomToken(chainId, addr, tok){
+  if(!addr) return false;
   const list = customTokensFor(chainId, addr);
-  if(list.some(t => t.address.toLowerCase() === tok.address.toLowerCase())) return;
+  if(list.some(t => t.address.toLowerCase() === tok.address.toLowerCase())) return true;
   list.push({ address: tok.address, symbol: tok.symbol, decimals: tok.decimals });
-  try { localStorage.setItem(_ctokKey(chainId, addr), JSON.stringify(list)); } catch(_){}
+  try {
+    localStorage.setItem(_ctokKey(chainId, addr), JSON.stringify(list));
+    return customTokensFor(chainId, addr).some(t => t.address.toLowerCase() === tok.address.toLowerCase());
+  } catch(_) { return false; }
+}
+// Parse a pasted token address. An all-lower or all-upper string carries no
+// EIP-55 checksum to violate, so accept and normalise it; a mixed-case string
+// does, and a mismatch there is a real typo worth naming.
+function parseTokenAddr(raw){
+  const t = (raw || '').trim();
+  if(!/^0x[0-9a-fA-F]{40}$/.test(t)) return { err: 'ENTER A VALID TOKEN ADDRESS' };
+  const body = t.slice(2);
+  if(/[a-f]/.test(body) && /[A-F]/.test(body) && !ethers.isAddress(t))
+    return { err: 'BAD CHECKSUM — RE-COPY THE ADDRESS' };
+  try { return { addr: ethers.getAddress(t.toLowerCase()) }; }
+  catch(_) { return { err: 'ENTER A VALID TOKEN ADDRESS' }; }
 }
 function removeCustomToken(chainId, addr, tokenAddr){
   const list = customTokensFor(chainId, addr).filter(t => t.address.toLowerCase() !== tokenAddr.toLowerCase());
@@ -2265,18 +2286,18 @@ function onBatchData(i, val){
 // vault, select it for the transfer, and refresh holdings so it's tracked.
 async function addCustomTokenFlow(){
   const v = S.vaults[S.sel]; if(!v) return;
-  const raw = document.getElementById('custom-tok-addr')?.value?.trim();
-  if(!raw || !ethers.isAddress(raw)){ flash('ENTER A VALID TOKEN ADDRESS'); return; }
-  const addr = ethers.getAddress(raw);
+  const parsed = parseTokenAddr(document.getElementById('custom-tok-addr')?.value);
+  if(parsed.err){ flash(parsed.err); return; }
+  const addr = parsed.addr;
   const existing = vaultTokens(v).find(t => t.address && t.address.toLowerCase() === addr.toLowerCase());
   if(existing){ S.txToken = existing.symbol; S.showCustomTok = false; render(); return; }
   flash('FETCHING TOKEN…');
   try {
     const meta = await fetchTokenMeta(addr);
     if(vaultTokens(v).some(t => t.symbol === meta.symbol)){ flash(`SYMBOL "${meta.symbol}" ALREADY LISTED`); return; }
-    saveCustomToken(S.chainId, v.address, meta);
+    const saved = saveCustomToken(S.chainId, v.address, meta);
     S.txToken = meta.symbol; S.showCustomTok = false;
-    flash(`ADDED ${meta.symbol} · ${meta.decimals} DEC`);
+    flash(saved ? `ADDED ${meta.symbol} · ${meta.decimals} DEC · SAVED` : `ADDED ${meta.symbol} · COULD NOT SAVE LOCALLY`);
     render();
     reloadHoldings(S.sel);
   } catch(e){
@@ -2291,7 +2312,10 @@ function removeCustomTokenFlow(tokenAddr){
   const v = S.vaults[S.sel]; if(!v) return;
   const tok = customTokensFor(S.chainId, v.address).find(t => t.address.toLowerCase() === tokenAddr.toLowerCase());
   removeCustomToken(S.chainId, v.address, tokenAddr);
+  // Both pickers read the same list, so either can be left pointing at a token
+  // that no longer exists.
   if(tok && S.txToken === tok.symbol) S.txToken = 'ETH';
+  if(tok && S.topup && S.topup.sym === tok.symbol) S.topup.sym = 'ETH';
   flash(tok ? `REMOVED ${tok.symbol}` : 'REMOVED');
   render();
   reloadHoldings(S.sel);
@@ -2349,22 +2373,26 @@ function fillTopUpMax(amountStr, dec, avail, unit){
 }
 async function addTopUpCustom(){
   const v = S.vaults[S.sel]; if(!v || !S.topup) return;
-  const raw = document.getElementById('topup-custom-addr')?.value?.trim();
-  if(!raw || !ethers.isAddress(raw)){ flash('ENTER A VALID TOKEN ADDRESS'); return; }
-  const addr = ethers.getAddress(raw);
+  const parsed = parseTokenAddr(document.getElementById('topup-custom-addr')?.value);
+  if(parsed.err){ flash(parsed.err); return; }
+  const addr = parsed.addr;
   const existing = vaultTokens(v).find(t => t.address && t.address.toLowerCase() === addr.toLowerCase());
   if(existing){ S.topup.sym = existing.symbol; S.topup.showCustom = false; render(); return; }
   flash('FETCHING TOKEN…');
   try {
     const meta = await fetchTokenMeta(addr);
     if(vaultTokens(v).some(t => t.symbol === meta.symbol)){ flash(`SYMBOL "${meta.symbol}" ALREADY LISTED`); return; }
-    saveCustomToken(S.chainId, v.address, meta);
+    // Saved against the vault, not the wallet — a token added while depositing
+    // is the same token you will later want to send out, and both pickers read
+    // this one list.
+    const saved = saveCustomToken(S.chainId, v.address, meta);
     if(S.topup){
       S.topup.sym = meta.symbol; S.topup.showCustom = false;
       try { S.topup.bals = await fetchTopUpBalances(window._connectedAddress, vaultTokens(v)); } catch(_){}
       render();
     }
-    flash(`ADDED ${meta.symbol} · ${meta.decimals} DEC`);
+    flash(saved ? `ADDED ${meta.symbol} · ${meta.decimals} DEC · SAVED` : `ADDED ${meta.symbol} · COULD NOT SAVE LOCALLY`);
+    reloadHoldings(S.sel);
   } catch(e){ flash(e.shortMessage || e.message || 'COULD NOT LOAD TOKEN'); }
 }
 async function submitTopUp(){
@@ -2447,7 +2475,11 @@ function renderTopUp(){
 
       <label class="lbl">ASSET</label>
       <div class="token-pills">${pills}<button class="pill" onclick="S.topup.showCustom=!S.topup.showCustom;render()">+ CUSTOM</button></div>
-      ${t.showCustom?`<div style="margin:4px 0 12px"><div style="display:flex;gap:8px"><input class="inp" id="topup-custom-addr" style="margin:0;flex:1;min-width:0;font-size:16px" placeholder="0x... TOKEN ADDRESS" onkeydown="if(event.key==='Enter'){event.preventDefault();addTopUpCustom()}"><button class="btn btn-outline btn-sm" onclick="addTopUpCustom()">ADD</button></div></div>`:''}
+      ${t.showCustom?`<div style="margin:4px 0 12px">
+        <div style="display:flex;gap:8px"><input class="inp" id="topup-custom-addr" style="margin:0;flex:1;min-width:0;font-size:16px" placeholder="0x... TOKEN ADDRESS" onkeydown="if(event.key==='Enter'){event.preventDefault();addTopUpCustom()}"><button class="btn btn-outline btn-sm" onclick="addTopUpCustom()">ADD</button></div>
+        ${(()=>{const cl=customTokensFor(S.chainId,v.address);return cl.length?`<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">${cl.map(x=>`<span class="ctok-chip">${tokIcon(x.symbol,'sm')} ${esc(x.symbol)} <span class="dim">${x.decimals}d</span><button onclick="removeCustomTokenFlow('${x.address}')" title="Remove ${esc(x.symbol)}">&#10005;</button></span>`).join('')}</div>`:''})()}
+        <div style="font-size:9px;color:var(--d);letter-spacing:1px;line-height:1.5;margin-top:8px">SAVED TO THIS BROWSER FOR THIS VAULT &mdash; AVAILABLE FOR SENDS TOO</div>
+      </div>`:''}
 
       <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-top:16px"><label class="lbl">AMOUNT</label>${availRow}</div>
       <input class="inp" id="topup-amount" inputmode="decimal" style="font-size:16px" placeholder="0.0" ${sending?'disabled':''} oninput="onTopUpAmount(this.value,${dec},${availNum},'${unitLabel}')" onkeydown="if(event.key==='Enter'){event.preventDefault();submitTopUp()}">
@@ -2507,7 +2539,8 @@ function renderTxBuilder(v,mob){
         <div class="fset">
           <div class="fhead"><label class="lbl">TOKEN</label>${hold?`<span class="fhint">VAULT HOLDS <b>${esc(hold.balance)} ${esc(S.txToken)}</b>${hold.usd?` &middot; ${esc(hold.usd)}`:''}</span>`:`<span class="fhint">NO ${esc(S.txToken)} BALANCE</span>`}</div>
           <div class="token-pills" style="margin-bottom:0">${tokenObjs.map(t=>`<button class="pill${S.txToken===t.symbol?" on":""}" onclick="selectTxToken('${esc(t.symbol)}')"><span class="tok-ico">${t.icon||iconForSym(t.symbol)}</span>${esc(t.symbol)}</button>`).join("")}${S.demoMode?"":`<button class="pill" onclick="S.showCustomTok=!S.showCustomTok;render()">+ CUSTOM</button>`}</div>
-          ${(!S.demoMode&&S.showCustomTok)?`<div style="margin-top:12px"><div style="display:flex;gap:8px"><input class="inp" id="custom-tok-addr" style="margin:0;flex:1;min-width:0;font-size:13px" placeholder="0x... TOKEN ADDRESS" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomTokenFlow()}"><button class="btn btn-outline btn-sm" onclick="addCustomTokenFlow()">ADD</button></div>${(()=>{const cl=customTokensFor(S.chainId,v.address);return cl.length?`<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">${cl.map(t=>`<span class="ctok-chip">${tokIcon(t.symbol,'sm')} ${esc(t.symbol)} <span class="dim">${t.decimals}d</span><button onclick="removeCustomTokenFlow('${t.address}')" title="Remove ${esc(t.symbol)}">&#10005;</button></span>`).join('')}</div>`:''})()}</div>`:''}
+          ${(!S.demoMode&&S.showCustomTok)?`<div style="margin-top:12px"><div style="display:flex;gap:8px"><input class="inp" id="custom-tok-addr" style="margin:0;flex:1;min-width:0;font-size:13px" placeholder="0x... TOKEN ADDRESS" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomTokenFlow()}"><button class="btn btn-outline btn-sm" onclick="addCustomTokenFlow()">ADD</button></div>${(()=>{const cl=customTokensFor(S.chainId,v.address);return cl.length?`<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">${cl.map(t=>`<span class="ctok-chip">${tokIcon(t.symbol,'sm')} ${esc(t.symbol)} <span class="dim">${t.decimals}d</span><button onclick="removeCustomTokenFlow('${t.address}')" title="Remove ${esc(t.symbol)}">&#10005;</button></span>`).join('')}</div>`:''})()}
+          <div style="font-size:9px;color:var(--d);letter-spacing:1px;line-height:1.5;margin-top:8px">SAVED TO THIS BROWSER FOR THIS VAULT &mdash; AVAILABLE FOR TOP UPS TOO</div></div>`:''}
         </div>
 
         <div class="fset">
