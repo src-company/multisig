@@ -478,8 +478,197 @@ const ERC20_ABI = [
   'function balanceOf(address) view returns (uint256)',
   'function decimals() view returns (uint8)',
   'function symbol() view returns (string)',
+  'function allowance(address owner, address spender) view returns (uint256)',
+  'function approve(address spender, uint256 amount) returns (bool)',
 ];
 const erc20Iface = new ethers.Interface(ERC20_ABI);
+
+// ── SLOW: time-delayed transfer protocol (Ethereum mainnet only) ──
+// https://etherscan.io/address/0x000000000000888741b254d37e1b27128afeaabc
+// A deposit locks funds in an ERC-1155 wrapper minted to the recipient; the
+// recipient can only unlock/claim once `delay` seconds have elapsed, and the
+// depositor (the vault) can `reverse` any time before the timer expires. ETH is
+// the zero-address sentinel with amount carried in msg.value; ERC20 requires a
+// prior approve of `amount` to the SLOW contract (batched atomically below).
+const SLOW_ADDRESS = '0x000000000000888741b254d37e1b27128afeaabc';
+const SLOW_ABI = [
+  'function depositTo(address token, address to, uint256 amount, uint96 delay, bytes data) payable returns (uint256)',
+  'function reverse(uint256 transferId)',
+  'function withdrawFrom(address from, address to, uint256 id, uint256 amount)',
+  'function canReverseTransfer(uint256 transferId) view returns (bool, bytes4)',
+  'function getOutboundTransfers(address user) view returns (uint256[])',
+  'function pendingTransfers(uint256) view returns (uint96 timestamp, address from, address to, uint256 id, uint256 amount)',
+];
+const slowIface = new ethers.Interface(SLOW_ABI);
+const SLOW_CHAIN_ID = 1;
+const SLOW_PRESETS = [
+  { s: 3600,    l: '1H'  }, { s: 21600,  l: '6H'  }, { s: 86400,   l: '1D'  },
+  { s: 259200,  l: '3D'  }, { s: 604800, l: '7D'  }, { s: 2592000, l: '30D' },
+];
+function slowAvailable(){ return !S.demoMode && S.chainId === SLOW_CHAIN_ID; }
+function fmtDelay(sec){
+  sec = Number(sec) || 0;
+  if(sec >= 86400 && sec % 86400 === 0){ const d = sec / 86400; return d + ' DAY'  + (d > 1 ? 'S' : ''); }
+  if(sec >= 3600  && sec % 3600  === 0){ const h = sec / 3600;  return h + ' HOUR' + (h > 1 ? 'S' : ''); }
+  const m = Math.max(1, Math.round(sec / 60)); return m + ' MIN' + (m > 1 ? 'S' : '');
+}
+// Abstracts SLOW calldata construction for an outbound transfer. Returns the
+// same {target,value,data,desc} shape a plain transfer produces, so callers stay
+// agnostic to the delivery mode. For ERC20 it reads the vault's live allowance
+// and, only when short, prepends an approve as a multisig `batch` so the approve
+// and deposit settle atomically in one proposal.
+async function buildSlowOutbound({ tokenInfo, toAddr, amountRaw, delaySec, vaultAddr }){
+  const delay  = BigInt(delaySec);
+  const dLabel = fmtDelay(delaySec);
+  if(tokenInfo.address === ethers.ZeroAddress){
+    // ETH: token=address(0), amount=0 (SLOW overwrites it with msg.value).
+    const data = slowIface.encodeFunctionData('depositTo', [ethers.ZeroAddress, toAddr, 0n, delay, '0x']);
+    return { target: SLOW_ADDRESS, value: amountRaw.toString(), data,
+      desc: `SLOW ${dLabel} · ETH → ${toAddr.slice(0,8)}...` };
+  }
+  const token = tokenInfo.address;
+  const depositData = slowIface.encodeFunctionData('depositTo', [token, toAddr, amountRaw, delay, '0x']);
+  let allowance = 0n;
+  try {
+    const erc = new ethers.Contract(token, ERC20_ABI, provider);
+    allowance = BigInt(await erc.allowance(vaultAddr, SLOW_ADDRESS));
+  } catch(_){}
+  if(allowance >= amountRaw){
+    // Allowance already covers it — single call to SLOW. (SLOW pulls exactly
+    // `amount`, so a standing allowance to it is normally 0 and this is the
+    // rare path; when set, deposit consumes it fully.)
+    return { target: SLOW_ADDRESS, value: '0', data: depositData,
+      desc: `SLOW ${dLabel} · ${tokenInfo.symbol} → ${toAddr.slice(0,8)}...` };
+  }
+  // Insufficient allowance: approve(exact) + deposit, atomic via multisig batch.
+  const approveData = erc20Iface.encodeFunctionData('approve', [SLOW_ADDRESS, amountRaw]);
+  const batchData = msIface.encodeFunctionData('batch', [[token, SLOW_ADDRESS], [0n, 0n], [approveData, depositData]]);
+  return { target: vaultAddr, value: '0', data: batchData, batched: true,
+    desc: `SLOW ${dLabel} · APPROVE + ${tokenInfo.symbol} → ${toAddr.slice(0,8)}...` };
+}
+
+// Human "2D 5H" / "3H 12M" remaining-time label.
+function fmtRemaining(sec){
+  sec = Math.max(0, Math.floor(sec));
+  if(sec <= 0) return 'EXPIRED';
+  const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60);
+  if(d > 0) return `${d}D ${h}H`;
+  if(h > 0) return `${h}H ${m}M`;
+  if(m > 0) return `${m}M`;
+  return `${sec}S`;
+}
+// Raw base-unit amount -> trimmed decimal string.
+function fmtAmount(raw, decimals){
+  try {
+    let s = ethers.formatUnits(raw, decimals);
+    if(s.includes('.')) s = s.replace(/0+$/, '').replace(/\.$/, '');
+    return s;
+  } catch(_){ return String(raw); }
+}
+// Resolve a SLOW-encoded token to {symbol,decimals}: ETH sentinel, then the
+// mainnet built-in list, then an on-chain lookup as a last resort.
+async function _slowTokenMeta(token){
+  if(token === ethers.ZeroAddress) return { symbol: 'ETH', decimals: 18 };
+  const known = (PROD_TOKENS[SLOW_CHAIN_ID] || []).find(t => t.address.toLowerCase() === token.toLowerCase());
+  if(known) return { symbol: known.symbol, decimals: known.decimals };
+  try { const m = await fetchTokenMeta(token); return { symbol: m.symbol, decimals: m.decimals }; }
+  catch(_){ return { symbol: token.slice(0,6) + '…' + token.slice(-4), decimals: 18 }; }
+}
+// Read the vault's outstanding outbound SLOW transfers straight from the
+// protocol's own enumeration (getOutboundTransfers -> pendingTransfers). Cleared
+// entries return a zeroed struct (timestamp==0) and are filtered out. One
+// multicall batches every pendingTransfers read; token metadata is resolved once
+// per distinct asset. Returns [] off-mainnet or on any read failure.
+async function loadSlowOutbound(vaultAddr){
+  if(S.chainId !== SLOW_CHAIN_ID || !vaultAddr) return [];
+  try {
+    const slow = new ethers.Contract(SLOW_ADDRESS, SLOW_ABI, provider);
+    const ids = await slow.getOutboundTransfers(vaultAddr);
+    if(!ids || !ids.length) return [];
+    const calls = ids.map(id => ({ target: SLOW_ADDRESS, allowFailure: true, callData: slowIface.encodeFunctionData('pendingTransfers', [id]) }));
+    const res = await getMC3().aggregate3(calls);
+    const rows = [];
+    res.forEach((r, i) => {
+      if(!r?.success) return;
+      let d; try { d = slowIface.decodeFunctionResult('pendingTransfers', r.returnData); } catch(_){ return; }
+      const timestamp = Number(d.timestamp);
+      if(!timestamp) return; // reversed / claimed / never existed
+      const idBig = BigInt(d.id);
+      const token = ethers.getAddress('0x' + (idBig & ((1n << 160n) - 1n)).toString(16).padStart(40, '0'));
+      const delay = Number(idBig >> 160n);
+      rows.push({ transferId: ids[i].toString(), rawId: idBig.toString(), to: d.to,
+        token, delay, timestamp, unlockAt: timestamp + delay, amount: d.amount.toString() });
+    });
+    const metas = {};
+    await Promise.all([...new Set(rows.map(r => r.token))].map(async t => { metas[t] = await _slowTokenMeta(t); }));
+    rows.forEach(r => { const m = metas[r.token] || { symbol: '?', decimals: 18 }; r.symbol = m.symbol; r.decimals = m.decimals; });
+    rows.sort((a, b) => a.unlockAt - b.unlockAt); // soonest to unlock (least reverse-time) first
+    return rows;
+  } catch(e){ console.error('loadSlowOutbound:', e); return []; }
+}
+// Panel listing outstanding outbound SLOW transfers with a REVERSE action.
+function renderSlowOutbound(v, mob){
+  if(S.demoMode || S.chainId !== SLOW_CHAIN_ID) return '';
+  const rows = v.slowOut || [];
+  if(!rows.length) return '';
+  const now = NOW();
+  const items = rows.map(r => {
+    const remaining = r.unlockAt - now;
+    const reversible = remaining > 0;
+    // A reverse proposal that must clear a timelock may miss the reverse window.
+    const tight = reversible && v.delay > 0 && !v.fastPath && remaining < v.delay;
+    const amtStr = fmtAmount(r.amount, r.decimals);
+    const toShort = r.to.slice(0,6) + '…' + r.to.slice(-4);
+    const timeLabel = reversible
+      ? `<span style="color:var(--a)">UNLOCKS IN ${fmtRemaining(remaining)}</span>${tight?`<span style="color:var(--y);margin-left:8px" title="This vault's timelock (${fmtD(v.delay)}) is longer than the time left to reverse — a reverse proposal may expire before it can execute. Use the fast path if all owners sign.">&#9888; MAY MISS WINDOW</span>`:''}`
+      : `<span style="color:var(--d)">UNLOCKED · NO LONGER REVERSIBLE</span>`;
+    const btn = reversible
+      ? `<button class="btn btn-outline btn-sm" onclick="proposeSlowReverse(${S.sel},'${r.transferId}')" title="Propose to cancel this SLOW transfer and return the funds to the vault (reverse + withdraw, atomic)">REVERSE</button>`
+      : '';
+    return `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 0;border-bottom:1px solid var(--ln)">
+      <span style="display:inline-flex;align-items:center;gap:6px;font-weight:600">${tokIcon(r.symbol,'sm')} ${esc(amtStr)} ${esc(r.symbol)}</span>
+      <span style="color:var(--d);font-size:11px">&rarr; ${esc(toShort)}${copyBtn(r.to)}</span>
+      <span style="font-size:10px;letter-spacing:1px;margin-left:auto">${timeLabel}</span>
+      ${btn}
+    </div>`;
+  }).join('');
+  return `<div class="sec" style="margin-top:24px"><span>SLOW · OUTBOUND</span><span class="line"></span></div>
+    <div style="font-size:10px;color:var(--d);letter-spacing:1px;line-height:1.5;margin:-4px 0 8px">TIME-LOCKED TRANSFERS THIS VAULT HAS SENT. REVERSE CANCELS ONE AND RETURNS THE FUNDS TO THE VAULT BEFORE ITS TIMER EXPIRES &mdash; PROPOSED &amp; APPROVED (${v.threshold}/${v.ownerCount}) LIKE ANY OUTBOUND TX.</div>
+    ${items}`;
+}
+// Atomic cancel: reverse(transferId) + withdrawFrom(vault, vault, id, amount),
+// batched so the pending SLOW transfer is undone and the underlying asset is
+// returned to the vault in a single proposal. Reverse only works before expiry.
+async function prodReverseSlow(vi, transferId){
+  const w = requireSigner(); if(!w) return;
+  const { signer, addr: connectedAddress } = w;
+  const v = S.vaults[vi]; if(!v) return;
+  if(S.chainId !== SLOW_CHAIN_ID){ flash('SLOW IS MAINNET-ONLY'); return; }
+  const entry = (v.slowOut || []).find(t => t.transferId === transferId);
+  if(!entry){ flash('TRANSFER NOT FOUND — REFRESH'); return; }
+  if(entry.unlockAt <= NOW()){ flash('TIMELOCK EXPIRED — CAN NO LONGER REVERSE'); return; }
+  try {
+    const reverseData  = slowIface.encodeFunctionData('reverse', [transferId]);
+    const withdrawData = slowIface.encodeFunctionData('withdrawFrom', [v.address, v.address, entry.rawId, entry.amount]);
+    const batchData = msIface.encodeFunctionData('batch', [[SLOW_ADDRESS, SLOW_ADDRESS], [0n, 0n], [reverseData, withdrawData]]);
+    const target = v.address, value = '0';
+
+    const domain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address };
+    const nonce = nextNonce(v);
+    const msg = { target, value: 0n, data: batchData, nonce };
+    const sig = await signer.signTypedData(domain, EIP712_TYPES, msg);
+    const txHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg);
+    const desc = `REVERSE SLOW · ${fmtAmount(entry.amount, entry.decimals)} ${entry.symbol} ↩ VAULT`;
+
+    if(v.dbId){
+      const txId = await dbProposeTx(v.dbId, nonce, target, value, batchData, txHash, v.threshold, connectedAddress, desc);
+      if(txId) await dbAddSig(txId, connectedAddress, sig);
+    }
+    flash(`REVERSE TX #${nonce} CREATED`);
+    await reloadQueue(vi);
+  } catch(e){ console.error(e); flash(e.shortMessage || e.message || 'FAILED'); }
+}
+function proposeSlowReverse(vi, transferId){ guardSubmit(prodReverseSlow)(vi, transferId); }
 
 const CHAINLINK_ABI = ['function latestAnswer() view returns (int256)'];
 const clIface = new ethers.Interface(CHAINLINK_ABI);
@@ -848,6 +1037,9 @@ const S = {
   txMode: "TRANSFER",
   txToken: "ETH",
   showCustomTok: false,
+  txSlow: false,          // outbound delivery mode: false = INSTANT, true = SLOW (delayed)
+  txSlowDelaySec: 86400,  // SLOW timelock in seconds (default 1 day)
+  txSlowUnit: 'd',        // custom-delay unit for the builder input
   deploy: null,
   topup: null,
   batch: [{ t: "", v: "", d: "" }, { t: "", v: "", d: "" }],
@@ -952,6 +1144,7 @@ function selectorToLabel(callData) {
     [msIface, 'setExecutor', 'SET EXECUTOR'], [msIface, 'cancelQueued', 'CANCEL'],
     [msIface, 'executeQueued', 'ACCELERATE'], [msIface, 'batch', 'BATCH'],
     [msIface, 'delegateCall', 'DELEGATE CALL'], [tlIface, 'enableForward', 'ENABLE FORWARD'],
+    [slowIface, 'depositTo', 'SLOW TRANSFER'],
   ];
   for(const [iface, fn, label] of map) {
     if(sel === iface.getFunction(fn).selector) { _selectorLabels[sel] = label; return label; }
@@ -1594,8 +1787,9 @@ function renderDash(v,mob){
       ${v.fastPath?'<span style="color:var(--g)" title="Unanimous owner signatures can bypass the timelock — instant execution via the executor">INSTANT &middot; ALL OWNERS</span>':""}
     </div>
   </div>
+  ${renderSlowOutbound(v,mob)}
   <div class="sec"><span>QUEUE</span><span class="line"></span>
-    ${S.showTx?"":`<button class="btn btn-outline btn-sm" onclick="S.showTx=true;S.txMode='TRANSFER';S.txToken='ETH';_builderSim=null;render()">+ NEW</button>`}
+    ${S.showTx?"":`<button class="btn btn-outline btn-sm" onclick="S.showTx=true;S.txMode='TRANSFER';S.txToken='ETH';S.txSlow=false;_builderSim=null;render()">+ NEW</button>`}
   </div>
   ${S.showTx?renderTxBuilder(v,mob):""}
   ${v.queue.length===0&&!S.showTx?`<div style="padding:48px 0;text-align:center;font-size:13px;color:var(--d);letter-spacing:2px">NO PENDING TRANSACTIONS</div>`:v.queue.map((tx,i)=>{
@@ -1991,6 +2185,22 @@ function renderTxBuilder(v,mob){
     const hold=(v.holdings||[]).find(h=>h.token===S.txToken);
     const availStr=hold?(hold.raw!=null?ethers.formatUnits(hold.raw,hold.decimals||dec):stripCommas(hold.balance)):'';
     const availNum=availStr?Number(availStr):0;
+    const slowOn=slowAvailable()&&S.txSlow;
+    const slowUi=slowAvailable()?`
+        <label class="lbl">DELIVERY</label>
+        <div class="token-pills" style="margin-bottom:${slowOn?8:12}px">
+          <button class="pill${!S.txSlow?" on":""}" onclick="setTxSlow(false)">INSTANT</button>
+          <button class="pill${S.txSlow?" on":""}" onclick="setTxSlow(true)" title="Time-delayed transfer via the SLOW protocol — reversible by the vault until the timer expires">SLOW &middot; DELAYED</button>
+        </div>
+        ${slowOn?`<div class="token-pills" style="margin-bottom:8px">${SLOW_PRESETS.map(p=>`<button class="pill${Number(S.txSlowDelaySec)===p.s?" on":""}" onclick="setSlowDelay(${p.s})">${p.l}</button>`).join("")}</div>
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <input class="inp" id="slow-custom-n" style="margin:0;flex:1;font-size:13px" inputmode="decimal" placeholder="CUSTOM" onchange="onSlowCustom()" onkeydown="if(event.key==='Enter'){event.preventDefault();onSlowCustom()}">
+          <select class="inp" id="slow-custom-u" style="margin:0;width:auto;font-size:13px" onchange="onSlowCustom()">
+            <option value="h"${S.txSlowUnit==="h"?" selected":""}>HOURS</option>
+            <option value="d"${S.txSlowUnit==="d"?" selected":""}>DAYS</option>
+          </select>
+        </div>
+        <div style="font-size:10px;color:var(--d);line-height:1.5;margin-bottom:12px">RECIPIENT GETS A TIME-LOCKED CLAIM VIA SLOW &mdash; UNLOCKS AFTER <b style="color:var(--m)">${esc(fmtDelay(S.txSlowDelaySec))}</b>. THE VAULT CAN REVERSE ANY TIME BEFORE THEN.${S.txToken!=="ETH"?` ALLOWANCE TO SLOW IS ADDED ATOMICALLY IF NEEDED.`:``}</div>`:``}`:``;
     body=`<div class="grid2">
       <div>
         <label class="lbl">TOKEN</label>
@@ -2003,7 +2213,8 @@ function renderTxBuilder(v,mob){
       </div><div>
         <label class="lbl">RECIPIENT</label><input class="inp" id="tx-to" placeholder="0x... or name.eth / name.wei" oninput="onTxRecipient(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();submitTransfer()}">
         <div id="tx-to-status" style="font-size:9px;letter-spacing:1px;margin-top:-12px;margin-bottom:12px;min-height:11px"></div>
-        ${S.txToken!=="ETH"?`<div style="font-size:10px;color:var(--d);margin-top:-4px;margin-bottom:12px">ON-CHAIN: transfer(recipient, amount) on ${S.txToken} contract</div>`:""}
+        ${slowUi}
+        ${(S.txToken!=="ETH"&&!slowOn)?`<div style="font-size:10px;color:var(--d);margin-top:-4px;margin-bottom:12px">ON-CHAIN: transfer(recipient, amount) on ${S.txToken} contract</div>`:""}
         <button class="btn btn-fill btn-w" style="margin-top:${mob?8:16}px" onclick="submitTransfer()">SIGN + SUBMIT</button>
       </div></div>`;
   }else if(S.txMode==="CUSTOM"){
@@ -2295,6 +2506,17 @@ function addTxDemo(tx) {
   v.nonce++;
   S.showTx = false;
   flash(`TX #${n} CREATED`);
+  render();
+}
+
+function setTxSlow(on){ S.txSlow = !!on; _builderSim = null; render(); }
+function setSlowDelay(sec){ S.txSlowDelaySec = sec; render(); }
+function onSlowCustom(){
+  const n = parseFloat(stripCommas(document.getElementById('slow-custom-n')?.value || ''));
+  const u = document.getElementById('slow-custom-u')?.value || 'd';
+  S.txSlowUnit = u;
+  if(!(n > 0)) { render(); return; }
+  S.txSlowDelaySec = Math.max(1, Math.round(n * (u === 'h' ? 3600 : 86400)));
   render();
 }
 
@@ -3204,7 +3426,7 @@ async function reloadVault(vi) {
     }
     delete v._pendingLabel;
     // Executor check + token balances + queue + history + owner names in parallel
-    const [fpResult, holdings, , , ownerNames] = await Promise.all([
+    const [fpResult, holdings, , , ownerNames, slowOut] = await Promise.all([
       s.executor !== ethers.ZeroAddress ? (async () => {
         try {
           const tlContract = new ethers.Contract(s.executor, TIMELOCK_EXECUTOR_ABI, provider);
@@ -3214,12 +3436,14 @@ async function reloadVault(vi) {
       loadTokenBalances(v.address, s.balance),
       loadVaultQueue(vi),
       loadVaultHistory(vi),
-      resolveOwnerNames([...s.owners])
+      resolveOwnerNames([...s.owners]),
+      loadSlowOutbound(v.address)
     ]);
     v.owners.forEach(o => { if(ownerNames[o.addr.toLowerCase()]) o.name = ownerNames[o.addr.toLowerCase()]; });
     v.isTimelockExecutor = fpResult.isTE;
     v.fastPath = fpResult.fpEnabled;
     v.holdings = holdings;
+    v.slowOut = slowOut;
     if(v.dbId) dbSyncWalletState(v.address, v.dbId);
     render();
   } catch(e) {
@@ -4348,18 +4572,25 @@ async function prodSubmitTransfer() {
   try {
     const toAddr = await resolveName(to);
     const tokenInfo = curTok(v);
+    const isEth = tokenInfo.address === ethers.ZeroAddress;
+    const amountRaw = isEth ? ethers.parseEther(amt) : ethers.parseUnits(amt, tokenInfo.decimals);
 
     let target, value, data, desc;
-    if(tokenInfo.address === ethers.ZeroAddress) {
+    if(S.txSlow && slowAvailable()) {
+      // SLOW delivery: build the depositTo call (plus an atomic approve batch
+      // for ERC20 when the vault's allowance to SLOW falls short).
+      ({ target, value, data, desc } = await buildSlowOutbound({
+        tokenInfo, toAddr, amountRaw, delaySec: S.txSlowDelaySec, vaultAddr: v.address,
+      }));
+    } else if(isEth) {
       target = toAddr;
-      value = ethers.parseEther(amt).toString();
+      value = amountRaw.toString();
       data = '0x';
       desc = `${amt} ETH \u2192 ${toAddr.slice(0,8)}...`;
     } else {
-      const parsed = ethers.parseUnits(amt, tokenInfo.decimals);
       target = tokenInfo.address;
       value = '0';
-      data = erc20Iface.encodeFunctionData('transfer', [toAddr, parsed]);
+      data = erc20Iface.encodeFunctionData('transfer', [toAddr, amountRaw]);
       desc = `${amt} ${tokenInfo.symbol} \u2192 ${toAddr.slice(0,8)}...`;
     }
 
