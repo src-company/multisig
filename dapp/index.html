@@ -466,8 +466,20 @@ input.amt-in:focus{outline:none;box-shadow:none!important;border-bottom-color:tr
 .tx-kind.stake{color:var(--a);border-color:var(--fr);display:inline-flex;align-items:center;gap:5px}
 
 /* ── QUEUE CARDS ───────────────────────────────────────────────── */
-.tx-kind{font-size:8px;font-weight:700;letter-spacing:2px;border:1px solid var(--ln);color:var(--d);padding:2px 6px;white-space:nowrap}
-.tx-kind.slow{color:var(--a);border-color:var(--fr)}
+/* Badge tone maps to what a proposal can do, not to what it is called:
+   value moves are routine, policy outlives the proposal, danger is
+   irreversible or unbounded, code is opaque until you read it. */
+.tx-kind{font-size:8px;font-weight:700;letter-spacing:2px;border:1px solid var(--ln);color:var(--d);padding:2px 6px;white-space:nowrap;display:inline-flex;align-items:center;gap:5px}
+.tx-kind.slow,.tx-kind.stake{color:var(--a);border-color:var(--fr)}
+.tx-kind.policy{color:var(--y);border-color:color-mix(in srgb,var(--y) 45%,transparent);background:color-mix(in srgb,var(--y) 8%,transparent)}
+.tx-kind.danger{color:var(--r);border-color:color-mix(in srgb,var(--r) 45%,transparent);background:color-mix(in srgb,var(--r) 8%,transparent)}
+.tx-kind.code{color:var(--m);border-color:var(--fr)}
+/* When the badge is suppressed as a duplicate of the headline, the headline
+   carries the tone instead — the flag must not vanish with the badge. */
+.tx-val.policy{color:var(--y)}
+.tx-val.danger{color:var(--r)}
+.tx-note{font-size:10px;letter-spacing:1px;line-height:1.65;color:var(--d);margin-top:8px;max-width:76ch}
+.tx-note.warn{color:var(--y);border-left:2px solid var(--y);background:color-mix(in srgb,var(--y) 6%,transparent);padding:7px 10px;margin-top:10px}
 .tx-status{border:1px solid currentColor;padding:4px 9px;white-space:nowrap}
 .approvals{gap:6px}
 .ap-ok,.ap-no{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border:1px solid var(--ln);letter-spacing:1px}
@@ -1348,7 +1360,7 @@ function selectorToLabel(callData) {
     [msIface, 'setExecutor', 'SET EXECUTOR'], [msIface, 'cancelQueued', 'CANCEL'],
     [msIface, 'executeQueued', 'ACCELERATE'], [msIface, 'batch', 'BATCH'],
     [msIface, 'delegateCall', 'DELEGATE CALL'], [tlIface, 'enableForward', 'ENABLE FORWARD'],
-    [slowIface, 'depositTo', 'SLOW TRANSFER'],
+    [slowIface, 'depositTo', 'SLOW TRANSFER'], [erc20Iface, 'approve', 'ERC20 APPROVE'],
   ];
   for(const [iface, fn, label] of map) {
     if(sel === iface.getFunction(fn).selector) { _selectorLabels[sel] = label; return label; }
@@ -1356,6 +1368,124 @@ function selectorToLabel(callData) {
   const fallback = `CALL ${sel}`;
   _selectorLabels[sel] = fallback;
   return fallback;
+}
+
+// ── PROPOSAL CLASSIFICATION ───────────────────────────────────────
+// Every proposal type this vault can hold, resolved from the call itself to a
+// badge and one plain sentence about what executing it actually does. Read from
+// target/value/calldata rather than from anything this UI recorded, so a
+// proposal raised by another tool is described identically.
+//
+// Returns { label, tone, note, warn, icon }. `tone` drives the badge colour;
+// `warn` marks proposals whose consequences outlive them — a weaker policy, a
+// standing allowance, foreign code in the vault's own storage. Routine asset
+// movements carry no note: the amount and the recipient already say it.
+function txKind(tx, v) {
+  const data = tx.callData || '0x';
+  const val = tx.rawValue ? BigInt(tx.rawValue) : 0n;
+  const self = !!(v.address && tx.target && tx.target.toLowerCase() === v.address.toLowerCase());
+  const sel = data.length >= 10 ? data.slice(0, 10) : '';
+  const is = (iface, fn) => sel === iface.getFunction(fn).selector;
+  const dec = (fn, iface) => { try { return (iface || msIface).decodeFunctionData(fn, data); } catch(_) { return null; } };
+  const at = a => a ? shortAddr(a) : 'AN ADDRESS';
+
+  // ── no calldata: value moves, or a nonce-consuming no-op ──
+  if(data === '0x') {
+    if(self && val === 0n) return { label:'REJECT · NO-OP', tone:'danger',
+      note:'A DO-NOTHING SELF-CALL WHOSE ONLY EFFECT IS TO CONSUME THIS NONCE, SO LATER PROPOSALS CAN PROCEED. IT MOVES NOTHING.' };
+    if(tx.isStake || isStakeCall(tx.target, data)) return { label:'STAKE · ETH → wstETH', tone:'stake', icon:'wstETH',
+      note:'STAKES ETH WITH LIDO — THE wstETH CONTRACT MINTS wstETH STRAIGHT BACK TO THE VAULT. HOW MUCH IS SET BY THE RATE AT EXECUTION, NOT NOW.' };
+    return { label:'ETH TRANSFER', tone:'value' };
+  }
+
+  // ── asset movement ──
+  if(is(erc20Iface, 'transfer')) return { label:'ERC20 TRANSFER', tone:'value' };
+  if(is(erc20Iface, 'approve')) {
+    const d = dec('approve', erc20Iface);
+    const max = d && d[1] != null && BigInt(d[1]) >= (2n ** 255n);
+    return { label:'ERC20 APPROVE', tone:'code', warn:true,
+      note:`LETS ${at(d && d[0])} MOVE ${max ? 'AN UNLIMITED AMOUNT OF' : 'UP TO THE APPROVED AMOUNT OF'} THIS TOKEN OUT OF THE VAULT, AT ANY TIME, UNTIL THE ALLOWANCE IS REVOKED. IT DOES NOT EXPIRE WITH THIS PROPOSAL.` };
+  }
+  if(is(slowIface, 'depositTo')) {
+    const d = dec('depositTo', slowIface);
+    const delay = d ? Number(d[3]) : 0;
+    return { label:`SLOW · ${delay ? fmtDelay(delay) : 'DELAYED'}`, tone:'slow',
+      note:`LOCKS THE ASSET IN A TIME-DELAYED CLAIM FOR ${at(d && d[1])}. THEY CAN COLLECT IT ONLY AFTER ${delay ? fmtDelay(delay) : 'THE DELAY'}, AND THE VAULT CAN REVERSE IT AT ANY POINT BEFORE THEN.` };
+  }
+
+  // ── policy: outlives the proposal, so every one of these gets a note ──
+  if(is(msIface, 'addOwner')) {
+    const d = dec('addOwner');
+    return { label:'ADD OWNER', tone:'policy',
+      note:`ADDS ${at(d && d[0])} AS AN OWNER &mdash; ${v.ownerCount} &rarr; ${v.ownerCount + 1} OWNERS. THE THRESHOLD STAYS AT ${v.threshold}, SO EACH SIGNATURE COVERS A SMALLER SHARE OF THE OWNER SET.` };
+  }
+  if(is(msIface, 'removeOwner')) {
+    const d = dec('removeOwner');   // (prevOwner, owner) — the second is the one removed
+    const tooFew = v.ownerCount <= v.threshold;
+    return { label:'REMOVE OWNER', tone:'policy', warn:tooFew,
+      note:`REMOVES ${at(d && d[1])} &mdash; ${v.ownerCount} &rarr; ${v.ownerCount - 1} OWNERS, STILL ${v.threshold} SIGNATURES REQUIRED.` +
+        (tooFew ? ` THAT WOULD LEAVE FEWER OWNERS THAN THE THRESHOLD, SO THE CALL WILL REVERT.` : '') };
+  }
+  if(is(msIface, 'setThreshold')) {
+    const d = dec('setThreshold');
+    const n = d ? Number(d[0]) : null;
+    const lower = n != null && n < v.threshold;
+    return { label:'SET THRESHOLD', tone:'policy', warn:lower,
+      note:`REQUIRES ${n != null ? n : '?'} OF ${v.ownerCount} SIGNATURES AFTER THIS, FROM ${v.threshold} NOW.` +
+        (n === 1 ? ` AT 1, ANY SINGLE OWNER COULD MOVE EVERYTHING ON THEIR OWN.` : lower ? ` THIS LOWERS THE BAR FOR EVERY FUTURE PROPOSAL, INCLUDING ONES ALREADY IN THE QUEUE.` : '') };
+  }
+  if(is(msIface, 'setDelay')) {
+    const d = dec('setDelay');
+    const s = d ? Number(d[0]) : null;
+    const shorter = s != null && s < v.delay;
+    return { label:'SET TIMELOCK', tone:'policy', warn:shorter,
+      note:`TIMELOCK BECOMES ${s == null ? '?' : s === 0 ? 'NONE' : fmtD(s)}, FROM ${v.delay ? fmtD(v.delay) : 'NONE'} NOW.` +
+        (s === 0 ? ` AT ZERO THERE IS NO DELAY AT ALL — PROPOSALS EXECUTE THE MOMENT THEY REACH QUORUM, WITH NO WINDOW TO CANCEL ONE.` :
+         shorter ? ` A SHORTER DELAY MEANS LESS TIME TO SPOT AND CANCEL A BAD PROPOSAL.` : '') };
+  }
+  if(is(msIface, 'setExecutor')) {
+    const d = dec('setExecutor');
+    const a = d ? d[0] : null;
+    const clearing = a && a === ethers.ZeroAddress;
+    return { label:'SET EXECUTOR', tone:'policy', warn:true,
+      note:clearing
+        ? `REMOVES THE VAULT'S EXECUTOR. THE FAST PATH AND THE CANCEL/ACCELERATE ROUTES THAT RUN THROUGH IT ALL STOP WORKING.`
+        : `POINTS THE VAULT AT ${at(a)} AS ITS TIMELOCK EXECUTOR. THAT CONTRACT CAN THEN FORWARD CALLS ON THE VAULT'S BEHALF — VERIFY IT BEFORE SIGNING.` };
+  }
+  if(is(tlIface, 'enableForward')) {
+    const d = dec('enableForward', tlIface);
+    const on = d ? !!d[0] : null;
+    return { label:'EXECUTOR FAST PATH', tone:'policy', warn:on === true,
+      note:on
+        ? `TURNS ON THE FAST PATH — ONCE EVERY OWNER SIGNS, A PROPOSAL CAN SKIP THE TIMELOCK ENTIRELY.`
+        : `TURNS OFF THE FAST PATH — EVERY PROPOSAL MUST THEN SERVE THE FULL TIMELOCK, WITH NO UNANIMOUS SHORTCUT.` };
+  }
+
+  // ── queue control ──
+  if(is(msIface, 'cancelQueued')) return { label:'CANCEL QUEUED', tone:'danger',
+    note:`DROPS A PROPOSAL THAT IS ALREADY QUEUED, BEFORE ITS TIMELOCK ELAPSES. THE CANCELLED PROPOSAL CANNOT THEN EXECUTE.` };
+  if(is(msIface, 'executeQueued')) return { label:'ACCELERATE', tone:'danger',
+    note:`EXECUTES A QUEUED PROPOSAL IMMEDIATELY, SKIPPING WHATEVER IS LEFT OF ITS TIMELOCK. THIS IS THE STEP THE DELAY EXISTS TO PREVENT, SO IT TAKES EVERY OWNER'S SIGNATURE.` };
+
+  // ── composite / raw ──
+  if(is(msIface, 'batch')) {
+    const d = dec('batch');
+    if(d) {
+      const [targets, values, datas] = d;
+      const parts = datas.map((cd, i) => (!cd || cd === '0x') && BigInt(values[i]) > 0n ? 'ETH TRANSFER' : selectorToLabel(cd));
+      return { label:`BATCH · ${targets.length} CALLS`, tone:'code',
+        note:`${parts.join(' + ')} — EXECUTED ATOMICALLY, SO EITHER EVERY CALL LANDS OR THE WHOLE PROPOSAL REVERTS AND NOTHING DOES.` };
+    }
+    return { label:'BATCH', tone:'code', note:`SEVERAL CALLS EXECUTED ATOMICALLY — ALL SUCCEED, OR THE WHOLE PROPOSAL REVERTS.` };
+  }
+  if(is(msIface, 'delegateCall')) {
+    const d = dec('delegateCall');
+    return { label:'DELEGATE CALL', tone:'danger', warn:true,
+      note:`RUNS ${at(d && d[0])}'S CODE INSIDE THE VAULT'S OWN STORAGE. IT CAN REACH EVERY ASSET THE VAULT HOLDS AND REWRITE EVERY SETTING IT HAS, INCLUDING THE OWNER SET. ONLY APPROVE THIS IF YOU HAVE READ THAT CODE.` };
+  }
+
+  return { label:`CALL ${sel || '?'}`, tone:'code', warn:true,
+    note:`UNRECOGNISED FUNCTION. NOTHING IN THIS INTERFACE CAN TELL YOU WHAT IT DOES — READ THE TARGET CONTRACT AND THE CALLDATA, OR SIMULATE IT, BEFORE SIGNING.` };
 }
 
 function isCancelTx(tx, v) {
@@ -2005,7 +2135,13 @@ function renderDash(v,mob){
     const firstUnqueued=v.queue.findIndex(t=>t.eta===0&&!isCancelTx(t,v));
     const blocked=!isQueued&&!isCancel&&i!==firstUnqueued;
     const dv=tx.displayValue||tx.value,dt=tx.displayToken||tx.token;
-    const display=dv&&dv!=="0"?`${dv} ${dt}`:tx.dataLabel;
+    // What kind of proposal this is, and what executing it would actually do.
+    const kind=isCancel&&tx.cancelTarget!=null
+      ?{label:`CANCEL #${tx.cancelTarget}`,tone:'danger',note:`DROPS QUEUED PROPOSAL #${tx.cancelTarget} BEFORE ITS TIMELOCK ELAPSES, SO IT CAN NEVER EXECUTE.`}
+      :txKind(tx,v);
+    // With no value to lead on, the kind label IS the headline — one vocabulary
+    // across the badge, the headline and the note, instead of two.
+    const display=dv&&dv!=="0"?`${dv} ${dt}`:kind.label;
     const acCount=Object.values(tx.approvals).filter(Boolean).length;
     let progressLine="";
     if(!isCancel&&!isQueued&&!blocked){
@@ -2089,13 +2225,10 @@ function renderDash(v,mob){
     }
     // Kind badge — what sort of call this is. Suppressed when the headline
     // line already says it (a bare "BATCH (3)" needs no "BATCH" tag beside it).
-    const kindLabel=tx.isStake?`STAKE &middot; ETH &rarr; wstETH`:tx.slowDelay?`SLOW &middot; ${fmtDelay(tx.slowDelay)}`:(tx.dataLabel||'');
-    const kindTag=(kindLabel&&kindLabel!==display)
-      ?`<span class="tx-kind${tx.slowDelay?' slow':''}${tx.isStake?' stake':''}"${
-          tx.isStake?` title="Sends ETH to the wstETH contract — its receive() fallback submits to Lido and mints wstETH back to the vault"`
-          :tx.slowDelay?` title="Time-delayed via SLOW — the recipient can claim after ${esc(fmtDelay(tx.slowDelay))}; the vault can reverse it until then"`:''
-        }>${tx.isStake?`${tokIcon('wstETH','sm')} `:''}${kindLabel}</span>`
+    const kindTag=(kind.label&&kind.label!==display)
+      ?`<span class="tx-kind ${esc(kind.tone||'')}">${kind.icon?`${tokIcon(kind.icon,'sm')} `:''}${kind.label}</span>`
       :'';
+    const kindNote=kind.note?`<div class="tx-note${kind.warn?' warn':''}">${kind.note}</div>`:'';
     const txLink=!S.demoMode&&v.address&&ethers.isAddress(v.address)?`${location.origin}/#${S.chainId}/${v.address}/tx/${tx.nonce}`:'';
     const isFocus=_focusNonce!==null&&tx.nonce===_focusNonce&&!!v.address&&v.address.toLowerCase()===(_focusVaultAddr||'').toLowerCase();
     return`<div class="tx${blocked?" blocked":""}${isFocus?" tx-focus":""}" data-tx-nonce="${tx.nonce}">
@@ -2107,9 +2240,10 @@ function renderDash(v,mob){
             ${kindTag}
           </div>
           <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-top:6px">
-            <span class="tx-val" style="display:inline-flex;align-items:center;gap:6px">${(dv&&dv!=='0')?tokIcon(dt):''}${esc(display)}</span>
+            <span class="tx-val${(!kindTag&&(kind.tone==='policy'||kind.tone==='danger'))?' '+kind.tone:''}" style="display:inline-flex;align-items:center;gap:6px">${(dv&&dv!=='0')?tokIcon(dt):''}${esc(display)}</span>
           </div>
           <div class="tx-to">&rarr; ${S.demoMode?addrLink(tx.target,v.chain):addrLink(tx.displayTo||tx.target)}${(()=>{const a=S.demoMode?tx.target:(tx.displayTo||tx.target);return ethers.isAddress(a)?copyBtn(a):'';})()}</div>
+          ${kindNote}
         </div>
         ${!mob&&!blocked?`<div class="tx-actions"><span class="tx-status" style="color:${s.c}"${tx.eta>0&&!s.exec?` data-eta-status="${tx.eta}"`:``}>&bull; ${s.l}</span>${actionBtn}</div>`:""}
         ${mob&&!blocked?`<span class="tx-status" style="color:${s.c}"${tx.eta>0&&!s.exec?` data-eta-status="${tx.eta}"`:``}>&bull; ${s.l}</span>`:""}
