@@ -1,11 +1,11 @@
 # Render Blueprint — self-hosted PostgREST + Postgres + static dapp.
-# Replaces Supabase with equivalent, self-owned pieces, all on Render.
+# Self-owned data layer: Postgres + PostgREST, all on Render.
 # Spec: https://render.com/docs/blueprint-spec
 #
 # One-time setup after first deploy:
 #   1. Connect to the DB and run, in order:
-#        supabase/schema.sql      (tables, functions, views, RLS)
-#        supabase/roles.sql       (authenticator + anon roles/grants)
+#        db/schema.sql      (tables, functions, views, RLS)
+#        db/roles.sql       (authenticator + anon roles/grants)
 #   2. Give the login role a password:
 #        ALTER ROLE authenticator WITH PASSWORD '<strong-random-password>';
 #   3. Set PGRST_DB_URI (marked sync:false below) in the dashboard to:
@@ -40,6 +40,19 @@ services:
         value: anon
       - key: PGRST_DB_POOL
         value: "10"
+      # Fail fast when the pool is saturated instead of hanging the request
+      # (the browser client retries with backoff, so a quick error beats a
+      # stalled connection during a load spike or cold start).
+      - key: PGRST_DB_POOL_ACQUISITION_TIMEOUT
+        value: "10"
+      # Recover automatically if the DB connection drops (e.g. Postgres
+      # restart/failover) rather than serving 503s until a manual redeploy.
+      - key: PGRST_DB_POOL_MAX_IDLETIME
+        value: "30"
+      # Cap rows per response so a pathological query can't exhaust memory on
+      # the small instance. The dapp always paginates well under this.
+      - key: PGRST_DB_MAX_ROWS
+        value: "1000"
       # PostgREST listens here; Render auto-detects the open port. If routing
       # fails, add an env var PORT with the same value.
       - key: PGRST_SERVER_PORT
@@ -57,7 +70,7 @@ services:
     buildCommand: "echo no build step"
     # Optional: serve the CSP/security headers from here instead of the
     # <meta> tag in index.html. Remember to point connect-src at the
-    # PostgREST service URL (replacing https://*.supabase.co).
+    # PostgREST service URL (https://multisig-postgrest.onrender.com).
     # headers:
     #   - path: /*
     #     name: Content-Security-Policy

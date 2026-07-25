@@ -36,6 +36,8 @@ button:focus:not(:focus-visible){outline:none}
 button{cursor:pointer}
 button:active{transform:scale(.97)}
 ::placeholder{color:var(--d)}
+::selection{background:var(--a);color:var(--bg)}
+::-moz-selection{background:var(--a);color:var(--bg)}
 ::-webkit-scrollbar{width:3px;height:3px}
 ::-webkit-scrollbar-thumb{background:var(--ln)}
 @keyframes toastIn{from{opacity:0;transform:translateX(-50%) translateY(12px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
@@ -62,16 +64,26 @@ button:active{transform:scale(.97)}
   button:hover{opacity:.85}
   .btn:hover{opacity:.9}
   .btn-fill:hover,.btn-green:hover{opacity:.85}
-  .net-row:hover{color:var(--a);background:var(--ln)}
+  .btn-outline:hover{opacity:1;background:var(--a);color:var(--bg)}
+  .btn-danger:hover{opacity:1;background:var(--r);color:var(--bg);border-color:var(--r)}
+  .net-row:hover{color:var(--a);background:var(--ln);transform:translateX(3px);box-shadow:inset 2px 0 0 var(--a)}
   .vtab:hover{color:var(--a)}
-  .pill:hover{border-color:var(--a);color:var(--a)}
-  .row:hover{background:var(--ln)}
+  .pill:not(.on):hover{border-color:var(--a);color:var(--a);background:color-mix(in srgb,var(--a) 6%,transparent)}
+  .row:hover{background:var(--ln);box-shadow:inset 2px 0 0 var(--fr)}
   .inp:hover{border-bottom-color:var(--m)}
   .admin-tab:hover,.txb-tab:hover{color:var(--a)}
   .link-btn:hover{opacity:.7}
-  .theme-btn:hover,.wallet-btn:hover{background:var(--ln)}
-  .tx:not(.blocked):hover{background:var(--ln)}
+  .theme-btn:hover,.wallet-btn:hover{background:var(--ln);border-color:var(--fr)}
+  .tx:not(.blocked):hover{background:var(--ln);box-shadow:inset 2px 0 0 var(--a)}
 }
+
+/* reactive affordances — explorer/address links, queue-card press, network-row slide */
+.alink{transition:border-color .15s,color .15s}
+@media(hover:hover){.alink:hover{border-bottom-color:var(--a)!important;color:var(--a)!important}}
+.tx-explorer{display:inline-flex;align-items:center;gap:3px;font-size:9px;font-weight:700;letter-spacing:1px;color:var(--d);text-decoration:none;border-bottom:1px solid transparent;transition:color .15s,border-color .15s;white-space:nowrap}
+@media(hover:hover){.tx-explorer:hover{color:var(--a);border-bottom-color:var(--a)}}
+.tx:not(.blocked):active{background:color-mix(in srgb,var(--a) 9%,transparent)}
+.net-row:active{transform:translateX(1px)}
 
 /* scanline */
 .scan{position:fixed;inset:0;pointer-events:none;z-index:100;background:repeating-linear-gradient(0deg,transparent,transparent 3px,#0A0A0A04 3px,#0A0A0A04 6px)}
@@ -102,8 +114,8 @@ button:active{transform:scale(.97)}
 
 /* nav */
 .nav{display:flex;border-bottom:1px solid var(--ln)}
-.nav button{padding:14px 20px;font-size:12px;font-weight:700;letter-spacing:2px;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--d);transition:color .15s,border-color .15s}
-.nav button.on{color:var(--a);border-bottom-color:var(--a)}
+.nav button{position:relative;padding:14px 20px;font-size:12px;font-weight:700;letter-spacing:2px;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--d);transition:color .15s}
+.nav button.on{color:var(--a)}
 
 /* content */
 .content{padding:8px 0;min-height:60vh;display:flex;flex-direction:column;flex:1}
@@ -114,7 +126,7 @@ button:active{transform:scale(.97)}
 .sec .line{flex:1;height:1px;background:var(--ln)}
 
 /* buttons */
-.btn{font-size:11px;font-weight:700;letter-spacing:2px;height:40px;display:inline-flex;align-items:center;justify-content:center;padding:0 20px;text-transform:uppercase;border:none;transition:opacity .15s,background .15s}
+.btn{font-size:11px;font-weight:700;letter-spacing:2px;height:40px;display:inline-flex;align-items:center;justify-content:center;padding:0 20px;text-transform:uppercase;border:none;transition:opacity .15s,background .15s,color .15s,border-color .15s,transform .1s ease}
 .btn-fill{background:var(--a);color:var(--bg)}
 .btn-green{background:var(--g);color:var(--gc)}
 .btn-outline{background:transparent;color:var(--a);border:1px solid var(--a)}
@@ -138,7 +150,7 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 .vtabs::-webkit-scrollbar{display:none}
 .vtabs-inner{display:flex;border-bottom:1px solid var(--ln);min-width:max-content}
 .vtab{padding:16px 24px;text-align:left;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--d);position:relative;flex:1 0 140px;transition:color .15s}
-.vtab.on{color:var(--a);border-bottom-color:var(--a)}
+.vtab.on{color:var(--a)}
 .vtab-name{font-size:14px;font-weight:700;display:flex;align-items:center;gap:6px}
 .vtab-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;animation:pulse 2s infinite}
 .vtab-info{font-size:10px;opacity:.7;margin-top:3px}
@@ -175,8 +187,8 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 /* tx builder */
 .txb{padding:20px 18px;border:1px solid var(--fr);border-left:2px solid var(--a);background:color-mix(in srgb,var(--a) 4%,transparent);margin:6px 0 28px}
 .txb-tabs{display:flex;gap:20px;margin-bottom:24px;align-items:center}
-.txb-tab{background:transparent;border:none;font-size:11px;font-weight:700;letter-spacing:2px;padding:4px 0;color:var(--d);border-bottom:2px solid transparent;transition:color .15s,border-color .15s}
-.txb-tab.on{color:var(--a);border-bottom-color:var(--a)}
+.txb-tab{position:relative;background:transparent;border:none;font-size:11px;font-weight:700;letter-spacing:2px;padding:4px 0;color:var(--d);border-bottom:2px solid transparent;transition:color .15s}
+.txb-tab.on{color:var(--a)}
 .x-btn{background:transparent;border:none;color:var(--d);font-size:14px;padding:8px;min-width:40px;min-height:40px;display:flex;align-items:center;justify-content:center;margin-left:auto}
 .x-btn.red{color:var(--r)}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:32px}
@@ -218,7 +230,7 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 .empty-sub{font-size:12px;color:var(--m);letter-spacing:2px;margin:12px 0 32px}
 
 /* network selector */
-.net-row{padding:12px 8px;font-size:12px;font-weight:700;letter-spacing:2px;border-bottom:1px solid var(--ln);color:var(--d);cursor:pointer;display:flex;align-items:center;gap:8px;transition:background .15s,color .15s}
+.net-row{padding:12px 8px;font-size:12px;font-weight:700;letter-spacing:2px;border-bottom:1px solid var(--ln);color:var(--d);cursor:pointer;display:flex;align-items:center;gap:8px;transition:background .15s,color .15s,transform .15s,box-shadow .15s}
 .net-row.on{color:var(--a);border-bottom:none}
 .net-id{font-size:9px;opacity:.4}
 .net-test{font-size:8px;opacity:.5}
@@ -230,8 +242,14 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 /* admin */
 .admin-note{font-size:10px;color:var(--d);letter-spacing:2px;margin:12px 0 20px}
 .admin-tabs{display:flex;gap:24px;margin-bottom:32px}
-.admin-tab{background:transparent;border:none;font-size:12px;font-weight:700;letter-spacing:2px;color:var(--d);padding:4px 0;border-bottom:2px solid transparent;transition:color .15s,border-color .15s}
-.admin-tab.on{color:var(--a);border-bottom-color:var(--a)}
+.admin-tab{position:relative;background:transparent;border:none;font-size:12px;font-weight:700;letter-spacing:2px;color:var(--d);padding:4px 0;border-bottom:2px solid transparent;transition:color .15s}
+.admin-tab.on{color:var(--a)}
+/* animated tab indicators — the active bar slides in and previews faintly on hover */
+.nav button::after,.vtab::after,.txb-tab::after,.admin-tab::after{content:"";position:absolute;left:0;right:0;bottom:-2px;height:2px;background:var(--a);transform:scaleX(0);transform-origin:center;transition:transform .22s cubic-bezier(.4,0,.2,1);pointer-events:none}
+.nav button.on::after,.vtab.on::after,.txb-tab.on::after,.admin-tab.on::after{transform:scaleX(1)}
+@media(hover:hover){
+  .nav button:not(.on):hover::after,.vtab:not(.on):hover::after,.txb-tab:not(.on):hover::after,.admin-tab:not(.on):hover::after{transform:scaleX(1);background:var(--fr)}
+}
 .policy-big{font-size:44px;font-weight:700;letter-spacing:-2px}
 .policy-of{font-size:18px;font-weight:700;color:var(--m)}
 .changed-tag{font-size:10px;color:var(--y);letter-spacing:2px}
@@ -617,13 +635,54 @@ const CHAINLINK_FEEDS = {
 const DEMO_TOKENS = {ETHEREUM:["ETH","USDC","USDT","DAI","WBTC","wstETH"],BASE:["ETH","USDC","USDT","DAI","cbBTC","wstETH"],MEGAETH:["ETH","USDT0","wstETH"],ARBITRUM:["ETH","USDC","USDT","DAI","WBTC","wstETH"],"OP MAINNET":["ETH","USDC","USDT","DAI","WBTC","wstETH"],SEPOLIA:["ETH"],"BASE SEPOLIA":["ETH"]};
 
 // ── DATABASE (self-hosted PostgREST) ──────────────────────────────
-// Minimal PostgREST client — replicates the subset of the supabase-js
-// query builder this app uses (.from/.select/.eq/.in/.order/.limit/
-// .maybeSingle and .rpc), so the db* helpers below are unchanged.
+// Minimal PostgREST client — a small fluent query builder covering just
+// what this app uses (.from/.select/.eq/.in/.order/.limit/.maybeSingle
+// and .rpc), so the db* helpers below stay compact.
 // Every request runs as the `anon` role: no Authorization header is
 // sent (matches roles.sql). Reads are RLS-gated SELECTs; writes go
 // through the SECURITY DEFINER functions via .rpc().
 const PGRST_URL = 'https://multisig-postgrest.onrender.com'; // ← set to your Render PostgREST URL
+
+// Resilient fetch: per-attempt timeout + bounded retry with exponential
+// backoff + jitter. Render's PostgREST can cold-start or return transient
+// 5xx/429; the DB is the ONLY store for off-chain proposals & signatures,
+// so a single dropped write loses coordination state. Retrying network
+// errors and transient statuses turns those blips into non-events.
+// Only idempotent-or-self-healing operations flow through here: reads,
+// upserts (register/propose/add_signature), and nonce marks that are
+// reconciled to on-chain state by dbSyncWalletState on the next reload.
+const PG_TIMEOUT_MS = 12000;     // per-attempt; first cold start can be slow
+const PG_MAX_ATTEMPTS = 4;       // 1 try + 3 retries
+const PG_RETRY_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
+const pgSleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function pgFetch(path, init) {
+  let lastErr = null;
+  for(let attempt = 0; attempt < PG_MAX_ATTEMPTS; attempt++) {
+    if(attempt > 0) {
+      // 300ms, 900ms, 2700ms (±30% jitter)
+      const base = 300 * Math.pow(3, attempt - 1);
+      await pgSleep(base * (0.7 + Math.random() * 0.6));
+    }
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), PG_TIMEOUT_MS);
+    try {
+      const res = await fetch(`${PGRST_URL}/${path}`, { ...init, signal: ctrl.signal });
+      clearTimeout(timer);
+      if(!res.ok && PG_RETRY_STATUS.has(res.status) && attempt < PG_MAX_ATTEMPTS - 1) {
+        lastErr = { status: res.status, message: `HTTP ${res.status}` };
+        continue; // transient — retry
+      }
+      return res; // success or non-retryable error (4xx) — hand back to caller
+    } catch(e) {
+      clearTimeout(timer);
+      // Network failure / timeout (AbortError) — retryable
+      lastErr = { message: e.name === 'AbortError' ? `timeout after ${PG_TIMEOUT_MS}ms` : String(e) };
+    }
+  }
+  throw Object.assign(new Error(lastErr?.message || 'request failed'), { pgError: lastErr });
+}
+
 class PgQuery {
   constructor(table) { this._table = table; this._params = new URLSearchParams(); this._single = false; }
   select(cols) { this._params.set('select', cols || '*'); return this; }
@@ -634,11 +693,11 @@ class PgQuery {
   maybeSingle() { this._single = true; return this; }
   async _run() {
     try {
-      const res = await fetch(`${PGRST_URL}/${this._table}?${this._params}`, { headers: { 'Accept': 'application/json' } });
+      const res = await pgFetch(`${this._table}?${this._params}`, { headers: { 'Accept': 'application/json' } });
       if(!res.ok) return { data: null, error: { status: res.status, message: await res.text() } };
       const rows = await res.json();
       return { data: this._single ? (rows[0] ?? null) : rows, error: null };
-    } catch(e) { return { data: null, error: { message: String(e) } }; }
+    } catch(e) { return { data: null, error: e.pgError || { message: String(e) } }; }
   }
   then(resolve, reject) { return this._run().then(resolve, reject); }
 }
@@ -646,7 +705,7 @@ const sb = {
   from(table) { return new PgQuery(table); },
   async rpc(fn, params) {
     try {
-      const res = await fetch(`${PGRST_URL}/rpc/${fn}`, {
+      const res = await pgFetch(`rpc/${fn}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify(params || {})
@@ -654,7 +713,7 @@ const sb = {
       if(!res.ok) return { data: null, error: { status: res.status, message: await res.text() } };
       const text = await res.text();
       return { data: text ? JSON.parse(text) : null, error: null };
-    } catch(e) { return { data: null, error: { message: String(e) } }; }
+    } catch(e) { return { data: null, error: e.pgError || { message: String(e) } }; }
   }
 };
 
@@ -976,7 +1035,7 @@ function addrLink(addr, chain) {
     ? (EXPLORERS[chain] || EXPLORERS.ETHEREUM)
     : (CHAINS[S.chainId]?.explorer || 'https://etherscan.io');
   if (ethers.isAddress(addr)) {
-    return `<a href="${base}/address/${safe}" target="_blank" rel="noopener" title="${safe}" style="color:inherit;text-decoration:none;border-bottom:1px solid var(--ln)">${esc(shortAddr(addr))}</a>`;
+    return `<a class="alink" href="${base}/address/${safe}" target="_blank" rel="noopener" title="${safe}" style="color:inherit;text-decoration:none;border-bottom:1px solid var(--ln)">${esc(shortAddr(addr))}</a>`;
   }
   return `<span style="border-bottom:1px solid var(--ln)">${safe}</span>`;
 }
@@ -1238,7 +1297,24 @@ function explorerTxLink(hash) {
   if(!hash || !/^0x[0-9a-fA-F]{64}$/.test(hash)) return esc(hash||'');
   const c = CHAINS[S.chainId];
   const base = c ? c.explorer : 'https://etherscan.io';
-  return `<a href="${base}/tx/${hash}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;border-bottom:1px solid var(--ln)">${hash.slice(0,10)}...${hash.slice(-6)}</a>`;
+  return `<a class="alink" href="${base}/tx/${hash}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;border-bottom:1px solid var(--ln)">${hash.slice(0,10)}...${hash.slice(-6)}</a>`;
+}
+
+// Explorer link for a queue transaction, context-aware:
+// prefers a real on-chain tx hash (execution → queue), and always falls
+// back to the vault's address page so EVERY tx exposes an explorer jump —
+// even pending off-chain proposals that have no tx hash of their own yet.
+function txExplorerLink(tx, v) {
+  if(S.demoMode) return '';
+  const c = CHAINS[S.chainId];
+  const base = c ? c.explorer : 'https://etherscan.io';
+  const isHash = h => h && /^0x[0-9a-fA-F]{64}$/.test(h);
+  let href, tip;
+  if(isHash(tx.executionTx))      { href = `${base}/tx/${tx.executionTx}`; tip = 'View execution transaction'; }
+  else if(isHash(tx.queueTx))     { href = `${base}/tx/${tx.queueTx}`;     tip = 'View queue transaction'; }
+  else if(v && v.address && ethers.isAddress(v.address)) { href = `${base}/address/${v.address}`; tip = 'View vault on explorer'; }
+  else return '';
+  return `<a class="tx-explorer" href="${href}" target="_blank" rel="noopener" title="${tip}" onclick="event.stopPropagation()">↗ EXPLORER</a>`;
 }
 
 // ── RENDER ────────────────────────────────────────────────────────
@@ -1386,9 +1462,18 @@ function renderDeployOverlay(){
       const canRetry = s.status==='failed' && d.done;
       right = `<span style="font-size:9px;letter-spacing:1px;color:${gc}">${s.status==='failed'&&s.err?esc(String(s.err).slice(0,30)):lbl[s.status]}</span>${canRetry?` <button class="reject-link" style="padding:2px 9px;margin-left:8px" onclick="retryChain(${k})">RETRY</button>`:''}`;
     }
+    // Per-chain explorer link: each chain has its own explorer, so build the
+    // base from the step's chain id (not the connected chain) — links stay
+    // correct across a multichain deploy.
+    let xlink = '';
+    if((s.status==='done'||s.status==='skipped') && (s.txHash||s.address)){
+      const eb = CHAINS[s.id] ? CHAINS[s.id].explorer : 'https://etherscan.io';
+      const href = s.txHash ? `${eb}/tx/${s.txHash}` : `${eb}/address/${s.address}`;
+      xlink = `<a class="tx-explorer" href="${href}" target="_blank" rel="noopener" title="${s.txHash?'View deploy transaction':'View vault on explorer'} · ${esc(s.name)}">↗</a>`;
+    }
     return `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--ln)">
       <span style="color:${gc};font-size:12px;width:14px;text-align:center">${g}</span>
-      ${chainIcon(s.id)}<span style="flex:1;font-size:12px;font-weight:700;letter-spacing:1px">${esc(s.name)}</span>${right}</div>`;
+      ${chainIcon(s.id)}<span style="flex:1;font-size:12px;font-weight:700;letter-spacing:1px">${esc(s.name)}</span>${right}${xlink}</div>`;
   }).join('');
 
   let footer;
@@ -1504,6 +1589,7 @@ function renderDash(v,mob){
         ?`<span style="border-left:2px solid var(--a);padding-left:10px;margin-left:2px"><strong>${fmtD(v.delay)}</strong> TIMELOCK</span>`
         :`<span style="border-left:2px solid var(--y);padding-left:10px;margin-left:2px;color:var(--y)"><strong>UNLOCKED</strong></span>`}
       <span>${S.demoMode?v.chain:chainName()}</span>
+      ${v.address&&ethers.isAddress(v.address)?`<span>${S.demoMode?addrLink(v.address,v.chain):addrLink(v.address)}${copyBtn(v.address)}</span>`:""}
       ${v.executor===ethers.ZeroAddress||v.executor==="0x0000...0000"?'<span style="color:var(--y)">NO EXECUTOR</span>':""}
       ${v.fastPath?'<span style="color:var(--g)" title="Unanimous owner signatures can bypass the timelock — instant execution via the executor">INSTANT &middot; ALL OWNERS</span>':""}
     </div>
@@ -1617,7 +1703,7 @@ function renderDash(v,mob){
         ${blocked?'<span style="font-size:10px;color:var(--d);letter-spacing:2px">BLOCKED</span>':""}
       </div>
       ${blocked?"":progressLine}
-      <div class="approvals">${apHtml}${etaHtml}</div>
+      <div class="approvals">${apHtml}${etaHtml}${(()=>{const xl=txExplorerLink(tx,v);return xl?`<span class="eta" style="margin-left:${etaHtml?'12px':'auto'}">${xl}</span>`:'';})()}</div>
       ${(i===firstUnqueued&&!isQueued&&!isCancel&&!blocked)?(()=>{const rsc=tx.rejectSigners?tx.rejectSigners.size:0;const armed=_rejectArmed===tx.nonce;const rlabel=armed?'CONFIRM &middot; SKIP NONCE?':`REJECT &middot; SKIP NONCE${rsc?` (${rsc}/${v.threshold})`:''}`;return `<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="sim-btn" onclick="simulateProposal(${S.sel},${tx.nonce})" title="Dry-run this proposal against current chain state (from = the vault)">SIMULATE</button><button class="reject-link${armed?' armed':''}" onclick="armReject(${S.sel},${tx.nonce})" title="Sign a no-op to consume this nonce so later transactions can proceed">${rlabel}</button></div>`;})():''}
       ${tx._sim?renderSimResult(tx._sim):''}
       ${mob&&!blocked&&actionBtn?`<div class="mob-actions">${actionBtn}</div>`:""}
@@ -1886,7 +1972,7 @@ function renderTopUp(){
       ${sel.symbol==='ETH'?`<div style="font-size:9px;color:var(--d);letter-spacing:1px;margin-bottom:4px">KEEP SOME ETH FOR GAS</div>`:''}
 
       ${t.err?`<div style="font-size:10px;color:var(--r);letter-spacing:1px;line-height:1.5;margin:8px 0">${esc(String(t.err).slice(0,120))}</div>`:''}
-      ${t.txHash?`<div style="font-size:9px;color:var(--m);letter-spacing:1px;margin:8px 0;word-break:break-all">TX ${esc(t.txHash.slice(0,14))}… &middot; ${addrLink(v.address)}</div>`:''}
+      ${t.txHash?`<div style="font-size:9px;color:var(--m);letter-spacing:1px;margin:8px 0;word-break:break-all">TX ${explorerTxLink(t.txHash)} &middot; ${addrLink(v.address)}</div>`:''}
 
       <button class="btn ${sending?'btn-disabled':'btn-fill'} btn-w btn-big" style="margin-top:14px" ${sending?'disabled':''} onclick="submitTopUp()">${btnLabel}</button>
       <div style="margin-top:10px;font-size:9px;color:var(--d);letter-spacing:1px;text-align:center;line-height:1.5">A DIRECT TRANSFER FROM YOUR WALLET &mdash; NO SIGNATURES OR TIMELOCK NEEDED TO DEPOSIT</div>
@@ -2627,6 +2713,13 @@ async function loadTokenBalances(walletAddr, ethBalance) {
 
 // ── PRODUCTION: DATABASE HELPERS ──────────────────────────────────
 
+// Build a user-facing error for a failed critical write. `label` is shown in
+// the flash; the underlying PostgREST error is attached for the console.
+function dbError(label, err) {
+  const detail = err && (err.message || err.status);
+  return Object.assign(new Error(label), { shortMessage: label, dbDetail: detail });
+}
+
 async function dbRegisterWallet(addr, deployer, salt, ownerList, thresh, del, exec, block, txHash, name, labels, nonce) {
   const { data, error } = await sb.rpc('register_wallet', {
     p_chain_id: S.chainId, p_address: addr, p_deployer: deployer,
@@ -2660,7 +2753,11 @@ async function dbProposeTx(wId, nonce, target, value, callData, txHash, thresh, 
     p_tx_hash: txHash, p_threshold: thresh, p_proposed_by: proposedBy,
     p_description: desc
   });
-  if(error) console.error('DB propose:', error);
+  if(error) { console.error('DB propose:', error); throw dbError('PROPOSAL NOT SAVED', error); }
+  // A null id with no error means the row exists but under a different hash at
+  // this nonce (nonce collision) — the caller's signature would be dropped
+  // silently, so treat it as a hard failure the user can act on.
+  if(!data) throw dbError('PROPOSAL NOT SAVED — NONCE IN USE', null);
   return data;
 }
 
@@ -2669,7 +2766,7 @@ async function dbAddSig(txId, signerAddr, signature, sigType) {
     p_tx_id: txId, p_signer: signerAddr, p_signature: signature,
     p_sig_type: sigType || 'ecdsa'
   });
-  if(error) console.error('DB add sig:', error);
+  if(error) { console.error('DB add sig:', error); throw dbError('SIGNATURE NOT SAVED', error); }
   return data;
 }
 
@@ -2698,12 +2795,29 @@ async function dbGetSigs(txId) {
   return data || [];
 }
 
+// Batch variant: fetch signatures for many txs in ONE request instead of
+// N per-tx round-trips. Returns a Map of tx_id → sorted signatures.
+async function dbGetSigsByTxIds(txIds) {
+  const map = new Map();
+  if(!txIds.length) return map;
+  txIds.forEach(id => map.set(id, []));
+  const { data } = await sb.from('signatures')
+    .select('tx_id, signer, signature, sig_type')
+    .in('tx_id', txIds)
+    .order('signer', { ascending: true });
+  (data || []).forEach(s => {
+    const arr = map.get(s.tx_id);
+    if(arr) arr.push({ signer: s.signer, signature: s.signature, sig_type: s.sig_type });
+  });
+  return map;
+}
+
 async function dbMarkExecuted(txId, block, execTx) {
   await sb.rpc('mark_executed', { p_tx_id: txId, p_block: block, p_execution_tx: execTx, p_caller: window._connectedAddress });
 }
 
 async function dbMarkQueued(txId, eta, block) {
-  await sb.rpc('mark_queued', { p_tx_id: txId, p_eta: eta, p_block: block, p_caller: window._connectedAddress });
+  await sb.rpc('mark_queued', { p_tx_id: txId, p_eta: eta, p_block: block, p_queue_tx: queueTx || null, p_caller: window._connectedAddress });
 }
 
 async function dbCancelTx(txId, cancelledBy) {
@@ -2762,6 +2876,7 @@ async function dbGetHistory(wId, limit) {
   const { data } = await sb.from('tx_history')
     .select('*')
     .eq('wallet_id', wId)
+    .order('sort_ts', { ascending: false })
     .limit(limit || 50);
   return data || [];
 }
@@ -2878,10 +2993,10 @@ async function loadVaultQueue(vi) {
     const you = window._connectedAddress;
     const queue = [];
 
-    // Fetch sigs + verify on-chain queue state in parallel
+    // Fetch sigs (one batched request) + verify on-chain queue state in parallel
     const queuedTxs = txs.filter(t => t.status === 'queued' && t.tx_hash);
-    const [allSigs, onchainQueued] = await Promise.all([
-      Promise.all(txs.map(t => dbGetSigs(t.id))),
+    const [sigMap, onchainQueued] = await Promise.all([
+      dbGetSigsByTxIds(txs.map(t => t.id)),
       (async () => {
         const result = {};
         if(!queuedTxs.length) return result;
@@ -2912,17 +3027,17 @@ async function loadVaultQueue(vi) {
       if(t.description && t.description.startsWith('Accelerate #')) {
         const origNonce = parseInt(t.description.replace('Accelerate #', ''));
         if(!isNaN(origNonce)) {
-          accelSigs[origNonce] = new Set(allSigs[ti].map(s => s.signer.toLowerCase()));
+          accelSigs[origNonce] = new Set((sigMap.get(t.id) || []).map(s => s.signer.toLowerCase()));
         }
       } else if(t.description && t.description.startsWith('Cancel #')) {
         const origNonce = parseInt(t.description.replace('Cancel #', ''));
         if(!isNaN(origNonce)) {
-          cancelSigs[origNonce] = new Set(allSigs[ti].map(s => s.signer.toLowerCase()));
+          cancelSigs[origNonce] = new Set((sigMap.get(t.id) || []).map(s => s.signer.toLowerCase()));
         }
       } else if(t.description && t.description.startsWith('Reject #')) {
         const origNonce = parseInt(t.description.replace('Reject #', ''));
         if(!isNaN(origNonce)) {
-          rejectSigs[origNonce] = new Set(allSigs[ti].map(s => s.signer.toLowerCase()));
+          rejectSigs[origNonce] = new Set((sigMap.get(t.id) || []).map(s => s.signer.toLowerCase()));
         }
       }
     }
@@ -2951,12 +3066,22 @@ async function loadVaultQueue(vi) {
         }
       }
 
-      const sigs = allSigs[ti];
+      const sigs = sigMap.get(t.id) || [];
+      // Verify each stored sig against THIS tx's digest before counting it as
+      // an approval. add_signature runs as anon with ON CONFLICT DO UPDATE, so
+      // anyone can overwrite a stored sig with garbage. Verifying here means a
+      // corrupted sig shows its owner as un-signed (prompting a re-sign, which
+      // repairs the row) rather than a false "approved" that fails at execute
+      // time. approval/sender sigs are trusted — the contract validates those.
+      const ownerAddrs = v.loadedOwners || v.owners.map(o => o.addr);
+      const sigDomain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address };
+      const sigMsg = { target: t.target, value: t.value ? BigInt(t.value) : 0n, data: t.call_data || '0x', nonce: t.nonce };
+      const validSigs = verifySigs(sigs, sigDomain, EIP712_TYPES, sigMsg, ownerAddrs);
       const approvals = {};
       v.owners.forEach(o => approvals[o.addr] = false);
       const addrKey = {};
       v.owners.forEach(o => addrKey[o.addr.toLowerCase()] = o.addr);
-      sigs.forEach(s => { const k = addrKey[s.signer.toLowerCase()]; if(k) approvals[k] = true; });
+      validSigs.forEach(s => { const k = addrKey[s.signer.toLowerCase()]; if(k) approvals[k] = true; });
 
       const dataLabel = selectorToLabel(t.call_data);
 
@@ -3328,7 +3453,7 @@ async function deployOnChain(k){
       const onchainNonce = Number(await ms.nonce());
       await dbRegisterWallet(walletAddr, ctx.connectedAddress, ctx.salt, ctx.resolvedOwners, ctx.thresh, ctx.del, ctx.executor, Number(receipt.blockNumber), receipt.hash, ctx.cfName, ctx.ownerLabels, onchainNonce);
     } catch(e){ console.error('DB register failed:', e); }
-    step.status='done'; step.address=walletAddr; render();
+    step.status='done'; step.address=walletAddr; step.txHash=receipt.hash; render();
     return true;
   } catch(e){
     console.error('deploy on', net.name, e);
@@ -3645,6 +3770,7 @@ async function prodSubmit(vi, nonce) {
             if(cancelledDbTx) await dbCancelTx(cancelledDbTx.id, connectedAddress);
           } else {
             tx.eta = eta;
+            tx.queueTx = receipt.hash;
             flash(`QUEUED #${nonce} \u2014 ETA: ${new Date(eta*1000).toLocaleString()}`);
             if(tx.dbId) await dbMarkQueued(tx.dbId, eta, Number(receipt.blockNumber));
           }

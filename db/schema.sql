@@ -1,4 +1,4 @@
--- MULTISIG.software — Supabase Schema
+-- MULTISIG.software — Database Schema (self-hosted Postgres + PostgREST)
 -- Single canonical file. Safe to run on fresh or existing DB.
 
 -- ── TABLES ───────────────────────────────────────────────────────
@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS transactions (
   eta             bigint,
   queued_at       timestamptz,
   queued_block    bigint,
+  queue_tx        text,
   executed_at     timestamptz,
   executed_block  bigint,
   execution_tx    text,
@@ -75,6 +76,8 @@ CREATE TABLE IF NOT EXISTS transactions (
   UNIQUE (wallet_id, nonce),
   UNIQUE (chain_id, tx_hash)
 );
+
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS queue_tx text;
 
 CREATE INDEX IF NOT EXISTS idx_tx_wallet_status ON transactions (wallet_id, status);
 CREATE INDEX IF NOT EXISTS idx_tx_chain ON transactions (chain_id);
@@ -150,12 +153,17 @@ CREATE OR REPLACE VIEW my_wallets AS
   FROM wallets w
   JOIN owners o ON o.wallet_id = w.id AND o.is_current = true;
 
+-- Only signatures from CURRENT owners count toward quorum. A signer removed
+-- after signing leaves a stale row that would otherwise inflate sig_count and
+-- falsely mark a tx "ready" (the on-chain execute would then revert). The
+-- LEFT JOIN to owners lets us FILTER those out while still returning txs with
+-- zero valid sigs.
 CREATE OR REPLACE VIEW tx_summary AS
   SELECT
     t.*,
-    count(s.id) AS sig_count,
+    count(s.id) FILTER (WHERE o.id IS NOT NULL) AS sig_count,
     t.threshold AS sigs_needed,
-    count(s.id) >= t.threshold AS ready,
+    count(s.id) FILTER (WHERE o.id IS NOT NULL) >= t.threshold AS ready,
     CASE
       WHEN t.status = 'queued' AND t.eta IS NOT NULL
         THEN t.eta <= extract(epoch FROM now())
@@ -163,6 +171,10 @@ CREATE OR REPLACE VIEW tx_summary AS
     END AS queue_ready
   FROM transactions t
   LEFT JOIN signatures s ON s.tx_id = t.id
+  LEFT JOIN owners o
+    ON o.wallet_id = t.wallet_id
+   AND lower(o.address) = lower(s.signer)
+   AND o.is_current = true
   GROUP BY t.id;
 
 CREATE OR REPLACE VIEW tx_history AS
@@ -170,7 +182,11 @@ CREATE OR REPLACE VIEW tx_history AS
     t.id, t.wallet_id, t.nonce, t.target, t.value, t.call_data,
     t.tx_hash, t.status, t.description, t.proposed_by,
     t.proposed_at, t.eta, t.executed_at, t.executed_block,
-    t.execution_tx, t.cancelled_at, t.cancelled_by
+    t.execution_tx, t.queue_tx, t.cancelled_at, t.cancelled_by,
+    -- Single sortable timestamp so clients can order deterministically.
+    -- PostgREST does not preserve a view's internal ORDER BY, so callers
+    -- must order explicitly on this column (see dbGetHistory).
+    COALESCE(t.executed_at, t.cancelled_at) AS sort_ts
   FROM transactions t
   WHERE t.status IN ('executed', 'cancelled')
   ORDER BY COALESCE(t.executed_at, t.cancelled_at) DESC;
@@ -341,8 +357,11 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+-- Drop the pre-queue_tx signature so no stale overload lingers on existing DBs.
+DROP FUNCTION IF EXISTS mark_queued(uuid, bigint, bigint, text);
 CREATE OR REPLACE FUNCTION mark_queued(
   p_tx_id uuid, p_eta bigint, p_block bigint,
+  p_queue_tx text DEFAULT NULL,
   p_caller text DEFAULT NULL
 ) RETURNS void AS $$
 DECLARE
@@ -357,7 +376,7 @@ BEGIN
   END IF;
 
   UPDATE transactions
-  SET status = 'queued', eta = p_eta, queued_at = now(), queued_block = p_block
+  SET status = 'queued', eta = p_eta, queued_at = now(), queued_block = p_block, queue_tx = p_queue_tx
   WHERE id = p_tx_id;
 
   -- On-chain nonce increments at queue time (execute() is called to queue)
@@ -452,17 +471,40 @@ CREATE OR REPLACE FUNCTION sync_wallet_state(
 DECLARE
   i int;
   existing text[];
+  old_threshold smallint;
+  old_delay int;
+  old_executor text;
 BEGIN
   IF NOT is_wallet_owner(p_wallet_id, p_caller) THEN
     RAISE EXCEPTION 'Not an owner';
   END IF;
+
+  -- Capture prior state so we can journal what actually changed. This is the
+  -- only place config drift (threshold/delay/executor/ownership) is observed
+  -- off-chain, so we append config_log rows — otherwise config history would
+  -- never contain anything but the original 'init' event.
+  SELECT threshold, delay, executor INTO old_threshold, old_delay, old_executor
+  FROM wallets WHERE id = p_wallet_id;
 
   UPDATE wallets SET
     threshold = p_threshold, owner_count = p_owner_count,
     delay = p_delay, executor = p_executor, nonce = p_nonce
   WHERE id = p_wallet_id;
 
-  -- Mark removed owners
+  IF old_threshold IS DISTINCT FROM p_threshold THEN
+    INSERT INTO config_log (wallet_id, event, threshold, owner_count)
+    VALUES (p_wallet_id, 'threshold_changed', p_threshold, p_owner_count);
+  END IF;
+  IF old_delay IS DISTINCT FROM p_delay THEN
+    INSERT INTO config_log (wallet_id, event, delay)
+    VALUES (p_wallet_id, 'delay_changed', p_delay);
+  END IF;
+  IF lower(coalesce(old_executor, '')) IS DISTINCT FROM lower(coalesce(p_executor, '')) THEN
+    INSERT INTO config_log (wallet_id, event, executor)
+    VALUES (p_wallet_id, 'executor_changed', p_executor);
+  END IF;
+
+  -- Mark removed owners (and journal each removal)
   SELECT array_agg(address) INTO existing
   FROM owners WHERE wallet_id = p_wallet_id AND is_current = true;
 
@@ -471,11 +513,13 @@ BEGIN
       IF NOT (SELECT lower(existing[i]) = ANY(SELECT lower(unnest(p_owners)))) THEN
         UPDATE owners SET is_current = false, removed_at = now()
         WHERE wallet_id = p_wallet_id AND address = existing[i] AND is_current = true;
+        INSERT INTO config_log (wallet_id, event, subject, owner_count)
+        VALUES (p_wallet_id, 'owner_removed', existing[i], p_owner_count);
       END IF;
     END LOOP;
   END IF;
 
-  -- Upsert owners with correct positions
+  -- Upsert owners with correct positions (and journal each addition)
   FOR i IN 1..array_length(p_owners, 1) LOOP
     IF EXISTS (
       SELECT 1 FROM owners
@@ -486,6 +530,8 @@ BEGIN
     ELSE
       INSERT INTO owners (wallet_id, address, position, is_current)
       VALUES (p_wallet_id, p_owners[i], i - 1, true);
+      INSERT INTO config_log (wallet_id, event, subject, owner_count)
+      VALUES (p_wallet_id, 'owner_added', p_owners[i], p_owner_count);
     END IF;
   END LOOP;
 END;

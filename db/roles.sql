@@ -1,11 +1,10 @@
 -- MULTISIG.software — PostgREST roles & grants
 -- Run AFTER schema.sql, as the database owner, on your Render Postgres.
 --
--- This recreates the two roles Supabase provisioned automatically
--- (`authenticator` + `anon`) so a self-hosted PostgREST enforces the same
--- security model: anonymous browsers can READ (gated by the RLS SELECT
--- policies in schema.sql) and can only WRITE through the SECURITY DEFINER
--- functions, which run their own owner checks.
+-- This defines the two roles PostgREST needs (`authenticator` + `anon`) so
+-- anonymous browsers can READ (gated by the RLS SELECT policies in
+-- schema.sql) and can only WRITE through the SECURITY DEFINER functions,
+-- which run their own owner checks.
 
 -- ── ROLES ────────────────────────────────────────────────────────
 
