@@ -1116,8 +1116,12 @@ const sb = {
   }
 };
 
-// ── WNS ───────────────────────────────────────────────────────────
+// ── WNS / GNS ─────────────────────────────────────────────────────
+// GNS (.gwei) is a direct fork of WNS (.wei): same ABI, same NameNFT calls,
+// also on mainnet. Both are registered below and resolved identically; the
+// only asymmetry is preference order — .wei wins when an address has both.
 const WEINS = '0x0000000000696760E15f265e828DB644A0c242EB';
+const GWEINS = '0x9D51D507BC7264d4fE8Ad1cf7Fe191933A0a81d6';
 const WEINS_ABI = [
   'function computeId(string) pure returns (uint256)',
   // Canonical forward resolution: inactive/expired -> 0; explicitly-set
@@ -1127,6 +1131,19 @@ const WEINS_ABI = [
   'function reverseResolve(address) view returns (string)',
 ];
 const weinsIface = new ethers.Interface(WEINS_ABI);
+// Preference order for reverse resolution — .wei first, .gwei as fallback.
+const NAME_SERVICES = [
+  { suffix: '.wei',  addr: WEINS },
+  { suffix: '.gwei', addr: GWEINS },
+];
+// One matcher for every name we accept, so the field hints, the validators and
+// the resolvers can never drift apart. '.gwei' does not end in '.wei', so the
+// suffixes stay unambiguous.
+const NAME_RE = /\.(eth|g?wei)$/i;
+function nsFor(name) {
+  const v = name.toLowerCase();
+  return NAME_SERVICES.find(s => v.endsWith(s.suffix)) || null;
+}
 
 // ── EIP-712 ───────────────────────────────────────────────────────
 const EIP712_DOMAIN = { name:'Multisig', version:'1' };
@@ -1550,8 +1567,8 @@ function getYou(){
   return window._connectedAddress || null;
 }
 
-// Best short identity for an owner: custom label, else resolved .wei/ENS name,
-// else a shortened address.
+// Best short identity for an owner: custom label, else resolved
+// .wei/.gwei/ENS name, else a shortened address.
 function ownerIdent(o){
   return o.label || o.name || (o.addr && ethers.isAddress(o.addr) ? o.addr.slice(0,6)+'…'+o.addr.slice(-4) : (o.addr || ''));
 }
@@ -1585,8 +1602,8 @@ function updateLoadStatus(val) {
   const t = (val || '').trim();
   if (!t) { el.textContent = ''; return; }
   if (ethers.isAddress(t)) { el.textContent = 'VALID ADDRESS'; el.style.color = 'var(--g)'; }
-  else if (/\.(eth|wei)$/i.test(t)) { el.textContent = 'NAME · RESOLVES ON LOAD'; el.style.color = 'var(--a)'; }
-  else { el.textContent = 'ENTER AN ADDRESS OR .eth / .wei NAME'; el.style.color = 'var(--r)'; }
+  else if (NAME_RE.test(t)) { el.textContent = 'NAME · RESOLVES ON LOAD'; el.style.color = 'var(--a)'; }
+  else { el.textContent = 'ENTER AN ADDRESS OR .eth / .wei / .gwei NAME'; el.style.color = 'var(--r)'; }
 }
 
 function chainName() {
@@ -2055,7 +2072,7 @@ function renderChainOverlay(mob){
 
 // ── DASHBOARD ─────────────────────────────────────────────────────
 function renderDash(v,mob){
-  if(!v)return`<div class="empty"><div class="empty-title">NO VAULTS</div><div class="empty-sub">${S.demoMode?"":"DEPLOY YOUR FIRST MULTISIG"}</div><button class="btn btn-outline" style="padding:0 32px;height:48px" onclick="S.view='CREATE';render()">CREATE VAULT</button>${!S.demoMode?`<div style="max-width:400px;margin:44px auto 0;padding-top:32px;border-top:1px solid var(--ln)"><div style="font-size:10px;font-weight:600;letter-spacing:2px;color:var(--m)">LOAD EXISTING VAULT</div><div style="margin-top:12px;display:flex;align-items:center;gap:8px;justify-content:center;flex-wrap:wrap"><input class="inp" id="load-addr" style="max-width:320px;min-width:0;flex:1;margin:0;font-size:16px" placeholder="0x... or name.eth / name.wei" oninput="updateLoadStatus(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();loadVaultByAddress()}"><button class="btn btn-outline btn-sm" onclick="loadVaultByAddress()">LOAD</button></div><div id="load-status" style="font-size:9px;letter-spacing:1px;text-align:center;min-height:12px;margin-top:6px"></div><div style="margin-top:24px"><button class="btn btn-outline" style="font-size:9px;border-color:var(--ln);color:var(--d)" onclick="S.demoMode=true;S.vaults=seed();S.sel=0;flash('DEMO LOADED');render()">LOAD DEMO</button></div></div>`:""}</div>`;
+  if(!v)return`<div class="empty"><div class="empty-title">NO VAULTS</div><div class="empty-sub">${S.demoMode?"":"DEPLOY YOUR FIRST MULTISIG"}</div><button class="btn btn-outline" style="padding:0 32px;height:48px" onclick="S.view='CREATE';render()">CREATE VAULT</button>${!S.demoMode?`<div style="max-width:400px;margin:44px auto 0;padding-top:32px;border-top:1px solid var(--ln)"><div style="font-size:10px;font-weight:600;letter-spacing:2px;color:var(--m)">LOAD EXISTING VAULT</div><div style="margin-top:12px;display:flex;align-items:center;gap:8px;justify-content:center;flex-wrap:wrap"><input class="inp" id="load-addr" style="max-width:320px;min-width:0;flex:1;margin:0;font-size:16px" placeholder="0x... or name.eth / name.(g)wei" oninput="updateLoadStatus(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();loadVaultByAddress()}"><button class="btn btn-outline btn-sm" onclick="loadVaultByAddress()">LOAD</button></div><div id="load-status" style="font-size:9px;letter-spacing:1px;text-align:center;min-height:12px;margin-top:6px"></div><div style="margin-top:24px"><button class="btn btn-outline" style="font-size:9px;border-color:var(--ln);color:var(--d)" onclick="S.demoMode=true;S.vaults=seed();S.sel=0;flash('DEMO LOADED');render()">LOAD DEMO</button></div></div>`:""}</div>`;
   const you = getYou();
   const h0=v.holdings[0];
 
@@ -2386,7 +2403,7 @@ function txMissing(){
   }
   if(!(parseFloat(stripCommas(S.txAmount || '')) > 0)) miss.push('AMOUNT');
   const t = (S.txTo || '').trim();
-  if(!t || !(ethers.isAddress(t) || /\.(eth|wei)$/i.test(t))) miss.push('RECIPIENT');
+  if(!t || !(ethers.isAddress(t) || NAME_RE.test(t))) miss.push('RECIPIENT');
   return miss;
 }
 // Live summary for the STAKE tab. The wstETH figure is an estimate by
@@ -2441,7 +2458,7 @@ function txReviewBody(v){
   const rate = tokRate(hold);
   const slowOn = slowAvailable() && S.txSlow;
   const isAddr = ethers.isAddress(to);
-  const isName = /\.(eth|wei)$/i.test(to);
+  const isName = NAME_RE.test(to);
   const availNum = hold ? Number(hold.raw != null ? ethers.formatUnits(hold.raw, hold.decimals || ct.decimals) : stripCommas(hold.balance)) : 0;
 
   const amtHtml = amtNum > 0
@@ -2535,7 +2552,7 @@ function _addrState(t){
   t = (t || '').trim();
   if(!t) return { txt:'', color:'' };
   if(ethers.isAddress(t)) return { txt:'VALID ADDRESS', color:'var(--g)' };
-  if(/\.(eth|wei)$/i.test(t)) return { txt:'NAME · RESOLVES AT SIGN', color:'var(--a)' };
+  if(NAME_RE.test(t)) return { txt:'NAME · RESOLVES AT SIGN', color:'var(--a)' };
   // Right shape, wrong case: a mistyped or truncated paste, not a bad format.
   // Naming it precisely is the difference between a 2-second fix and a re-copy.
   if(/^0x[0-9a-fA-F]{40}$/.test(t)) return { txt:'BAD CHECKSUM — RE-COPY THE ADDRESS', color:'var(--r)' };
@@ -2850,7 +2867,7 @@ function renderTxBuilder(v,mob){
 
         <div class="fset">
           <div class="fhead"><label class="lbl">RECIPIENT</label><span class="fhint" id="tx-to-status"></span></div>
-          <input class="inp" id="tx-to" style="margin-bottom:0" placeholder="0x... or name.eth / name.wei" value="${esc(S.txTo)}" oninput="onTxRecipient(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();submitTransfer()}">
+          <input class="inp" id="tx-to" style="margin-bottom:0" placeholder="0x... or name.eth / name.(g)wei" value="${esc(S.txTo)}" oninput="onTxRecipient(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();submitTransfer()}">
         </div>
 
         ${slowUi}
@@ -2953,7 +2970,7 @@ function renderTxBuilder(v,mob){
     }
     body=`<div class="grid2">
       <div>
-        <label class="lbl">TARGET</label><input class="inp" id="cx-target" placeholder="0x... or name.eth / name.wei" value="${esc(shortAddr(S.cxTarget))}" onfocus="this.value=S.cxTarget" onblur="this.value=shortAddr(S.cxTarget)" oninput="onCxTargetChange(this.value)">
+        <label class="lbl">TARGET</label><input class="inp" id="cx-target" placeholder="0x... or name.eth / name.(g)wei" value="${esc(shortAddr(S.cxTarget))}" onfocus="this.value=S.cxTarget" onblur="this.value=shortAddr(S.cxTarget)" oninput="onCxTargetChange(this.value)">
         <div id="cx-target-status" style="font-size:9px;letter-spacing:1px;margin-top:-8px;margin-bottom:8px;min-height:11px"></div>
         ${abiStatus}${fnPills}
         <label class="lbl">VALUE (ETH)</label><input class="inp" id="cx-value" placeholder="0" value="${esc(S.cxValue)}" oninput="S.cxValue=this.value;document.getElementById('cx-wei').textContent=this.value?toUnits(this.value,18)+' WEI':''">
@@ -2965,7 +2982,7 @@ function renderTxBuilder(v,mob){
     body=S.batch.map((c,i)=>`<div class="batch-call">
       <div class="call-hdr"><span>CALL ${String(i+1).padStart(2,"0")}</span>${S.batch.length>1?`<button class="x-btn" onclick="S.batch.splice(${i},1);render()">&#10005;</button>`:""}</div>
       <div class="grid3">
-        <div><label class="lbl">TARGET</label><input class="inp" data-bi="${i}" data-bf="t" placeholder="0x... or .eth/.wei" value="${esc(shortAddr(c.t))}" onfocus="this.value=S.batch[${i}].t" onblur="this.value=shortAddr(S.batch[${i}].t)" oninput="onBatchTarget(${i},this.value)"><div id="batch-t-${i}" style="font-size:9px;letter-spacing:1px;margin-top:-12px;margin-bottom:8px;min-height:11px">${(()=>{const s=_addrState(c.t);return s.txt?`<span style="color:${s.color}">${ethers.isAddress((c.t||'').trim())?'✓':s.txt}</span>`:''})()}</div></div>
+        <div><label class="lbl">TARGET</label><input class="inp" data-bi="${i}" data-bf="t" placeholder="0x... or .eth/.(g)wei" value="${esc(shortAddr(c.t))}" onfocus="this.value=S.batch[${i}].t" onblur="this.value=shortAddr(S.batch[${i}].t)" oninput="onBatchTarget(${i},this.value)"><div id="batch-t-${i}" style="font-size:9px;letter-spacing:1px;margin-top:-12px;margin-bottom:8px;min-height:11px">${(()=>{const s=_addrState(c.t);return s.txt?`<span style="color:${s.color}">${ethers.isAddress((c.t||'').trim())?'✓':s.txt}</span>`:''})()}</div></div>
         <div><label class="lbl">VALUE (ETH)</label><input class="inp" data-bi="${i}" data-bf="v" placeholder="0" value="${esc(c.v)}" oninput="S.batch[${i}].v=this.value;this.nextElementSibling.textContent=this.value?toUnits(this.value,18)+' WEI':''"><div style="font-size:10px;color:var(--d);margin-top:-12px;margin-bottom:8px;word-break:break-all">${c.v?toUnits(c.v,18)+' WEI':''}</div></div>
         <div><label class="lbl">CALLDATA</label><input class="inp" data-bi="${i}" data-bf="d" placeholder="0x..." value="${esc(c.d)}" oninput="onBatchData(${i},this.value)"><div id="batch-d-${i}" style="font-size:9px;letter-spacing:1px;margin-top:-12px;margin-bottom:8px;min-height:11px">${(()=>{const s=_hexState(c.d);return s.txt?`<span style="color:${s.color}">${s.txt}</span>`:''})()}</div></div>
       </div></div>`).join("")+
@@ -2989,7 +3006,7 @@ function getProdTokenSymbols(){
 // ── CREATE ────────────────────────────────────────────────────────
 // Synchronous create-form validation. Classifies each owner (address / name /
 // invalid / duplicate) and reports whether the form is ready to deploy.
-// Names (.eth/.wei) are accepted here and resolved at deploy time.
+// Names (.eth/.wei/.gwei) are accepted here and resolved at deploy time.
 function validateCreate(c, demo){
   const seen = new Map();
   const owners = c.owners.map(o => {
@@ -2997,7 +3014,7 @@ function validateCreate(c, demo){
     if(!raw) return { state: 'empty' };
     let state, key;
     if(ethers.isAddress(raw)) { state = 'address'; key = 'a:' + raw.toLowerCase(); }
-    else if(/\.(eth|wei)$/i.test(raw)) { state = 'name'; key = 'n:' + raw.toLowerCase(); }
+    else if(NAME_RE.test(raw)) { state = 'name'; key = 'n:' + raw.toLowerCase(); }
     else if(demo) { state = 'address'; key = 'x:' + raw.toLowerCase(); }
     else { state = 'invalid'; key = null; }
     if(key) { if(seen.has(key)) state = 'dup'; else seen.set(key, true); }
@@ -3031,11 +3048,11 @@ function renderCreate(mob){
       <label class="lbl">OWNERS</label>
       ${(()=>{const you=window._connectedAddress;if(you&&!S.demoMode&&c.owners.every(o=>!o.addr.trim())){c.owners[0].addr=you;c.owners[0].label='YOU'}return''})()}${c.owners.map((o,i)=>{
         const st=val.owners[i].state;
-        const note=st==='invalid'?'NOT A VALID ADDRESS OR .eth / .wei NAME':st==='dup'?'DUPLICATE — ALREADY LISTED ABOVE':st==='name'?'NAME &middot; RESOLVES AT DEPLOY':'';
+        const note=st==='invalid'?'NOT A VALID ADDRESS OR .eth / .wei / .gwei NAME':st==='dup'?'DUPLICATE — ALREADY LISTED ABOVE':st==='name'?'NAME &middot; RESOLVES AT DEPLOY':'';
         const noteColor=st==='name'?'var(--d)':'var(--r)';
         return`<div class="owner-row">
         <span class="o-num" style="color:${_OWNER_STATE_COLOR[st]||'var(--d)'}">${String(i+1).padStart(2,"0")}</span>
-        <input class="inp o-addr" style="${st==='invalid'||st==='dup'?'border-bottom-color:var(--r)':''}" placeholder="0x... or .eth/.wei" value="${esc(shortAddr(o.addr))}" onfocus="this.value=S.cf.owners[${i}].addr" onblur="this.value=shortAddr(S.cf.owners[${i}].addr)" oninput="S.cf.owners[${i}].addr=this.value;const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;if(+S.cf.threshold>fc){S.cf.threshold=String(fc)}" onchange="S.cf.owners[${i}].addr=this.value;render()">
+        <input class="inp o-addr" style="${st==='invalid'||st==='dup'?'border-bottom-color:var(--r)':''}" placeholder="0x... or .eth/.(g)wei" value="${esc(shortAddr(o.addr))}" onfocus="this.value=S.cf.owners[${i}].addr" onblur="this.value=shortAddr(S.cf.owners[${i}].addr)" oninput="S.cf.owners[${i}].addr=this.value;const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;if(+S.cf.threshold>fc){S.cf.threshold=String(fc)}" onchange="S.cf.owners[${i}].addr=this.value;render()">
         <input class="inp o-label" placeholder="LABEL" value="${esc(o.label)}" oninput="S.cf.owners[${i}].label=this.value" onchange="render()">
         ${c.owners.length>1?`<button class="x-btn red o-del" onclick="S.cf.owners.splice(${i},1);const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;S.cf.threshold=String(Math.min(+S.cf.threshold||1,fc));render()">&#10005;</button>`:""}
       </div>${note?`<div class="owner-note" style="color:${noteColor}">${note}</div>`:''}`}).join("")}
@@ -3172,7 +3189,7 @@ function renderAdmin(v,mob){
     </div>`}).join("")}
     <div class="sep"></div>
     <label class="lbl"><span class="dim">ADD &middot;</span> OWNER</label>
-    <input class="inp" id="admin-add-owner" style="margin-top:8px" placeholder="0x... or name.eth / name.wei" onkeydown="if(event.key==='Enter'){event.preventDefault();doAdminPropose('addOwner')}">
+    <input class="inp" id="admin-add-owner" style="margin-top:8px" placeholder="0x... or name.eth / name.(g)wei" onkeydown="if(event.key==='Enter'){event.preventDefault();doAdminPropose('addOwner')}">
     <input class="inp" id="admin-add-label" style="font-size:11px;letter-spacing:1px" placeholder="LABEL (OPTIONAL)" onkeydown="if(event.key==='Enter'){event.preventDefault();doAdminPropose('addOwner')}">
     <button class="btn btn-outline btn-w" onclick="doAdminPropose('addOwner')">PROPOSE OWNER</button>
   </div>`:`<div>
@@ -3499,24 +3516,29 @@ async function resolveName(input) {
   const v = input.trim();
   if(!v) throw new Error('Empty input');
   if(ethers.isAddress(v)) return ethers.getAddress(v);
-  if(v.endsWith('.wei')) {
-    const ns = new ethers.Contract(WEINS, WEINS_ABI, ethMainRpc);
+  // .wei / .gwei — same contract shape, picked by suffix.
+  const svc = nsFor(v);
+  if(svc) {
+    const ns = new ethers.Contract(svc.addr, WEINS_ABI, ethMainRpc);
     const tokenId = await ns.computeId(v);
     // resolve() = explicit recipient if set, else owner; 0 if inactive/expired.
     const addr = await ns.resolve(tokenId);
     if(!addr || addr === ethers.ZeroAddress) throw new Error(`${v} not found`);
     return ethers.getAddress(addr);
   }
-  if(v.endsWith('.eth')) {
+  // Case-insensitive to match the field hints: ENS normalizes the name itself,
+  // and both name contracts hash case-insensitively, so TYPED.ETH resolves.
+  if(/\.eth$/i.test(v)) {
     const addr = await ethMainRpc.resolveName(v);
     if(!addr) throw new Error(`${v} not found`);
     return ethers.getAddress(addr);
   }
-  throw new Error('Enter an address, .eth, or .wei name');
+  throw new Error('Enter an address, .eth, .wei, or .gwei name');
 }
 
-// Reverse-resolve owner addresses to human-readable names. Primary: WNS
-// (.wei) reverse resolution batched into ONE Multicall3 call on mainnet.
+// Reverse-resolve owner addresses to human-readable names. Primary: WNS (.wei)
+// and GNS (.gwei) reverse resolution, both batched into ONE Multicall3 call on
+// mainnet, .wei preferred when an address holds a name in both.
 // Fallback: ENS reverse for any still-unnamed owners (best-effort, parallel).
 // Returns a lowercased-address → name map; never throws.
 const _ownerNameCache = {};
@@ -3525,26 +3547,34 @@ async function resolveOwnerNames(addrs) {
   if(!addrs || !addrs.length) return out;
   const need = [];
   for(const a of addrs) {
-    const k = a.toLowerCase();
+    const k = String(a).toLowerCase();
     if(_ownerNameCache[k] !== undefined) { if(_ownerNameCache[k]) out[k] = _ownerNameCache[k]; }
-    else need.push(a);
+    // Anything that is not an address is skipped rather than encoded: one bad
+    // entry would otherwise throw and cost every other owner its name.
+    else if(ethers.isAddress(a)) need.push(a);
   }
   if(!need.length) return out;
-  // 1) Batched .wei reverse resolution via Multicall3 on mainnet
+  // 1) Batched .wei + .gwei reverse resolution in a single Multicall3 on
+  // mainnet. Services are walked in NAME_SERVICES order and the first name
+  // found wins, so .wei takes precedence over .gwei for the same address.
   try {
     const mc = new ethers.Contract(MC3, MC3_ABI, ethMainRpc);
-    const calls = need.map(a => ({ target: WEINS, allowFailure: true, callData: weinsIface.encodeFunctionData('reverseResolve', [a]) }));
+    const calls = [];
+    for(const svc of NAME_SERVICES) {
+      for(const a of need) calls.push({ target: svc.addr, allowFailure: true, callData: weinsIface.encodeFunctionData('reverseResolve', [a]) });
+    }
     const res = await mc.aggregate3(calls);
-    res.forEach((r, i) => {
-      if(r.success) {
-        try {
-          const nm = weinsIface.decodeFunctionResult('reverseResolve', r.returnData)[0];
-          if(nm) out[need[i].toLowerCase()] = nm.toLowerCase();
-        } catch(_) {}
-      }
+    res.forEach((r, n) => {
+      if(!r.success) return;
+      const k = need[n % need.length].toLowerCase();
+      if(out[k]) return; // an earlier (more-preferred) service already named it
+      try {
+        const nm = weinsIface.decodeFunctionResult('reverseResolve', r.returnData)[0];
+        if(nm) out[k] = nm.toLowerCase();
+      } catch(_) {}
     });
-  } catch(e) { console.error('wei reverse resolve:', e); }
-  // 2) ENS fallback for owners without a .wei name
+  } catch(e) { console.error('wei/gwei reverse resolve:', e); }
+  // 2) ENS fallback for owners without a .wei / .gwei name
   const unnamed = need.filter(a => !out[a.toLowerCase()]);
   if(unnamed.length) {
     await Promise.all(unnamed.map(async a => {
@@ -4191,7 +4221,9 @@ async function loadVaultByAddress() {
   const input = document.getElementById('load-addr');
   const raw = input?.value?.trim();
   if(!raw) { flash('ENTER AN ADDRESS OR NAME'); return; }
-  const isName = !ethers.isAddress(raw);
+  // Only name-shaped input gets the RESOLVING spinner and the "not found"
+  // wording; anything else is a malformed address, and saying so is clearer.
+  const isName = NAME_RE.test(raw);
   let checksummed;
   if(isName) showLoading('RESOLVING NAME');
   try {
