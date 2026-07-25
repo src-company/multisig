@@ -686,6 +686,13 @@ const MULTISIG_ABI = [
   'function DOMAIN_SEPARATOR() view returns (bytes32)',
   'event ExecutionSuccess(bytes32 indexed txHash, uint256 nonce)',
   'event Queued(bytes32 indexed txHash, uint256 nonce, uint256 eta)',
+  // The wallet reverts with custom errors, which a bare provider surfaces as an
+  // undecoded blob. Carrying the definitions here lets decodeMultisigError()
+  // turn them back into sentences.
+  'error InvalidSig()',
+  'error Unauthorized()',
+  'error InvalidConfig()',
+  'error NotReady(uint256 eta)',
 ];
 const msIface = new ethers.Interface(MULTISIG_ABI);
 
@@ -702,6 +709,106 @@ const FACTORY_ABI = [
   'function createWithCalls(address[],uint32,uint256,address,uint256,address[],uint256[],bytes[]) payable returns (address)',
   'event Created(address indexed wallet)',
 ];
+
+// ── AUDIT SAFEGUARDS ──────────────────────────────────────────────
+// Mitigations for the Shred Security review of 2026-07-11 (audit/report-shred-
+// security.md). The factory, implementation and TimelockExecutor are immutable
+// singletons that were not redeployed, so every finding it raised is fenced off
+// here instead — at the last point where this interface can still decline to
+// build the transaction, or explain the one that already reverted.
+
+// L-1. execute() and executeQueued() call `executor.execute(...)` as a guard
+// hook whenever the executor address carries the 0x1111 marker in its top or
+// bottom 16 bits. An executor that is the vault itself turns that hook into
+// unbounded self-recursion: every execute reverts, and because setExecutor is
+// onlySelf it can only be reached *through* execute — so there is no way back.
+// The vault and everything in it are frozen for good.
+function isGuardHookAddr(a) {
+  if(!ethers.isAddress(a)) return false;
+  const n = BigInt(a);
+  return (n >> 144n) === 0x1111n || (n & 0xFFFFn) === 0x1111n;
+}
+// What pointing `vaultAddr` at `next` as its executor would mean:
+//   'lock' — permanent, unrecoverable DoS. Never build this transaction.
+//   'self' — the vault as its own executor. Harmless today only because this
+//            address happens to miss the marker; still a self-bypass of the
+//            signature path with no legitimate use, and one the contract's own
+//            recommended fix rejects outright.
+//   'hook' — a real, distinct executor that will fire the guard hook. Valid
+//            (that is the blocklist/veto pattern) but worth stopping over.
+function executorRisk(next, vaultAddr) {
+  if(!ethers.isAddress(next)) return null;
+  const self = !!vaultAddr && next.toLowerCase() === vaultAddr.toLowerCase();
+  if(self) return isGuardHookAddr(next) ? 'lock' : 'self';
+  return isGuardHookAddr(next) ? 'hook' : null;
+}
+
+// L-2. Both singleton constructors are payable and neither contract exposes a
+// withdrawal path, so ETH — or any token — that reaches the factory or the
+// implementation is unrecoverable by anyone. These are plausible paste targets:
+// they are printed in this UI and on every deploy receipt. Nothing built here
+// is allowed to send value to one.
+const NO_WITHDRAWAL = {
+  [FACTORY.toLowerCase()]: 'THE MULTISIG FACTORY',
+  [IMPLEMENTATION.toLowerCase()]: 'THE MULTISIG IMPLEMENTATION',
+  [ethers.ZeroAddress]: 'THE ZERO ADDRESS',
+  '0x0000000000000000000000000000000000000001': 'THE OWNER-LIST SENTINEL',
+};
+function lockedDest(addr) {
+  if(!ethers.isAddress(addr)) return null;
+  return NO_WITHDRAWAL[addr.toLowerCase()] || null;
+}
+
+// Appendix A (deployment checklist: "bytecode matches audited build",
+// "post-deploy on-chain validation"). Every vault the factory produces is the
+// same 45-byte clone delegating to IMPLEMENTATION. A successful receipt does
+// not prove one was produced — on a chain where the factory is absent, create()
+// is a plain transfer that mines with status 1 — so read the code back and
+// compare it against the audited build rather than trusting the receipt.
+function expectedCloneCode(impl) {
+  return ('0x5f5f365f5f37365f73' + impl.slice(2) + '5af43d5f5f3e6029573d5ffd5b3d5ff3').toLowerCase();
+}
+// 'clone'   — the audited implementation, byte for byte
+// '7702'    — an EOA delegating to it under EIP-7702 (0xef0100 ‖ address)
+// 'foreign' — code that is not this protocol's
+// 'empty'   — nothing deployed;  null — the chain could not be read
+async function classifyVaultCode(addr, rp) {
+  let code;
+  try { code = await (rp || provider).getCode(addr); } catch(_) { return null; }
+  if(!code || code === '0x') return 'empty';
+  code = code.toLowerCase();
+  if(code === expectedCloneCode(IMPLEMENTATION)) return 'clone';
+  if(code === '0xef0100' + IMPLEMENTATION.slice(2).toLowerCase()) return '7702';
+  return 'foreign';
+}
+
+// I-1. executeQueued reverts NotReady(eta) for two unrelated failures: the hash
+// was never queued (eta 0 — cancelled, already executed, or a stale nonce), and
+// the hash is queued but its timelock has not run out. One selector, two very
+// different next steps for whoever is standing at the button. Split them, and
+// decode the wallet's other custom errors while we are here.
+function decodeMultisigError(e) {
+  const data = e?.data ?? e?.info?.error?.data ?? e?.error?.data ?? e?.cause?.data;
+  if(typeof data !== 'string' || !data.startsWith('0x') || data.length < 10) return null;
+  let parsed = null;
+  try { parsed = msIface.parseError(data); } catch(_) { return null; }
+  if(!parsed) return null;
+  if(parsed.name === 'NotReady') {
+    const eta = Number(parsed.args[0]);
+    if(!eta) return 'NOT QUEUED — NO SUCH ENTRY IN THE VAULT’S QUEUE. IT WAS CANCELLED, ALREADY EXECUTED, OR CARRIES A DIFFERENT NONCE.';
+    const left = eta - Math.floor(Date.now() / 1000);
+    return left > 0 ? `TIMELOCK NOT ELAPSED — ${fmtDelay(left)} LEFT` : 'TIMELOCK NOT ELAPSED';
+  }
+  if(parsed.name === 'InvalidSig') return 'INVALID SIGNATURES — WRONG SIGNERS, WRONG ORDER, OR A STALE NONCE';
+  if(parsed.name === 'Unauthorized') return 'UNAUTHORIZED — THIS CALL HAS TO COME FROM THE VAULT ITSELF';
+  if(parsed.name === 'InvalidConfig') return 'INVALID CONFIG — THE VAULT REJECTED THESE PARAMETERS';
+  return null;
+}
+// Every catch that reports a failed vault call goes through here, so the split
+// above reaches the user rather than stopping at the console.
+function msErr(e, fallback) {
+  return decodeMultisigError(e) || e?.shortMessage || e?.message || fallback;
+}
 
 const ERC20_ABI = [
   'function transfer(address to, uint256 amount) returns (bool)',
@@ -1510,11 +1617,21 @@ function txKind(tx, v) {
       note:'A DO-NOTHING SELF-CALL WHOSE ONLY EFFECT IS TO CONSUME THIS NONCE, SO LATER PROPOSALS CAN PROCEED. IT MOVES NOTHING.' };
     if(tx.isStake || isStakeCall(tx.target, data)) return { label:'STAKE · ETH → wstETH', tone:'stake', icon:'wstETH',
       note:'STAKES ETH WITH LIDO — THE wstETH CONTRACT MINTS wstETH STRAIGHT BACK TO THE VAULT. HOW MUCH IS SET BY THE RATE AT EXECUTION, NOT NOW.' };
+    // Audit L-2 — see lockedDest().
+    const burn = val > 0n && lockedDest(tx.target);
+    if(burn) return { label:'ETH TRANSFER · UNRECOVERABLE', tone:'danger', warn:true,
+      note:`SENDS ETH TO ${burn}, WHICH HAS NO WITHDRAWAL PATH OF ANY KIND. NOBODY — NOT THE OWNERS, NOT THE DEPLOYER — CAN EVER GET IT BACK. THIS IS A BURN.` };
     return { label:'ETH TRANSFER', tone:'value' };
   }
 
   // ── asset movement ──
-  if(is(erc20Iface, 'transfer')) return { label:'ERC20 TRANSFER', tone:'value' };
+  if(is(erc20Iface, 'transfer')) {
+    const d = dec('transfer', erc20Iface);
+    const burn = d && lockedDest(d[0]);
+    if(burn) return { label:'ERC20 TRANSFER · UNRECOVERABLE', tone:'danger', warn:true,
+      note:`SENDS THIS TOKEN TO ${burn}, WHICH HAS NO WITHDRAWAL PATH AND CANNOT MOVE A TOKEN BALANCE. THE AMOUNT IS GONE FOR GOOD ONCE THIS EXECUTES.` };
+    return { label:'ERC20 TRANSFER', tone:'value' };
+  }
   if(is(erc20Iface, 'approve')) {
     const d = dec('approve', erc20Iface);
     const max = d && d[1] != null && BigInt(d[1]) >= (2n ** 255n);
@@ -1562,6 +1679,16 @@ function txKind(tx, v) {
     const d = dec('setExecutor');
     const a = d ? d[0] : null;
     const clearing = a && a === ethers.ZeroAddress;
+    // Audit L-1, read off the calldata rather than off anything this UI
+    // recorded — the proposal that matters most here is the one raised
+    // somewhere else and brought to a co-signer for a second signature.
+    const risk = a ? executorRisk(a, v.address) : null;
+    if(risk === 'lock') return { label:'SET EXECUTOR · LOCKS VAULT', tone:'danger', warn:true,
+      note:`DO NOT SIGN. THIS POINTS THE VAULT AT ITSELF, AND THIS VAULT'S ADDRESS CARRIES THE 0x1111 GUARD-HOOK MARKER — SO EVERY execute() WOULD CALL BACK INTO ITSELF UNTIL IT RAN OUT OF GAS. NOTHING WOULD EXECUTE AGAIN, INCLUDING THE PROPOSAL THAT WOULD UNDO THIS. THE VAULT AND EVERYTHING IN IT WOULD BE FROZEN PERMANENTLY.` };
+    if(risk === 'self') return { label:'SET EXECUTOR · SELF', tone:'danger', warn:true,
+      note:`POINTS THE VAULT AT ITSELF. THE EXECUTOR ROLE SKIPS SIGNATURE CHECKS AND THE TIMELOCK, SO THIS HANDS THAT BYPASS TO THE VAULT'S OWN SELF-CALLS AND HAS NO LEGITIMATE USE. AT A VAULT ADDRESS CARRYING THE 0x1111 MARKER THE SAME CALL LOCKS THE VAULT FOR GOOD.` };
+    if(risk === 'hook') return { label:'SET EXECUTOR · GUARD HOOK', tone:'danger', warn:true,
+      note:`POINTS THE VAULT AT ${at(a)}, WHOSE ADDRESS CARRIES THE 0x1111 GUARD-HOOK MARKER. THE VAULT WILL CALL execute() ON IT AROUND EVERY TRANSACTION OF ITS OWN — BEFORE SIGNATURES ARE EVEN CHECKED — AND A REVERT THERE STOPS THE VAULT DEAD. ONLY SIGN IF YOU HAVE READ THAT CONTRACT.` };
     return { label:'SET EXECUTOR', tone:'policy', warn:true,
       note:clearing
         ? `REMOVES THE VAULT'S EXECUTOR. THE FAST PATH AND THE CANCEL/ACCELERATE ROUTES THAT RUN THROUGH IT ALL STOP WORKING.`
@@ -2062,6 +2189,7 @@ function renderNow(){
       </div>
       <div class="footer-r">
         <a href="docs.html" class="docs-link">DOCS</a>
+        <a href="docs.html#audits" class="docs-link" target="_blank" rel="noopener" title="Security audits, findings, and how each one is answered">AUDIT</a>
         ${S.vaults.length===0&&!S.demoMode?`<button class="reset-btn" onclick="S.demoMode=true;S.vaults=seed();S.sel=0;flash('DEMO LOADED');render()">DEMO</button>`:""}
         ${S.demoMode?`<button class="reset-btn" onclick="S.demoMode=false;S.vaults=[];S.sel=0;S.view='DASH';S.showTx=false;S.batch=[{t:'',v:'',d:''},{t:'',v:'',d:''}];S.adminTab='POLICY';flash('DEMO CLEARED');render()">RESET</button>`:""}
         ${!S.demoMode&&S.vaults.length>0?`<button class="reset-btn" onclick="loadAllVaults()">RELOAD</button>`:""}
@@ -2100,16 +2228,23 @@ function renderDeployOverlay(){
     let g = glyph[s.status], gc = col[s.status], right;
     if(phase==='preflight'){ g='◐'; gc='var(--y)'; right=`<span style="font-size:9px;color:var(--d)">CHECKING…</span>`; }
     else if(phase==='review'){
-      const bad = s.pf && (s.pf.gasOk===false || s.pf.executorOk===false || s.pf.factoryOk===false);
+      const bad = s.pf && (s.pf.gasOk===false || s.pf.executorOk===false || s.pf.factoryOk===false || s.pf.implOk===false);
       const w=[];
       if(s.pf&&s.pf.factoryOk===false)w.push('NO FACTORY');
+      if(s.pf&&s.pf.implOk===false)w.push('UNKNOWN FACTORY');
       if(s.pf&&s.pf.gasOk===false)w.push('NO GAS');
       if(s.pf&&s.pf.executorOk===false)w.push('NO EXECUTOR');
       g = bad?'✕':'●'; gc = bad?'var(--y)':'var(--g)';
       right = `<span style="font-size:9px;letter-spacing:1px;color:${bad?'var(--y)':'var(--g)'}">${w.length?w.join(' · '):'READY'}</span>`;
     } else {
       const canRetry = s.status==='failed' && d.done;
-      right = `<span style="font-size:9px;letter-spacing:1px;color:${gc}">${s.status==='failed'&&s.err?esc(String(s.err).slice(0,30)):lbl[s.status]}</span>${canRetry?` <button class="reject-link" style="padding:2px 9px;margin-left:8px" onclick="retryChain(${k})">RETRY</button>`:''}`;
+      // A deploy that could not be read back is still a deploy — say so, but
+      // never let it borrow the word the verified ones earned.
+      const txt = s.status==='failed'&&s.err ? esc(String(s.err).slice(0,30))
+        : s.status==='done' ? (s.verified ? 'DEPLOYED · VERIFIED' : 'DEPLOYED · UNVERIFIED')
+        : lbl[s.status];
+      const tc = s.status==='done' && !s.verified ? 'var(--y)' : gc;
+      right = `<span style="font-size:9px;letter-spacing:1px;color:${tc}">${txt}</span>${canRetry?` <button class="reject-link" style="padding:2px 9px;margin-left:8px" onclick="retryChain(${k})">RETRY</button>`:''}`;
     }
     // Per-chain explorer link: each chain has its own explorer, so build the
     // base from the step's chain id (not the connected chain) — links stay
@@ -2130,8 +2265,9 @@ function renderDeployOverlay(){
     const noExec = d.ctx && d.ctx.wantForward && d.steps.some(s=>s.pf&&s.pf.executorOk===false);
     const noGas = d.steps.some(s=>s.pf&&s.pf.gasOk===false);
     const noFac = d.steps.some(s=>s.pf&&s.pf.factoryOk===false);
+    const badImpl = d.steps.some(s=>s.pf&&s.pf.implOk===false);
     const notOwner = d.ctx && d.ctx.deployerIsOwner === false;
-    footer = `<div style="margin-top:14px;font-size:10px;color:var(--y);letter-spacing:1px;line-height:1.6">${noFac?'No factory on some chains — the vault cannot be deployed there. ':''}${noExec?'No TimelockExecutor on some chains — fast path can’t be enabled there. ':''}${noGas?'No gas in the connected wallet on some chains. ':''}${notOwner?'You are not one of the owners — the vault will deploy, but it will not appear in your history. ':''}Proceed anyway and those chains may fail.</div>
+    footer = `<div style="margin-top:14px;font-size:10px;color:var(--y);letter-spacing:1px;line-height:1.6">${noFac?'No factory on some chains — the vault cannot be deployed there. ':''}${badImpl?'On some chains the factory address holds code that does not name the audited implementation — a vault deployed there would not be the reviewed contract. ':''}${noExec?'No TimelockExecutor on some chains — fast path can’t be enabled there. ':''}${noGas?'No gas in the connected wallet on some chains. ':''}${notOwner?'You are not one of the owners — the vault will deploy, but it will not appear in your history. ':''}Proceed anyway and those chains may fail.</div>
       <div style="display:flex;gap:8px;margin-top:16px"><button class="btn btn-outline btn-w" onclick="closeDeploy()">CANCEL</button><button class="btn btn-fill btn-w" onclick="proceedDeploy()">PROCEED</button></div>`;
   } else if(d.done){
     const dbWarn = d.steps.some(s=>s.dbWarn);
@@ -2243,6 +2379,8 @@ function renderDash(v,mob){
       <span>${S.demoMode?v.chain:chainName()}</span>
       ${v.address&&ethers.isAddress(v.address)?`<span>${S.demoMode?addrLink(v.address,v.chain):addrLink(v.address)}${copyBtn(v.address)}</span>`:""}
       ${v.executor===ethers.ZeroAddress||v.executor==="0x0000...0000"?'<span style="color:var(--y)">NO EXECUTOR</span>':""}
+      ${v.codeKind==='foreign'?'<span style="color:var(--r)" title="The code at this address is not the audited Multisig clone. Everything below is read from a contract this interface cannot vouch for.">UNVERIFIED CODE</span>':""}
+      ${v.codeKind==='7702'?'<span style="color:var(--m)" title="An EOA delegating to the Multisig implementation under EIP-7702. The key behind the address can revoke that delegation at any time.">EIP-7702</span>':""}
       ${v.fastPath?'<span style="color:var(--g)" title="Unanimous owner signatures can bypass the timelock — instant execution via the executor">INSTANT &middot; ALL OWNERS</span>':""}
     </div>
   </div>
@@ -3573,6 +3711,11 @@ function doReject(vi, nonce) {
 
 // Two-click guard so a stray click can't skip a nonce: first click arms
 // (button flips to CONFIRM, auto-disarms after a few seconds), second commits.
+// Arms the guard-hook executor confirmation in prodAdminPropose — same
+// press-again idiom as REJECT below, keyed by the address rather than a nonce
+// so editing the field disarms it.
+let _hookArmed = null, _hookArmTimer = null;
+
 let _rejectArmed = null, _rejectArmTimer = null;
 function armReject(vi, nonce) {
   clearTimeout(_rejectArmTimer);
@@ -3863,8 +4006,8 @@ function doAdminPropose(action, val) {
 // testnet. The consequence is that resolution is a *foreign* network call from
 // every chain but one, which is why it is bounded by a timeout and why its
 // failures are classified instead of collapsed into "not found".
-// Fetched fresh on every use rather than held in a const: makeProvider
-// rebuilds a wedged provider, and a captured instance would never see it.
+// Called rather than captured in a const so the lookup always goes through
+// makeProvider's cache, which is also what the rest of the app uses for chain 1.
 function mainnetRpc() { return makeProvider(1); }
 const NAME_TIMEOUT_MS = 12000;
 
@@ -4111,8 +4254,11 @@ async function resolveOwnerNames(addrs) {
       while(queue.length) {
         const a = queue.shift();
         // lookupAddress forward-verifies the ENS name before returning it.
+        // On failure the address has to be un-answered: step 1 already marked
+        // it, and leaving that mark caches "no name" for an owner whose ENS
+        // name was merely rate-limited away — the exact poisoning this guards.
         try { const nm = await mainnetRpc().lookupAddress(a); if(nm) out[a.toLowerCase()] = String(nm).toLowerCase(); answered.add(a.toLowerCase()); }
-        catch(_) {}
+        catch(_) { answered.delete(a.toLowerCase()); }
       }
     }));
   }
@@ -4445,7 +4591,7 @@ async function loadSingleVaultData(addr, dbWallet) {
   }
 
   // Phase 2: owner labels + executor check + token balances + owner names in parallel
-  const [labelsRaw, fpResult, holdings, ownerNames] = await Promise.all([
+  const [labelsRaw, fpResult, holdings, ownerNames, codeKind] = await Promise.all([
     dbW?.id ? dbGetOwnerLabels(dbW.id) : Promise.resolve([]),
     s.executor !== ethers.ZeroAddress ? (async () => {
       try {
@@ -4454,7 +4600,12 @@ async function loadSingleVaultData(addr, dbWallet) {
       } catch(_) { return { isTE: false, fpEnabled: false }; }
     })() : Promise.resolve({ isTE: false, fpEnabled: false }),
     loadTokenBalances(addr, s.balance),
-    resolveOwnerNames([...s.owners])
+    resolveOwnerNames([...s.owners]),
+    // What is actually running at this address. A vault can arrive here from a
+    // pasted address or a history row, and answering threshold()/getOwners()
+    // proves only that something implements the shape — not that it is the
+    // audited build. Checked once per load, on the chain the vault is read on.
+    classifyVaultCode(addr)
   ]);
 
   const ownerLabels = {};
@@ -4485,7 +4636,8 @@ async function loadSingleVaultData(addr, dbWallet) {
     dbId: dbW?.id || null,
     fastPath: fpEnabled,
     loadedOwners: [...s.owners],
-    isTimelockExecutor: isTE
+    isTimelockExecutor: isTE,
+    codeKind
   };
 }
 
@@ -4948,11 +5100,22 @@ async function prodDeploy() {
   // codeless address, which mines successfully and deploys nothing.
   const pfPromise = Promise.all(chains.map(async net => {
     const rp = makeProvider(net.id);
-    let gasOk = null, executorOk = null, factoryOk = null;
+    let gasOk = null, executorOk = null, factoryOk = null, implOk = null;
     try { const fc = await rp.getCode(FACTORY); factoryOk = !!fc && fc !== '0x'; } catch(_){}
+    // Code at the factory address is not proof it is *this* factory. The audit's
+    // deployment checklist asks for the audited build to be confirmed on-chain
+    // rather than assumed, and the cheapest confirmation is the factory naming
+    // its own implementation: a chain where that address holds something else
+    // would mint vaults running code this audit never saw.
+    if(factoryOk){
+      try {
+        const impl = await new ethers.Contract(FACTORY, FACTORY_ABI, rp).implementation();
+        implOk = String(impl).toLowerCase() === IMPLEMENTATION.toLowerCase();
+      } catch(_){}
+    }
     try { gasOk = (await rp.getBalance(connectedAddress)) > 0n; } catch(_){}
     if(wantForward){ try { const code = await rp.getCode(TIMELOCK_EXECUTOR); executorOk = !!code && code !== '0x'; } catch(_){} }
-    return { gasOk, executorOk, factoryOk };
+    return { gasOk, executorOk, factoryOk, implOk };
   }));
   // Mine the CREATE2 salt up front (chain-independent), dedup-checked against
   // every chain this deploy targets, so the actual vault address is known and
@@ -4970,9 +5133,10 @@ async function prodDeploy() {
   if(!S.deploy) return;   // user cancelled during preflight
   pf.forEach((r,i)=>{ S.deploy.steps[i].pf = r; });
   const noFactory = pf.some(r => r.factoryOk === false);                 // factory truly missing
+  const badImpl = pf.some(r => r.implOk === false);                      // wrong code at the factory address
   const blocked = wantForward && pf.some(r => r.executorOk === false);   // executor truly missing
   const warn = pf.some(r => r.gasOk === false);
-  if(noFactory || blocked || warn || !deployerIsOwner){ S.deploy.phase = 'review'; render(); return; }  // wait for user to PROCEED
+  if(noFactory || badImpl || blocked || warn || !deployerIsOwner){ S.deploy.phase = 'review'; render(); return; }  // wait for user to PROCEED
   runDeploy();
 }
 
@@ -5044,12 +5208,28 @@ async function deployOnChain(k){
     for(const log of receipt.logs){ try { const p = iface.parseLog(log); if(p?.name === 'Created'){ walletAddr = p.args[0]; break; } } catch(_){} }
     // A mined receipt is not a deployment. If the factory is absent on this
     // chain the call is a plain transfer to a codeless address: status 1, no
-    // Created event, nothing deployed. Confirm the vault has code before
-    // recording it as one.
-    const deployedCode = await provider.getCode(walletAddr).catch(() => null);
-    if(deployedCode === '0x'){
+    // Created event, nothing deployed. So read the chain back rather than
+    // trusting the receipt — the audit's deployment checklist asks for exactly
+    // this step, and asks that it check the code is the audited build and that
+    // the vault came up holding the configuration that was asked for, not just
+    // that something is there.
+    const kind = await classifyVaultCode(walletAddr);
+    if(kind === 'empty'){
       step.status='failed'; step.err='NO CODE AT ADDRESS — FACTORY MISSING?'; step.txHash=receipt.hash; render(); return false;
     }
+    if(kind === 'foreign'){
+      step.status='failed'; step.err='CODE AT ADDRESS IS NOT THE AUDITED BUILD'; step.txHash=receipt.hash; render(); return false;
+    }
+    // Configuration read back from the wallet itself. init() runs inside the
+    // same transaction, so a mismatch here means the vault that exists is not
+    // the vault that was ordered — surfaced before any funds are sent to it.
+    const configOk = await vaultMatchesCtx(walletAddr, ctx);
+    if(configOk === false){
+      step.status='failed'; step.err='DEPLOYED CONFIG DOES NOT MATCH'; step.txHash=receipt.hash; render(); return false;
+    }
+    // kind === null / configOk === null: the chain would not answer. The deploy
+    // itself succeeded, so record it, but do not claim it was verified.
+    step.verified = kind !== null && configOk === true;
     d.lastVaultAddr = walletAddr;
     try {
       const ms = new ethers.Contract(walletAddr, MULTISIG_ABI, provider);
@@ -5195,7 +5375,7 @@ async function prodApprove(vi, nonce) {
     render();
   } catch(e) {
     console.error(e);
-    flash(e.shortMessage || e.message || 'APPROVE FAILED');
+    flash(msErr(e, 'APPROVE FAILED'));
   }
 }
 
@@ -5224,7 +5404,7 @@ async function prodUnsign(vi, nonce) {
       if(v.dbId) await dbRecordApproval(v.dbId, S.chainId, connectedAddress, hash, false, Number(receipt.blockNumber), receipt.hash);
     } catch(e) {
       console.error('Revoke approval:', e);
-      flash(e.shortMessage || e.message || 'REVOKE FAILED');
+      flash(msErr(e, 'REVOKE FAILED'));
       return;
     }
   }
@@ -5385,7 +5565,7 @@ async function prodSubmit(vi, nonce) {
     await reloadVault(vi);
   } catch(e) {
     console.error(e);
-    flash(e.shortMessage || e.message || 'SUBMIT FAILED');
+    flash(msErr(e, 'SUBMIT FAILED'));
   }
 }
 
@@ -5428,7 +5608,7 @@ async function prodExecute(vi, nonce) {
     await reloadVault(vi);
   } catch(e) {
     console.error(e);
-    flash(e.shortMessage || e.message || 'EXECUTE FAILED');
+    flash(msErr(e, 'EXECUTE FAILED'));
   }
 }
 
@@ -5469,7 +5649,7 @@ async function prodFastExecute(vi, nonce) {
     await reloadVault(vi);
   } catch(e) {
     console.error(e);
-    flash(e.shortMessage || e.message || 'FAST EXECUTE FAILED');
+    flash(msErr(e, 'FAST EXECUTE FAILED'));
   }
 }
 
@@ -5568,7 +5748,7 @@ async function prodCancel(vi, nonce) {
     await reloadVault(vi);
   } catch(e) {
     console.error(e);
-    flash(e.shortMessage || e.message || 'CANCEL FAILED');
+    flash(msErr(e, 'CANCEL FAILED'));
   }
 }
 
@@ -5658,7 +5838,7 @@ async function prodReject(vi, nonce) {
     await reloadVault(vi);
   } catch(e) {
     console.error(e);
-    flash(e.shortMessage || e.message || 'REJECT FAILED');
+    flash(msErr(e, 'REJECT FAILED'));
   }
 }
 
@@ -5739,6 +5919,11 @@ function _revertReason(data) {
   if(typeof data === 'string' && data.startsWith('0x08c379a0')) {
     try { return ethers.AbiCoder.defaultAbiCoder().decode(['string'], '0x' + data.slice(10))[0]; } catch(_){}
   }
+  // A simulation that trips one of the wallet's own custom errors otherwise
+  // reads as a bare "execution reverted" — the one case where the panel has
+  // the answer in hand and declines to give it.
+  const named = decodeMultisigError({ data });
+  if(named) return named;
   return 'execution reverted';
 }
 async function _simViaSimulateV1(s) {
@@ -6006,7 +6191,7 @@ async function prodAccelerate(vi, nonce) {
     await reloadVault(vi);
   } catch(e) {
     console.error(e);
-    flash(e.shortMessage || e.message || 'ACCELERATE FAILED');
+    flash(msErr(e, 'ACCELERATE FAILED'));
   }
 }
 
@@ -6024,6 +6209,12 @@ async function prodSubmitTransfer() {
 
   try {
     const toAddr = assertPreviewed(to, await resolveName(to), S.chainId);
+    // Audit L-2. The factory and the implementation hold no withdrawal path, so
+    // anything sent there is burnt. Both are printed in this UI and on every
+    // deploy receipt, which makes them exactly the kind of address that gets
+    // pasted into a recipient field by mistake.
+    const burn = lockedDest(toAddr);
+    if(burn) { flash(`REFUSED — ${burn} CANNOT SEND FUNDS BACK OUT`); return; }
     const tokenInfo = curTok(v);
     const isEth = tokenInfo.address === ethers.ZeroAddress;
     const amountRaw = isEth ? ethers.parseEther(amt) : ethers.parseUnits(amt, tokenInfo.decimals);
@@ -6124,6 +6315,12 @@ async function prodSubmitCustom() {
   try {
     const resolvedTarget = assertPreviewed(target, await resolveName(target), S.chainId);
     const value = ethers.parseEther(val).toString();
+    // Audit L-2 — value sent to a contract with no withdrawal path is burnt.
+    // Calldata to those addresses is inert but harmless, so only value is
+    // refused; the custom builder is the one place a raw address reaches a
+    // proposal without passing a recipient field.
+    const burn = BigInt(value) > 0n && lockedDest(resolvedTarget);
+    if(burn) { flash(`REFUSED — ETH SENT TO ${burn} CANNOT BE RECOVERED`); return; }
 
     const domain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address };
     const nonce = nextNonce(v);
@@ -6167,6 +6364,13 @@ async function prodSubmitBatch() {
     const targets = await Promise.all(calls.map(async c => assertPreviewed(c.t, await resolveName(c.t), S.chainId)));
     const values = calls.map(c => ethers.parseEther(stripCommas(c.v || '0')));
     const datas = calls.map(c => (c.d || '0x').trim());
+    // Audit L-2. A batch executes atomically, so one burnt leg is reason enough
+    // to refuse the whole thing — and inside a batch that leg is the easiest
+    // one for a co-signer to read past.
+    for(let i = 0; i < targets.length; i++) {
+      const burn = values[i] > 0n && lockedDest(targets[i]);
+      if(burn) { flash(`REFUSED — CALL ${i + 1} SENDS ETH TO ${burn}, WHICH CANNOT SEND IT BACK`); return; }
+    }
 
     const batchData = msIface.encodeFunctionData('batch', [targets, values, datas]);
     const target = v.address;
@@ -6219,6 +6423,29 @@ async function prodAdminPropose(action, val) {
       case 'setExecutor': {
         const addr = document.getElementById('admin-executor-input')?.value?.trim();
         if(!addr || !ethers.isAddress(addr)) { flash('INVALID ADDRESS'); return; }
+        // Audit L-1. A vault pointed at itself can never be pointed anywhere
+        // else again — setExecutor is onlySelf, so the only route to it is the
+        // execute() that the guard hook is busy recursing through. Refuse to
+        // raise the proposal at all; a co-signer should never be asked to look
+        // at this one, and by the time it executes nothing can undo it.
+        const risk = executorRisk(addr, v.address);
+        if(risk === 'lock' || risk === 'self') {
+          flash(risk === 'lock'
+            ? 'REFUSED — THE VAULT AS ITS OWN EXECUTOR WOULD LOCK IT PERMANENTLY'
+            : 'REFUSED — A VAULT CANNOT BE ITS OWN EXECUTOR');
+          return;
+        }
+        // A distinct executor carrying the marker is the legitimate guardian
+        // pattern, so it is allowed — but a guard that reverts stops the vault
+        // dead, so it does not get raised on one click.
+        if(risk === 'hook' && _hookArmed !== addr.toLowerCase()) {
+          clearTimeout(_hookArmTimer);
+          _hookArmed = addr.toLowerCase();
+          _hookArmTimer = setTimeout(() => { _hookArmed = null; }, 6000);
+          flash('0x1111 GUARD HOOK — THIS EXECUTOR RUNS BEFORE EVERY TX AND CAN BLOCK THE VAULT. PRESS AGAIN TO PROPOSE IT.');
+          return;
+        }
+        _hookArmed = null;
         data = msIface.encodeFunctionData('setExecutor', [ethers.getAddress(addr)]);
         desc = `setExecutor(${addr.slice(0,10)}...)`;
         break;

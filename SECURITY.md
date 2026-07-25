@@ -2,11 +2,112 @@
 
 > **Purpose:** Security posture document for `src/Multisig.sol`. Summarizes prior audit findings with developer responses, documents defense mechanisms and invariants, and provides structured guidance for future reviewers to avoid duplicate findings and produce consistent reports.
 
-## Prior Audit
+## Prior Audits
+
+**Date:** 2026-07-11 (cover page marked **DRAFT**)
+**Auditor:** Shred Security — researchers kenzo, yashar
+**Scope:** 4-day review of `src/Multisig.sol` @ `2329339`, plus a stateful invariant fuzzing campaign
+**Result:** 0 high, 0 medium, 2 low, 2 informational
+**Full report:** [`audit/report-shred-security.md`](audit/report-shred-security.md) — the auditor's text reproduced in full, with our response to each finding inline
+**Original PDF:** [`audit/Multisig-Shred-Audit-07-2026.pdf`](audit/Multisig-Shred-Audit-07-2026.pdf) — also at <https://audit.multisig.wei.limo> (byte-identical, sha256 `9346de4b…`)
 
 **Date:** 2026-04-03
 **Method:** Pashov Skills — 8-agent parallelized security audit (four passes)
 **Full reports:** [`audit/report-multisig.md`](audit/report-multisig.md), [`audit/report-mods.md`](audit/report-mods.md)
+
+---
+
+## Shred Security Findings — Disposition
+
+The factory, the `Multisig` implementation and the `TimelockExecutor` are
+immutable singletons already deployed at their mined addresses across every
+supported chain. None of these four findings is severe enough to justify
+redeploying them and migrating existing vaults, and none can be reached without
+a wallet client building the transaction that triggers it. Each is therefore
+mitigated in the dapp, at the point where the transaction is constructed or
+reviewed — not in the contracts.
+
+| ID | Severity | Contract change | Mitigation |
+|---|---|---|---|
+| L-1 | Low | None | `dapp/index.html` refuses to raise a `setExecutor` proposal naming the vault itself, and `txKind()` classifies any inbound one as `SET EXECUTOR · LOCKS VAULT` (danger tone, "do not sign"). Executors carrying the `0x1111` guard marker require explicit confirmation. |
+| L-2 | Low | None | `lockedDest()` refuses to build any transfer, custom call or batch leg that sends value to the factory, the implementation, `address(0)` or the owner-list sentinel; `txKind()` marks an inbound one `UNRECOVERABLE`. Documented below. |
+| I-1 | Info | None | `decodeMultisigError()` splits `NotReady(0)` ("not queued — cancelled, executed, or a stale nonce") from `NotReady(eta)` ("timelock not elapsed — N left") across every execute path and the simulation panel. |
+| I-2 | Info | None | Accepted as intended design — the live `block.chainid` read is what makes signatures fork-safe by construction. See below. |
+
+**Auditor status vs. ours.** The report's Vulnerability Summary records
+`Fixed 0 / Acknowledged 0`, which was the state at delivery, before we had
+responded. Our position is **0 fixed in-contract, 4 acknowledged.**
+
+### What the invariant fuzzing did *not* cover
+
+Appendix B reports 10/10 invariants holding across ~327,680 handler calls with
+zero contract bugs. That result is narrower than it looks, and two of its stated
+exclusions land squarely on the findings in the same report:
+
+- **Executor bypass and guardian hooks (the `0x1111` pattern)** — excluded. This
+  is the exact mechanism behind L-1, so the clean fuzzing result says nothing
+  about it.
+- **`MultisigFactory` / `createWithCalls` deployment paths** — excluded. The
+  factory is one of the two contracts in L-2.
+
+Also uncovered: malformed signatures, EIP-7702 semantics, the module contracts,
+reentrancy via malicious call targets, and cross-chain or cross-wallet replay.
+Per the auditor these remain covered by the 280-test Foundry suite and prior
+manual review. Do not cite Appendix B as coverage for any of the above.
+
+### L-1 — why the dapp, not the contract
+
+The DoS needs two deliberate steps that only ever happen through a client: a
+vault living at an address carrying the `0x1111` marker, and a threshold-signed
+`setExecutor(address(this))`. The dapp's own salt miner searches for a `0x00`
+prefix and can never produce a marked address, so a vault it deploys is not
+exposed at all. What remains is an imported address or an EIP-7702 delegation
+plus a proposal — and a proposal has to be raised, signed by a threshold of
+owners, and (under a timelock) survive its delay. The dapp refuses to raise it
+and flags it in red for every co-signer if it arrives from elsewhere.
+
+**Residual risk.** An owner set that signs `setExecutor(address(this))` outside
+this dapp, at a marked address, still bricks the vault. That is unreachable from
+here and unfixable without a redeploy. If a future version of `Multisig.sol` is
+ever deployed, apply the auditor's fix: `require(_executor != address(this))`.
+
+### L-2 — ETH sent to the singletons is permanently locked
+
+Recorded here per the auditor's second recommendation, which the payable
+constructors are kept for (~24 gas at deploy time):
+
+> **ETH or tokens sent directly to `MultisigFactory`
+> (`0x000000000e8CB9ed9DC2114d79d9215eacb9cB07`) or to the `Multisig`
+> implementation (`0xD54cb65224410F3Ff97a8E72f363f224419f4FB0`) are
+> unrecoverable.** Neither contract has a withdrawal path, and the
+> implementation is never initialized, so it has no owners to authorize one.
+> There is no recovery for anyone, including the deployer.
+
+Value passed to `create()` / `createWithCalls()` is *not* affected — the factory
+forwards `callvalue()` into the CREATE2 as the new vault's opening balance.
+
+### I-2 — accepted
+
+`DOMAIN_SEPARATOR()` stays live. Caching it in `init()` would trade ~500–800 gas
+per call for fork-awareness logic and extra clone storage, and correctness is
+already unaffected: the live `block.chainid` read is what makes signatures
+fork-safe by construction. This is the intended minimal design.
+
+### Deployment checklist (Appendix A)
+
+Gaps the dapp can close, it now closes. Deploy preflight reads
+`MultisigFactory.implementation()` on every target chain and refuses to treat an
+address holding other code as the factory. After a deploy lands, the vault's
+runtime bytecode is compared against the audited 45-byte clone of
+`IMPLEMENTATION` and its owners, threshold, delay and executor are read back and
+matched against what was requested — a chain that cannot be read back is
+reported `DEPLOYED · UNVERIFIED` rather than counted as verified. Every vault
+load runs the same bytecode classification and badges anything that is not the
+audited build as `UNVERIFIED CODE`.
+
+The remaining gaps are operational and out of a client's reach: fork-based
+mainnet tests, CI, monitoring and alerting, incident-response drills, and a
+normative deployment runbook. They remain open.
 
 ---
 
