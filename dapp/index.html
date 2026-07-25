@@ -173,33 +173,42 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 .holdings strong{font-weight:700}
 .holdings .usd{font-size:10px;color:var(--d);margin-left:4px}
 
-/* Visual privacy. Contrast cannot hide these — an onlooker sits on the same
-   contrast sensitivity function you do, so any contrast that clears your
-   threshold clears theirs. The gap comes from angular size, so the 9-11px
-   chrome is already private (4 arcmin x-height at 1m, under the ~5 arcmin
-   detection floor) while the 12-52px money figures are fluently readable at
-   1m+. Occlusion is the only lever that works on them.
+/* Visual privacy — the over-the-shoulder pass, gated on body.priv-on.
+   Contrast cannot hide anything here: an onlooker sits on the same contrast
+   sensitivity function you do, so any contrast clearing your threshold clears
+   theirs. Occlusion is the only lever that works.
    Radius: letter identification lives in a ~3 cycles-per-x-height band, i.e. a
    stroke period of 0.172em. A Gaussian of sigma s attenuates period p by
    exp(-2(pi*s/p)^2), so 0.08em drops that band below an onlooker's detection
    threshold at 1m. 0.11em keeps ~1.4x margin for better-than-20/20 eyes, where
    the earlier 0.16em (2x) bought little further privacy and read as a font
-   fault rather than a deliberate veil. In em, so it tracks every breakpoint.
-   .priv marks a figure; it goes on the digits alone and never on the token
-   icon or ticker beside them — those carry nothing an onlooker wants, and
-   smearing them is what made the treatment look broken. */
-.priv{filter:blur(.11em);transition:filter .32s ease}
+   fault rather than a deliberate veil. In em, so one radius serves the 9px
+   chrome and the 52px hero alike and it tracks every breakpoint.
+   What carries .priv is a rule, not a judgement call: a figure stating a
+   QUANTITY OF MONEY — a balance, an amount, a delta — wherever it appears and
+   at whatever size. Tickers, token icons, addresses, signer counts, gas, dates
+   and thresholds never do. That is what keeps the veil from reading as damage:
+   it lands on digits and leaves the furniture sharp.
+   (Size was the earlier boundary — 12px+ only, since 9-11px sits under the
+   ~5 arcmin detection floor at 1m. But an onlooker on a train is at 0.5m, not
+   1m, and once this is a mode the user switches on it is a promise: hiding the
+   hero balance while the same number sits sharp in the vault tab above it is a
+   broken one.) */
+body.priv-on .priv{filter:blur(.11em);transition:filter .32s ease}
 /* Reveal by group, not by glyph. A balance and its USD line are one figure, so
    they lift together and the pointer never has to hunt for the right few
    pixels; .privg is that group, and it is drawn tightly around the figures so
    crossing the page doesn't strobe them. Quick to reveal, slow to re-veil —
    the reverse feels like a flinch. Touch has no hover, so groups without an
-   inner control carry tabindex=0 and lift on tap. */
-.privg:hover .priv,.privg:focus-within .priv,.priv:hover,.priv:focus{filter:none;transition-duration:.1s}
-.privg,.priv{outline:none}
-.privg:focus-visible,.priv:focus-visible{outline:2px solid var(--a);outline-offset:3px}
+   inner control carry tabindex=0 (emitted only while the mode is on, so the
+   mode never leaves dead tab stops behind) and lift on tap. */
+body.priv-on .privg:hover .priv,body.priv-on .privg:focus-within .priv,
+body.priv-on .priv:hover,body.priv-on .priv:focus{filter:none;transition-duration:.1s}
+body.priv-on .privg,body.priv-on .priv{outline:none}
+body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px solid var(--a);outline-offset:3px}
+.priv-btn svg{display:block}
 @media(prefers-reduced-motion:reduce){
-  .priv{transition:none}
+  body.priv-on .priv{transition:none}
 }
 .meta{display:flex;gap:24px;font-size:11px;letter-spacing:2px;color:var(--m);margin-top:12px;flex-wrap:wrap}
 
@@ -1457,6 +1466,10 @@ function seed() {
 // ── STATE ─────────────────────────────────────────────────────────
 const S = {
   dark: !localStorage.getItem('ms_light'),
+  // Veiled by default: a privacy default that has to be found and switched on
+  // protects nobody, because the moment you want it is the moment it is already
+  // too late. Off is one click and is remembered.
+  priv: localStorage.getItem('ms_priv') !== '0',
   view: "DASH",
   sel: 0,
   vaults: [],
@@ -1853,6 +1866,26 @@ function loadingSvg() {
   return matchMedia('(prefers-reduced-motion: reduce)').matches ? s.replace(/<animate\b[^>]*>/g, '') : s;
 }
 
+// ── VISUAL PRIVACY ───────────────────────────────────────────────
+// The header eye. Drawn rather than typed: the geometric-shape glyphs that
+// would carry this meaning (◐ ◉ ◌) are not all in IBM Plex Mono, so they fall
+// through to whatever system font has them and land off-family beside ☀.
+// The icon shows the STATE, not the action — a slashed eye means the figures
+// are veiled right now — and the title says what a click will do.
+const _EYE = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="square" aria-hidden="true"><path d="M1.8 12S5.6 5.2 12 5.2 22.2 12 22.2 12 18.4 18.8 12 18.8 1.8 12 1.8 12Z"/><circle cx="12" cy="12" r="3.1"/>`;
+const EYE_ON = _EYE + `</svg>`;
+const EYE_OFF = _EYE + `<path d="M4 20 20 4"/></svg>`;
+
+function togglePriv(){
+  S.priv = !S.priv;
+  try { localStorage.setItem('ms_priv', S.priv ? '1' : '0'); } catch(_){}
+  flash(S.priv ? 'BALANCES VEILED' : 'BALANCES VISIBLE');
+  render();
+}
+// Emitted on a .privg only while the mode is on, so switching it off does not
+// leave dead tab stops and empty tooltips scattered through the page.
+function pgAttrs(){ return S.priv ? ' tabindex="0" title="Hover or tap to reveal"' : ''; }
+
 // ── ABI FETCH (Sourcify) ─────────────────────────────────────────
 // Cache: false=EOA, []=unverified contract, [...]=verified fns, undefined=not fetched
 const _abiCache = {};
@@ -2127,7 +2160,7 @@ function render(){
 function renderNow(){
   const v = S.vaults[S.sel] || null;
   const mob = _vw <= 640;
-  document.body.className = S.dark ? "" : "light";
+  document.body.className = (S.dark ? "" : "light") + (S.priv ? " priv-on" : "");
   if(_lastFaviconDark !== S.dark) {
     _lastFaviconDark = S.dark;
     document.getElementById("favicon").href = S.dark ? FAVICON_DARK : FAVICON_LIGHT;
@@ -2172,6 +2205,7 @@ function renderNow(){
         ${v?`<div class="addr">${vAddr}${!S.demoMode&&v.address&&ethers.isAddress(v.address)?` <button class="x-btn copy-btn" style="display:inline-flex;min-width:auto;min-height:auto;padding:2px 5px;font-size:9px;vertical-align:middle" onclick="navigator.clipboard.writeText(location.href);flash('LINK COPIED')" title="Copy shareable link \u00B7 ${location.origin}/#${S.chainId}/${v.address}">\u29C9</button>`:""}</div>`:""}
       </div>
       <div class="hdr-r">
+        <button class="theme-btn priv-btn" onclick="togglePriv()" aria-pressed="${S.priv}" title="${S.priv?'Balances veiled \u00B7 hover or tap a figure to read it. Click to show them.':'Balances visible. Click to veil them.'}">${S.priv?EYE_OFF:EYE_ON}</button>
         <button class="theme-btn" onclick="S.dark=!S.dark;localStorage.setItem('ms_light',S.dark?'':'1');render()">${S.dark?"\u2600":"\u25CF"}</button>
         <button class="wallet-btn" onclick="${walletOnclick}">${walletDot}${esc(walletLabel)}</button>
       </div>
@@ -2350,7 +2384,7 @@ function renderDash(v,mob){
       const pending=vt.queue.length>0?`${vt.queue.length} PENDING`:"";
       // The balance summary is a comparison aid for choosing between vaults; with a
       // single vault it only echoes the hero stat below, so drop it and keep pending.
-      const bal=vt.holdings.length?tokIcon(vt.holdings[0].token,'sm')+" "+vt.holdings[0].balance+" "+vt.holdings[0].token+(vt.holdings.length>1?" +"+(vt.holdings.length-1)+" MORE":""):"EMPTY";
+      const bal=vt.holdings.length?tokIcon(vt.holdings[0].token,'sm')+' <span class="priv">'+vt.holdings[0].balance+'</span> '+vt.holdings[0].token+(vt.holdings.length>1?" +"+(vt.holdings.length-1)+" MORE":""):"EMPTY";
       const info=S.vaults.length===1?pending:bal+(pending?` &middot; ${pending}`:"");
       return`<button class="vtab${on?" on":""}" onclick="S.sel=${i};S.nt=S.vaults[${i}].threshold;setNd(S.vaults[${i}].delay);S.showTx=false;render()">
       <div class="vtab-name">${esc(vt.name)}${dot}</div>
@@ -2358,13 +2392,13 @@ function renderDash(v,mob){
     </button>`}).join("")}
   </div></div>
   <div class="stats">
-    ${h0?`<div class="privg" tabindex="0" title="Tap or hover to reveal" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    ${h0?`<div class="privg"${pgAttrs()} style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       ${tokIcon(h0.token,'big')}
       <span class="stat-big priv">${h0.balance}</span>
       <span class="stat-token">${h0.token}</span>
       <span class="stat-usd priv">${h0.usd}</span>
     </div>
-    ${v.holdings.length>1?`<div class="holdings privg" tabindex="0" title="Tap or hover to reveal">${v.holdings.slice(1).map(h=>`<span>${tokIcon(h.token,'sm')} <span class="priv">${h.balance}</span> <strong>${h.token}</strong><span class="usd priv">${h.usd}</span></span>`).join("")}</div>`:""}`
+    ${v.holdings.length>1?`<div class="holdings privg"${pgAttrs()}>${v.holdings.slice(1).map(h=>`<span>${tokIcon(h.token,'sm')} <span class="priv">${h.balance}</span> <strong>${h.token}</strong><span class="usd priv">${h.usd}</span></span>`).join("")}</div>`:""}`
     :`<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
       <span class="stat-big" style="color:var(--d)">0</span>
       <span class="stat-token">ETH</span>
@@ -2666,7 +2700,7 @@ function stakeReviewBody(v){
   const out = wstethOut(amtStr);
 
   const amtHtml = amtNum > 0
-    ? `<div class="privg" tabindex="0" title="Tap or hover to reveal">
+    ? `<div class="privg"${pgAttrs()}>
          <div class="review-amt">${tokIcon('ETH')}<span class="priv">${esc(groupInt(amtStr))}</span><span style="font-size:13px;color:var(--m)">ETH</span></div>
          ${rate > 0 ? `<div class="review-usd priv">${esc(fmtUsd(amtNum * rate))}</div>` : ''}
        </div>`
@@ -2712,7 +2746,7 @@ function txReviewBody(v){
   const availNum = hold ? Number(hold.raw != null ? ethers.formatUnits(hold.raw, hold.decimals || ct.decimals) : stripCommas(hold.balance)) : 0;
 
   const amtHtml = amtNum > 0
-    ? `<div class="privg" tabindex="0" title="Tap or hover to reveal">
+    ? `<div class="privg"${pgAttrs()}>
          <div class="review-amt">${tokIcon(S.txToken)}<span class="priv">${esc(groupInt(amtStr))}</span><span style="font-size:13px;color:var(--m)">${esc(S.txToken)}</span></div>
          ${rate > 0 ? `<div class="review-usd priv">${esc(fmtUsd(amtNum * rate))}</div>` : ''}
        </div>`
@@ -3051,7 +3085,7 @@ function renderTopUp(){
   const availRow = t.loading
     ? `<span style="font-size:9px;color:var(--d);letter-spacing:1px;animation:pulse 2s infinite">CHECKING WALLET…</span>`
     : hasBal
-      ? `<button class="link-btn" style="font-size:9px;margin:0;padding:0" onclick="fillTopUpMax('${availStr}',${dec},${availNum},'${unitLabel}')">MAX ${esc(_amtDisp(availStr))} ${esc(sel.symbol)}</button>`
+      ? `<button class="link-btn" style="font-size:9px;margin:0;padding:0" onclick="fillTopUpMax('${availStr}',${dec},${availNum},'${unitLabel}')">MAX <span class="priv">${esc(_amtDisp(availStr))}</span> ${esc(sel.symbol)}</button>`
       : `<span style="font-size:9px;color:var(--y);letter-spacing:1px">NO ${esc(sel.symbol)} IN WALLET</span>`;
 
   const sending = t.sending;
@@ -3073,9 +3107,11 @@ function renderTopUp(){
         <div style="font-size:9px;color:var(--d);letter-spacing:1px;line-height:1.5;margin-top:8px">SAVED TO THIS BROWSER FOR THIS VAULT &mdash; AVAILABLE FOR SENDS TOO</div>
       </div>`:''}
 
-      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-top:16px"><label class="lbl">AMOUNT</label>${availRow}</div>
-      <input class="inp" id="topup-amount" inputmode="decimal" style="font-size:16px" placeholder="0.0" ${sending?'disabled':''} oninput="onTopUpAmount(this.value,${dec},${availNum},'${unitLabel}')" onkeydown="if(event.key==='Enter'){event.preventDefault();submitTopUp()}">
-      <div id="topup-units" style="font-size:10px;color:var(--d);margin-top:-12px;word-break:break-all"></div>
+      <div class="privg">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-top:16px"><label class="lbl">AMOUNT</label>${availRow}</div>
+        <input class="inp priv" id="topup-amount" inputmode="decimal" style="font-size:16px" placeholder="0.0" ${sending?'disabled':''} oninput="onTopUpAmount(this.value,${dec},${availNum},'${unitLabel}')" onkeydown="if(event.key==='Enter'){event.preventDefault();submitTopUp()}">
+        <div id="topup-units" class="priv" style="font-size:10px;color:var(--d);margin-top:-12px;word-break:break-all"></div>
+      </div>
       <div id="topup-warn" style="font-size:10px;color:var(--r);letter-spacing:1px;min-height:12px;margin-bottom:4px"></div>
       ${sel.symbol==='ETH'?`<div style="font-size:9px;color:var(--d);letter-spacing:1px;margin-bottom:4px">KEEP SOME ETH FOR GAS</div>`:''}
 
@@ -3133,14 +3169,14 @@ function renderTxBuilder(v,mob){
     body=`<div class="send-grid">
       <div>
         <div class="fset">
-          <div class="fhead"><label class="lbl">TOKEN</label>${hold?`<span class="fhint">VAULT HOLDS <b>${esc(hold.balance)} ${esc(S.txToken)}</b>${hold.usd?` &middot; ${esc(hold.usd)}`:''}</span>`:`<span class="fhint">NO ${esc(S.txToken)} BALANCE</span>`}</div>
+          <div class="fhead"><label class="lbl">TOKEN</label>${hold?`<span class="fhint privg"${pgAttrs()}>VAULT HOLDS <b><span class="priv">${esc(hold.balance)}</span> ${esc(S.txToken)}</b>${hold.usd?` &middot; <span class="priv">${esc(hold.usd)}</span>`:''}</span>`:`<span class="fhint">NO ${esc(S.txToken)} BALANCE</span>`}</div>
           <div class="token-pills" style="margin-bottom:0">${tokenObjs.map(t=>`<button class="pill${S.txToken===t.symbol?" on":""}" onclick="selectTxToken('${esc(t.symbol)}')"><span class="tok-ico">${t.icon||iconForSym(t.symbol)}</span>${esc(t.symbol)}</button>`).join("")}${S.demoMode?"":`<button class="pill" onclick="S.showCustomTok=!S.showCustomTok;render()">+ CUSTOM</button>`}</div>
           ${(!S.demoMode&&S.showCustomTok)?`<div style="margin-top:12px"><div style="display:flex;gap:8px"><input class="inp" id="custom-tok-addr" style="margin:0;flex:1;min-width:0;font-size:13px" placeholder="0x... TOKEN ADDRESS" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomTokenFlow()}"><button class="btn btn-outline btn-sm" onclick="addCustomTokenFlow()">ADD</button></div>${(()=>{const cl=customTokensFor(S.chainId,v.address);return cl.length?`<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">${cl.map(t=>`<span class="ctok-chip">${tokIcon(t.symbol,'sm')} ${esc(t.symbol)} <span class="dim">${t.decimals}d</span><button onclick="removeCustomTokenFlow('${t.address}')" title="Remove ${esc(t.symbol)}">&#10005;</button></span>`).join('')}</div>`:''})()}
           <div style="font-size:9px;color:var(--d);letter-spacing:1px;line-height:1.5;margin-top:8px">SAVED TO THIS BROWSER FOR THIS VAULT &mdash; AVAILABLE FOR TOP UPS TOO</div></div>`:''}
         </div>
 
         <div class="fset privg">
-          <div class="fhead"><label class="lbl">AMOUNT</label><span class="fhint" id="tx-units"></span></div>
+          <div class="fhead"><label class="lbl">AMOUNT</label><span class="fhint priv" id="tx-units"></span></div>
           <div class="amt">
             <input class="amt-in priv" id="tx-amount" inputmode="decimal" placeholder="0.0" value="${esc(S.txAmount)}" oninput="onTxAmount(this.value,${dec},${availNum},'${esc(unitLabel)}')" onkeydown="if(event.key==='Enter'){event.preventDefault();submitTransfer()}">
             <span class="amt-tok">${tokIcon(S.txToken)}${esc(S.txToken)}</span>
@@ -3193,7 +3229,7 @@ function renderTxBuilder(v,mob){
         </div>
 
         <div class="fset privg">
-          <div class="fhead"><label class="lbl">AMOUNT TO STAKE</label><span class="fhint" id="stake-units"></span></div>
+          <div class="fhead"><label class="lbl">AMOUNT TO STAKE</label><span class="fhint priv" id="stake-units"></span></div>
           <div class="amt">
             <input class="amt-in priv" id="stake-amount" inputmode="decimal" placeholder="0.0" value="${esc(S.stakeAmount)}" oninput="onStakeAmount(this.value,${availNum})" onkeydown="if(event.key==='Enter'){event.preventDefault();submitStake()}">
             <span class="amt-tok">${tokIcon('ETH')}ETH</span>
@@ -3203,7 +3239,7 @@ function renderTxBuilder(v,mob){
             ${availNum>0?`<span class="qbtns">${[['25%',.25],['50%',.5],['MAX',1]].map(([l,f])=>`<button class="qbtn" onclick="fillStakePct(${f},'${availStr}',${availNum})">${l}</button>`).join('')}</span>`:''}
             <span class="amt-warn" id="stake-amount-warn"></span>
           </div>
-          <div class="fhint" style="margin-top:10px">VAULT HOLDS <b>${hold?esc(hold.balance):'0'} ETH</b>${hold&&hold.usd?` &middot; ${esc(hold.usd)}`:''}</div>
+          <div class="fhint privg"${pgAttrs()} style="margin-top:10px">VAULT HOLDS <b><span class="priv">${hold?esc(hold.balance):'0'}</span> ETH</b>${hold&&hold.usd?` &middot; <span class="priv">${esc(hold.usd)}</span>`:''}</div>
         </div>
 
         <div class="fset">
@@ -3494,14 +3530,17 @@ function renderAdmin(v,mob){
   </div>`:`<div>
     ${(()=>{
       const hist = S.demoMode
-        ? [{nonce:42,act:"TRANSFER",desc:"0.3 ETH \u2192 0xab12",age:"1H",status:"executed"},{nonce:39,act:"TRANSFER",desc:"1.2 ETH \u2192 0x4f21",age:"4H",status:"executed"},{nonce:38,act:"THRESHOLD",desc:"1 \u2192 2",age:"18H",status:"executed"},{nonce:37,act:"ADD OWNER",desc:"0x9a0bfffb4d67c3e6a5cb2481bcad3c13e8d7cd1e",age:"2D",status:"executed"},{nonce:36,act:"TRANSFER",desc:"5K USDC \u2192 0x8bc2",age:"3D",status:"executed"}]
+        ? [{nonce:42,act:"TRANSFER",desc:"0.3 ETH \u2192 0xab12",amt:"0.3 ETH",descRest:"\u2192 0xab12",age:"1H",status:"executed"},{nonce:39,act:"TRANSFER",desc:"1.2 ETH \u2192 0x4f21",amt:"1.2 ETH",descRest:"\u2192 0x4f21",age:"4H",status:"executed"},{nonce:38,act:"THRESHOLD",desc:"1 \u2192 2",age:"18H",status:"executed"},{nonce:37,act:"ADD OWNER",desc:"0x9a0bfffb4d67c3e6a5cb2481bcad3c13e8d7cd1e",age:"2D",status:"executed"},{nonce:36,act:"TRANSFER",desc:"5K USDC \u2192 0x8bc2",amt:"5K USDC",descRest:"\u2192 0x8bc2",age:"3D",status:"executed"}]
         : (v.history||[]);
       if(!hist.length) return '<div style="padding:48px 0;text-align:center;font-size:11px;color:var(--d);letter-spacing:2px">NO HISTORY YET</div>';
-      return hist.map(tx=>`<div class="row">
+      // No pgAttrs here: history runs to 50 rows and a tab stop on each would bury
+      // the real controls. Hover reveals on desktop, tap-hover on touch, and the
+      // eye is one click away for anyone who needs the whole ledger at once.
+      return hist.map(tx=>`<div class="row privg">
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;flex:1">
           <span style="font-size:10px;font-weight:700;color:var(--d)">#${tx.nonce}</span>
           <span style="font-size:10px;font-weight:700;color:var(--m);letter-spacing:2px">${esc(tx.act)}</span>
-          ${tx.desc&&tx.desc!==tx.act?`<span style="font-size:12px">${esc(tx.desc)}</span>`:""}
+          ${tx.desc&&tx.desc!==tx.act?`<span style="font-size:12px">${tx.amt?`<span class="priv">${esc(tx.amt)}</span> ${esc(tx.descRest||'')}`:esc(tx.desc)}</span>`:""}
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
           <span style="font-size:10px;color:var(--m)">${esc(tx.age)}</span>
@@ -4824,10 +4863,14 @@ async function loadVaultHistory(vi) {
     v.history = rows.map(t => {
       const act = selectorToLabel(t.call_data);
       const ethVal = t.value && t.value !== '0' ? ethers.formatEther(BigInt(t.value)) : null;
+      // Split when the line is ours to split: a derived "0.4 ETH → 0x12ab" has a
+      // figure to veil, a description the user typed is arbitrary text and is left whole.
+      const derived = !t.description && !!ethVal;
       const desc = t.description || (ethVal ? `${ethVal} ETH → ${t.target.slice(0,6)}...` : act);
       const ts = t.executed_at || t.cancelled_at;
       const age = ts ? fmtAge(new Date(ts)) : '';
-      return { nonce: t.nonce, act, desc, status: t.status, age, executionTx: t.execution_tx };
+      return { nonce: t.nonce, act, desc, status: t.status, age, executionTx: t.execution_tx,
+        amt: derived ? `${ethVal} ETH` : null, descRest: derived ? `→ ${t.target.slice(0,6)}...` : null };
     });
   } catch(e) {
     console.error('loadVaultHistory:', e);
@@ -6068,12 +6111,12 @@ function renderSim(sim, opts) {
 
   const assets = (sim.assets || []).filter(a => a.delta !== 0n);
   const ledger = assets.length
-    ? `<div class="sim-led">${assets.map(a => {
+    ? `<div class="sim-led privg"${pgAttrs()}>${assets.map(a => {
         const neg = a.delta < 0n, abs = neg ? -a.delta : a.delta;
         return `<div class="sim-row ${neg?'sim-out':'sim-in'}">
           <span class="dir">${neg ? 'OUT' : 'IN'}</span>
           ${tokIcon(a.symbol,'sm')}<span>${esc(a.symbol)}</span>
-          <span class="val">${neg ? '&minus;' : '+'}${esc(groupInt(fmtAmount(abs, a.decimals)))}</span>
+          <span class="val priv">${neg ? '&minus;' : '+'}${esc(groupInt(fmtAmount(abs, a.decimals)))}</span>
         </div>`;
       }).join('')}</div>`
     : `<div class="sim-sub">NO BALANCE CHANGE TO THE VAULT${sim.basic ? '' : ' &mdash; NOTHING ENTERS OR LEAVES IT'}.</div>`;
