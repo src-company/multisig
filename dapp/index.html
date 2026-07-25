@@ -258,6 +258,14 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 .owner-row .o-label{grid-area:label;margin:0;font-size:11px;letter-spacing:1px}
 .owner-row .o-del{grid-area:del;margin:0}
 .owner-note{font-size:9px;letter-spacing:1px;margin:2px 0 10px 30px}
+/* clone-from-Safe affordance: logo + a quiet CLONE hint beside OWNERS */
+.safe-pill{height:26px;padding:0 10px;gap:6px;font-size:9px;color:var(--m)}
+.safe-pill:hover{border-color:#12FF80;color:#12FF80}
+.safe-pill .tok-ico svg{width:12px;height:12px}
+.safe-src{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:9px;letter-spacing:1px;color:var(--d);border:1px solid var(--ln);border-left:2px solid #12FF80;padding:8px 10px;margin:0 0 12px}
+.safe-src .x-btn{min-width:24px;min-height:24px;padding:0;font-size:11px}
+.safe-row{display:flex;align-items:center;gap:8px;font-size:10px;font-weight:700;letter-spacing:1px;color:var(--m);border:1px solid var(--ln);padding:10px;margin-top:8px;cursor:pointer;text-align:left;width:100%;background:transparent;transition:border-color .15s,color .15s}
+.safe-row:hover{border-color:#12FF80;color:#12FF80}
 .preview-text{font-size:12px;line-height:2;color:var(--m);padding:16px 18px;white-space:pre;border-left:2px solid var(--a);background:color-mix(in srgb,var(--a) 4%,transparent);overflow-x:auto}
 
 /* mobile */
@@ -631,6 +639,16 @@ const ERC20_ABI = [
   'function approve(address spender, uint256 amount) returns (bool)',
 ];
 const erc20Iface = new ethers.Interface(ERC20_ABI);
+
+// ── SAFE (Gnosis Safe) ────────────────────────────────────────────
+// Read-only, and only the two getters every Safe version has ever exposed, so
+// the CREATE page can copy an existing Safe's signer set into a new timelocked
+// vault. VERSION() is a nicety — pre-1.1 Safes lack it, so it stays optional.
+const SAFE_ABI = [
+  'function getOwners() view returns (address[])',
+  'function getThreshold() view returns (uint256)',
+  'function VERSION() view returns (string)',
+];
 
 // ── STAKE: ETH → wstETH via Lido (Ethereum mainnet only) ──────────
 // https://etherscan.io/address/0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0
@@ -1169,6 +1187,11 @@ const MEGA_LOGO = `<svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg"
 const CHAIN_ICONS = { 1: ETH_ICON, 8453: BASE_LOGO, 10: OP_LOGO, 42161: ARB_LOGO, 4326: MEGA_LOGO, 11155111: ETH_ICON, 84532: BASE_LOGO };
 function chainIcon(id, cls){ const ic = CHAIN_ICONS[id]; return ic ? `<span class="tok-ico${cls?' '+cls:''}">${ic}</span>` : ''; }
 
+// Gnosis Safe mark (the three-square glyph, wordmark dropped so it reads at
+// icon size). Used by the CREATE page's clone affordance.
+const SAFE_LOGO = `<svg viewBox="0 0 439.1 439.4" xmlns="http://www.w3.org/2000/svg" fill="#12FF80"><path d="M413.3,219.4h-47.6c-14.2,0-25.7,11.5-25.7,25.7v69.1c0,14.2-11.5,25.7-25.7,25.7H124.8c-14.2,0-25.7,11.5-25.7,25.7v47.6c0,14.2,11.5,25.7,25.7,25.7h200.4c14.2,0,25.6-11.5,25.6-25.7v-38.2c0-14.2,11.5-24.3,25.7-24.3h36.8c14.2,0,25.7-11.5,25.7-25.7v-80.2C439.1,230.6,427.5,219.4,413.3,219.4L413.3,219.4z"/><path d="M99.1,124.8c0-14.2,11.5-25.7,25.7-25.7h189.3c14.2,0,25.7-11.5,25.7-25.7V25.7c0-14.2-11.5-25.7-25.7-25.7H113.9C99.6,0,88.1,11.5,88.1,25.7v36.7c0,14.2-11.5,25.7-25.7,25.7H25.7C11.5,88.2,0,99.7,0,113.9v80.3c0,14.2,11.6,25.2,25.8,25.2h47.6c14.2,0,25.7-11.5,25.7-25.7L99.1,124.8L99.1,124.8z"/><path d="M197.1,169.4h45.7c14.9,0,27,12.1,27,27v45.7c0,14.9-12.1,27-27,27h-45.7c-14.9,0-27-12.1-27-27v-45.7C170.1,181.5,182.2,169.4,197.1,169.4z"/></svg>`;
+const safeIcon = cls => `<span class="tok-ico${cls?' '+cls:''}">${SAFE_LOGO}</span>`;
+
 const NOW = () => Math.floor(Date.now()/1000);
 const asc = n => "/".repeat(n);
 const ASC400 = asc(400);
@@ -1281,7 +1304,9 @@ const S = {
   cf: {
     name: '', threshold: "1", delayVal: "24", delayUnit: 'h', net: 0, clone: [], fastPath: false,
     owners: [{ addr: '', label: '' }, { addr: '', label: '' }, { addr: '', label: '' }],
+    safeSrc: null,        // set when the signer set was cloned from a Gnosis Safe
   },
+  safeClone: null,        // the clone-a-Safe modal: { input, busy, err, found }
 
   // admin
   adminTab: "POLICY",
@@ -1973,6 +1998,7 @@ function renderNow(){
     <div class="hbar">${ASC200}</div>
   </div>
   ${S.showChains?renderChainOverlay(mob):""}
+  ${S.safeClone?renderSafeCloneModal():""}
   ${S.deploy?renderDeployOverlay():""}
   ${S.topup?renderTopUp():""}`;
   restoreFocus(_focusState);
@@ -3045,8 +3071,15 @@ function renderCreate(mob){
     <div>
       <label class="lbl">VAULT NAME</label>
       <input class="inp" style="margin-bottom:20px" placeholder="MY VAULT" value="${esc(c.name||'')}" oninput="S.cf.name=this.value" onchange="render()">
-      <label class="lbl">OWNERS</label>
-      ${(()=>{const you=window._connectedAddress;if(you&&!S.demoMode&&c.owners.every(o=>!o.addr.trim())){c.owners[0].addr=you;c.owners[0].label='YOU'}return''})()}${c.owners.map((o,i)=>{
+      <div class="fhead"><label class="lbl" style="margin:0">OWNERS</label>
+        <button class="pill safe-pill" title="Copy the owners and threshold of an existing Gnosis Safe" onclick="openSafeClone()">${safeIcon()}CLONE</button>
+      </div>
+      ${c.safeSrc?(()=>{const sn=CHAINS[c.safeSrc.chainId]?.name||c.safeSrc.chainId,ex=CHAINS[c.safeSrc.chainId]?.explorer||'https://etherscan.io';return`<div class="safe-src">
+        ${safeIcon()}<span>CLONED FROM SAFE <a href="${ex}/address/${esc(c.safeSrc.addr)}" target="_blank" rel="noopener" style="color:var(--m);text-decoration:none;border-bottom:1px solid var(--ln)">${esc(shortAddr(c.safeSrc.addr))}</a> &middot; ${esc(String(sn).toUpperCase())}${c.safeSrc.version?' &middot; v'+esc(c.safeSrc.version):''}</span>
+        <span style="color:var(--m)">${c.safeSrc.threshold} OF ${c.safeSrc.ownerCount}</span>
+        <button class="x-btn" title="Undo the clone" onclick="undoSafeClone()">&#10005;</button>
+      </div>`})():''}
+      ${(()=>{const you=window._connectedAddress;if(you&&!S.demoMode&&!c.safeSrc&&c.owners.every(o=>!o.addr.trim())){c.owners[0].addr=you;c.owners[0].label='YOU'}return''})()}${c.owners.map((o,i)=>{
         const st=val.owners[i].state;
         const note=st==='invalid'?'NOT A VALID ADDRESS OR .eth / .wei / .gwei NAME':st==='dup'?'DUPLICATE — ALREADY LISTED ABOVE':st==='name'?'NAME &middot; RESOLVES AT DEPLOY':'';
         const noteColor=st==='name'?'var(--d)':'var(--r)';
@@ -3088,7 +3121,8 @@ function renderCreate(mob){
     <div style="margin-top:${mob?36:0}px">
       ${!mob?`<label class="lbl">PREVIEW</label><div class="preview-text">NAME        ${esc(c.name||'UNNAMED')}
 OWNERS      ${c.owners.filter(o=>o.addr.trim()).length||0}${c.owners.some(o=>o.label&&o.addr.trim())?" ("+c.owners.filter(o=>o.label&&o.addr.trim()).map(o=>esc(o.label)).join(", ")+")":""}
-THRESHOLD   ${c.threshold}/${c.owners.filter(o=>o.addr.trim()).length||1}
+THRESHOLD   ${c.threshold}/${c.owners.filter(o=>o.addr.trim()).length||1}${c.safeSrc?`
+CLONED FROM ${esc(shortAddr(c.safeSrc.addr))} &middot; SAFE${c.safeSrc.version?" v"+esc(c.safeSrc.version):""}`:""}
 DELAY       ${ds>0?c.delayVal+c.delayUnit+" ("+ds+"s)":"0 &mdash; UNLOCKED"}${ds>0?"\nFAST PATH   "+(c.fastPath?"ENABLED (ALL OWNERS)":"DISABLED"):""}
 NETWORK     ${net.name} (${net.id})
 TOKENS      ${toks.join(", ")}
@@ -3437,6 +3471,162 @@ function toggleClone(i){
   s.has(i) ? s.delete(i) : s.add(i);
   S.cf.clone = [...s];
   render();
+}
+
+// ── CREATE: CLONE A GNOSIS SAFE ───────────────────────────────────
+// Migrating off a Safe means retyping its signer set, which is exactly the
+// step where an address gets fat-fingered. So copy it: two read-only getters
+// give the owners and the threshold, and the rest of this page — timelock,
+// fast path, chains — stays whatever the operator chose. The Safe itself is
+// never touched, and no funds move; this only fills in the form.
+const netIdx = chainId => NETS.findIndex(n => n.id === chainId);
+const MAX_CLONE_OWNERS = 100;   // far above any real Safe; a guard, not a limit
+
+function openSafeClone(){
+  S.safeClone = { input:'', busy:false, err:'', found:null, addr:null, label:'' };
+  render();
+  setTimeout(() => document.getElementById('safe-input')?.focus(), 60);
+}
+function closeSafeClone(){ S.safeClone = null; render(); }
+
+// Live field hint, in the same vocabulary as every other address input.
+function safeCloneInput(val){
+  if(S.safeClone){ S.safeClone.input = val; S.safeClone.err = ''; }
+  const el = document.getElementById('safe-status');
+  if(!el) return;
+  const s = _addrState(val);
+  el.textContent = s.txt;
+  el.style.color = s.color || '';
+}
+
+// Read a Safe at `addr` on `chainId`. Returns null for every flavour of "no
+// Safe here" — nothing deployed, a contract that is not a Safe, an RPC that
+// would not answer — so callers can treat it as a simple presence check. The
+// timeout matters: this fans out over every supported chain, and one wedged
+// RPC must not leave the modal spinning.
+function readSafe(addr, chainId, ms = 8000){
+  if(!CHAINS[chainId]) return Promise.resolve(null);
+  const read = (async () => {
+    try {
+      const p = makeProvider(chainId);
+      const code = await p.getCode(addr);
+      if(!code || code === '0x') return null;
+      const s = new ethers.Contract(addr, SAFE_ABI, p);
+      const [owners, threshold] = await Promise.all([s.getOwners(), s.getThreshold()]);
+      // Both bounds are about a contract that only claims to be a Safe: an
+      // owner list long enough to hang the form, or a VERSION() long enough to
+      // wreck the layout, are the two things it gets to choose here.
+      if(!owners || !owners.length || owners.length > MAX_CLONE_OWNERS) return null;
+      let version = null;
+      try { version = String(await s.VERSION()).trim().slice(0, 16); } catch(_){}
+      return { addr, chainId, owners: owners.map(a => ethers.getAddress(a)), threshold: Number(threshold), version };
+    } catch(_) { return null; }
+  })();
+  return Promise.race([read, new Promise(r => setTimeout(() => r(null), ms))]);
+}
+
+// One click: resolve the input (address, .eth, .wei or .gwei), read the Safe on
+// the chain this form deploys to, and fill the form in. Safes share an address
+// across chains but not always a signer set, so when it is not on the selected
+// chain we say where it is instead of dead-ending — loading one of those is an
+// explicit choice that also switches the deploy target.
+async function safeCloneSearch(){
+  const sc = S.safeClone;
+  if(!sc || sc.busy) return;
+  const raw = (document.getElementById('safe-input')?.value ?? sc.input ?? '').trim();
+  sc.input = raw;
+  if(!raw){ sc.err = 'ENTER A SAFE ADDRESS OR NAME'; render(); return; }
+  sc.busy = true; sc.err = ''; sc.found = null; render();
+
+  let addr;
+  try { addr = await resolveName(raw); }
+  catch(_) {
+    if(!S.safeClone) return;
+    sc.busy = false;
+    sc.err = NAME_RE.test(raw) ? `${raw.toUpperCase()} DOES NOT RESOLVE` : 'NOT A VALID ADDRESS OR NAME';
+    render(); return;
+  }
+
+  const chainId = NETS[S.cf.net]?.id;
+  const hit = await readSafe(addr, chainId);
+  if(!S.safeClone) return;                  // modal closed while reading
+  if(hit){ applySafe(hit, raw); return; }
+
+  const ids = Object.keys(CHAINS).map(Number).filter(id => id !== chainId);
+  const others = (await Promise.all(ids.map(id => readSafe(addr, id)))).filter(Boolean);
+  if(!S.safeClone) return;
+  sc.busy = false; sc.addr = addr; sc.label = raw;
+  sc.found = others.length ? others.sort((a,b) => netIdx(a.chainId) - netIdx(b.chainId)) : null;
+  sc.err = others.length ? '' : `NO SAFE AT ${shortAddr(addr)} ON ANY SUPPORTED CHAIN`;
+  render();
+}
+
+// Load a Safe that was found on a chain other than the selected one.
+function applyFoundSafe(chainId){
+  const sc = S.safeClone;
+  const hit = (sc?.found || []).find(f => f.chainId === chainId);
+  if(hit) applySafe(hit, sc.label);
+}
+
+// Fill the form from a Safe, keeping enough of the previous state to undo.
+async function applySafe(src, typed){
+  const c = S.cf;
+  // Owner labels come free: whatever .wei / .gwei / ENS name each signer holds.
+  let names = {};
+  try { names = await resolveOwnerNames(src.owners); } catch(_){}
+  const you = (window._connectedAddress || '').toLowerCase();
+  c.safeSrc = {
+    addr: src.addr, chainId: src.chainId, version: src.version,
+    ownerCount: src.owners.length, threshold: src.threshold,
+    prev: { owners: c.owners.map(o => ({ ...o })), threshold: c.threshold, name: c.name },
+  };
+  c.owners = src.owners.map(a => ({ addr: a, label: a.toLowerCase() === you ? 'YOU' : (names[a.toLowerCase()] || '') }));
+  c.threshold = String(Math.min(Math.max(src.threshold || 1, 1), c.owners.length));
+  const ni = netIdx(src.chainId);
+  if(ni >= 0){ c.net = ni; c.clone = (c.clone || []).filter(x => x !== ni); }
+  // Name the vault after whatever the operator searched for, but never
+  // overwrite a name they typed themselves.
+  if(!String(c.name || '').trim()) c.name = (NAME_RE.test(typed || '') ? typed.trim() : 'SAFE ' + src.addr.slice(2, 6)).toUpperCase();
+  S.safeClone = null;
+  flash(`CLONED ${c.owners.length} OWNERS · ${c.threshold} OF ${c.owners.length}`);
+  render();
+}
+
+function undoSafeClone(){
+  const c = S.cf, s = c.safeSrc;
+  if(!s) return;
+  if(s.prev){
+    c.owners = s.prev.owners?.length ? s.prev.owners : [{ addr:'', label:'' }];
+    c.threshold = s.prev.threshold;
+    c.name = s.prev.name;
+  }
+  c.safeSrc = null;
+  flash('CLONE UNDONE');
+  render();
+}
+
+function renderSafeCloneModal(){
+  const sc = S.safeClone, net = NETS[S.cf.net] || NETS[0];
+  const st = _addrState(sc.input || '');
+  const rows = (sc.found || []).map(f => `<button class="safe-row" onclick="applyFoundSafe(${f.chainId})">
+    ${chainIcon(f.chainId)}<span>${esc(String(CHAINS[f.chainId]?.name || f.chainId).toUpperCase())}</span>
+    <span style="margin-left:auto;color:var(--d);font-weight:400">${f.threshold} OF ${f.owners.length}${f.version?' &middot; v'+esc(f.version):''}</span>
+    <span aria-hidden="true">&rarr;</span>
+  </button>`).join('');
+  return`<div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200" onclick="closeSafeClone()"></div>
+  <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:min(440px,92vw);max-height:85vh;overflow-y:auto;background:var(--bg);border:1px solid #12FF80;padding:20px;z-index:201">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px">
+      <span style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;letter-spacing:2px">${safeIcon()}CLONE A SAFE</span>
+      <button class="x-btn" style="margin:0" onclick="closeSafeClone()">&#10005;</button>
+    </div>
+    <div style="font-size:10px;line-height:1.7;color:var(--d);margin-bottom:16px">Copies the owners and threshold of a Gnosis Safe on <b style="color:var(--m)">${esc(net.name)}</b> into this form. Your timelock, instant execution and chain picks stay as you set them. Nothing leaves the Safe &mdash; this deploys a new vault, so move funds once it is live.</div>
+    <label class="lbl">SAFE ADDRESS OR NAME</label>
+    <input class="inp" id="safe-input" style="margin-bottom:4px" placeholder="0x... or name.eth / name.(g)wei" value="${esc(sc.input||'')}" oninput="safeCloneInput(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();safeCloneSearch()}">
+    <div id="safe-status" style="font-size:9px;letter-spacing:1px;min-height:12px;margin-bottom:12px;color:${st.color||''}">${esc(st.txt)}</div>
+    ${sc.err?`<div style="font-size:9px;letter-spacing:1px;color:var(--r);line-height:1.6;margin-bottom:12px">${esc(sc.err)}</div>`:''}
+    ${rows?`<div style="font-size:9px;letter-spacing:1px;color:var(--y);line-height:1.6">NOT ON ${esc(net.name.toUpperCase())} &mdash; FOUND ELSEWHERE. LOADING ONE SWITCHES THIS DEPLOY TO THAT CHAIN.</div>${rows}<div style="height:14px"></div>`:''}
+    <button class="btn ${sc.busy?'btn-disabled':'btn-fill'} btn-w" id="safe-load" onclick="${sc.busy?'':'safeCloneSearch()'}">${sc.busy?'READING SAFE&hellip;':'LOAD SAFE'}</button>
+  </div>`;
 }
 function closeDeploy(){ S.deploy = null; S.view = 'DASH'; S.showTx = false; render(); }
 

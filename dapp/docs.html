@@ -253,6 +253,7 @@ UNLOCKED (delay = 0)
 
 <h2>CREATE</h2>
 <p>Deploy a new vault via MultisigFactory. Add owner addresses in any order — the app auto-sorts them ascending before submission (contract requirement). Minimum 1 owner. Threshold selector auto-clamps to owner count. Delay in hours — setting 0 shows UNLOCKED warning and hides the fast path toggle.</p>
+<p><strong>CLONE A SAFE</strong> — the Safe mark beside OWNERS opens a one-field migration tool: give it a Gnosis Safe by address or <code>.eth</code> / <code>.wei</code> / <code>.gwei</code> name and it copies that Safe's owners and threshold into the form, labelling each signer with whatever name it reverse-resolves to. Read-only — it calls <code>getOwners()</code> and <code>getThreshold()</code>, touches nothing on the Safe, and moves no funds; the new vault is a fresh deployment, so assets are transferred afterwards. Timelock, instant execution and chain selections stay whatever you set. The Safe is read on the network the form is deploying to; if it is not there, the tool reports which supported chains it did find it on, and loading one of those switches the deploy to that chain. A banner records the source Safe and undoes the clone in one click.</p>
 <p>When delay > 0, an INSTANT EXECUTION toggle enables the fast path at deploy time. If enabled, deployment uses <code>createWithCalls()</code> to call enableForward(true) on the TimelockExecutor as a post-init step with the factory as temporary executor. Network selector shows supported chains with chain IDs and token lists.</p>
 `
 };
