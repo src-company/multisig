@@ -218,7 +218,7 @@ INTERFACE:`
 <h2>DASHBOARD</h2>
 <p>Vault selector tabs across the top with inline status dots — green (pulsing) for executable transactions, yellow for transactions needing your signature. Primary holding displayed large, secondary tokens inline below. Vaults with no balances show a clean empty state. Metadata line shows threshold ratio, timelock duration (or UNLOCKED in yellow for delay=0), chain, and FAST PATH indicator when enabled.</p>
 <p>An action counter above the tabs summarizes pending items across all vaults: signatures needed, ready to execute, ready to submit.</p>
-<p>With no vaults loaded, the empty state offers CREATE VAULT or loading any existing vault by address or <code>.eth</code> / <code>.wei</code> name.</p>
+<p>With no vaults loaded, the empty state offers CREATE VAULT or loading any existing vault by address or <code>.eth</code> / <code>.wei</code> / <code>.gwei</code> name. Owner addresses reverse-resolve the same way — WNS (<code>.wei</code>) first, GNS (<code>.gwei</code>) as fallback, then ENS.</p>
 
 <h2>SIGNING</h2>
 <p>Two paths: <strong>SIGN</strong> (off-chain EIP-712, free, filled button) or <strong>APPROVE</strong> (on-chain approve() call, costs gas, outline button). Both count toward threshold. <strong>UNSIGN</strong> (outline) withdraws your approval — calls approve(hash, false). Visual hierarchy: filled = primary action, outline = secondary or already completed.</p>

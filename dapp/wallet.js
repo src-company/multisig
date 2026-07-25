@@ -1,7 +1,10 @@
 (function() {
 'use strict';
 
+// WNS (.wei) and its direct fork GNS (.gwei) — identical ABI, both on mainnet.
+// Reverse resolution is tried in this order, so .wei wins when both exist.
 const WEINS = '0x0000000000696760E15f265e828DB644A0c242EB';
+const GWEINS = '0x9D51D507BC7264d4fE8Ad1cf7Fe191933A0a81d6';
 const WEINS_ABI = ['function reverseResolve(address) view returns (string)'];
 const WC_PROJECT_ID = '1e8390ef1c1d8a185e035912a1409749';
 
@@ -247,9 +250,15 @@ const _ethMainProvider = new ethers.FallbackProvider(
   _ethRpcs.map((url, i) => ({ provider: new ethers.JsonRpcProvider(url, 1, {staticNetwork:true}), priority: i + 1, stallTimeout: 2000 })), 1, { quorum: 1 }
 );
 
+// Name the connected wallet: .wei, then .gwei, then ENS. Each step only runs
+// if the one before it came back empty, so the preferred name always wins.
 function resolveWeiName(addr) {
   try {
-    const ns = new ethers.Contract(WEINS, WEINS_ABI, _ethMainProvider);
+    const apply = name => {
+      if (_connectedAddress !== addr) return; // account changed — drop it
+      _walletDisplayName = name.toLowerCase();
+      notifyDisplayUpdate();
+    };
     const tryEns = () => {
       _ethMainProvider.lookupAddress(addr).then(ensName => {
         if (ensName && _connectedAddress === addr) {
@@ -258,14 +267,14 @@ function resolveWeiName(addr) {
         }
       }).catch(() => {});
     };
-    ns.reverseResolve(addr).then(name => {
-      if (name && _connectedAddress === addr) {
-        _walletDisplayName = name.toLowerCase();
-        notifyDisplayUpdate();
-      } else {
-        tryEns(); // no .wei name — fall back to ENS
-      }
-    }).catch(tryEns);
+    const tryNS = (registry, next) => {
+      const ns = new ethers.Contract(registry, WEINS_ABI, _ethMainProvider);
+      ns.reverseResolve(addr).then(name => {
+        if (name) apply(name);
+        else next();
+      }).catch(next);
+    };
+    tryNS(WEINS, () => tryNS(GWEINS, tryEns));
   } catch (e) {}
 }
 window.resolveWeiName = resolveWeiName;
