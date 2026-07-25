@@ -12,20 +12,31 @@
 <link rel="preload" href="./ethers.min.js" as="script">
 <link rel="preload" href="./wallet.js" as="script">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&display=swap" rel="stylesheet">
-<link id="favicon" rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%3Crect%20width%3D%2264%22%20height%3D%2264%22%20fill%3D%22%232D5FE8%22%2F%3E%0A%3Cdefs%3E%0A%3Cpath%20id%3D%22pt%22%20d%3D%22M4%2C4%20H60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pr%22%20d%3D%22M60%2C4%20V60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pb%22%20d%3D%22M60%2C60%20H4%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pl%22%20d%3D%22M4%2C60%20V4%22%20fill%3D%22none%22%2F%3E%0A%3C%2Fdefs%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pt%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pr%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pb%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230A0A0A%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pl%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Cpath%20d%3D%22M16%2C48%20V16%20H22%20L32%2C32%20L42%2C16%20H48%20V48%20H42%20V26%20L32%2C42%20L22%2C26%20V48%20Z%22%20fill%3D%22%230A0A0A%22%2F%3E%0A%3C%2Fsvg%3E" type="image/svg+xml">
+<link id="favicon" rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%3Crect%20width%3D%2264%22%20height%3D%2264%22%20fill%3D%22%232D5FE8%22%2F%3E%0A%3Cdefs%3E%0A%3Cpath%20id%3D%22pt%22%20d%3D%22M4%2C4%20H60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pr%22%20d%3D%22M60%2C4%20V60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pb%22%20d%3D%22M60%2C60%20H4%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pl%22%20d%3D%22M4%2C60%20V4%22%20fill%3D%22none%22%2F%3E%0A%3C%2Fdefs%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%23F5FBFF%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pt%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%23F5FBFF%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pr%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%23F5FBFF%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pb%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%23F5FBFF%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pl%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Cpath%20d%3D%22M16%2C48%20V16%20H22%20L32%2C32%20L42%2C16%20H48%20V48%20H42%20V26%20L32%2C42%20L22%2C26%20V48%20Z%22%20fill%3D%22%23F5FBFF%22%2F%3E%0A%3C%2Fsvg%3E" type="image/svg+xml">
 <link rel="stylesheet" href="./wallet.css">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html{-webkit-text-size-adjust:100%}
 a,button,[role=button],[onclick]{-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+/* Ink ladder. Hue is locked to the brand (blue 265 / teal 215); the contrast
+   target is a hard constraint; chroma is the free variable and is maximised.
+   Figures are APCA Lc against the theme's own --bg, monotone a > m > d > fr > ln.
+   Dark theme runs light-on-blue because #2D5FE8 caps ANY dark ink at Lc 28 —
+   below APCA's Lc 45 floor for text at any size. --on is the ink for text
+   sitting on a light semantic fill (--g/--r/--y), where --bg would be too dim. */
 :root{
-  --a:#0A0A0A;--bg:#2D5FE8;--d:#0A0A0AB3;--m:#0A0A0AE6;
-  --ln:#0A0A0A24;--fr:#0A0A0A45;--g:#7DFFBA;--gc:#000;--r:#FF6B6B;--y:#FFD600;
+  /* Lc:      78.1        —          64.3        73.3   */
+  --a:#F5FBFF;--bg:#2D5FE8;--d:#D6E6FF;--m:#EAF4FF;
+  /* Lc:       9.5         16.2        65.7                45.0        57.3 */
+  --ln:#FFFFFF2E;--fr:#FFFFFF47;--g:#7DFFBA;--gc:#0A0A0A;--r:#FFB1AC;--y:#FFD600;
+  --on:#0A0A0A;
   --f:'IBM Plex Mono','Courier New',monospace;
 }
 .light{
-  --a:#00788C;--bg:#FDFDFD;--d:#006A7DCC;--m:#005E70F2;
+  /* Lc:      80.5        —          65.2        73.3   */
+  --a:#00677C;--bg:#FDFDFD;--d:#008CA6;--m:#007990;
   --ln:#0099B326;--fr:#0099B340;--g:#059669;--gc:#fff;--r:#DC2626;--y:#B45309;
+  --on:#FDFDFD;
 }
 body{font-family:var(--f);background:var(--bg);color:var(--a);min-height:100vh;min-height:100dvh;padding:10px;position:relative;overflow-x:hidden;transition:background .3s,color .3s;display:flex;flex-direction:column}
 #app{flex:1;display:flex;flex-direction:column}
@@ -60,7 +71,7 @@ button:active{transform:scale(.97)}
   .btn:hover{opacity:.9}
   .btn-fill:hover,.btn-green:hover{opacity:.85}
   .btn-outline:hover{opacity:1;background:var(--a);color:var(--bg)}
-  .btn-danger:hover{opacity:1;background:var(--r);color:var(--bg);border-color:var(--r)}
+  .btn-danger:hover{opacity:1;background:var(--r);color:var(--on);border-color:var(--r)}
   .net-row:hover{color:var(--a);background:var(--ln);transform:translateX(3px);box-shadow:inset 2px 0 0 var(--a)}
   .vtab:hover{color:var(--a)}
   .pill:not(.on):hover{border-color:var(--a);color:var(--a);background:color-mix(in srgb,var(--a) 6%,transparent)}
@@ -158,6 +169,28 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 .holdings{display:flex;gap:20px;margin-top:12px;flex-wrap:wrap;font-size:12px;color:var(--m)}
 .holdings strong{font-weight:700}
 .holdings .usd{font-size:10px;color:var(--d);margin-left:4px}
+
+/* Visual privacy. Contrast cannot hide these — an onlooker sits on the same
+   contrast sensitivity function you do, so any contrast that clears your
+   threshold clears theirs. The gap comes from angular size, so the 9-12px UI is
+   already private (4 arcmin x-height at 1m, under the ~5 arcmin detection
+   floor) while these 13-52px figures are fluently readable at 1m+. Occlusion is
+   the only lever that works on them.
+   Radius: letter identification lives in a ~3 cycles-per-x-height band, i.e. a
+   stroke period of 0.172em. A Gaussian of sigma s attenuates period p by
+   exp(-2(pi*s/p)^2), so 0.08em drops that band below an onlooker's detection
+   threshold at 1m. Doubled to 0.16em for margin on better-than-20/20 eyes. */
+.stat-big,.stat-usd,input.amt-in,.review-amt:not(.ph){filter:blur(.16em);transition:filter .12s ease}
+.stats:hover .stat-big,.stats:hover .stat-usd,
+.stat-big:hover,.stat-usd:hover,.stat-big:focus,.stat-usd:focus,
+input.amt-in:hover,input.amt-in:focus,
+.review-amt:not(.ph):hover,.review-amt:not(.ph):focus{filter:none}
+/* Touch has no hover, so the masked figures carry tabindex=0 and reveal on tap. */
+.stat-big:focus,.stat-usd:focus,.review-amt:focus{outline:none}
+.stat-big:focus-visible,.stat-usd:focus-visible,.review-amt:focus-visible{outline:2px solid var(--a);outline-offset:3px}
+@media(prefers-reduced-motion:reduce){
+  .stat-big,.stat-usd,input.amt-in,.review-amt:not(.ph){transition:none}
+}
 .meta{display:flex;gap:24px;font-size:11px;letter-spacing:2px;color:var(--m);margin-top:12px;flex-wrap:wrap}
 
 /* queue */
@@ -351,7 +384,7 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 @keyframes markIn{from{opacity:0;transform:scale(.82)}to{opacity:1;transform:scale(1)}}
 @keyframes markBreath{0%,100%{transform:scale(1)}50%{transform:scale(1.045)}}
 .loading-overlay .loading-text{font-family:var(--f,'IBM Plex Mono',monospace);font-size:9px;font-weight:700;letter-spacing:4px;animation:pulse 2s ease-in-out infinite}
-.loading-overlay.dark-bg .loading-text{color:#0A0A0A99}
+.loading-overlay.dark-bg .loading-text{color:#F5FBFFCC}
 .loading-overlay.light-bg .loading-text{color:#0099B3AA}
 /* scanning progress bar — echoes the queue .pbar motion so it reads as one system */
 .loading-overlay::after{content:"";width:132px;max-width:44vw;height:2px;opacity:.55;background-size:200% 100%;background-repeat:no-repeat;animation:loadSweep 1.4s cubic-bezier(.65,0,.35,1) infinite}
@@ -530,7 +563,7 @@ input.amt-in:focus{outline:none;box-shadow:none!important;border-bottom-color:tr
   var el=document.getElementById('loading');
   el.className='loading-overlay '+(d?'dark-bg':'light-bg');
   var svg=d
-    ?'<svg class="loading-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#2D5FE8"/><defs><path id="l0t" d="M4,4 H60" fill="none"/><path id="l0r" d="M60,4 V60" fill="none"/><path id="l0b" d="M60,60 H4" fill="none"/><path id="l0l" d="M4,60 V4" fill="none"/></defs><text font-family="\'Courier New\',monospace" font-size="4.2" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l0t"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="\'Courier New\',monospace" font-size="4.2" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l0r"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="\'Courier New\',monospace" font-size="4.2" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l0b"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="\'Courier New\',monospace" font-size="4.2" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l0l"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><path d="M16,48 V16 H22 L32,32 L42,16 H48 V48 H42 V26 L32,42 L22,26 V48 Z" fill="#0A0A0A"/></svg><div class="loading-text">LOADING</div>'
+    ?'<svg class="loading-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#2D5FE8"/><defs><path id="l0t" d="M4,4 H60" fill="none"/><path id="l0r" d="M60,4 V60" fill="none"/><path id="l0b" d="M60,60 H4" fill="none"/><path id="l0l" d="M4,60 V4" fill="none"/></defs><text font-family="\'Courier New\',monospace" font-size="4.2" fill="#F5FBFF" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l0t"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="\'Courier New\',monospace" font-size="4.2" fill="#F5FBFF" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l0r"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="\'Courier New\',monospace" font-size="4.2" fill="#F5FBFF" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l0b"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="\'Courier New\',monospace" font-size="4.2" fill="#F5FBFF" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l0l"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><path d="M16,48 V16 H22 L32,32 L42,16 H48 V48 H42 V26 L32,42 L22,26 V48 Z" fill="#F5FBFF"/></svg><div class="loading-text">LOADING</div>'
     :'<svg class="loading-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#FDFDFD"/><defs><path id="l1t" d="M4,4 H60" fill="none"/><path id="l1r" d="M60,4 V60" fill="none"/><path id="l1b" d="M60,60 H4" fill="none"/><path id="l1l" d="M4,60 V4" fill="none"/></defs><text font-family="\'Courier New\',monospace" font-size="4.2" fill="#0099B3" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l1t"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="\'Courier New\',monospace" font-size="4.2" fill="#0099B3" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l1r"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="\'Courier New\',monospace" font-size="4.2" fill="#0099B3" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l1b"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="\'Courier New\',monospace" font-size="4.2" fill="#0099B3" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l1l"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><path d="M16,48 V16 H22 L32,32 L42,16 H48 V48 H42 V26 L32,42 L22,26 V48 Z" fill="#0099B3"/></svg><div class="loading-text">LOADING</div>';
   if(matchMedia('(prefers-reduced-motion: reduce)').matches) svg=svg.replace(/<animate\b[^>]*>/g,'');
   el.innerHTML=svg;
@@ -1644,7 +1677,7 @@ const FAVICON_DARK = "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3
 const FAVICON_LIGHT = "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%3Crect%20width%3D%2264%22%20height%3D%2264%22%20fill%3D%22%23FDFDFD%22%2F%3E%0A%3Cdefs%3E%0A%3Cpath%20id%3D%22pt%22%20d%3D%22M4%2C4%20H60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pr%22%20d%3D%22M60%2C4%20V60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pb%22%20d%3D%22M60%2C60%20H4%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pl%22%20d%3D%22M4%2C60%20V4%22%20fill%3D%22none%22%2F%3E%0A%3C%2Fdefs%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230099B3%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pt%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230099B3%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pr%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230099B3%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pb%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230099B3%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pl%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Cpath%20d%3D%22M16%2C48%20V16%20H22%20L32%2C32%20L42%2C16%20H48%20V48%20H42%20V26%20L32%2C42%20L22%2C26%20V48%20Z%22%20fill%3D%22%230099B3%22%2F%3E%0A%3C%2Fsvg%3E";
 let _lastFaviconDark = null;
 
-const LOADING_SVG_DARK = `<svg class="loading-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#2D5FE8"/><defs><path id="l2t" d="M4,4 H60" fill="none"/><path id="l2r" d="M60,4 V60" fill="none"/><path id="l2b" d="M60,60 H4" fill="none"/><path id="l2l" d="M4,60 V4" fill="none"/></defs><text font-family="'Courier New',monospace" font-size="4.2" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l2t"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l2r"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l2b"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l2l"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><path d="M16,48 V16 H22 L32,32 L42,16 H48 V48 H42 V26 L32,42 L22,26 V48 Z" fill="#0A0A0A"/></svg>`;
+const LOADING_SVG_DARK = `<svg class="loading-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#2D5FE8"/><defs><path id="l2t" d="M4,4 H60" fill="none"/><path id="l2r" d="M60,4 V60" fill="none"/><path id="l2b" d="M60,60 H4" fill="none"/><path id="l2l" d="M4,60 V4" fill="none"/></defs><text font-family="'Courier New',monospace" font-size="4.2" fill="#F5FBFF" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l2t"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#F5FBFF" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l2r"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#F5FBFF" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l2b"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#F5FBFF" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l2l"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><path d="M16,48 V16 H22 L32,32 L42,16 H48 V48 H42 V26 L32,42 L22,26 V48 Z" fill="#F5FBFF"/></svg>`;
 const LOADING_SVG_LIGHT = `<svg class="loading-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#FDFDFD"/><defs><path id="l3t" d="M4,4 H60" fill="none"/><path id="l3r" d="M60,4 V60" fill="none"/><path id="l3b" d="M60,60 H4" fill="none"/><path id="l3l" d="M4,60 V4" fill="none"/></defs><text font-family="'Courier New',monospace" font-size="4.2" fill="#0099B3" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l3t"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#0099B3" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l3r"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#0099B3" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l3b"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><text font-family="'Courier New',monospace" font-size="4.2" fill="#0099B3" fill-opacity="0.6" letter-spacing="-0.3"><textPath href="#l3l"><animate attributeName="startOffset" from="0%" to="100%" dur="3s" repeatCount="indefinite"/>////////////////////////////////////////////////////////////</textPath></text><path d="M16,48 V16 H22 L32,32 L42,16 H48 V48 H42 V26 L32,42 L22,26 V48 Z" fill="#0099B3"/></svg>`;
 // Loading mark for the current theme, with the marching-slash SMIL animation
 // stripped when the viewer prefers reduced motion.
@@ -2145,13 +2178,13 @@ function renderDash(v,mob){
   <div class="stats">
     ${h0?`<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       ${tokIcon(h0.token,'big')}
-      <span class="stat-big">${h0.balance}</span>
+      <span class="stat-big" tabindex="0" title="Tap or hover to reveal">${h0.balance}</span>
       <span class="stat-token">${h0.token}</span>
-      <span class="stat-usd">${h0.usd}</span>
+      <span class="stat-usd" tabindex="0" title="Tap or hover to reveal">${h0.usd}</span>
     </div>
     ${v.holdings.length>1?`<div class="holdings">${v.holdings.slice(1).map(h=>`<span>${tokIcon(h.token,'sm')} ${h.balance} <strong>${h.token}</strong><span class="usd">${h.usd}</span></span>`).join("")}</div>`:""}`
     :`<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
-      <span class="stat-big" style="color:var(--d)">0</span>
+      <span class="stat-big" style="color:var(--d)" tabindex="0" title="Tap or hover to reveal">0</span>
       <span class="stat-token">ETH</span>
     </div>
     <div style="font-size:11px;color:var(--d);letter-spacing:2px;margin-top:8px">NO BALANCES</div>`}
@@ -2488,7 +2521,7 @@ function txReviewBody(v){
   const availNum = hold ? Number(hold.raw != null ? ethers.formatUnits(hold.raw, hold.decimals || ct.decimals) : stripCommas(hold.balance)) : 0;
 
   const amtHtml = amtNum > 0
-    ? `<div class="review-amt">${tokIcon(S.txToken)}<span>${esc(groupInt(amtStr))}</span><span style="font-size:13px;color:var(--m)">${esc(S.txToken)}</span></div>
+    ? `<div class="review-amt" tabindex="0" title="Tap or hover to reveal">${tokIcon(S.txToken)}<span>${esc(groupInt(amtStr))}</span><span style="font-size:13px;color:var(--m)">${esc(S.txToken)}</span></div>
        ${rate > 0 ? `<div class="review-usd">${esc(fmtUsd(amtNum * rate))}</div>` : ''}`
     : `<div class="review-amt ph">${tokIcon(S.txToken)}<span>0.0</span><span style="font-size:13px">${esc(S.txToken)}</span></div>`;
   const toHtml = (isAddr || isName)
