@@ -200,7 +200,6 @@ input.amt-in:hover,input.amt-in:focus,
 .tx-nonce{font-size:10px;font-weight:700;color:var(--d)}
 .tx-val{font-size:20px;font-weight:700}
 .tx-to{font-size:11px;color:var(--m);margin-top:3px;word-break:break-all}
-.tx-actions{display:flex;align-items:center;gap:10px;flex-shrink:0}
 .tx-status{font-size:10px;font-weight:700;letter-spacing:2px}
 .approvals{display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:10px;letter-spacing:1px}
 .ap-ok{color:var(--g);font-weight:600}
@@ -210,7 +209,14 @@ input.amt-in:hover,input.amt-in:focus,
 .tx-progress>.plabel{min-width:78px}
 .pbar{height:4px;background:var(--ln);overflow:hidden;flex:1;min-width:70px;max-width:220px}
 .pbar>i{display:block;height:100%;transition:width .4s ease}
-.mob-actions{margin-top:14px}
+/* Proposal footer. The status pill reads as state and lives in the header next
+   to .tx-kind, which it matches; the verbs it enables collect down here. Keeping
+   them apart matters because .tx-status shares .btn's outlined-caps treatment —
+   flush against EXECUTE/CANCEL it misread as a third, disabled button.
+   Diagnostics lead, committal actions sit on the trailing edge. */
+.tx-foot{margin-top:12px;display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap}
+.tx-foot-diag{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.tx-foot-act{display:flex;gap:8px;flex-shrink:0;margin-left:auto}
 
 /* tx builder */
 .txb{padding:20px 18px;border:1px solid var(--fr);border-left:2px solid var(--a);background:color-mix(in srgb,var(--a) 4%,transparent);margin:6px 0 28px}
@@ -336,6 +342,11 @@ input.amt-in:hover,input.amt-in:focus,
   .tx{padding:18px 6px}
   .tx-val{font-size:16px}
   .tx-to{font-size:10px}
+  /* actionBtn stacks full-width at this breakpoint, so the trailing block takes
+     the whole row rather than sharing it with the diagnostics. */
+  .tx-foot{align-items:stretch}
+  .tx-foot-act{width:100%;margin-left:0;margin-top:2px}
+  .tx-foot-act>*{width:100%}
   .row{padding:14px 6px}
   .sep{margin:24px 0}
   .grid2,.grid3{grid-template-columns:1fr;gap:0}
@@ -2321,8 +2332,7 @@ function renderDash(v,mob){
           <div class="tx-to">&rarr; ${S.demoMode?addrLink(tx.target,v.chain):addrLink(tx.displayTo||tx.target)}${(()=>{const a=S.demoMode?tx.target:(tx.displayTo||tx.target);return ethers.isAddress(a)?copyBtn(a):'';})()}</div>
           ${kindNote}
         </div>
-        ${!mob&&!blocked?`<div class="tx-actions"><span class="tx-status" style="color:${s.c}"${tx.eta>0&&!s.exec?` data-eta-status="${tx.eta}"`:``}>&bull; ${s.l}</span>${actionBtn}</div>`:""}
-        ${mob&&!blocked?`<span class="tx-status" style="color:${s.c}"${tx.eta>0&&!s.exec?` data-eta-status="${tx.eta}"`:``}>&bull; ${s.l}</span>`:""}
+        ${!blocked?`<span class="tx-status" style="color:${s.c}"${tx.eta>0&&!s.exec?` data-eta-status="${tx.eta}"`:``}>&bull; ${s.l}</span>`:""}
         ${blocked?'<span style="font-size:10px;color:var(--d);letter-spacing:2px">BLOCKED</span>':""}
       </div>
       ${blocked?"":progressLine}
@@ -2334,13 +2344,15 @@ function renderDash(v,mob){
         const rsc = tx.rejectSigners ? tx.rejectSigners.size : 0;
         const armed = _rejectArmed === tx.nonce;
         const rlabel = armed ? 'CONFIRM &middot; SKIP NONCE?' : `REJECT &middot; SKIP NONCE${rsc?` (${rsc}/${v.threshold})`:''}`;
-        return `<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
-          <button class="sim-btn" onclick="simulateProposal(${S.sel},${tx.nonce})" title="Dry-run this proposal against current chain state (from = the vault)">${tx._sim&&!tx._sim.loading?'RE-SIMULATE':'SIMULATE'}</button>
-          ${canReject?`<button class="reject-link${armed?' armed':''}" onclick="armReject(${S.sel},${tx.nonce})" title="Sign a no-op to consume this nonce so later transactions can proceed">${rlabel}</button>`:''}
+        return `<div class="tx-foot">
+          <div class="tx-foot-diag">
+            <button class="sim-btn" onclick="simulateProposal(${S.sel},${tx.nonce})" title="Dry-run this proposal against current chain state (from = the vault)">${tx._sim&&!tx._sim.loading?'RE-SIMULATE':'SIMULATE'}</button>
+            ${canReject?`<button class="reject-link${armed?' armed':''}" onclick="armReject(${S.sel},${tx.nonce})" title="Sign a no-op to consume this nonce so later transactions can proceed">${rlabel}</button>`:''}
+          </div>
+          ${actionBtn?`<div class="tx-foot-act">${actionBtn}</div>`:''}
         </div>`;
       })()}
       ${tx._sim?renderSim(tx._sim,{ rerun:`simulateProposal(${S.sel},${tx.nonce})`, dismiss:`dismissProposalSim(${S.sel},${tx.nonce})` }):''}
-      ${mob&&!blocked&&actionBtn?`<div class="mob-actions">${actionBtn}</div>`:""}
     </div>`}).join("")}
   <div class="sec"><span>SIGNERS</span><span class="line"></span></div>
   ${v.owners.map(o=>`<div class="row">
