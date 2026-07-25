@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://multisig-postgrest.onrender.com https://repo.sourcify.dev https://*.publicnode.com https://1rpc.io https://*.drpc.org https://mainnet.base.org https://sepolia.base.org https://arb1.arbitrum.io https://mainnet.optimism.io https://mainnet.megaeth.com https://rpc-megaeth-mainnet.globalstake.io wss:; img-src 'self' data:; upgrade-insecure-requests">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://multisig-postgrest.onrender.com https://repo.sourcify.dev https://*.publicnode.com https://1rpc.io https://*.drpc.org https://api.coinbase.com https://mainnet.base.org https://sepolia.base.org https://arb1.arbitrum.io https://mainnet.optimism.io https://mainnet.megaeth.com https://rpc-megaeth-mainnet.globalstake.io wss:; img-src 'self' data:; upgrade-insecure-requests">
 <title>multisig</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -167,29 +167,39 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 .stat-token{font-size:16px;font-weight:600;color:var(--m)}
 .stat-usd{font-size:13px;color:var(--d)}
 .holdings{display:flex;gap:20px;margin-top:12px;flex-wrap:wrap;font-size:12px;color:var(--m)}
+/* The reveal groups in the hero are sized to their figures, not to the column,
+   so sweeping the pointer down the page doesn't trip them. */
+.stats .privg{width:fit-content;max-width:100%}
 .holdings strong{font-weight:700}
 .holdings .usd{font-size:10px;color:var(--d);margin-left:4px}
 
 /* Visual privacy. Contrast cannot hide these — an onlooker sits on the same
    contrast sensitivity function you do, so any contrast that clears your
-   threshold clears theirs. The gap comes from angular size, so the 9-12px UI is
-   already private (4 arcmin x-height at 1m, under the ~5 arcmin detection
-   floor) while these 13-52px figures are fluently readable at 1m+. Occlusion is
-   the only lever that works on them.
+   threshold clears theirs. The gap comes from angular size, so the 9-11px
+   chrome is already private (4 arcmin x-height at 1m, under the ~5 arcmin
+   detection floor) while the 12-52px money figures are fluently readable at
+   1m+. Occlusion is the only lever that works on them.
    Radius: letter identification lives in a ~3 cycles-per-x-height band, i.e. a
    stroke period of 0.172em. A Gaussian of sigma s attenuates period p by
    exp(-2(pi*s/p)^2), so 0.08em drops that band below an onlooker's detection
-   threshold at 1m. Doubled to 0.16em for margin on better-than-20/20 eyes. */
-.stat-big,.stat-usd,input.amt-in,.review-amt:not(.ph){filter:blur(.16em);transition:filter .12s ease}
-.stats:hover .stat-big,.stats:hover .stat-usd,
-.stat-big:hover,.stat-usd:hover,.stat-big:focus,.stat-usd:focus,
-input.amt-in:hover,input.amt-in:focus,
-.review-amt:not(.ph):hover,.review-amt:not(.ph):focus{filter:none}
-/* Touch has no hover, so the masked figures carry tabindex=0 and reveal on tap. */
-.stat-big:focus,.stat-usd:focus,.review-amt:focus{outline:none}
-.stat-big:focus-visible,.stat-usd:focus-visible,.review-amt:focus-visible{outline:2px solid var(--a);outline-offset:3px}
+   threshold at 1m. 0.11em keeps ~1.4x margin for better-than-20/20 eyes, where
+   the earlier 0.16em (2x) bought little further privacy and read as a font
+   fault rather than a deliberate veil. In em, so it tracks every breakpoint.
+   .priv marks a figure; it goes on the digits alone and never on the token
+   icon or ticker beside them — those carry nothing an onlooker wants, and
+   smearing them is what made the treatment look broken. */
+.priv{filter:blur(.11em);transition:filter .32s ease}
+/* Reveal by group, not by glyph. A balance and its USD line are one figure, so
+   they lift together and the pointer never has to hunt for the right few
+   pixels; .privg is that group, and it is drawn tightly around the figures so
+   crossing the page doesn't strobe them. Quick to reveal, slow to re-veil —
+   the reverse feels like a flinch. Touch has no hover, so groups without an
+   inner control carry tabindex=0 and lift on tap. */
+.privg:hover .priv,.privg:focus-within .priv,.priv:hover,.priv:focus{filter:none;transition-duration:.1s}
+.privg,.priv{outline:none}
+.privg:focus-visible,.priv:focus-visible{outline:2px solid var(--a);outline-offset:3px}
 @media(prefers-reduced-motion:reduce){
-  .stat-big,.stat-usd,input.amt-in,.review-amt:not(.ph){transition:none}
+  .priv{transition:none}
 }
 .meta{display:flex;gap:24px;font-size:11px;letter-spacing:2px;color:var(--m);margin-top:12px;flex-wrap:wrap}
 
@@ -461,9 +471,13 @@ input.amt-in:focus{outline:none;box-shadow:none!important;border-bottom-color:tr
 .review-amt{display:flex;align-items:center;gap:9px;font-size:26px;font-weight:700;letter-spacing:-1px;line-height:1.15;word-break:break-all}
 .review-amt.ph{color:var(--fr)}
 .review-usd{font-size:11px;letter-spacing:1px;color:var(--d);margin-top:4px}
+.review .privg{width:fit-content;max-width:100%}
 .review-arrow{font-size:9px;letter-spacing:2px;color:var(--d);margin:14px 0 5px}
 .review-to{font-size:12px;font-weight:700;word-break:break-all;line-height:1.5}
 .review-to.ph{color:var(--fr);font-weight:400}
+/* the address a name resolves to — the thing actually being signed */
+.review-to-sub{font-size:10px;font-weight:400;letter-spacing:1px;color:var(--m);word-break:break-all;line-height:1.6;margin-top:3px}
+.review-to-sub.bad{color:var(--r)}
 .review-rows{margin-top:16px}
 .rrow{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:10px;letter-spacing:1px;padding:8px 0;border-top:1px solid var(--ln);color:var(--d)}
 .rrow b{color:var(--m);font-weight:700;text-align:right;word-break:break-word}
@@ -602,8 +616,18 @@ const CHAINS = {
 };
 
 const _providerCache = {};
+// A FallbackProvider is not self-healing: ethers marks a backend with
+// `_lastFatalError` the first time its getBlockNumber throws, never clears it,
+// and once every backend carries one the provider answers "no runners?!" to
+// everything from then on. Cached forever, that means a single network blip —
+// a sleeping laptop, a dropped tunnel — silently kills a chain for the rest of
+// the page session. Mainnet is the worst one to lose, because every .eth /
+// .wei / .gwei name is read from it no matter which chain the app is on, so a
+// wedged mainnet provider takes name resolution down everywhere. So: notice the
+// wedge and rebuild on the next call.
 function makeProvider(id) {
-  if (_providerCache[id]) return _providerCache[id];
+  const cached = _providerCache[id];
+  if (cached && !cached._wedged) return cached;
   const c = CHAINS[id];
   const p = c.rpcs.length === 1
     ? new ethers.JsonRpcProvider(c.rpcs[0], id, { staticNetwork: true })
@@ -615,6 +639,11 @@ function makeProvider(id) {
         id,
         { quorum: 1 }
       );
+  const perform = typeof p._perform === 'function' ? p._perform.bind(p) : null;
+  if (perform) p._perform = async req => {
+    try { return await perform(req); }
+    catch (e) { if (/no runners/i.test((e && e.message) || '')) p._wedged = true; throw e; }
+  };
   _providerCache[id] = p;
   return p;
 }
@@ -2071,8 +2100,11 @@ function renderDeployOverlay(){
     let g = glyph[s.status], gc = col[s.status], right;
     if(phase==='preflight'){ g='◐'; gc='var(--y)'; right=`<span style="font-size:9px;color:var(--d)">CHECKING…</span>`; }
     else if(phase==='review'){
-      const bad = s.pf && (s.pf.gasOk===false || s.pf.executorOk===false);
-      const w=[]; if(s.pf&&s.pf.gasOk===false)w.push('NO GAS'); if(s.pf&&s.pf.executorOk===false)w.push('NO EXECUTOR');
+      const bad = s.pf && (s.pf.gasOk===false || s.pf.executorOk===false || s.pf.factoryOk===false);
+      const w=[];
+      if(s.pf&&s.pf.factoryOk===false)w.push('NO FACTORY');
+      if(s.pf&&s.pf.gasOk===false)w.push('NO GAS');
+      if(s.pf&&s.pf.executorOk===false)w.push('NO EXECUTOR');
       g = bad?'✕':'●'; gc = bad?'var(--y)':'var(--g)';
       right = `<span style="font-size:9px;letter-spacing:1px;color:${bad?'var(--y)':'var(--g)'}">${w.length?w.join(' · '):'READY'}</span>`;
     } else {
@@ -2097,10 +2129,13 @@ function renderDeployOverlay(){
   if(phase==='review'){
     const noExec = d.ctx && d.ctx.wantForward && d.steps.some(s=>s.pf&&s.pf.executorOk===false);
     const noGas = d.steps.some(s=>s.pf&&s.pf.gasOk===false);
-    footer = `<div style="margin-top:14px;font-size:10px;color:var(--y);letter-spacing:1px;line-height:1.6">${noExec?'No TimelockExecutor on some chains — fast path can’t be enabled there. ':''}${noGas?'No gas in the connected wallet on some chains. ':''}Proceed anyway and those chains may fail.</div>
+    const noFac = d.steps.some(s=>s.pf&&s.pf.factoryOk===false);
+    const notOwner = d.ctx && d.ctx.deployerIsOwner === false;
+    footer = `<div style="margin-top:14px;font-size:10px;color:var(--y);letter-spacing:1px;line-height:1.6">${noFac?'No factory on some chains — the vault cannot be deployed there. ':''}${noExec?'No TimelockExecutor on some chains — fast path can’t be enabled there. ':''}${noGas?'No gas in the connected wallet on some chains. ':''}${notOwner?'You are not one of the owners — the vault will deploy, but it will not appear in your history. ':''}Proceed anyway and those chains may fail.</div>
       <div style="display:flex;gap:8px;margin-top:16px"><button class="btn btn-outline btn-w" onclick="closeDeploy()">CANCEL</button><button class="btn btn-fill btn-w" onclick="proceedDeploy()">PROCEED</button></div>`;
   } else if(d.done){
-    footer = `<button class="btn btn-fill btn-w" style="margin-top:20px" onclick="closeDeploy()">${anyFail?'CLOSE':'VIEW VAULT'}</button>`;
+    const dbWarn = d.steps.some(s=>s.dbWarn);
+    footer = `${dbWarn?`<div style="margin-top:14px;font-size:10px;color:var(--y);letter-spacing:1px;line-height:1.6">Deployed on-chain, but not recorded in history — the vault is live at the address above.</div>`:''}<button class="btn btn-fill btn-w" style="margin-top:20px" onclick="closeDeploy()">${anyFail?'CLOSE':'VIEW VAULT'}</button>`;
   } else if(phase==='deploying'){
     footer = `<div style="margin-top:16px;font-size:9px;color:var(--d);letter-spacing:1px;text-align:center">APPROVE EACH WALLET PROMPT TO CONTINUE</div>`;
   } else { footer = ''; }
@@ -2187,15 +2222,15 @@ function renderDash(v,mob){
     </button>`}).join("")}
   </div></div>
   <div class="stats">
-    ${h0?`<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    ${h0?`<div class="privg" tabindex="0" title="Tap or hover to reveal" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       ${tokIcon(h0.token,'big')}
-      <span class="stat-big" tabindex="0" title="Tap or hover to reveal">${h0.balance}</span>
+      <span class="stat-big priv">${h0.balance}</span>
       <span class="stat-token">${h0.token}</span>
-      <span class="stat-usd" tabindex="0" title="Tap or hover to reveal">${h0.usd}</span>
+      <span class="stat-usd priv">${h0.usd}</span>
     </div>
-    ${v.holdings.length>1?`<div class="holdings">${v.holdings.slice(1).map(h=>`<span>${tokIcon(h.token,'sm')} ${h.balance} <strong>${h.token}</strong><span class="usd">${h.usd}</span></span>`).join("")}</div>`:""}`
+    ${v.holdings.length>1?`<div class="holdings privg" tabindex="0" title="Tap or hover to reveal">${v.holdings.slice(1).map(h=>`<span>${tokIcon(h.token,'sm')} <span class="priv">${h.balance}</span> <strong>${h.token}</strong><span class="usd priv">${h.usd}</span></span>`).join("")}</div>`:""}`
     :`<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
-      <span class="stat-big" style="color:var(--d)" tabindex="0" title="Tap or hover to reveal">0</span>
+      <span class="stat-big" style="color:var(--d)">0</span>
       <span class="stat-token">ETH</span>
     </div>
     <div style="font-size:11px;color:var(--d);letter-spacing:2px;margin-top:8px">NO BALANCES</div>`}
@@ -2318,7 +2353,7 @@ function renderDash(v,mob){
     const kindNote=kind.note?`<div class="tx-note${kind.warn?' warn':''}">${kind.note}</div>`:'';
     const txLink=!S.demoMode&&v.address&&ethers.isAddress(v.address)?`${location.origin}/#${S.chainId}/${v.address}/tx/${tx.nonce}`:'';
     const isFocus=_focusNonce!==null&&tx.nonce===_focusNonce&&!!v.address&&v.address.toLowerCase()===(_focusVaultAddr||'').toLowerCase();
-    return`<div class="tx${blocked?" blocked":""}${isFocus?" tx-focus":""}" data-tx-nonce="${tx.nonce}">
+    return`<div class="tx privg${blocked?" blocked":""}${isFocus?" tx-focus":""}" data-tx-nonce="${tx.nonce}">
       ${isFocus?`<div style="margin-bottom:10px"><span class="tx-share">SHARED FOR REVIEW${txLink?` <button onclick="event.stopPropagation();navigator.clipboard.writeText('${txLink}');flash('CO-SIGN LINK COPIED')" title="Copy co-sign link">⧉</button>`:''}<button onclick="dismissFocus()" title="Dismiss">&#10005;</button></span></div>`:''}
       <div class="tx-top">
         <div style="flex:1;min-width:0">
@@ -2327,7 +2362,7 @@ function renderDash(v,mob){
             ${kindTag}
           </div>
           <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-top:6px">
-            <span class="tx-val${(!kindTag&&(kind.tone==='policy'||kind.tone==='danger'))?' '+kind.tone:''}" style="display:inline-flex;align-items:center;gap:6px">${(dv&&dv!=='0')?tokIcon(dt):''}${esc(display)}</span>
+            <span class="tx-val${(!kindTag&&(kind.tone==='policy'||kind.tone==='danger'))?' '+kind.tone:''}" style="display:inline-flex;align-items:center;gap:6px">${(dv&&dv!=='0')?`${tokIcon(dt)}<span class="priv">${esc(dv)}</span> ${esc(dt)}`:esc(display)}</span>
           </div>
           <div class="tx-to">&rarr; ${S.demoMode?addrLink(tx.target,v.chain):addrLink(tx.displayTo||tx.target)}${(()=>{const a=S.demoMode?tx.target:(tx.displayTo||tx.target);return ethers.isAddress(a)?copyBtn(a):'';})()}</div>
           ${kindNote}
@@ -2379,13 +2414,17 @@ function onTxAmount(val, dec, avail, unit){
 }
 function onTxRecipient(val){
   S.txTo = val;
-  const s = document.getElementById('tx-to-status');
-  if(s){
-    const st = _addrState(val);
-    s.textContent = st.txt;
-    s.style.color = st.color || '';
-  }
+  updateTxToStatus();
   updateTxReview();
+}
+function updateTxToStatus(){
+  const s = document.getElementById('tx-to-status');
+  if(!s) return;
+  const val = S.txTo || '';
+  if(_nameHint(s, val, updateTxToStatus)) return;
+  const st = _addrState(val);
+  s.textContent = st.txt;
+  s.style.color = st.color || '';
 }
 // Open/close the builder from a clean slate — a stale amount or recipient
 // carried into the next proposal is the one mistake this form must not make.
@@ -2489,8 +2528,10 @@ function stakeReviewBody(v){
   const out = wstethOut(amtStr);
 
   const amtHtml = amtNum > 0
-    ? `<div class="review-amt">${tokIcon('ETH')}<span>${esc(groupInt(amtStr))}</span><span style="font-size:13px;color:var(--m)">ETH</span></div>
-       ${rate > 0 ? `<div class="review-usd">${esc(fmtUsd(amtNum * rate))}</div>` : ''}`
+    ? `<div class="privg" tabindex="0" title="Tap or hover to reveal">
+         <div class="review-amt">${tokIcon('ETH')}<span class="priv">${esc(groupInt(amtStr))}</span><span style="font-size:13px;color:var(--m)">ETH</span></div>
+         ${rate > 0 ? `<div class="review-usd priv">${esc(fmtUsd(amtNum * rate))}</div>` : ''}
+       </div>`
     : `<div class="review-amt ph">${tokIcon('ETH')}<span>0.0</span><span style="font-size:13px">ETH</span></div>`;
   const outHtml = out
     ? `<div class="review-to" style="display:flex;align-items:center;gap:8px">${tokIcon('wstETH')}<span>&asymp; ${esc(groupInt(Number(ethers.formatUnits(out, 18)).toFixed(6).replace(/\.?0+$/, '')))} wstETH</span></div>`
@@ -2533,12 +2574,23 @@ function txReviewBody(v){
   const availNum = hold ? Number(hold.raw != null ? ethers.formatUnits(hold.raw, hold.decimals || ct.decimals) : stripCommas(hold.balance)) : 0;
 
   const amtHtml = amtNum > 0
-    ? `<div class="review-amt" tabindex="0" title="Tap or hover to reveal">${tokIcon(S.txToken)}<span>${esc(groupInt(amtStr))}</span><span style="font-size:13px;color:var(--m)">${esc(S.txToken)}</span></div>
-       ${rate > 0 ? `<div class="review-usd">${esc(fmtUsd(amtNum * rate))}</div>` : ''}`
+    ? `<div class="privg" tabindex="0" title="Tap or hover to reveal">
+         <div class="review-amt">${tokIcon(S.txToken)}<span class="priv">${esc(groupInt(amtStr))}</span><span style="font-size:13px;color:var(--m)">${esc(S.txToken)}</span></div>
+         ${rate > 0 ? `<div class="review-usd priv">${esc(fmtUsd(amtNum * rate))}</div>` : ''}
+       </div>`
     : `<div class="review-amt ph">${tokIcon(S.txToken)}<span>0.0</span><span style="font-size:13px">${esc(S.txToken)}</span></div>`;
-  const toHtml = (isAddr || isName)
-    ? `<div class="review-to">${esc(isAddr ? shortAddr(to) : to)}</div>`
-    : `<div class="review-to ph">NO RECIPIENT YET</div>`;
+  // A name shows the address it resolves to, right here, because that address
+  // is what the proposal will carry and what every co-signer will vote on.
+  const pv = isName ? previewName(to, S.chainId, () => { if(S.showTx) updateTxReview(); }) : null;
+  const toHtml = isAddr
+    ? `<div class="review-to">${esc(shortAddr(to))}</div>`
+    : isName
+      ? `<div class="review-to">${esc(to)}</div>` + (
+          !pv ? ''
+          : pv.state === 'resolving' ? `<div class="review-to-sub">RESOLVING&hellip;</div>`
+          : pv.state === 'err' ? `<div class="review-to-sub bad">${esc(pv.err)}</div>`
+          : `<div class="review-to-sub">&rarr; ${esc(pv.addr)}</div>`)
+      : `<div class="review-to ph">NO RECIPIENT YET</div>`;
 
   // The on-chain shape of the proposal, named the way the queue will label it.
   const call = slowOn ? 'SLOW.depositTo()'
@@ -2562,7 +2614,8 @@ function txReviewBody(v){
   else if(!hold && amtNum > 0 && !S.demoMode) warns.push(`THE VAULT HOLDS NO ${esc(S.txToken)} — THIS WILL REVERT ON EXECUTION.`);
   if(slowOn && v.delay > 0 && !v.fastPath && v.delay >= Number(S.txSlowDelaySec))
     warns.push('THE VAULT TIMELOCK IS AS LONG AS THE SLOW DELAY — A REVERSE MAY NOT CLEAR IN TIME.');
-  if(isName) warns.push('NAME RESOLVES AT SIGNING TIME — CONFIRM THE ADDRESS IN YOUR WALLET.');
+  if(pv && pv.state === 'err') warns.push(`${esc(pv.err)} — THE PROPOSAL CANNOT BE BUILT UNTIL IT DOES.`);
+  else if(pv && pv.alt) warns.push(`${esc(to.toUpperCase())} PUBLISHES A DIFFERENT ADDRESS FOR ${esc((CHAINS[S.chainId] || {}).name || 'THIS CHAIN').toUpperCase()} (${esc(shortAddr(pv.alt))}). THIS SENDS TO THE ADDRESS ABOVE — CONFIRM WHICH ONE YOU WANT.`);
 
   return `${amtHtml}
     <div class="review-arrow">&darr; TO</div>
@@ -2623,7 +2676,10 @@ function _addrState(t){
   t = (t || '').trim();
   if(!t) return { txt:'', color:'' };
   if(ethers.isAddress(t)) return { txt:'VALID ADDRESS', color:'var(--g)' };
-  if(NAME_RE.test(t)) return { txt:'NAME · RESOLVES AT SIGN', color:'var(--a)' };
+  // Every namespace is rooted on mainnet, so this holds whichever chain the app
+  // is pointed at. Timing is deliberately not promised here: the send flow now
+  // resolves in the review, before anything is signed.
+  if(NAME_RE.test(t)) return { txt:'NAME · RESOLVED ON MAINNET', color:'var(--a)' };
   // Right shape, wrong case: a mistyped or truncated paste, not a bad format.
   // Naming it precisely is the difference between a 2-second fix and a re-copy.
   if(/^0x[0-9a-fA-F]{40}$/.test(t)) return { txt:'BAD CHECKSUM — RE-COPY THE ADDRESS', color:'var(--r)' };
@@ -2639,18 +2695,40 @@ function _hexState(d){
 }
 // CUSTOM target — mirrors onCxTargetChange's ABI fetch with an inline hint for
 // the name / invalid cases the ABI status doesn't cover.
+// A call target is signed just like a recipient is, so it gets the same
+// treatment: show the address the name resolves to rather than promising to
+// resolve it later, out of sight.
+function _nameHint(el, raw, repaint){
+  const t = (raw || '').trim();
+  const pv = previewName(t, S.chainId, repaint);
+  if(!pv) return false;
+  if(pv.state === 'resolving'){ el.textContent = 'RESOLVING…'; el.style.color = 'var(--a)'; }
+  else if(pv.state === 'err'){ el.textContent = pv.err; el.style.color = 'var(--r)'; }
+  else { el.textContent = '→ ' + shortAddr(pv.addr) + (pv.alt ? ' · PUBLISHES A DIFFERENT ADDRESS FOR THIS CHAIN' : ''); el.style.color = pv.alt ? 'var(--y)' : 'var(--g)'; }
+  return true;
+}
 function updateCxTargetStatus(val){
   const el = document.getElementById('cx-target-status');
   if(!el) return;
   const t = (val || '').trim();
   if(!t || ethers.isAddress(t)){ el.textContent = ''; return; }
+  if(_nameHint(el, t, () => updateCxTargetStatus(S.cxTarget))) return;
   const s = _addrState(t);
   el.textContent = s.txt; el.style.color = s.color;
 }
 function onBatchTarget(i, val){
   S.batch[i].t = val;
+  updateBatchTargetStatus(i);
+}
+function updateBatchTargetStatus(i){
   const el = document.getElementById('batch-t-' + i);
-  if(el){ const s = _addrState(val); el.textContent = s.txt ? (ethers.isAddress((val||'').trim()) ? '✓' : s.txt) : ''; el.style.color = s.color; }
+  if(!el) return;
+  const val = S.batch[i] ? S.batch[i].t : '';
+  const t = (val || '').trim();
+  if(ethers.isAddress(t)){ el.textContent = '✓'; el.style.color = 'var(--g)'; return; }
+  if(_nameHint(el, t, () => updateBatchTargetStatus(i))) return;
+  const s = _addrState(t);
+  el.textContent = s.txt || ''; el.style.color = s.color;
 }
 function onBatchData(i, val){
   S.batch[i].d = val;
@@ -2923,14 +3001,14 @@ function renderTxBuilder(v,mob){
           <div style="font-size:9px;color:var(--d);letter-spacing:1px;line-height:1.5;margin-top:8px">SAVED TO THIS BROWSER FOR THIS VAULT &mdash; AVAILABLE FOR TOP UPS TOO</div></div>`:''}
         </div>
 
-        <div class="fset">
+        <div class="fset privg">
           <div class="fhead"><label class="lbl">AMOUNT</label><span class="fhint" id="tx-units"></span></div>
           <div class="amt">
-            <input class="amt-in" id="tx-amount" inputmode="decimal" placeholder="0.0" value="${esc(S.txAmount)}" oninput="onTxAmount(this.value,${dec},${availNum},'${esc(unitLabel)}')" onkeydown="if(event.key==='Enter'){event.preventDefault();submitTransfer()}">
+            <input class="amt-in priv" id="tx-amount" inputmode="decimal" placeholder="0.0" value="${esc(S.txAmount)}" oninput="onTxAmount(this.value,${dec},${availNum},'${esc(unitLabel)}')" onkeydown="if(event.key==='Enter'){event.preventDefault();submitTransfer()}">
             <span class="amt-tok">${tokIcon(S.txToken)}${esc(S.txToken)}</span>
           </div>
           <div class="amt-foot">
-            <span class="amt-usd" id="tx-amount-usd" data-rate="${rate||0}"></span>
+            <span class="amt-usd priv" id="tx-amount-usd" data-rate="${rate||0}"></span>
             ${availNum>0?`<span class="qbtns">${[['25%',.25],['50%',.5],['MAX',1]].map(([l,f])=>`<button class="qbtn" onclick="fillTxPct(${f},'${availStr}',${dec},${availNum},'${esc(unitLabel)}')">${l}</button>`).join('')}</span>`:''}
             <span class="amt-warn" id="tx-amount-warn"></span>
           </div>
@@ -2976,14 +3054,14 @@ function renderTxBuilder(v,mob){
           <div class="stake-note">A PLAIN ETH TRANSFER TO THE <b>wstETH</b> CONTRACT. ITS <b>receive()</b> FALLBACK SUBMITS THE ETH TO LIDO AND MINTS wstETH STRAIGHT BACK TO THE VAULT &mdash; NO APPROVAL, NO ROUTER, NO CALLDATA.</div>
         </div>
 
-        <div class="fset">
+        <div class="fset privg">
           <div class="fhead"><label class="lbl">AMOUNT TO STAKE</label><span class="fhint" id="stake-units"></span></div>
           <div class="amt">
-            <input class="amt-in" id="stake-amount" inputmode="decimal" placeholder="0.0" value="${esc(S.stakeAmount)}" oninput="onStakeAmount(this.value,${availNum})" onkeydown="if(event.key==='Enter'){event.preventDefault();submitStake()}">
+            <input class="amt-in priv" id="stake-amount" inputmode="decimal" placeholder="0.0" value="${esc(S.stakeAmount)}" oninput="onStakeAmount(this.value,${availNum})" onkeydown="if(event.key==='Enter'){event.preventDefault();submitStake()}">
             <span class="amt-tok">${tokIcon('ETH')}ETH</span>
           </div>
           <div class="amt-foot">
-            <span class="amt-usd" id="stake-amount-usd" data-rate="${rate||0}"></span>
+            <span class="amt-usd priv" id="stake-amount-usd" data-rate="${rate||0}"></span>
             ${availNum>0?`<span class="qbtns">${[['25%',.25],['50%',.5],['MAX',1]].map(([l,f])=>`<button class="qbtn" onclick="fillStakePct(${f},'${availStr}',${availNum})">${l}</button>`).join('')}</span>`:''}
             <span class="amt-warn" id="stake-amount-warn"></span>
           </div>
@@ -3084,7 +3162,11 @@ function validateCreate(c, demo){
     const raw = (o.addr || '').trim();
     if(!raw) return { state: 'empty' };
     let state, key;
-    if(ethers.isAddress(raw)) { state = 'address'; key = 'a:' + raw.toLowerCase(); }
+    // init() walks a linked list headed by address(1) and requires each owner
+    // to be strictly greater than the one before, so 0x0 and 0x1 are not owners
+    // the contract can hold — reject them here, not with a reverted deploy.
+    if(ethers.isAddress(raw) && BigInt(raw) <= 1n) { state = 'invalid'; key = null; }
+    else if(ethers.isAddress(raw)) { state = 'address'; key = 'a:' + raw.toLowerCase(); }
     else if(NAME_RE.test(raw)) { state = 'name'; key = 'n:' + raw.toLowerCase(); }
     else if(demo) { state = 'address'; key = 'x:' + raw.toLowerCase(); }
     else { state = 'invalid'; key = null; }
@@ -3544,30 +3626,43 @@ function safeCloneInput(val){
   el.style.color = s.color || '';
 }
 
-// Read a Safe at `addr` on `chainId`. Returns null for every flavour of "no
-// Safe here" — nothing deployed, a contract that is not a Safe, an RPC that
-// would not answer — so callers can treat it as a simple presence check. The
-// timeout matters: this fans out over every supported chain, and one wedged
-// RPC must not leave the modal spinning.
+// Read a Safe at `addr` on `chainId`. Resolves `{ hit, status }`, never throws.
+// The status matters as much as the hit: "there is no Safe here" and "we could
+// not look" are different claims, and reporting the second as the first is how
+// a modal ends up telling someone their Safe does not exist because an RPC was
+// wedged. 'none' = nothing deployed or not a Safe, 'big' = an owner list too
+// long to render, 'down' = the chain would not answer inside `ms`. The timeout
+// matters because this fans out over every supported chain.
 function readSafe(addr, chainId, ms = 8000){
-  if(!CHAINS[chainId]) return Promise.resolve(null);
+  if(!CHAINS[chainId]) return Promise.resolve({ hit:null, status:'none' });
+  let timer;
   const read = (async () => {
-    try {
-      const p = makeProvider(chainId);
-      const code = await p.getCode(addr);
-      if(!code || code === '0x') return null;
-      const s = new ethers.Contract(addr, SAFE_ABI, p);
-      const [owners, threshold] = await Promise.all([s.getOwners(), s.getThreshold()]);
-      // Both bounds are about a contract that only claims to be a Safe: an
-      // owner list long enough to hang the form, or a VERSION() long enough to
-      // wreck the layout, are the two things it gets to choose here.
-      if(!owners || !owners.length || owners.length > MAX_CLONE_OWNERS) return null;
-      let version = null;
-      try { version = String(await s.VERSION()).trim().slice(0, 16); } catch(_){}
-      return { addr, chainId, owners: owners.map(a => ethers.getAddress(a)), threshold: Number(threshold), version };
-    } catch(_) { return null; }
+    const p = makeProvider(chainId);
+    let code;
+    try { code = await p.getCode(addr); }
+    catch(_) { return { hit:null, status:'down' }; }
+    if(!code || code === '0x') return { hit:null, status:'none' };
+    const s = new ethers.Contract(addr, SAFE_ABI, p);
+    let owners, threshold;
+    try { [owners, threshold] = await Promise.all([s.getOwners(), s.getThreshold()]); }
+    catch(e) {
+      // A contract that returns nothing decodable for these two getters is not
+      // a Safe. Any other failure is the chain not answering — which must not
+      // be reported back as "not a Safe".
+      const notSafe = e && (e.code === 'BAD_DATA' || e.code === 'CALL_EXCEPTION');
+      return { hit:null, status: notSafe ? 'none' : 'down' };
+    }
+    if(!owners || !owners.length) return { hit:null, status:'none' };
+    // Both bounds are about a contract that only claims to be a Safe: an owner
+    // list long enough to hang the form, or a VERSION() long enough to wreck
+    // the layout, are the two things it gets to choose here.
+    if(owners.length > MAX_CLONE_OWNERS) return { hit:null, status:'big' };
+    let version = null;
+    try { version = String(await s.VERSION()).trim().slice(0, 16); } catch(_){}
+    return { hit: { addr, chainId, owners: owners.map(a => ethers.getAddress(a)), threshold: Number(threshold), version }, status:'ok' };
   })();
-  return Promise.race([read, new Promise(r => setTimeout(() => r(null), ms))]);
+  return Promise.race([read, new Promise(r => { timer = setTimeout(() => r({ hit:null, status:'down' }), ms); })])
+    .finally(() => clearTimeout(timer));
 }
 
 // One click: resolve the input (address, .eth, .wei or .gwei), read the Safe on
@@ -3585,24 +3680,31 @@ async function safeCloneSearch(){
 
   let addr;
   try { addr = await resolveName(raw); }
-  catch(_) {
+  catch(e) {
     if(!S.safeClone) return;
     sc.busy = false;
-    sc.err = NAME_RE.test(raw) ? `${raw.toUpperCase()} DOES NOT RESOLVE` : 'NOT A VALID ADDRESS OR NAME';
+    sc.err = NAME_RE.test(raw) ? nameErrText(raw, e) : 'NOT A VALID ADDRESS OR NAME';
     render(); return;
   }
 
   const chainId = NETS[S.cf.net]?.id;
-  const hit = await readSafe(addr, chainId);
+  const primary = await readSafe(addr, chainId);
   if(!S.safeClone) return;                  // modal closed while reading
-  if(hit){ applySafe(hit, raw); return; }
+  if(primary.hit){ applySafe(primary.hit, raw); return; }
 
   const ids = Object.keys(CHAINS).map(Number).filter(id => id !== chainId);
-  const others = (await Promise.all(ids.map(id => readSafe(addr, id)))).filter(Boolean);
+  const scans = await Promise.all(ids.map(id => readSafe(addr, id)));
   if(!S.safeClone) return;
+  const others = scans.map(s => s.hit).filter(Boolean);
+  const all = [primary, ...scans];
   sc.busy = false; sc.addr = addr; sc.label = raw;
   sc.found = others.length ? others.sort((a,b) => netIdx(a.chainId) - netIdx(b.chainId)) : null;
-  sc.err = others.length ? '' : `NO SAFE AT ${shortAddr(addr)} ON ANY SUPPORTED CHAIN`;
+  // Say what actually happened. A Safe too big to clone is not a missing Safe,
+  // and a chain that never answered is not a chain without one.
+  if(others.length) sc.err = '';
+  else if(all.some(s => s.status === 'big')) sc.err = `THAT SAFE HAS MORE THAN ${MAX_CLONE_OWNERS} OWNERS — TOO MANY TO CLONE`;
+  else if(all.some(s => s.status === 'down')) sc.err = `NO SAFE AT ${shortAddr(addr)} ON THE CHAINS THAT ANSWERED — SOME COULD NOT BE READ`;
+  else sc.err = `NO SAFE AT ${shortAddr(addr)} ON ANY SUPPORTED CHAIN`;
   render();
 }
 
@@ -3616,14 +3718,22 @@ function applyFoundSafe(chainId){
 // Fill the form from a Safe, keeping enough of the previous state to undo.
 async function applySafe(src, typed){
   const c = S.cf;
+  // The modal instance this clone belongs to. Reverse-resolving the signer
+  // names takes a round trip, and closing the modal in the middle of it has to
+  // mean cancelled — otherwise dismissing the dialog still rewrites the form.
+  const token = S.safeClone;
+  if(token){ token.busy = true; render(); }
   // Owner labels come free: whatever .wei / .gwei / ENS name each signer holds.
   let names = {};
   try { names = await resolveOwnerNames(src.owners); } catch(_){}
+  if(S.safeClone !== token) return;
   const you = (window._connectedAddress || '').toLowerCase();
   c.safeSrc = {
     addr: src.addr, chainId: src.chainId, version: src.version,
     ownerCount: src.owners.length, threshold: src.threshold,
-    prev: { owners: c.owners.map(o => ({ ...o })), threshold: c.threshold, name: c.name },
+    // Snapshot everything this function touches — the chain picks included,
+    // since loading a Safe found elsewhere moves the deploy target too.
+    prev: { owners: c.owners.map(o => ({ ...o })), threshold: c.threshold, name: c.name, net: c.net, clone: (c.clone || []).slice() },
   };
   c.owners = src.owners.map(a => ({ addr: a, label: a.toLowerCase() === you ? 'YOU' : (names[a.toLowerCase()] || '') }));
   c.threshold = String(Math.min(Math.max(src.threshold || 1, 1), c.owners.length));
@@ -3644,6 +3754,8 @@ function undoSafeClone(){
     c.owners = s.prev.owners?.length ? s.prev.owners : [{ addr:'', label:'' }];
     c.threshold = s.prev.threshold;
     c.name = s.prev.name;
+    if(typeof s.prev.net === 'number') c.net = s.prev.net;
+    if(Array.isArray(s.prev.clone)) c.clone = s.prev.clone.slice();
   }
   c.safeSrc = null;
   flash('CLONE UNDONE');
@@ -3745,30 +3857,164 @@ function doAdminPropose(action, val) {
 }
 
 // ── PRODUCTION: NAME RESOLUTION ───────────────────────────────────
-const ethMainRpc = makeProvider(1);
+// All three namespaces are rooted on Ethereum mainnet, so every lookup goes
+// through this dedicated mainnet provider rather than the active `provider` — a
+// name means the same thing whether the app is pointed at Base, Arbitrum or a
+// testnet. The consequence is that resolution is a *foreign* network call from
+// every chain but one, which is why it is bounded by a timeout and why its
+// failures are classified instead of collapsed into "not found".
+// Fetched fresh on every use rather than held in a const: makeProvider
+// rebuilds a wedged provider, and a captured instance would never see it.
+function mainnetRpc() { return makeProvider(1); }
+const NAME_TIMEOUT_MS = 12000;
+
+class NameError extends Error {
+  constructor(kind, msg){ super(msg); this.nameKind = kind; this.shortMessage = msg; }
+}
+// 'notfound'    — mainnet answered, the name has no address
+// 'offchain'    — an ENS name whose CCIP-read gateway could not be reached
+// 'unreachable' — mainnet itself did not answer
+// 'invalid'     — not an address and not a name we resolve
+function _nameKind(e){
+  if(e && e.nameKind) return e.nameKind;
+  if(e && e.code === 'OFFCHAIN_FAULT') return 'offchain';
+  if(e && (e.code === 'NETWORK_ERROR' || e.code === 'SERVER_ERROR' || e.code === 'TIMEOUT' || e.code === 'UNKNOWN_ERROR')) return 'unreachable';
+  return 'notfound';
+}
+// A wedged mainnet RPC must not hang a deploy or a send happening on another
+// chain entirely, so every mainnet name call is bounded.
+function _nameRace(p){
+  let t;
+  return Promise.race([
+    p, new Promise((_, rej) => { t = setTimeout(() => rej(new NameError('unreachable', 'MAINNET DID NOT ANSWER')), NAME_TIMEOUT_MS); })
+  ]).finally(() => clearTimeout(t));
+}
+// One vocabulary for every "that name did not resolve" message in the app.
+// Telling someone on Arbitrum that their name does not exist, when what
+// happened is that mainnet timed out, is the failure this exists to prevent.
+function nameErrText(raw, e){
+  const r = String(raw || '').toUpperCase();
+  switch(_nameKind(e)){
+    case 'offchain':    return `${r} RESOLVES OFFCHAIN — ITS GATEWAY IS BLOCKED OR DOWN`;
+    case 'unreachable': return 'CANNOT REACH ETHEREUM MAINNET TO RESOLVE NAMES';
+    case 'invalid':     return 'ENTER A VALID ADDRESS OR NAME';
+    default:            return `${r} DOES NOT RESOLVE`;
+  }
+}
+
+// ethers reports an unreachable provider as "no resolver" — resolveName returns
+// null rather than throwing — so a blank answer is ambiguous: the name may not
+// exist, or mainnet may not be answering. One cheap probe settles it, and it
+// only runs on the failure path. This is the difference between telling an
+// Arbitrum user their name is wrong and telling them mainnet is down.
+async function _nameFailure(v, e){
+  let kind = _nameKind(e);
+  if(kind === 'notfound'){
+    // The probe has to actually leave the machine. getBlockNumber is answered
+    // from the FallbackProvider's cached height, and getCode of a fixed address
+    // is served from ethers' result cache — both report healthy while every
+    // backend is down. Reading an address nobody has ever touched, different on
+    // each probe, is the cheapest call that cannot come from a cache.
+    const probe = '0x' + String(Date.now()).padStart(40, '0').slice(-40);
+    try { await _nameRace(mainnetRpc().getCode(probe)); }
+    catch(_) { kind = 'unreachable'; }
+  }
+  return new NameError(kind, nameErrText(v, { nameKind: kind }));
+}
 
 async function resolveName(input) {
   const v = input.trim();
-  if(!v) throw new Error('Empty input');
+  if(!v) throw new NameError('invalid', 'ENTER AN ADDRESS OR NAME');
   if(ethers.isAddress(v)) return ethers.getAddress(v);
-  // .wei / .gwei — same contract shape, picked by suffix.
+  // .wei / .gwei — same contract shape, picked by suffix. Each hashes its own
+  // suffix away and ignores case, but neither knows the other's: handing a
+  // .gwei name to WNS hashes to an unrelated id that may well be registered.
+  // So the service is chosen by suffix before a single call is made.
   const svc = nsFor(v);
   if(svc) {
-    const ns = new ethers.Contract(svc.addr, WEINS_ABI, ethMainRpc);
-    const tokenId = await ns.computeId(v);
-    // resolve() = explicit recipient if set, else owner; 0 if inactive/expired.
-    const addr = await ns.resolve(tokenId);
-    if(!addr || addr === ethers.ZeroAddress) throw new Error(`${v} not found`);
+    const ns = new ethers.Contract(svc.addr, WEINS_ABI, mainnetRpc());
+    let addr;
+    try {
+      const tokenId = await _nameRace(ns.computeId(v));
+      // resolve() = explicit recipient if set, else owner; 0 if inactive/expired.
+      addr = await _nameRace(ns.resolve(tokenId));
+    } catch(e) { throw await _nameFailure(v, e); }
+    // The call itself succeeded here, so a zero really is an unregistered or
+    // expired name — no liveness probe needed.
+    if(!addr || addr === ethers.ZeroAddress) throw new NameError('notfound', nameErrText(v, { nameKind:'notfound' }));
     return ethers.getAddress(addr);
   }
   // Case-insensitive to match the field hints: ENS normalizes the name itself,
   // and both name contracts hash case-insensitively, so TYPED.ETH resolves.
   if(/\.eth$/i.test(v)) {
-    const addr = await ethMainRpc.resolveName(v);
-    if(!addr) throw new Error(`${v} not found`);
+    let addr;
+    try { addr = await _nameRace(mainnetRpc().resolveName(v)); }
+    catch(e) { throw await _nameFailure(v, e); }
+    if(!addr) throw await _nameFailure(v, null);
     return ethers.getAddress(addr);
   }
-  throw new Error('Enter an address, .eth, .wei, or .gwei name');
+  throw new NameError('invalid', 'ENTER AN ADDRESS, .eth, .wei OR .gwei NAME');
+}
+
+// ── NAME PREVIEW (what you review is what you sign) ───────────────
+// A signer approving a send to "alice.eth" has to see the address that send
+// will actually carry. Punting it to the wallet prompt does not work here: in
+// a multisig the co-signers never see that prompt — they see the queued
+// proposal, already resolved, and vote on it. So names are resolved in the
+// review card, before anything is signed.
+//
+// Resolution is async and the review repaints on every keystroke, so each
+// result is cached per (name, chain) and the card is repainted when one lands.
+const _namePreview = {};
+function _pvKey(raw, chainId){ return String(raw || '').trim().toLowerCase() + '@' + chainId; }
+
+// ENSIP-11: a name may publish a different address for a specific chain. Worth
+// surfacing — sending to the mainnet address of a wallet that lives elsewhere
+// on this chain is unrecoverable — but not worth silently obeying: distinct L2
+// records are vanishingly rare (none of ENS's own, Base's or Coinbase's names
+// publish one), and quietly disagreeing with every other tool about where funds
+// go is its own hazard. So it warns; it never redirects. Never throws.
+async function altChainAddress(name, chainId, mainAddr){
+  if(!chainId || chainId === 1 || !/\.eth$/i.test(name)) return null;
+  try {
+    const r = await _nameRace(mainnetRpc().getResolver(name));
+    if(!r) return null;
+    const a = await _nameRace(r.getAddress(0x80000000 + chainId));
+    if(!a || !ethers.isAddress(a)) return null;
+    const addr = ethers.getAddress(a);
+    return addr.toLowerCase() === String(mainAddr).toLowerCase() ? null : addr;
+  } catch(_) { return null; }
+}
+
+// Kick off (or reuse) resolution of `raw` for display. Returns the entry
+// synchronously so the renderer can show 'resolving' immediately.
+function previewName(raw, chainId, onSettle){
+  const key = String(raw || '').trim();
+  if(!key || !NAME_RE.test(key)) return null;
+  const ck = _pvKey(key, chainId);
+  if(_namePreview[ck]) return _namePreview[ck];
+  const entry = _namePreview[ck] = { state:'resolving', addr:null, alt:null, err:'' };
+  (async () => {
+    try {
+      entry.addr = await resolveName(key);
+      entry.state = 'ok';
+      entry.alt = await altChainAddress(key, chainId, entry.addr);
+    } catch(e) {
+      entry.state = 'err';
+      entry.err = e.shortMessage || e.message || 'DOES NOT RESOLVE';
+    }
+    try { onSettle && onSettle(entry); } catch(_) {}
+  })();
+  return entry;
+}
+
+// What was reviewed is what gets signed. Names are mutable, and the gap between
+// reviewing a proposal and signing it is exactly where a repoint would land.
+function assertPreviewed(raw, resolved, chainId){
+  const p = _namePreview[_pvKey(raw, chainId)];
+  if(p && p.state === 'ok' && p.addr && p.addr.toLowerCase() !== String(resolved).toLowerCase())
+    throw new Error(`${String(raw).toUpperCase()} NOW RESOLVES ELSEWHERE — REVIEW IT AGAIN`);
+  return resolved;
 }
 
 // Reverse-resolve owner addresses to human-readable names. Primary: WNS (.wei)
@@ -3789,35 +4035,94 @@ async function resolveOwnerNames(addrs) {
     else if(ethers.isAddress(a)) need.push(a);
   }
   if(!need.length) return out;
+  // A lookup that never completed must not be remembered as "this address has
+  // no name" — mainnet is a foreign network from every other chain, and one
+  // rate-limited burst would otherwise blank the signer list for the rest of
+  // the session. Only addresses mainnet actually answered for get cached.
+  const answered = new Set();
   // 1) Batched .wei + .gwei reverse resolution in a single Multicall3 on
   // mainnet. Services are walked in NAME_SERVICES order and the first name
   // found wins, so .wei takes precedence over .gwei for the same address.
+  const claimed = {};
   try {
-    const mc = new ethers.Contract(MC3, MC3_ABI, ethMainRpc);
+    const mc = new ethers.Contract(MC3, MC3_ABI, mainnetRpc());
     const calls = [];
     for(const svc of NAME_SERVICES) {
       for(const a of need) calls.push({ target: svc.addr, allowFailure: true, callData: weinsIface.encodeFunctionData('reverseResolve', [a]) });
     }
     const res = await mc.aggregate3(calls);
     res.forEach((r, n) => {
-      if(!r.success) return;
       const k = need[n % need.length].toLowerCase();
-      if(out[k]) return; // an earlier (more-preferred) service already named it
+      answered.add(k);
+      if(!r.success || claimed[k]) return;   // failed, or a preferred service already named it
       try {
         const nm = weinsIface.decodeFunctionResult('reverseResolve', r.returnData)[0];
-        if(nm) out[k] = nm.toLowerCase();
+        if(nm) claimed[k] = { name: nm.toLowerCase(), svc: NAME_SERVICES[Math.floor(n / need.length)] };
       } catch(_) {}
     });
   } catch(e) { console.error('wei/gwei reverse resolve:', e); }
-  // 2) ENS fallback for owners without a .wei / .gwei name
+  // 1b) A reverse record is a string the address chose, not proof of anything:
+  // the name can be repointed with setAddr or sold on afterwards, and the stale
+  // record survives. ENS reverse is forward-verified for us by ethers, so do
+  // the same here — resolve each claimed name and keep only the ones that come
+  // back to the address claiming them. One extra batched call, and a displayed
+  // name means what a signer would assume it means.
+  const claims = Object.entries(claimed);
+  if(claims.length) {
+    try {
+      const mc = new ethers.Contract(MC3, MC3_ABI, mainnetRpc());
+      // computeId is pure but still a call, so batch it too rather than firing
+      // one per owner: a cloned Safe can bring a hundred of them.
+      const idRes = await mc.aggregate3(claims.map(([, c]) =>
+        ({ target: c.svc.addr, allowFailure: true, callData: weinsIface.encodeFunctionData('computeId', [c.name]) })));
+      const fwdCalls = [];
+      const fwdOf = [];
+      idRes.forEach((r, i) => {
+        if(!r.success) return;
+        try {
+          const id = weinsIface.decodeFunctionResult('computeId', r.returnData)[0];
+          fwdOf.push(i);
+          fwdCalls.push({ target: claims[i][1].svc.addr, allowFailure: true, callData: weinsIface.encodeFunctionData('resolve', [id]) });
+        } catch(_) {}
+      });
+      const fwd = fwdCalls.length ? await mc.aggregate3(fwdCalls) : [];
+      fwd.forEach((r, n) => {
+        if(!r.success) return;
+        try {
+          const back = weinsIface.decodeFunctionResult('resolve', r.returnData)[0];
+          const [k, c] = claims[fwdOf[n]];
+          if(String(back).toLowerCase() === k) out[k] = c.name;
+        } catch(_) {}
+      });
+    } catch(e) {
+      // Could not verify: show nothing rather than an unverified name, and do
+      // not remember the blank — these addresses go back in the queue.
+      console.error('wei/gwei forward verify:', e);
+      for(const [k] of claims) answered.delete(k);
+    }
+  }
+  // 2) ENS fallback for owners without a verified .wei / .gwei name. Capped
+  // concurrency: lookupAddress is several round trips each, and a cloned Safe
+  // can arrive with a hundred owners at once.
   const unnamed = need.filter(a => !out[a.toLowerCase()]);
   if(unnamed.length) {
-    await Promise.all(unnamed.map(async a => {
-      try { const nm = await ethMainRpc.lookupAddress(a); if(nm) out[a.toLowerCase()] = nm; } catch(_) {}
+    const queue = unnamed.slice();
+    await Promise.all(Array.from({ length: Math.min(6, queue.length) }, async () => {
+      while(queue.length) {
+        const a = queue.shift();
+        // lookupAddress forward-verifies the ENS name before returning it.
+        try { const nm = await mainnetRpc().lookupAddress(a); if(nm) out[a.toLowerCase()] = String(nm).toLowerCase(); answered.add(a.toLowerCase()); }
+        catch(_) {}
+      }
     }));
   }
-  // Cache results (including negative lookups) to avoid repeat network calls
-  for(const a of need) { const k = a.toLowerCase(); _ownerNameCache[k] = out[k] || null; }
+  // Cache both hits and confirmed misses; leave unanswered addresses uncached
+  // so a later call can try again.
+  for(const a of need) {
+    const k = a.toLowerCase();
+    if(out[k]) _ownerNameCache[k] = out[k];
+    else if(answered.has(k)) _ownerNameCache[k] = null;
+  }
   return out;
 }
 
@@ -4465,7 +4770,7 @@ async function loadVaultByAddress() {
     checksummed = await resolveName(raw);
   } catch(e) {
     hideLoading();
-    flash(isName ? 'NAME NOT FOUND' : 'ENTER A VALID ADDRESS OR NAME');
+    flash(isName ? nameErrText(raw, e) : 'ENTER A VALID ADDRESS OR NAME');
     return;
   }
   // Check if already loaded
@@ -4529,8 +4834,13 @@ function buildInitcode(impl) {
   return '0x602d5f8160095f39f35f5f365f5f37365f73' + impl.slice(2).toLowerCase() + '5af43d5f5f3e6029573d5ffd5b3d5ff3';
 }
 
-async function mineVanitySalt(factory, impl, caller, rp) {
-  rp = rp || provider;
+// `rps` is every chain this deploy will touch, not just one. The salt is
+// chain-independent, so a candidate that is free here but taken on a clone
+// target lands on an address that already holds a different vault — and the
+// deploy loop would report that stranger's vault as "already deployed".
+async function mineVanitySalt(factory, impl, caller, rps) {
+  const providers = (Array.isArray(rps) ? rps : [rps]).filter(Boolean);
+  if(!providers.length) providers.push(provider);
   const hash = ethers.keccak256(buildInitcode(impl));
   const base = BigInt(caller) << 96n;
   const MAX_ITER = 2000000n;
@@ -4538,13 +4848,32 @@ async function mineVanitySalt(factory, impl, caller, rp) {
     const salt = '0x' + (base | n).toString(16).padStart(64, '0');
     const addr = ethers.getCreate2Address(factory, salt, hash);
     if(addr.slice(2, 4) === '00') {
-      const code = await rp.getCode(addr);
-      if(code !== '0x') continue; // already deployed on this chain
+      // A chain that will not answer cannot clear the address, but it cannot
+      // block mining forever either — deployOnChain re-checks before signing.
+      const codes = await Promise.all(providers.map(p => p.getCode(addr).catch(() => '0x')));
+      if(codes.some(code => code && code !== '0x')) continue; // taken somewhere
       return { salt: base | n, address: addr, nonce: n };
     }
     if(n > 0n && n % 5000n === 0n) await new Promise(r => setTimeout(r, 0));
   }
   throw new Error('Vanity address mining exceeded max iterations');
+}
+
+// Does the contract already sitting at `addr` match what this deploy asked for?
+// true = the same vault (a retry landing on work already done), false = someone
+// else's, null = the chain could not be read. Called before a pre-existing
+// deployment is allowed to stand in for this one.
+async function vaultMatchesCtx(addr, ctx){
+  try {
+    const ms = new ethers.Contract(addr, MULTISIG_ABI, provider);
+    const [th, dl, ex, ow] = await Promise.all([ms.threshold(), ms.delay(), ms.executor(), ms.getOwners()]);
+    if(Number(th) !== Number(ctx.thresh)) return false;
+    if(Number(dl) !== Number(ctx.del)) return false;
+    if(String(ex).toLowerCase() !== String(ctx.executor).toLowerCase()) return false;
+    const have = ow.map(a => String(a).toLowerCase()).sort();
+    const want = ctx.resolvedOwners.map(a => a.toLowerCase()).sort();
+    return have.length === want.length && have.every((v, i) => v === want[i]);
+  } catch(_) { return null; }
 }
 
 // ── PRODUCTION: DEPLOY ────────────────────────────────────────────
@@ -4558,15 +4887,22 @@ async function prodDeploy() {
   if(!valid.length) { flash('ADD AT LEAST 1 OWNER'); return; }
   if(parseInt(c.threshold) > valid.length) { flash('THRESHOLD > OWNER COUNT'); return; }
 
-  // Resolve all owner addresses in parallel
-  let resolvedOwners;
+  // Resolve all owner addresses in parallel, each one welded to its label.
+  // init() needs the owner list strictly ascending, and the labels are stored
+  // positionally against it (owners[i] ↔ labels[i]), so the two have to be
+  // sorted as pairs. Sorting the addresses alone leaves the labels behind in
+  // form order and silently files every signer under someone else's name —
+  // which a cloned Safe, whose getOwners() order is arbitrary, hits every time.
+  let pairs;
   try {
-    resolvedOwners = await Promise.all(valid.map(o => resolveName(o.addr)));
+    pairs = await Promise.all(valid.map(async o => ({ addr: await resolveName(o.addr), label: o.label || '' })));
   } catch(e) {
-    flash(`INVALID OWNER: ${e.message}`);
+    flash(`OWNER: ${e.shortMessage || e.message}`);
     return;
   }
-  resolvedOwners.sort((a, b) => a.toLowerCase() < b.toLowerCase() ? -1 : 1);
+  pairs.sort((a, b) => a.addr.toLowerCase() < b.addr.toLowerCase() ? -1 : 1);
+  const resolvedOwners = pairs.map(p => p.addr);
+  const ownerLabels = pairs.map(p => p.label);
 
   // Reject duplicates before the expensive mining/deploy — init() requires
   // strictly ascending owners, so a repeat (incl. two names resolving to the
@@ -4576,12 +4912,18 @@ async function prodDeploy() {
       flash('DUPLICATE OWNER ADDRESS'); return;
     }
   }
+  // Same reasoning, for the sentinel end of the range: owners must be > 0x1.
+  // A name can resolve to anything, so this is checked after resolution too.
+  if(resolvedOwners.some(a => BigInt(a) <= 1n)) { flash('OWNER 0x0 IS NOT A VALID ADDRESS'); return; }
 
   const thresh = Math.min(parseInt(c.threshold) || 1, resolvedOwners.length);
   const del = toSec(c.delayVal, c.delayUnit);
   const executor = del > 0 ? TIMELOCK_EXECUTOR : ethers.ZeroAddress;
   const wantForward = c.fastPath && del > 0;
-  const ownerLabels = valid.map(o => o.label || '');
+  // register_wallet() requires the deployer to be one of the owners. Cloning a
+  // Safe you only watch produces exactly that vault, so surface it before the
+  // deploy rather than losing the record afterwards.
+  const deployerIsOwner = resolvedOwners.some(a => a.toLowerCase() === connectedAddress.toLowerCase());
 
   // Deploy chains: primary first, then clone targets. The CREATE2 address is
   // identical on every chain (same factory + salt + init code), so the vault
@@ -4594,27 +4936,32 @@ async function prodDeploy() {
   S.deploy = {
     chains,
     steps: chains.map(n => ({ id:n.id, name:n.name, status:'pending' })),
-    ctx: { resolvedOwners, del, thresh, executor, wantForward, ownerLabels, connectedAddress, cfName: c.name || null, salt:null, minedAddr:null },
+    ctx: { resolvedOwners, del, thresh, executor, wantForward, ownerLabels, connectedAddress, cfName: c.name || null, salt:null, minedAddr:null, deployerIsOwner },
     phase:'preflight', address:null, done:false, lastVaultAddr:null,
   };
   render();
 
-  // Preflight (read-only, no chain switch): does the wallet have gas on each
-  // chain, and — when fast-path is on — is the TimelockExecutor deployed there?
+  // Preflight (read-only, no chain switch): is the factory deployed on each
+  // chain, does the wallet have gas there, and — when fast-path is on — is the
+  // TimelockExecutor present? The factory check is the one that cannot be
+  // skipped: a create() sent to a chain without it is a plain transfer to a
+  // codeless address, which mines successfully and deploys nothing.
   const pfPromise = Promise.all(chains.map(async net => {
     const rp = makeProvider(net.id);
-    let gasOk = null, executorOk = null;
+    let gasOk = null, executorOk = null, factoryOk = null;
+    try { const fc = await rp.getCode(FACTORY); factoryOk = !!fc && fc !== '0x'; } catch(_){}
     try { gasOk = (await rp.getBalance(connectedAddress)) > 0n; } catch(_){}
     if(wantForward){ try { const code = await rp.getCode(TIMELOCK_EXECUTOR); executorOk = !!code && code !== '0x'; } catch(_){} }
-    return { gasOk, executorOk };
+    return { gasOk, executorOk, factoryOk };
   }));
-  // Mine the CREATE2 salt up front (chain-independent), dedup-checked against the
-  // primary chain, so the actual vault address is known and shown in the review /
-  // deploy overlay before the user approves any wallet prompt. Runs concurrently
-  // with preflight; if it fails we fall back to lazy mining inside deployOnChain.
+  // Mine the CREATE2 salt up front (chain-independent), dedup-checked against
+  // every chain this deploy targets, so the actual vault address is known and
+  // shown in the review / deploy overlay before the user approves any wallet
+  // prompt. Runs concurrently with preflight; if it fails we fall back to lazy
+  // mining inside deployOnChain.
   const minePromise = (async () => {
     try {
-      const mined = await mineVanitySalt(FACTORY, IMPLEMENTATION, connectedAddress, makeProvider(chains[0].id));
+      const mined = await mineVanitySalt(FACTORY, IMPLEMENTATION, connectedAddress, chains.map(n => makeProvider(n.id)));
       if(S.deploy){ S.deploy.ctx.salt = mined.salt; S.deploy.ctx.minedAddr = mined.address; S.deploy.address = mined.address; render(); }
     } catch(e){ console.error('Vanity mining (preflight):', e); }
   })();
@@ -4622,9 +4969,10 @@ async function prodDeploy() {
   await minePromise;
   if(!S.deploy) return;   // user cancelled during preflight
   pf.forEach((r,i)=>{ S.deploy.steps[i].pf = r; });
+  const noFactory = pf.some(r => r.factoryOk === false);                 // factory truly missing
   const blocked = wantForward && pf.some(r => r.executorOk === false);   // executor truly missing
   const warn = pf.some(r => r.gasOk === false);
-  if(blocked || warn){ S.deploy.phase = 'review'; render(); return; }    // wait for user to PROCEED
+  if(noFactory || blocked || warn || !deployerIsOwner){ S.deploy.phase = 'review'; render(); return; }  // wait for user to PROCEED
   runDeploy();
 }
 
@@ -4652,15 +5000,35 @@ async function deployOnChain(k){
     if(window._connectedWalletProvider && !(await waitForWalletChain(net.id))){
       step.status='failed'; step.err=`SWITCH TO ${net.name} IN WALLET`; render(); return false;
     }
-    const signer = requireSigner()?.signer;
-    if(!signer){ step.status='failed'; step.err='NO SIGNER'; render(); return false; }
+    const w = requireSigner();
+    if(!w || !w.signer){ step.status='failed'; step.err='NO SIGNER'; render(); return false; }
+    // The salt is bound to the deployer: the factory requires salt >> 96 to be
+    // msg.sender. Switching accounts mid-deploy would otherwise revert with an
+    // opaque SaltDoesNotStartWith after the wallet prompt was already approved.
+    if(w.addr && ctx.connectedAddress && w.addr.toLowerCase() !== ctx.connectedAddress.toLowerCase()){
+      step.status='failed'; step.err=`SWITCH BACK TO ${shortAddr(ctx.connectedAddress)}`; render(); return false;
+    }
+    const signer = w.signer;
     if(!ctx.salt){
       step.status='mining'; render();
-      const mined = await mineVanitySalt(FACTORY, IMPLEMENTATION, ctx.connectedAddress);
+      const mined = await mineVanitySalt(FACTORY, IMPLEMENTATION, ctx.connectedAddress, d.chains.map(n => makeProvider(n.id)));
       ctx.salt = mined.salt; ctx.minedAddr = mined.address; d.address = mined.address; render();
     }
     const existing = await provider.getCode(ctx.minedAddr);
-    if(existing && existing !== '0x'){ step.status='skipped'; step.address=ctx.minedAddr; d.lastVaultAddr=ctx.minedAddr; render(); return true; }
+    if(existing && existing !== '0x'){
+      // Something already holds this address. On a retry that is this vault, so
+      // skipping is right. But an earlier deploy from the same EOA can occupy
+      // the same salt on a chain the mining pass never saw, and that vault has
+      // a different signer set — reporting it as "already deployed" would hand
+      // back a stranger's wallet as though the clone had succeeded.
+      const same = await vaultMatchesCtx(ctx.minedAddr, ctx);
+      if(same !== true){
+        step.status='failed';
+        step.err = same === false ? 'ADDRESS HOLDS A DIFFERENT VAULT' : 'CANNOT VERIFY EXISTING VAULT';
+        render(); return false;
+      }
+      step.status='skipped'; step.address=ctx.minedAddr; d.lastVaultAddr=ctx.minedAddr; render(); return true;
+    }
     step.status='deploying'; render();
     const factory = new ethers.Contract(FACTORY, FACTORY_ABI, signer);
     let tx;
@@ -4674,12 +5042,21 @@ async function deployOnChain(k){
     let walletAddr = ctx.minedAddr;
     const iface = new ethers.Interface(FACTORY_ABI);
     for(const log of receipt.logs){ try { const p = iface.parseLog(log); if(p?.name === 'Created'){ walletAddr = p.args[0]; break; } } catch(_){} }
+    // A mined receipt is not a deployment. If the factory is absent on this
+    // chain the call is a plain transfer to a codeless address: status 1, no
+    // Created event, nothing deployed. Confirm the vault has code before
+    // recording it as one.
+    const deployedCode = await provider.getCode(walletAddr).catch(() => null);
+    if(deployedCode === '0x'){
+      step.status='failed'; step.err='NO CODE AT ADDRESS — FACTORY MISSING?'; step.txHash=receipt.hash; render(); return false;
+    }
     d.lastVaultAddr = walletAddr;
     try {
       const ms = new ethers.Contract(walletAddr, MULTISIG_ABI, provider);
       const onchainNonce = Number(await ms.nonce());
-      await dbRegisterWallet(walletAddr, ctx.connectedAddress, ctx.salt, ctx.resolvedOwners, ctx.thresh, ctx.del, ctx.executor, Number(receipt.blockNumber), receipt.hash, ctx.cfName, ctx.ownerLabels, onchainNonce);
-    } catch(e){ console.error('DB register failed:', e); }
+      const wid = await dbRegisterWallet(walletAddr, ctx.connectedAddress, ctx.salt, ctx.resolvedOwners, ctx.thresh, ctx.del, ctx.executor, Number(receipt.blockNumber), receipt.hash, ctx.cfName, ctx.ownerLabels, onchainNonce);
+      if(!wid) step.dbWarn = true;   // deployed on-chain, absent from history
+    } catch(e){ console.error('DB register failed:', e); step.dbWarn = true; }
     step.status='done'; step.address=walletAddr; step.txHash=receipt.hash; render();
     return true;
   } catch(e){
@@ -5427,7 +5804,7 @@ async function buildSimInput() {
     const amt = stripCommas(S.txAmount || document.getElementById('tx-amount')?.value || '0');
     const to = S.txTo || document.getElementById('tx-to')?.value || '';
     if(!to || !amt || !(parseFloat(amt) > 0)) throw new Error('FILL IN AMOUNT AND RECIPIENT');
-    const toAddr = await resolveName(to);
+    const toAddr = assertPreviewed(to, await resolveName(to), S.chainId);
     const tokenInfo = curTok(v);
     const isEth = tokenInfo.address === ethers.ZeroAddress;
     const amountRaw = isEth ? ethers.parseEther(amt) : ethers.parseUnits(amt, tokenInfo.decimals);
@@ -5452,13 +5829,13 @@ async function buildSimInput() {
     if(!target) throw new Error('ENTER TARGET');
     const val = stripCommas(S.cxValue || document.getElementById('cx-value')?.value || '0');
     const d = getCxCalldata(); if(d === null) throw new Error('INVALID CALLDATA');
-    const resolvedTarget = await resolveName(target);
+    const resolvedTarget = assertPreviewed(target, await resolveName(target), S.chainId);
     return { from, to: resolvedTarget, value: ethers.parseEther(val), data: d };
   }
   if(S.txMode === 'BATCH') {
     const calls = S.batch.filter(c => c.t.trim());
     if(!calls.length) throw new Error('ADD AT LEAST 1 CALL');
-    const targets = await Promise.all(calls.map(c => resolveName(c.t)));
+    const targets = await Promise.all(calls.map(async c => assertPreviewed(c.t, await resolveName(c.t), S.chainId)));
     const values = calls.map(c => ethers.parseEther(stripCommas(c.v || '0')));
     const datas = calls.map(c => (c.d || '0x').trim());
     return { from, to: v.address, value: 0n, data: msIface.encodeFunctionData('batch', [targets, values, datas]) };
@@ -5646,7 +6023,7 @@ async function prodSubmitTransfer() {
   if(!to || !amt) { flash('FILL IN AMOUNT AND RECIPIENT'); return; }
 
   try {
-    const toAddr = await resolveName(to);
+    const toAddr = assertPreviewed(to, await resolveName(to), S.chainId);
     const tokenInfo = curTok(v);
     const isEth = tokenInfo.address === ethers.ZeroAddress;
     const amountRaw = isEth ? ethers.parseEther(amt) : ethers.parseUnits(amt, tokenInfo.decimals);
@@ -5745,7 +6122,7 @@ async function prodSubmitCustom() {
   if(d !== '0x' && d.length % 2 !== 0) { flash('INVALID CALLDATA — ODD LENGTH'); return; }
 
   try {
-    const resolvedTarget = await resolveName(target);
+    const resolvedTarget = assertPreviewed(target, await resolveName(target), S.chainId);
     const value = ethers.parseEther(val).toString();
 
     const domain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address };
@@ -5787,7 +6164,7 @@ async function prodSubmitBatch() {
   }
 
   try {
-    const targets = await Promise.all(calls.map(c => resolveName(c.t)));
+    const targets = await Promise.all(calls.map(async c => assertPreviewed(c.t, await resolveName(c.t), S.chainId)));
     const values = calls.map(c => ethers.parseEther(stripCommas(c.v || '0')));
     const datas = calls.map(c => (c.d || '0x').trim());
 
@@ -6067,6 +6444,10 @@ function handleDeepLink() {
 // ── TICK (block number + ETA updates) ─────────────────────────────
 async function fetchBlock() {
   try {
+    // The active-chain provider is held in a global rather than fetched per
+    // call, so it cannot heal itself the way makeProvider's callers do. This
+    // poll runs anyway — use it to swap a wedged provider out.
+    if (provider && provider._wedged) provider = makeProvider(S.chainId);
     const n = await provider.getBlockNumber();
     S.latestBlock = n;
     document.querySelectorAll("[data-block]").forEach(el => el.textContent = "BLOCK " + n.toLocaleString());
