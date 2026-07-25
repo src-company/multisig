@@ -620,7 +620,7 @@ function renderSlowOutbound(v, mob){
     const amtStr = fmtAmount(r.amount, r.decimals);
     const toShort = r.to.slice(0,6) + '…' + r.to.slice(-4);
     const timeLabel = reversible
-      ? `<span style="color:var(--a)">UNLOCKS IN ${fmtRemaining(remaining)}</span>${tight?`<span style="color:var(--y);margin-left:8px" title="This vault's timelock (${fmtD(v.delay)}) is longer than the time left to reverse — a reverse proposal may expire before it can execute. Use the fast path if all owners sign.">&#9888; MAY MISS WINDOW</span>`:''}`
+      ? `<span class="slow-eta" data-slow-unlock="${r.unlockAt}" style="color:var(--a)">UNLOCKS IN ${fmtRemaining(remaining)}</span>${tight?`<span style="color:var(--y);margin-left:8px" title="This vault's timelock (${fmtD(v.delay)}) is longer than the time left to reverse — a reverse proposal may expire before it can execute. Use the fast path if all owners sign.">&#9888; MAY MISS WINDOW</span>`:''}`
       : `<span style="color:var(--d)">UNLOCKED · NO LONGER REVERSIBLE</span>`;
     const btn = reversible
       ? `<button class="btn btn-outline btn-sm" onclick="proposeSlowReverse(${S.sel},'${r.transferId}')" title="Propose to cancel this SLOW transfer and return the funds to the vault (reverse + withdraw, atomic)">REVERSE</button>`
@@ -4991,6 +4991,30 @@ setInterval(pollTick, 12000);
 // Refresh immediately when the tab regains focus instead of waiting out the
 // interval, so the block number and ETAs are current the moment the user returns.
 document.addEventListener("visibilitychange", () => { if (!document.hidden) pollTick(); });
+
+// SLOW · OUTBOUND unlock countdowns tick every second (in-place text updates so
+// the seconds are visible in the final minute). When a timer crosses zero, do a
+// single focus-guarded re-render so that row drops its REVERSE button and
+// relabels as no longer reversible.
+function tickSlowCountdowns() {
+  if (document.hidden) return;
+  const els = document.querySelectorAll('[data-slow-unlock]');
+  if (!els.length) return;
+  const now = NOW();
+  let crossed = false;
+  els.forEach(el => {
+    const remaining = (+el.dataset.slowUnlock) - now;
+    if (remaining > 0) el.textContent = 'UNLOCKS IN ' + fmtRemaining(remaining);
+    else crossed = true;
+  });
+  if (crossed) {
+    const hasFocused = document.querySelector(
+      '.txb input:focus, .txb textarea:focus, .content input:focus, .content textarea:focus, .content select:focus'
+    );
+    if (!hasFocused) render();
+  }
+}
+setInterval(tickSlowCountdowns, 1000);
 
 // ── INIT ──────────────────────────────────────────────────────────
 (function init() {
