@@ -2816,7 +2816,7 @@ async function dbMarkExecuted(txId, block, execTx) {
   await sb.rpc('mark_executed', { p_tx_id: txId, p_block: block, p_execution_tx: execTx, p_caller: window._connectedAddress });
 }
 
-async function dbMarkQueued(txId, eta, block) {
+async function dbMarkQueued(txId, eta, block, queueTx) {
   await sb.rpc('mark_queued', { p_tx_id: txId, p_eta: eta, p_block: block, p_queue_tx: queueTx || null, p_caller: window._connectedAddress });
 }
 
@@ -3115,6 +3115,7 @@ async function loadVaultQueue(vi) {
         approvals: approvals,
         dbId: t.id,
         txHash: t.tx_hash,
+        queueTx: t.queue_tx || null,
         callData: t.call_data,
         rawValue: t.value,
         signatures: sigs.map(s => ({signer: s.signer, sig: s.signature, sigType: s.sig_type})),
@@ -3772,7 +3773,7 @@ async function prodSubmit(vi, nonce) {
             tx.eta = eta;
             tx.queueTx = receipt.hash;
             flash(`QUEUED #${nonce} \u2014 ETA: ${new Date(eta*1000).toLocaleString()}`);
-            if(tx.dbId) await dbMarkQueued(tx.dbId, eta, Number(receipt.blockNumber));
+            if(tx.dbId) await dbMarkQueued(tx.dbId, eta, Number(receipt.blockNumber), receipt.hash);
           }
         }
       } catch(_){}
