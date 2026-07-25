@@ -1,5 +1,5 @@
 /* Wallet modal — styled for MULTISIG.software brutalist design */
-/* Uses CSS vars from app.css: --a, --bg, --d, --m, --ln, --r, --f */
+/* Uses CSS vars from index.html: --a, --bg, --d, --m, --ln, --r, --on, --f */
 
 .wallet-modal-overlay{
   display:none;position:fixed;inset:0;
@@ -11,7 +11,7 @@
 body.modal-open{overflow:hidden}
 
 .wallet-modal{
-  background:var(--bg,#2D5FE8);border:2px solid var(--a,#0A0A0A);
+  background:var(--bg,#2D5FE8);border:2px solid var(--a,#F5FBFF);
   padding:24px;width:100%;max-width:380px;
   max-height:calc(100vh - 80px);max-height:calc(100dvh - 80px);
   display:flex;flex-direction:column;overflow:hidden;
@@ -23,10 +23,10 @@ body.modal-open{overflow:hidden}
 }
 .wallet-modal-title{
   font-size:10px;font-weight:700;letter-spacing:3px;
-  text-transform:uppercase;color:var(--a,#0A0A0A);
+  text-transform:uppercase;color:var(--a,#F5FBFF);
 }
 .wallet-modal-close{
-  background:transparent;border:none;color:var(--a,#0A0A0A);
+  background:transparent;border:none;color:var(--a,#F5FBFF);
   font-size:16px;cursor:pointer;padding:8px;margin:-8px;
   opacity:.4;transition:opacity .15s;font-family:var(--f,monospace);
 }
@@ -37,13 +37,13 @@ body.modal-open{overflow:hidden}
 .wallet-option{
   display:flex;align-items:center;gap:12px;
   padding:14px 12px;background:transparent;
-  border:1px solid var(--ln,#0A0A0A1A);border-bottom:none;
-  color:var(--a,#0A0A0A);cursor:pointer;
+  border:1px solid var(--ln,#FFFFFF2E);border-bottom:none;
+  color:var(--a,#F5FBFF);cursor:pointer;
   transition:background .15s,color .15s;
   font-family:var(--f,monospace);
 }
-.wallet-option:last-of-type{border-bottom:1px solid var(--ln,#0A0A0A1A)}
-@media(hover:hover){.wallet-option:hover{background:var(--ln,#0A0A0A1A)}}
+.wallet-option:last-of-type{border-bottom:1px solid var(--ln,#FFFFFF2E)}
+@media(hover:hover){.wallet-option:hover{background:var(--ln,#FFFFFF2E)}}
 .wallet-option:active{opacity:.7}
 .wallet-option-icon{font-size:1.5rem;display:flex;align-items:center}
 .wallet-option-icon img,.wallet-option-icon svg{width:1.5rem;height:auto}
@@ -52,14 +52,14 @@ body.modal-open{overflow:hidden}
 }
 
 .wallet-option.disconnect{
-  border:1px solid color-mix(in srgb,var(--r,#FF6B6B) 35%,transparent);
-  color:var(--r,#FF6B6B);justify-content:center;margin-top:12px;
+  border:1px solid color-mix(in srgb,var(--r,#FFB1AC) 35%,transparent);
+  color:var(--r,#FFB1AC);justify-content:center;margin-top:12px;
 }
-@media(hover:hover){.wallet-option.disconnect:hover{background:var(--r,#FF6B6B);color:var(--bg,#2D5FE8)}}
+@media(hover:hover){.wallet-option.disconnect:hover{background:var(--r,#FFB1AC);color:var(--on,#0A0A0A)}}
 
 .wallet-addr-display{
-  padding:12px;border:1px solid var(--ln,#0A0A0A1A);margin-bottom:16px;
-  font-size:11px;word-break:break-all;color:var(--m,#0A0A0ACC);
+  padding:12px;border:1px solid var(--ln,#FFFFFF2E);margin-bottom:16px;
+  font-size:11px;word-break:break-all;color:var(--m,#EAF4FF);
   letter-spacing:1px;
 }
 
