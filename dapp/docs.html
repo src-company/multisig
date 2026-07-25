@@ -216,6 +216,13 @@ AUDITS:`
   <td><a href="https://audit.multisig.wei.limo" target="_blank" rel="noopener">READ &nearr;</a></td>
 </tr>
 <tr>
+  <td>2026-07-25</td>
+  <td>leftclaw<br><span style="color:var(--d);font-size:11px">multi-agent pipeline<br>via One Dollar Audit</span></td>
+  <td>Multisig.sol +<br>TimelockExecutor.sol<br>+ IMultisig</td>
+  <td>1 critical &middot; 2 high<br>4 medium &middot; 5 low</td>
+  <td><a href="https://github.com/src-company/multisig/blob/main/audit/report-leftclaw.md" target="_blank" rel="noopener">READ &nearr;</a><br><a href="https://leftclaw.services/result/500.html" target="_blank" rel="noopener">ORIGINAL &nearr;</a></td>
+</tr>
+<tr>
   <td>2026-07-26</td>
   <td>GPT-5.6 Sol<br><span style="color:var(--d);font-size:11px">Pro, independent</span></td>
   <td>Multisig.sol +<br>TimelockExecutor.sol<br>composition review</td>
@@ -277,6 +284,9 @@ AUDITS:`
 
 <div class="sig">H-01 &middot; ROUTE-UNBOUND SIGNATURES <span class="params">— high, mitigated</span></div>
 <div class="desc">The most serious issue any review has raised here, and the only one that touches the cancel path — which needs no forwardEnabled, so it reached every vault with a timelock and this executor. Every executor bundle this app builds now spends one slot on a sender slot bound to the submitter, so a copied bundle is inert on either route. For a cancel the protection is complete: the bundle is exactly threshold slots, so binding one leaves a copier a signature short. For unanimous accelerate or instant execute on a k-of-n vault it is partial — an adversary can still extract a threshold subset from the remaining signatures to queue the action and burn the nonce, which delays rather than defeats it. Private submission is the remaining mitigation there.</div>
+
+<div class="sig">H-2 &middot; THRESHOLD OVERFLOW AT 1009 <span class="params">— mitigated</span></div>
+<div class="desc">execute() computes the required signature length in uint16 inside an unchecked block, so at a threshold of 1009 it wraps to 49 while the verification loop still reads 1009 slots — no signature set can satisfy both, and owner-signed execution is dead permanently. ERC-1271 and the executor path widen correctly and keep working, which is what would make an attacker-held executor unremovable. Reachable only by deliberately configuring 1009+ owners; this app caps owners and thresholds at 1008.</div>
 
 <div class="sig">L-04 &middot; EXECUTOR AS A DEAD END <span class="params">— low, mitigated</span></div>
 <div class="desc">The TimelockExecutor has no withdrawal path either. Plain ETH bounces since it has no receive function, but tokens sent to it are stuck forever. It is now refused as a destination alongside the factory and the implementation.</div>

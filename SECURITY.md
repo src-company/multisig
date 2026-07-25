@@ -57,6 +57,116 @@ manual review. Do not cite Appendix B as coverage for any of the above.
 
 ---
 
+## Fourth Review (leftclaw, 2026-07-25) — Disposition
+
+**Full report with our responses inline:**
+[`audit/report-leftclaw.md`](audit/report-leftclaw.md) ·
+[original](https://leftclaw.services/result/500.html)
+
+A multi-agent automated pipeline commissioned via One Dollar Audit. Filed 1
+Critical, 2 High, 4 Medium, 5 Low. Two findings contradicted earlier reviews, so
+both were settled against solc `0.8.34+commit.80d5c536` — the compiler of record
+for the deployed contracts — rather than by argument.
+
+| ID | Filed | Our position |
+|---|---|---|
+| C-1 | **Critical** | **Rejected.** The PoC misreads which address the hook pattern applies to. |
+| H-1 | High | Already mitigated (= Shred L-1, Opus M-1). Their revert analysis is right — and contradicts their own L-5. |
+| H-2 | High | **Accepted and new.** Corrects two prior audits. Now guarded in the dapp. |
+| M-1 | Medium | **Accepted.** Real double-execution path; our acceleration already uses the wrapper they recommend. |
+| M-2 | Medium | Confirmed — independently reaches GPT-5.6's H-01. Already mitigated. |
+| M-3 | Medium | Confirmed — independently reaches Opus 5's H-1. Already surfaced. |
+| M-4 | Medium | Rejected as filed (F-1); recommendation already implemented. |
+| L-1, L-3, L-4 | Low | Accepted as informational. L-4 (unbounded returndata copy) is new. |
+| L-2 | Low | Already mitigated (= Opus M-2). |
+| L-5 | Low | **Rejected — factually wrong, and contradicts this report's own H-1.** |
+
+### C-1 — why we rejected a Critical
+
+The hook tests and calls the wallet's **own executor**, not itself:
+`_executor := executor`, the pattern is checked on `_executor`, and the call goes
+**to** `_executor`. The PoC states the hook fires because wallet A's *own*
+address carries the `0x1111` suffix, forwarding to B. It does not: for A's hook
+to reach B you need `A.executor == B`, so **B** must carry the pattern.
+
+Correctly stated, the preconditions are `A.executor == B`, B carrying the
+pattern, **and** `B.executor == A` — mutual executor designation. And
+`B.executor == A` alone already gives whoever controls A unconditional authority
+over B: `B.execute(target, value, data, "")` with `msg.sender == executor` skips
+both signatures and delay. **The hook grants nothing the executor role does not
+already grant.** C-1 reduces to "the executor can drain the wallet" — the first
+row of the False Positive Patterns table.
+
+Worth noting as a caution about multi-agent methodology: this was "independently
+confirmed by 6+ agents," which propagated a shared misreading rather than
+catching it. The two other AI reviews read the hook correctly.
+
+**What survives:** `executeQueued()` re-reads `executor` **live** at execution
+time rather than binding it at queue time, so a queued transaction fires hooks
+against whatever executor exists later. No other reviewer noted this. Combined
+with GPT-5.6's L-01 it is a genuine composition property.
+
+### H-2 — the finding that corrects two prior audits
+
+`execute()` reads `threshold` into a `uint16` local and computes
+`_threshold * 65` in uint16 arithmetic inside the function-wide `unchecked`
+block. Verified against the compiler's IR:
+
+```
+function wrapping_mul_t_uint16(x, y) -> product {
+    product := cleanup_t_uint16(mul(x, y))     // cleaned := and(value, 0xffff)
+}
+```
+
+At threshold 1009 the check demands 49 bytes while the loop reads to offset
+65,584 — unsatisfiable, so owner-signed execution is permanently dead.
+`isValidSignature()` and `TimelockExecutor.forward()` widen to `uint256` first
+and are unaffected, which makes this an owner-lockout rather than a full brick —
+and is why an attacker-held executor would become unremovable.
+
+**Both prior reviews mis-sized this.** Opus 5's I-4 called it "unreachable in
+practice (65,536 owners far exceeds the block gas limit)"; GPT-5.6's I-01
+anchored on the same number. The real break point is **1,009 — 65× lower**, and
+~22M gas fits in a mainnet block. Right conclusion, wrong arithmetic, twice.
+
+We assess it Low in practice — no real deployment has 1,009 owners — but a
+one-way door does not get left unguarded for lack of a plausible user.
+**Mitigated:** `MAX_SAFE_THRESHOLD = 1008`; the create flow refuses a larger
+owner set (the ceiling must sit on owner count, since threshold can never exceed
+it) and `setThreshold` refuses any value above it.
+
+### L-5 — settled by compiling
+
+L-5 claims a codeless `0x1111` executor makes the hook a silent no-op. Their own
+H-1 says it reverts and bricks the wallet. Compiling three minimal probes with
+the compiler of record:
+
+| Call shape | compiler-inserted `extcodesize` |
+|---|---|
+| High-level call to a void function (`execute(...)`) | **1** |
+| High-level call to a value-returning function | 0 |
+| Raw `address.call(...)` | 0 |
+
+`Multisig.execute` returns nothing, so the guard is inserted and **the hook
+reverts**. Compiling `Multisig.sol` itself yields 11 compiler-inserted guards
+with zero in the source. H-1 and Opus 5's M-1 are correct; L-5 is not — it
+describes raw EVM semantics rather than compiled Solidity. This matters: under
+L-5's reading the dapp guard we ship for codeless marked executors would look
+unnecessary.
+
+### Methodology note
+
+This report's **Leads** (sub-confidence-floor items) and **Rejected Claims**
+sections are its best feature. Two of its leads are items earlier reviews filed
+as findings — the `addOwner` `ownerCount` wrap (GPT-5.6 I-01) and the `init()`
+downcast truncation (Opus 5 I-4) — and it correctly demoted both as impractical
+while correctly sizing the one arithmetic bug that *is* reachable. It also
+rejected a false `createWithCalls` "stranded `msg.value`" claim, correctly, on
+the grounds that an internal call compiles to a `JUMP` and `CALLVALUE` belongs to
+the outer transaction.
+
+---
+
 ## Third Review (GPT-5.6 Sol, 2026-07-26) — Disposition
 
 **Full report with our responses inline:**

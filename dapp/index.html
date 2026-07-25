@@ -809,6 +809,17 @@ async function packSigsBound(sigs, submitter, msAddr, hash) {
   return { packed, bound: true };
 }
 
+// H-2 (fourth review). execute() reads `threshold` into a uint16 local and then
+// computes `_threshold * 65` — uint16 arithmetic, inside the function-wide
+// unchecked block, so it wraps at 65536. At threshold 1009 the length check
+// demands 49 bytes while the verification loop reads to offset 65,584: no sigs
+// value satisfies both, so the owners' signature path is dead permanently.
+// isValidSignature() and TimelockExecutor.forward() widen to uint256 first and
+// are unaffected — which is what makes this an owner-lockout rather than a full
+// brick, and why an attacker-held executor would become unremovable.
+// Verified against solc 0.8.34's IR: wrapping_mul_t_uint16 masks with 0xffff.
+const MAX_SAFE_THRESHOLD = 1008;
+
 // M-2. Past this, a timelock stops being a review window and starts being a
 // liability: every proposal that would shorten it again waits it out first.
 // A month is already far beyond any operational use.
@@ -1558,10 +1569,11 @@ function seed() {
 // ── STATE ─────────────────────────────────────────────────────────
 const S = {
   dark: !localStorage.getItem('ms_light'),
-  // Veiled by default: a privacy default that has to be found and switched on
-  // protects nobody, because the moment you want it is the moment it is already
-  // too late. Off is one click and is remembered.
-  priv: localStorage.getItem('ms_priv') !== '0',
+  // Clear by default. A vault's first job is to show you what it holds, and
+  // veiling it before anyone has asked reads as a rendering fault rather than a
+  // feature. The eye in the header turns it on when the room warrants it, and
+  // that choice is remembered — so the cost is one click, once.
+  priv: localStorage.getItem('ms_priv') === '1',
   view: "DASH",
   sel: 0,
   vaults: [],
@@ -5227,6 +5239,10 @@ async function prodDeploy() {
   // Same reasoning, for the sentinel end of the range: owners must be > 0x1.
   // A name can resolve to anything, so this is checked after resolution too.
   if(resolvedOwners.some(a => BigInt(a) <= 1n)) { flash('OWNER 0x0 IS NOT A VALID ADDRESS'); return; }
+  // Audit H-2 — a threshold of 1009 or more overflows execute()'s uint16
+  // signature-length check, and the threshold cannot exceed the owner count, so
+  // the owner count is where the ceiling has to be enforced.
+  if(resolvedOwners.length > MAX_SAFE_THRESHOLD) { flash(`REFUSED — MORE THAN ${MAX_SAFE_THRESHOLD} OWNERS CAN OVERFLOW THE SIGNATURE-LENGTH CHECK AND PERMANENTLY DISABLE OWNER-SIGNED EXECUTION`); return; }
 
   const thresh = Math.min(parseInt(c.threshold) || 1, resolvedOwners.length);
   const del = toSec(c.delayVal, c.delayUnit);
@@ -6599,6 +6615,9 @@ async function prodAdminPropose(action, val) {
     switch(action) {
       case 'setThreshold': {
         if(!val || val < 1 || val > v.ownerCount) { flash('THRESHOLD MUST BE 1..' + v.ownerCount); return; }
+        // Audit H-2 — at or above 1009 the signature-length check wraps and no
+        // owner-signed transaction can ever execute again.
+        if(val > MAX_SAFE_THRESHOLD) { flash(`REFUSED — A THRESHOLD ABOVE ${MAX_SAFE_THRESHOLD} OVERFLOWS THE SIGNATURE-LENGTH CHECK AND WOULD PERMANENTLY DISABLE OWNER-SIGNED EXECUTION`); return; }
         data = msIface.encodeFunctionData('setThreshold', [val]);
         desc = `setThreshold(${val})`;
         break;
