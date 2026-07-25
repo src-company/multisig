@@ -53,11 +53,6 @@ button:active{transform:scale(.97)}
 .reject-link.armed{border-color:var(--r);color:var(--r);background:color-mix(in srgb,var(--r) 8%,transparent)}
 .sim-btn{background:transparent;border:1px solid var(--ln);color:var(--d);font-size:9px;font-weight:700;letter-spacing:2px;padding:6px 12px;cursor:pointer;font-family:var(--f);text-transform:uppercase;transition:border-color .15s,color .15s}
 .sim-btn:hover{border-color:var(--a);color:var(--a)}
-.sim-result{margin-top:10px;padding:10px 14px;font-size:10px;letter-spacing:1px;line-height:1.7;border-left:2px solid var(--ln);color:var(--m)}
-.sim-result.pass{border-left-color:var(--g)}
-.sim-result.revert{border-left-color:var(--r);color:var(--r)}
-.sim-send{color:var(--r)}
-.sim-recv{color:var(--g)}
 .copy-btn{opacity:.4;transition:opacity .15s}
 @media(hover:hover){.copy-btn:hover{opacity:1}}
 @media(hover:hover){
@@ -178,7 +173,7 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 .ap-ok{color:var(--g);font-weight:600}
 .ap-no{color:var(--d);font-weight:600}
 .eta{color:var(--d);margin-left:auto;font-size:10px}
-.tx-progress{display:flex;align-items:center;gap:10px;margin:12px 0 2px;font-size:9px;font-weight:700;letter-spacing:2px;color:var(--d)}
+.tx-progress{display:flex;align-items:center;gap:10px;margin:14px 0 12px;font-size:9px;font-weight:700;letter-spacing:2px;color:var(--d)}
 .tx-progress>.plabel{min-width:78px}
 .pbar{height:4px;background:var(--ln);overflow:hidden;flex:1;min-width:70px;max-width:220px}
 .pbar>i{display:block;height:100%;transition:width .4s ease}
@@ -362,6 +357,124 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 @media(max-width:640px){.loading-overlay{gap:16px}.loading-overlay .loading-svg{width:68px;height:68px}.loading-overlay .loading-text{font-size:8px;letter-spacing:3px}.loading-overlay::after{width:104px}}
 @media(prefers-reduced-motion:reduce){.loading-overlay::after{display:none}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}}
+
+/* ── SEND FLOW ─────────────────────────────────────────────────────
+   Two-track builder: the form fields run down the left, a live review
+   card (what will actually be proposed) sits on the right and carries
+   the terminal actions, so the eye never leaves the summary it signs. */
+.send-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:36px;align-items:start}
+.fset{margin-bottom:26px}
+.fset:last-child{margin-bottom:0}
+.fhead{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.fhead .lbl{margin-bottom:0}
+.fhint{font-size:9px;letter-spacing:1px;color:var(--d)}
+.fhint b{color:var(--m);font-weight:700}
+
+/* amount — the headline figure of the proposal, sized like one */
+.amt{display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--ln);transition:border-color .15s,box-shadow .15s}
+.amt:focus-within{border-bottom-color:var(--a);box-shadow:inset 0 -1px 0 var(--a)}
+input.amt-in{flex:1;min-width:0;width:100%;padding:8px 0;font-size:32px;font-weight:700;letter-spacing:-1.5px;background:transparent;border:none;border-radius:0;-webkit-appearance:none}
+input.amt-in:focus{outline:none;box-shadow:none!important;border-bottom-color:transparent!important}
+.amt-tok{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:700;letter-spacing:2px;color:var(--m);flex-shrink:0;padding-left:14px;border-left:1px solid var(--ln);align-self:stretch;padding-top:14px;padding-bottom:14px}
+.amt-foot{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:9px;min-height:24px}
+.amt-usd{font-size:11px;letter-spacing:1px;color:var(--d);word-break:break-all}
+.amt-warn{font-size:10px;letter-spacing:1px;color:var(--r);flex-basis:100%}
+.qbtns{display:flex;gap:5px;margin-left:auto;flex-shrink:0}
+.qbtn{height:24px;padding:0 9px;font-size:9px;font-weight:700;letter-spacing:1.5px;background:transparent;border:1px solid var(--ln);color:var(--d);font-family:var(--f);transition:color .15s,border-color .15s}
+@media(hover:hover){.qbtn:hover{color:var(--a);border-color:var(--a)}}
+
+/* segmented control — mutually-exclusive modes read better than loose pills */
+.seg{display:inline-flex;border:1px solid var(--ln);padding:3px;gap:3px;max-width:100%}
+.seg button{height:32px;padding:0 20px;font-size:10px;font-weight:700;letter-spacing:2px;background:transparent;border:none;color:var(--d);white-space:nowrap;transition:background .18s,color .18s}
+.seg button.on{background:var(--a);color:var(--bg)}
+@media(hover:hover){.seg button:not(.on):hover{color:var(--a);background:color-mix(in srgb,var(--a) 8%,transparent)}}
+
+/* SLOW delay picker */
+.slow-box{margin-top:14px;padding:14px;border:1px solid var(--ln);border-left:2px solid var(--a);background:color-mix(in srgb,var(--a) 4%,transparent)}
+.slow-note{font-size:10px;letter-spacing:1px;line-height:1.7;color:var(--d)}
+.slow-note b{color:var(--m);font-weight:700}
+.slow-custom{display:flex;align-items:center;gap:10px;margin-top:12px}
+.slow-custom-l{font-size:9px;font-weight:700;letter-spacing:2px;color:var(--d);flex-shrink:0}
+.slow-custom .inp{margin:0;font-size:13px;padding:6px 0;min-width:0}
+.slow-unit{font-size:10px;font-weight:700;letter-spacing:1.5px;color:var(--m);background:transparent;border:1px solid var(--ln);padding:7px 26px 7px 10px;border-radius:0;-webkit-appearance:none;appearance:none;flex-shrink:0;
+  background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);
+  background-position:calc(100% - 14px) calc(50% + 1px),calc(100% - 10px) calc(50% + 1px);background-size:4px 4px,4px 4px;background-repeat:no-repeat}
+.slow-unit:focus{border-color:var(--a);outline:none}
+.slow-unit option{background:var(--bg);color:var(--a)}
+
+/* review card */
+.review{border:1px solid var(--fr);border-top:2px solid var(--a);background:color-mix(in srgb,var(--a) 4%,transparent);padding:16px 16px 18px}
+.review-h{display:flex;justify-content:space-between;align-items:center;font-size:9px;font-weight:700;letter-spacing:3px;color:var(--d);margin-bottom:14px}
+.review-tag{border:1px solid var(--ln);padding:2px 6px;font-size:8px;letter-spacing:2px}
+.review-amt{display:flex;align-items:center;gap:9px;font-size:26px;font-weight:700;letter-spacing:-1px;line-height:1.15;word-break:break-all}
+.review-amt.ph{color:var(--fr)}
+.review-usd{font-size:11px;letter-spacing:1px;color:var(--d);margin-top:4px}
+.review-arrow{font-size:9px;letter-spacing:2px;color:var(--d);margin:14px 0 5px}
+.review-to{font-size:12px;font-weight:700;word-break:break-all;line-height:1.5}
+.review-to.ph{color:var(--fr);font-weight:400}
+.review-rows{margin-top:16px}
+.rrow{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:10px;letter-spacing:1px;padding:8px 0;border-top:1px solid var(--ln);color:var(--d)}
+.rrow b{color:var(--m);font-weight:700;text-align:right;word-break:break-word}
+.rrow b.hi{color:var(--a)}
+.review-warn{font-size:10px;letter-spacing:1px;line-height:1.6;color:var(--y);border-left:2px solid var(--y);background:color-mix(in srgb,var(--y) 7%,transparent);padding:8px 10px;margin-top:14px}
+.review-miss{font-size:9px;letter-spacing:1.5px;color:var(--d);text-align:center;margin-top:9px;line-height:1.5}
+.btn-pending{opacity:.4}
+
+/* ── SIMULATION ────────────────────────────────────────────────────
+   A dry-run is the last thing between a signer and an irreversible
+   proposal, so it gets a real panel: verdict, asset ledger, gas. */
+.sim-idle{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:18px;padding:11px 13px;border:1px dashed var(--fr)}
+.sim-idle .t{font-size:9px;letter-spacing:1.5px;color:var(--d);line-height:1.6}
+.sim{margin-top:16px;border:1px solid var(--ln);border-left:2px solid var(--fr);background:color-mix(in srgb,var(--a) 3%,transparent)}
+.sim.run{border-left-color:var(--a)}
+.sim.pass{border-left-color:var(--g)}
+.sim.revert{border-left-color:var(--r)}
+.sim-h{display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding:11px 14px;font-size:10px;font-weight:700;letter-spacing:2px;color:var(--m)}
+.sim.run .sim-h{color:var(--a)}
+.sim.pass .sim-h{color:var(--g)}
+.sim.revert .sim-h{color:var(--r)}
+.sim-h .mark{font-size:12px;line-height:1}
+.sim-tags{margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.sim-tag{font-size:8px;font-weight:700;letter-spacing:2px;color:var(--d);border:1px solid var(--ln);padding:2px 6px}
+.sim-x{background:transparent;border:none;color:var(--d);font-size:11px;line-height:1;padding:2px 4px;font-family:var(--f)}
+@media(hover:hover){.sim-x:hover{color:var(--a)}}
+.sim-b{padding:0 14px 13px}
+.sim-sub{font-size:9px;letter-spacing:1.5px;color:var(--d);line-height:1.7}
+.sim-scan{height:2px;background-image:linear-gradient(90deg,transparent,var(--a),transparent);background-size:200% 100%;background-repeat:no-repeat;animation:loadSweep 1.3s cubic-bezier(.65,0,.35,1) infinite;opacity:.55;margin-bottom:10px}
+.sim-led{border-top:1px solid var(--ln);margin-top:2px}
+.sim-row{display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:1px solid var(--ln);font-size:13px;font-weight:700}
+.sim-row:last-child{border-bottom:none}
+.sim-row .dir{font-size:9px;font-weight:700;letter-spacing:2px;width:46px;flex-shrink:0}
+.sim-row .val{margin-left:auto;text-align:right;word-break:break-all}
+.sim-out{color:var(--r)}
+.sim-in{color:var(--g)}
+.sim-foot{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;font-size:10px;letter-spacing:1px;color:var(--d);padding-top:10px;border-top:1px solid var(--ln)}
+.sim-reason{font-size:11px;line-height:1.6;color:var(--r);word-break:break-all;padding:10px 12px;background:color-mix(in srgb,var(--r) 14%,transparent);border-left:2px solid var(--r)}
+
+/* ── QUEUE CARDS ───────────────────────────────────────────────── */
+.tx-kind{font-size:8px;font-weight:700;letter-spacing:2px;border:1px solid var(--ln);color:var(--d);padding:2px 6px;white-space:nowrap}
+.tx-kind.slow{color:var(--a);border-color:var(--fr)}
+.tx-status{border:1px solid currentColor;padding:4px 9px;white-space:nowrap}
+.approvals{gap:6px}
+.ap-ok,.ap-no{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border:1px solid var(--ln);letter-spacing:1px}
+.ap-ok{color:var(--g);border-color:color-mix(in srgb,var(--g) 40%,transparent);background:color-mix(in srgb,var(--g) 8%,transparent)}
+
+@media(max-width:900px){
+  .send-grid{grid-template-columns:minmax(0,1fr) 264px;gap:26px}
+}
+@media(max-width:760px){
+  .send-grid{grid-template-columns:1fr;gap:24px}
+  .review{margin-top:2px}
+}
+@media(max-width:640px){
+  input.amt-in{font-size:26px}
+  .amt-tok{font-size:12px;padding-left:10px}
+  .seg{width:100%}
+  .seg button{flex:1;padding:0 8px;height:38px}
+  .qbtn{height:30px;padding:0 11px}
+  .review-amt{font-size:22px}
+  .sim-row{font-size:12px}
+}
 </style>
 </head>
 <body>
@@ -1036,6 +1149,11 @@ const S = {
   showTx: false,
   txMode: "TRANSFER",
   txToken: "ETH",
+  // Amount/recipient live in state (not just the DOM) so a re-render — token
+  // switch, delivery change, poll tick — never wipes half-typed input, and the
+  // review card can mirror the fields without a full rebuild.
+  txAmount: "",
+  txTo: "",
   showCustomTok: false,
   txSlow: false,          // outbound delivery mode: false = INSTANT, true = SLOW (delayed)
   txSlowDelaySec: 86400,  // SLOW timelock in seconds (default 1 day)
@@ -1625,6 +1743,9 @@ function renderNow(){
   ${S.deploy?renderDeployOverlay():""}
   ${S.topup?renderTopUp():""}`;
   restoreFocus(_focusState);
+  // Paint the send-flow review card + submit readiness from state on every
+  // rebuild, so it survives token switches, polls and delivery-mode changes.
+  updateTxReview();
   // Scroll a freshly deep-linked tx into view once, when it first appears.
   if(_focusScroll){
     const fel = document.querySelector(`[data-tx-nonce="${_focusNonce}"]`);
@@ -1789,7 +1910,7 @@ function renderDash(v,mob){
   </div>
   ${renderSlowOutbound(v,mob)}
   <div class="sec"><span>QUEUE</span><span class="line"></span>
-    ${S.showTx?"":`<button class="btn btn-outline btn-sm" onclick="S.showTx=true;S.txMode='TRANSFER';S.txToken='ETH';S.txSlow=false;_builderSim=null;render()">+ NEW</button>`}
+    ${S.showTx?"":`<button class="btn btn-outline btn-sm" onclick="openTxBuilder()">+ NEW</button>`}
   </div>
   ${S.showTx?renderTxBuilder(v,mob):""}
   ${v.queue.length===0&&!S.showTx?`<div style="padding:48px 0;text-align:center;font-size:13px;color:var(--d);letter-spacing:2px">NO PENDING TRANSACTIONS</div>`:v.queue.map((tx,i)=>{
@@ -1880,6 +2001,10 @@ function renderDash(v,mob){
             ${s.cancel?`<button class="btn btn-danger" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL${s.cancelSigs?` (${s.cancelSigs}/${v.threshold})`:''}</button>`:''}
           </div>`;
     }
+    // Kind badge — what sort of call this is. Suppressed when the headline
+    // line already says it (a bare "BATCH (3)" needs no "BATCH" tag beside it).
+    const kindLabel=tx.slowDelay?`SLOW &middot; ${fmtDelay(tx.slowDelay)}`:(tx.dataLabel||'');
+    const kindTag=(kindLabel&&kindLabel!==display)?`<span class="tx-kind${tx.slowDelay?' slow':''}"${tx.slowDelay?` title="Time-delayed via SLOW — the recipient can claim after ${esc(fmtDelay(tx.slowDelay))}; the vault can reverse it until then"`:''}>${kindLabel}</span>`:'';
     const txLink=!S.demoMode&&v.address&&ethers.isAddress(v.address)?`${location.origin}/#${S.chainId}/${v.address}/tx/${tx.nonce}`:'';
     const isFocus=_focusNonce!==null&&tx.nonce===_focusNonce&&!!v.address&&v.address.toLowerCase()===(_focusVaultAddr||'').toLowerCase();
     return`<div class="tx${blocked?" blocked":""}${isFocus?" tx-focus":""}" data-tx-nonce="${tx.nonce}">
@@ -1888,6 +2013,9 @@ function renderDash(v,mob){
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
             <span class="tx-nonce">#${tx.nonce}${isCancel?" VIA EXECUTOR":i===firstUnqueued&&!isQueued?" NEXT":""}${txLink?` <button class="x-btn" style="font-size:8px;opacity:.4;display:inline-flex;min-width:auto;min-height:auto;padding:2px 4px;vertical-align:middle" onclick="event.stopPropagation();navigator.clipboard.writeText('${txLink}');flash('CO-SIGN LINK COPIED')" title="Copy co-sign link">\u29C9</button>`:""}</span>
+            ${kindTag}
+          </div>
+          <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-top:6px">
             <span class="tx-val" style="display:inline-flex;align-items:center;gap:6px">${(dv&&dv!=='0')?tokIcon(dt):''}${esc(display)}</span>
           </div>
           <div class="tx-to">&rarr; ${S.demoMode?addrLink(tx.target,v.chain):addrLink(tx.displayTo||tx.target)}${(()=>{const a=S.demoMode?tx.target:(tx.displayTo||tx.target);return ethers.isAddress(a)?copyBtn(a):'';})()}</div>
@@ -1898,8 +2026,19 @@ function renderDash(v,mob){
       </div>
       ${blocked?"":progressLine}
       <div class="approvals">${apHtml}${etaHtml}${(()=>{const xl=txExplorerLink(tx,v);return xl?`<span class="eta" style="margin-left:${etaHtml?'12px':'auto'}">${xl}</span>`:'';})()}</div>
-      ${(i===firstUnqueued&&!isQueued&&!isCancel&&!blocked)?(()=>{const rsc=tx.rejectSigners?tx.rejectSigners.size:0;const armed=_rejectArmed===tx.nonce;const rlabel=armed?'CONFIRM &middot; SKIP NONCE?':`REJECT &middot; SKIP NONCE${rsc?` (${rsc}/${v.threshold})`:''}`;return `<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="sim-btn" onclick="simulateProposal(${S.sel},${tx.nonce})" title="Dry-run this proposal against current chain state (from = the vault)">SIMULATE</button><button class="reject-link${armed?' armed':''}" onclick="armReject(${S.sel},${tx.nonce})" title="Sign a no-op to consume this nonce so later transactions can proceed">${rlabel}</button></div>`;})():''}
-      ${tx._sim?renderSimResult(tx._sim):''}
+      ${blocked?'':(()=>{
+        // Any live proposal can be dry-run — knowing it reverts is just as
+        // useful while it sits in the timelock as it is before signing.
+        const canReject = i===firstUnqueued && !isQueued && !isCancel;
+        const rsc = tx.rejectSigners ? tx.rejectSigners.size : 0;
+        const armed = _rejectArmed === tx.nonce;
+        const rlabel = armed ? 'CONFIRM &middot; SKIP NONCE?' : `REJECT &middot; SKIP NONCE${rsc?` (${rsc}/${v.threshold})`:''}`;
+        return `<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="sim-btn" onclick="simulateProposal(${S.sel},${tx.nonce})" title="Dry-run this proposal against current chain state (from = the vault)">${tx._sim&&!tx._sim.loading?'RE-SIMULATE':'SIMULATE'}</button>
+          ${canReject?`<button class="reject-link${armed?' armed':''}" onclick="armReject(${S.sel},${tx.nonce})" title="Sign a no-op to consume this nonce so later transactions can proceed">${rlabel}</button>`:''}
+        </div>`;
+      })()}
+      ${tx._sim?renderSim(tx._sim,{ rerun:`simulateProposal(${S.sel},${tx.nonce})`, dismiss:`dismissProposalSim(${S.sel},${tx.nonce})` }):''}
       ${mob&&!blocked&&actionBtn?`<div class="mob-actions">${actionBtn}</div>`:""}
     </div>`}).join("")}
   <div class="sec"><span>SIGNERS</span><span class="line"></span></div>
@@ -1912,28 +2051,175 @@ function renderDash(v,mob){
 }
 
 // ── TX BUILDER ────────────────────────────────────────────────────
-// DOM-only field feedback — updates sibling status nodes without a full
-// re-render so the input keeps focus while typing.
+// DOM-only field feedback — updates the status nodes and the review card
+// without a full re-render, so the input keeps focus and caret while typing.
 function onTxAmount(val, dec, avail, unit){
+  S.txAmount = val;
   const u = document.getElementById('tx-units');
   if(u) u.textContent = val ? toUnits(val, dec) + ' ' + unit : '';
+  const n = parseFloat(stripCommas(String(val))) || 0;
   const w = document.getElementById('tx-amount-warn');
-  if(w){ const n = parseFloat(String(val).replace(/,/g,'')) || 0; w.textContent = (avail > 0 && n > avail) ? 'EXCEEDS AVAILABLE BALANCE' : ''; }
+  if(w) w.textContent = (avail > 0 && n > avail) ? 'EXCEEDS AVAILABLE BALANCE' : '';
+  const usd = document.getElementById('tx-amount-usd');
+  if(usd){ const r = Number(usd.dataset.rate) || 0; usd.textContent = (r > 0 && n > 0) ? fmtUsd(n * r) : ''; }
+  updateTxReview();
 }
 function onTxRecipient(val){
+  S.txTo = val;
   const s = document.getElementById('tx-to-status');
-  if(!s) return;
-  const t = (val || '').trim();
-  if(!t){ s.textContent = ''; return; }
-  if(ethers.isAddress(t)){ s.textContent = 'VALID ADDRESS'; s.style.color = 'var(--g)'; }
-  else if(/\.(eth|wei)$/i.test(t)){ s.textContent = 'NAME · RESOLVES AT SIGN'; s.style.color = 'var(--a)'; }
-  else { s.textContent = 'NOT A VALID ADDRESS OR NAME'; s.style.color = 'var(--r)'; }
+  if(s){
+    const st = _addrState(val);
+    s.textContent = st.txt;
+    s.style.color = st.color || '';
+  }
+  updateTxReview();
 }
-function fillTxMax(amountStr, dec, avail, unit){
+// Open/close the builder from a clean slate — a stale amount or recipient
+// carried into the next proposal is the one mistake this form must not make.
+function openTxBuilder(){
+  S.showTx = true;
+  S.txMode = 'TRANSFER';
+  S.txToken = 'ETH';
+  S.txSlow = false;
+  resetTxFields();
+  render();
+}
+function closeTxBuilder(){
+  S.showTx = false;
+  resetTxFields();
+  render();
+}
+function resetTxFields(){
+  S.txAmount = '';
+  S.txTo = '';
+  _builderSim = null;
+}
+// Token switch keeps the typed amount but drops the stale unit/USD echo and
+// any simulation, which was run against the previous asset.
+function selectTxToken(sym){
+  S.txToken = sym;
+  S.showCustomTok = false;
+  _builderSim = null;
+  render();
+}
+function fillTxPct(frac, amountStr, dec, avail, unit){
   const el = document.getElementById('tx-amount');
   if(!el) return;
-  el.value = amountStr;
-  onTxAmount(amountStr, dec, avail, unit);
+  let out;
+  if(frac >= 1) out = amountStr;                       // MAX sends the exact raw balance, no rounding
+  else {
+    const n = Number(amountStr) * frac;
+    out = n > 0 ? n.toFixed(Math.min(dec, 8)).replace(/\.?0+$/, '') : '0';
+  }
+  el.value = out;
+  onTxAmount(out, dec, avail, unit);
+}
+// USD rate for a holding, derived from the balance/usd pair the treasury
+// loader already priced (0 when the asset has no feed).
+function tokRate(hold){
+  if(!hold || !hold.usd) return 0;
+  const u = parseFloat(String(hold.usd).replace(/[^0-9.]/g, ''));
+  const b = parseFloat(stripCommas(String(hold.balance)));
+  return (u > 0 && b > 0) ? u / b : 0;
+}
+function fmtUsd(n){
+  return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+// Thousands-separate the integer part of a decimal string, leaving the
+// fraction exact — token amounts must stay digit-for-digit truthful.
+function groupInt(s){
+  const [w, f] = String(s).split('.');
+  return w.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (f ? '.' + f : '');
+}
+// What the builder is still missing before it can be signed.
+function txMissing(){
+  const miss = [];
+  if(!(parseFloat(stripCommas(S.txAmount || '')) > 0)) miss.push('AMOUNT');
+  const t = (S.txTo || '').trim();
+  if(!t || !(ethers.isAddress(t) || /\.(eth|wei)$/i.test(t))) miss.push('RECIPIENT');
+  return miss;
+}
+// The live proposal summary: exactly what SIGN + SUBMIT will construct,
+// down to the call it encodes and the nonce it will occupy.
+function txReviewBody(v){
+  const ct = curTok(v);
+  const amtStr = stripCommas(S.txAmount || '').trim();
+  const amtNum = parseFloat(amtStr) || 0;
+  const to = (S.txTo || '').trim();
+  const hold = (v.holdings || []).find(h => h.token === S.txToken);
+  const rate = tokRate(hold);
+  const slowOn = slowAvailable() && S.txSlow;
+  const isAddr = ethers.isAddress(to);
+  const isName = /\.(eth|wei)$/i.test(to);
+  const availNum = hold ? Number(hold.raw != null ? ethers.formatUnits(hold.raw, hold.decimals || ct.decimals) : stripCommas(hold.balance)) : 0;
+
+  const amtHtml = amtNum > 0
+    ? `<div class="review-amt">${tokIcon(S.txToken)}<span>${esc(groupInt(amtStr))}</span><span style="font-size:13px;color:var(--m)">${esc(S.txToken)}</span></div>
+       ${rate > 0 ? `<div class="review-usd">${esc(fmtUsd(amtNum * rate))}</div>` : ''}`
+    : `<div class="review-amt ph">${tokIcon(S.txToken)}<span>0.0</span><span style="font-size:13px">${esc(S.txToken)}</span></div>`;
+  const toHtml = (isAddr || isName)
+    ? `<div class="review-to">${esc(isAddr ? shortAddr(to) : to)}</div>`
+    : `<div class="review-to ph">NO RECIPIENT YET</div>`;
+
+  // The on-chain shape of the proposal, named the way the queue will label it.
+  const call = slowOn ? 'SLOW.depositTo()'
+    : (S.txToken === 'ETH' ? 'NATIVE SEND' : `${esc(S.txToken)}.transfer()`);
+
+  const rows = [
+    ['ROUTE', slowOn ? `<b class="hi">SLOW &middot; ${esc(fmtDelay(S.txSlowDelaySec))}</b>` : '<b>DIRECT</b>'],
+    slowOn ? ['CLAIMABLE', `<b>${esc(fmtDelay(S.txSlowDelaySec))} AFTER EXECUTION</b>`] : null,
+    ['SIGNATURES', `<b>${v.threshold} OF ${v.ownerCount}</b>`],
+    ['TIMELOCK', v.delay > 0
+      ? `<b>${esc(fmtD(v.delay))}${v.fastPath ? ' &middot; SKIPPABLE' : ''}</b>`
+      : '<b>NONE &middot; EXECUTES AT QUORUM</b>'],
+    ['CALL', `<b>${call}</b>`],
+    // The approve is only batched in when the vault's standing allowance to
+    // SLOW falls short, so state it as conditional rather than promise a batch.
+    (slowOn && S.txToken !== 'ETH') ? ['ALLOWANCE', '<b>APPROVE BATCHED IF SHORT</b>'] : null,
+  ].filter(Boolean).map(([k, val]) => `<div class="rrow"><span>${k}</span>${val}</div>`).join('');
+
+  const warns = [];
+  if(availNum > 0 && amtNum > availNum) warns.push('AMOUNT EXCEEDS THE VAULT BALANCE — THIS WILL REVERT ON EXECUTION.');
+  else if(!hold && amtNum > 0 && !S.demoMode) warns.push(`THE VAULT HOLDS NO ${esc(S.txToken)} — THIS WILL REVERT ON EXECUTION.`);
+  if(slowOn && v.delay > 0 && !v.fastPath && v.delay >= Number(S.txSlowDelaySec))
+    warns.push('THE VAULT TIMELOCK IS AS LONG AS THE SLOW DELAY — A REVERSE MAY NOT CLEAR IN TIME.');
+  if(isName) warns.push('NAME RESOLVES AT SIGNING TIME — CONFIRM THE ADDRESS IN YOUR WALLET.');
+
+  return `${amtHtml}
+    <div class="review-arrow">&darr; TO</div>
+    ${toHtml}
+    <div class="review-rows">${rows}</div>
+    ${warns.map(w => `<div class="review-warn">${w}</div>`).join('')}`;
+}
+// Repaint the review card + submit affordance in place (no re-render, so the
+// amount/recipient fields keep focus while the summary tracks each keystroke).
+function updateTxReview(){
+  const host = document.getElementById('tx-review');
+  if(!host) return;
+  const v = S.vaults[S.sel];
+  if(!v) return;
+  host.innerHTML = txReviewBody(v);
+
+  // Re-derive the field echoes too — they are wiped by each rebuild, but the
+  // values behind them live in S and must survive it.
+  const ct = curTok(v);
+  const hold = (v.holdings || []).find(h => h.token === S.txToken);
+  const availNum = hold ? Number(hold.raw != null ? ethers.formatUnits(hold.raw, hold.decimals || ct.decimals) : stripCommas(hold.balance)) : 0;
+  const n = parseFloat(stripCommas(S.txAmount || '')) || 0;
+  const u = document.getElementById('tx-units');
+  if(u) u.textContent = S.txAmount ? toUnits(S.txAmount, ct.decimals) + ' ' + (S.txToken === 'ETH' ? 'WEI' : 'UNITS (' + ct.decimals + ' DECIMALS)') : '';
+  const w = document.getElementById('tx-amount-warn');
+  if(w) w.textContent = (availNum > 0 && n > availNum) ? 'EXCEEDS AVAILABLE BALANCE' : '';
+  const usd = document.getElementById('tx-amount-usd');
+  if(usd){ const r = Number(usd.dataset.rate) || 0; usd.textContent = (r > 0 && n > 0) ? fmtUsd(n * r) : ''; }
+  const st = document.getElementById('tx-to-status');
+  if(st){ const s = _addrState(S.txTo); st.textContent = s.txt; st.style.color = s.color || ''; }
+
+  const miss = txMissing();
+  const btn = document.getElementById('tx-submit');
+  if(btn) btn.classList.toggle('btn-pending', miss.length > 0);
+  const note = document.getElementById('tx-ready-note');
+  if(note) note.textContent = miss.length ? 'ENTER ' + miss.join(' + ') : '';
 }
 // Shared address/name field feedback (returns state; writes to a status node).
 function _addrState(t){
@@ -1941,6 +2227,10 @@ function _addrState(t){
   if(!t) return { txt:'', color:'' };
   if(ethers.isAddress(t)) return { txt:'VALID ADDRESS', color:'var(--g)' };
   if(/\.(eth|wei)$/i.test(t)) return { txt:'NAME · RESOLVES AT SIGN', color:'var(--a)' };
+  // Right shape, wrong case: a mistyped or truncated paste, not a bad format.
+  // Naming it precisely is the difference between a 2-second fix and a re-copy.
+  if(/^0x[0-9a-fA-F]{40}$/.test(t)) return { txt:'BAD CHECKSUM — RE-COPY THE ADDRESS', color:'var(--r)' };
+  if(/^0x[0-9a-fA-F]*$/.test(t)) return { txt:`${t.length-2}/40 HEX CHARS`, color:'var(--d)' };
   return { txt:'NOT A VALID ADDRESS OR NAME', color:'var(--r)' };
 }
 function _hexState(d){
@@ -2186,36 +2476,67 @@ function renderTxBuilder(v,mob){
     const availStr=hold?(hold.raw!=null?ethers.formatUnits(hold.raw,hold.decimals||dec):stripCommas(hold.balance)):'';
     const availNum=availStr?Number(availStr):0;
     const slowOn=slowAvailable()&&S.txSlow;
-    const slowUi=slowAvailable()?`
-        <label class="lbl">DELIVERY</label>
-        <div class="token-pills" style="margin-bottom:${slowOn?8:12}px">
-          <button class="pill${!S.txSlow?" on":""}" onclick="setTxSlow(false)">INSTANT</button>
-          <button class="pill${S.txSlow?" on":""}" onclick="setTxSlow(true)" title="Time-delayed transfer via the SLOW protocol — reversible by the vault until the timer expires">SLOW &middot; DELAYED</button>
+    const rate=tokRate(hold);
+    // Delivery always shows, even off mainnet — a greyed SLOW option explains
+    // why delayed sends aren't on offer here instead of silently omitting them.
+    const slowUi=`
+      <div class="fset">
+        <div class="fhead"><label class="lbl">DELIVERY</label><span class="fhint">${slowOn?`REVERSIBLE FOR <b>${esc(fmtDelay(S.txSlowDelaySec))}</b>`:`FINAL ON EXECUTION`}</span></div>
+        <div class="seg">
+          <button class="${!S.txSlow?"on":""}" onclick="setTxSlow(false)" title="The vault sends the asset directly — final the moment the proposal executes">INSTANT</button>
+          ${slowAvailable()
+            ? `<button class="${S.txSlow?"on":""}" onclick="setTxSlow(true)" title="Time-delayed transfer via the SLOW protocol — reversible by the vault until the timer expires">SLOW &middot; DELAYED</button>`
+            : `<button class="btn-disabled" style="border:none" onclick="flash('SLOW IS ETHEREUM MAINNET ONLY')" title="Delayed, reversible delivery via the SLOW protocol — available on Ethereum mainnet only">SLOW &middot; MAINNET ONLY</button>`}
         </div>
-        ${slowOn?`<div class="token-pills" style="margin-bottom:8px">${SLOW_PRESETS.map(p=>`<button class="pill${Number(S.txSlowDelaySec)===p.s?" on":""}" onclick="setSlowDelay(${p.s})">${p.l}</button>`).join("")}</div>
-        <div style="display:flex;gap:8px;margin-bottom:8px">
-          <input class="inp" id="slow-custom-n" style="margin:0;flex:1;font-size:13px" inputmode="decimal" placeholder="CUSTOM" onchange="onSlowCustom()" onkeydown="if(event.key==='Enter'){event.preventDefault();onSlowCustom()}">
-          <select class="inp" id="slow-custom-u" style="margin:0;width:auto;font-size:13px" onchange="onSlowCustom()">
-            <option value="h"${S.txSlowUnit==="h"?" selected":""}>HOURS</option>
-            <option value="d"${S.txSlowUnit==="d"?" selected":""}>DAYS</option>
-          </select>
-        </div>
-        <div style="font-size:10px;color:var(--d);line-height:1.5;margin-bottom:12px">RECIPIENT GETS A TIME-LOCKED CLAIM VIA SLOW &mdash; UNLOCKS AFTER <b style="color:var(--m)">${esc(fmtDelay(S.txSlowDelaySec))}</b>. THE VAULT CAN REVERSE ANY TIME BEFORE THEN.${S.txToken!=="ETH"?` ALLOWANCE TO SLOW IS ADDED ATOMICALLY IF NEEDED.`:``}</div>`:``}`:``;
-    body=`<div class="grid2">
+        ${!slowAvailable()?`<div class="slow-note" style="margin-top:10px">THE VAULT SENDS THE ASSET DIRECTLY. ON ETHEREUM MAINNET YOU CAN INSTEAD SEND VIA SLOW &mdash; THE RECIPIENT CLAIMS AFTER A DELAY YOU SET, AND THE VAULT CAN REVERSE IT UNTIL THEN.</div>`:''}
+        ${slowOn?`<div class="slow-box">
+          <div class="token-pills" style="margin-bottom:0">${SLOW_PRESETS.map(p=>`<button class="pill${Number(S.txSlowDelaySec)===p.s?" on":""}" onclick="setSlowDelay(${p.s})">${p.l}</button>`).join("")}</div>
+          <div class="slow-custom">
+            <span class="slow-custom-l">CUSTOM</span>
+            <input class="inp" id="slow-custom-n" style="flex:1" inputmode="decimal" placeholder="0" onchange="onSlowCustom()" onkeydown="if(event.key==='Enter'){event.preventDefault();onSlowCustom()}">
+            <select class="slow-unit" id="slow-custom-u" onchange="onSlowCustom()">
+              <option value="h"${S.txSlowUnit==="h"?" selected":""}>HOURS</option>
+              <option value="d"${S.txSlowUnit==="d"?" selected":""}>DAYS</option>
+            </select>
+          </div>
+          <div class="slow-note" style="margin-top:12px">RECIPIENT GETS A TIME-LOCKED CLAIM &mdash; CLAIMABLE AFTER <b>${esc(fmtDelay(S.txSlowDelaySec))}</b>, AND THE VAULT CAN REVERSE IT ANY TIME BEFORE THEN.${S.txToken!=="ETH"?` ALLOWANCE TO SLOW IS BATCHED IN ATOMICALLY IF NEEDED.`:``}</div>
+        </div>`:``}
+      </div>`;
+    body=`<div class="send-grid">
       <div>
-        <label class="lbl">TOKEN</label>
-        <div class="token-pills">${tokenObjs.map(t=>`<button class="pill${S.txToken===t.symbol?" on":""}" onclick="S.txToken='${esc(t.symbol)}';S.showCustomTok=false;render()"><span class="tok-ico">${t.icon||iconForSym(t.symbol)}</span>${esc(t.symbol)}</button>`).join("")}${S.demoMode?"":`<button class="pill" onclick="S.showCustomTok=!S.showCustomTok;render()">+ CUSTOM</button>`}</div>
-        ${(!S.demoMode&&S.showCustomTok)?`<div style="margin-bottom:12px"><div style="display:flex;gap:8px"><input class="inp" id="custom-tok-addr" style="margin:0;flex:1;font-size:13px" placeholder="0x... TOKEN ADDRESS" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomTokenFlow()}"><button class="btn btn-outline btn-sm" onclick="addCustomTokenFlow()">ADD</button></div>${(()=>{const cl=customTokensFor(S.chainId,v.address);return cl.length?`<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">${cl.map(t=>`<span class="ctok-chip">${tokIcon(t.symbol,'sm')} ${esc(t.symbol)} <span class="dim">${t.decimals}d</span><button onclick="removeCustomTokenFlow('${t.address}')" title="Remove ${esc(t.symbol)}">&#10005;</button></span>`).join('')}</div>`:''})()}</div>`:''}
-        <div style="display:flex;justify-content:space-between;align-items:baseline"><label class="lbl">AMOUNT</label>${availNum>0?`<button class="link-btn" style="font-size:9px;margin:0;padding:0" onclick="fillTxMax('${availStr}',${dec},${availNum},'${unitLabel}')">MAX ${esc(hold.balance)} ${esc(S.txToken)}</button>`:hold?`<span style="font-size:9px;color:var(--d);letter-spacing:1px">BAL ${esc(hold.balance)}</span>`:''}</div>
-        <input class="inp" id="tx-amount" placeholder="0.0" oninput="onTxAmount(this.value,${dec},${availNum},'${unitLabel}')" onkeydown="if(event.key==='Enter'){event.preventDefault();submitTransfer()}">
-        <div id="tx-units" style="font-size:10px;color:var(--d);margin-top:-12px;word-break:break-all"></div>
-        <div id="tx-amount-warn" style="font-size:10px;color:var(--r);letter-spacing:1px;margin-bottom:12px;min-height:12px"></div>
-      </div><div>
-        <label class="lbl">RECIPIENT</label><input class="inp" id="tx-to" placeholder="0x... or name.eth / name.wei" oninput="onTxRecipient(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();submitTransfer()}">
-        <div id="tx-to-status" style="font-size:9px;letter-spacing:1px;margin-top:-12px;margin-bottom:12px;min-height:11px"></div>
+        <div class="fset">
+          <div class="fhead"><label class="lbl">TOKEN</label>${hold?`<span class="fhint">VAULT HOLDS <b>${esc(hold.balance)} ${esc(S.txToken)}</b>${hold.usd?` &middot; ${esc(hold.usd)}`:''}</span>`:`<span class="fhint">NO ${esc(S.txToken)} BALANCE</span>`}</div>
+          <div class="token-pills" style="margin-bottom:0">${tokenObjs.map(t=>`<button class="pill${S.txToken===t.symbol?" on":""}" onclick="selectTxToken('${esc(t.symbol)}')"><span class="tok-ico">${t.icon||iconForSym(t.symbol)}</span>${esc(t.symbol)}</button>`).join("")}${S.demoMode?"":`<button class="pill" onclick="S.showCustomTok=!S.showCustomTok;render()">+ CUSTOM</button>`}</div>
+          ${(!S.demoMode&&S.showCustomTok)?`<div style="margin-top:12px"><div style="display:flex;gap:8px"><input class="inp" id="custom-tok-addr" style="margin:0;flex:1;min-width:0;font-size:13px" placeholder="0x... TOKEN ADDRESS" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomTokenFlow()}"><button class="btn btn-outline btn-sm" onclick="addCustomTokenFlow()">ADD</button></div>${(()=>{const cl=customTokensFor(S.chainId,v.address);return cl.length?`<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">${cl.map(t=>`<span class="ctok-chip">${tokIcon(t.symbol,'sm')} ${esc(t.symbol)} <span class="dim">${t.decimals}d</span><button onclick="removeCustomTokenFlow('${t.address}')" title="Remove ${esc(t.symbol)}">&#10005;</button></span>`).join('')}</div>`:''})()}</div>`:''}
+        </div>
+
+        <div class="fset">
+          <div class="fhead"><label class="lbl">AMOUNT</label><span class="fhint" id="tx-units"></span></div>
+          <div class="amt">
+            <input class="amt-in" id="tx-amount" inputmode="decimal" placeholder="0.0" value="${esc(S.txAmount)}" oninput="onTxAmount(this.value,${dec},${availNum},'${esc(unitLabel)}')" onkeydown="if(event.key==='Enter'){event.preventDefault();submitTransfer()}">
+            <span class="amt-tok">${tokIcon(S.txToken)}${esc(S.txToken)}</span>
+          </div>
+          <div class="amt-foot">
+            <span class="amt-usd" id="tx-amount-usd" data-rate="${rate||0}"></span>
+            ${availNum>0?`<span class="qbtns">${[['25%',.25],['50%',.5],['MAX',1]].map(([l,f])=>`<button class="qbtn" onclick="fillTxPct(${f},'${availStr}',${dec},${availNum},'${esc(unitLabel)}')">${l}</button>`).join('')}</span>`:''}
+            <span class="amt-warn" id="tx-amount-warn"></span>
+          </div>
+        </div>
+
+        <div class="fset">
+          <div class="fhead"><label class="lbl">RECIPIENT</label><span class="fhint" id="tx-to-status"></span></div>
+          <input class="inp" id="tx-to" style="margin-bottom:0" placeholder="0x... or name.eth / name.wei" value="${esc(S.txTo)}" oninput="onTxRecipient(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();submitTransfer()}">
+        </div>
+
         ${slowUi}
-        ${(S.txToken!=="ETH"&&!slowOn)?`<div style="font-size:10px;color:var(--d);margin-top:-4px;margin-bottom:12px">ON-CHAIN: transfer(recipient, amount) on ${S.txToken} contract</div>`:""}
-        <button class="btn btn-fill btn-w" style="margin-top:${mob?8:16}px" onclick="submitTransfer()">SIGN + SUBMIT</button>
+      </div>
+      <div>
+        <div class="review">
+          <div class="review-h"><span>REVIEW</span><span class="review-tag">NONCE #${nextNonce(v)}</span></div>
+          <div id="tx-review">${txReviewBody(v)}</div>
+        </div>
+        <button class="btn btn-fill btn-w btn-big" id="tx-submit" style="margin-top:14px" onclick="submitTransfer()">SIGN + SUBMIT</button>
+        <div class="review-miss" id="tx-ready-note"></div>
       </div></div>`;
   }else if(S.txMode==="CUSTOM"){
     const hasFns = Array.isArray(S.cxAbi) && S.cxAbi.length > 0;
@@ -2246,9 +2567,9 @@ function renderTxBuilder(v,mob){
         : '';
       const encodeFail = !encoded && selFn.inputs.length && Object.keys(S.cxArgs).length
         ? '<div style="font-size:10px;color:var(--r);margin-bottom:12px;letter-spacing:1px">ENCODE ERROR — CHECK PARAMS</div>' : '';
-      rightCol = `${params}${selFn.stateMutability==='payable'?'<div style="font-size:10px;color:var(--g);margin:-8px 0 12px;letter-spacing:1px">PAYABLE</div>':''}${preview}${encodeFail}<button class="btn btn-fill btn-w" style="margin-top:${mob?8:16}px" onclick="submitCustom()">SIGN + SUBMIT</button>`;
+      rightCol = `${params}${selFn.stateMutability==='payable'?'<div style="font-size:10px;color:var(--g);margin:-8px 0 12px;letter-spacing:1px">PAYABLE</div>':''}${preview}${encodeFail}<button class="btn btn-fill btn-w btn-big" style="margin-top:${mob?8:16}px" onclick="submitCustom()">SIGN + SUBMIT</button>`;
     } else {
-      rightCol = `<label class="lbl">CALLDATA</label><textarea class="inp" id="cx-data" placeholder="0x..."></textarea><button class="btn btn-fill btn-w" style="margin-top:${mob?8:16}px" onclick="submitCustom()">SIGN + SUBMIT</button>`;
+      rightCol = `<label class="lbl">CALLDATA</label><textarea class="inp" id="cx-data" placeholder="0x..."></textarea><button class="btn btn-fill btn-w btn-big" style="margin-top:${mob?8:16}px" onclick="submitCustom()">SIGN + SUBMIT</button>`;
     }
     body=`<div class="grid2">
       <div>
@@ -2269,11 +2590,15 @@ function renderTxBuilder(v,mob){
         <div><label class="lbl">CALLDATA</label><input class="inp" data-bi="${i}" data-bf="d" placeholder="0x..." value="${esc(c.d)}" oninput="onBatchData(${i},this.value)"><div id="batch-d-${i}" style="font-size:9px;letter-spacing:1px;margin-top:-12px;margin-bottom:8px;min-height:11px">${(()=>{const s=_hexState(c.d);return s.txt?`<span style="color:${s.color}">${s.txt}</span>`:''})()}</div></div>
       </div></div>`).join("")+
       `<button class="link-btn" onclick="S.batch.push({t:'',v:'',d:''});render()">+ ADD CALL</button>
-       <button class="btn btn-fill btn-w" style="margin-top:16px" onclick="submitBatch()">SIGN + SUBMIT BATCH</button>`;
+       <button class="btn btn-fill btn-w btn-big" style="margin-top:16px" onclick="submitBatch()">SIGN + SUBMIT BATCH</button>`;
   }
-  return`<div class="txb"><div class="txb-tabs">${tabs}<button class="x-btn" onclick="S.showTx=false;_builderSim=null;render()">&#10005;</button></div>${body}
-    <div style="margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="sim-btn" onclick="simulateBuilder()" title="Dry-run this transaction against current chain state before proposing">SIMULATE</button><span style="font-size:9px;color:var(--d);letter-spacing:1px">DRY-RUN BEFORE PROPOSING</span></div>
-    ${_builderSim?renderSimResult(_builderSim):''}</div>`;
+  return`<div class="txb"><div class="txb-tabs">${tabs}<button class="x-btn" onclick="closeTxBuilder()" title="Discard this draft">&#10005;</button></div>${body}
+    ${_builderSim
+      ? renderSim(_builderSim, { rerun:'simulateBuilder()', dismiss:'dismissBuilderSim()' })
+      : `<div class="sim-idle">
+          <button class="sim-btn" onclick="simulateBuilder()" title="Dry-run this transaction against current chain state before proposing">SIMULATE</button>
+          <span class="t">DRY-RUN AGAINST THE LATEST BLOCK &mdash; SEE THE EXACT BALANCE CHANGES AND GAS BEFORE THIS BECOMES A PROPOSAL.</span>
+        </div>`}</div>`;
 }
 
 function getProdTokenSymbols(){
@@ -2505,6 +2830,7 @@ function addTxDemo(tx) {
   v.queue.push({ nonce: n, ...tx, eta: 0, approvals: ap });
   v.nonce++;
   S.showTx = false;
+  resetTxFields();
   flash(`TX #${n} CREATED`);
   render();
 }
@@ -3310,7 +3636,25 @@ async function loadVaultQueue(vi) {
       const ethVal = t.value && t.value !== '0' ? ethers.formatEther(BigInt(t.value)) : '0';
       const value = ethVal === '0' ? '0' : ethVal;
       const token = (t.call_data === '0x' || !t.call_data) && ethVal !== '0' ? 'ETH' : '';
-      let displayValue = value, displayToken = token, displayTo = null;
+      let displayValue = value, displayToken = token, displayTo = null, slowDelay = 0;
+      // Decode a SLOW deposit so the queue shows the asset and the real
+      // recipient rather than "0 → the SLOW contract".
+      if(dataLabel === 'SLOW TRANSFER' && t.call_data && t.call_data.length >= 10) {
+        try {
+          const [tk, to, amt, delay] = slowIface.decodeFunctionData('depositTo', t.call_data);
+          const isEth = tk === ethers.ZeroAddress;
+          const info = isEth ? { symbol:'ETH', decimals:18 }
+            : (PROD_TOKENS[S.chainId] || ETH_ONLY).find(x => x.address.toLowerCase() === tk.toLowerCase())
+              || customTokensFor(S.chainId, v.address).find(x => x.address.toLowerCase() === tk.toLowerCase());
+          if(info) {
+            // ETH rides in msg.value; the encoded amount is zero for that path.
+            displayValue = fmtAmount(isEth ? BigInt(t.value || '0') : BigInt(amt), info.decimals);
+            displayToken = info.symbol;
+          }
+          displayTo = to;
+          slowDelay = Number(delay);
+        } catch(_) {}
+      }
       // Decode ERC20 transfer amount and recipient for display
       if(dataLabel === 'ERC20 TRANSFER' && t.call_data && t.call_data.length >= 10) {
         try {
@@ -3333,6 +3677,7 @@ async function loadVaultQueue(vi) {
         value: value,
         token: token,
         dataLabel: dataLabel,
+        slowDelay: slowDelay,
         eta: t.eta || 0,
         approvals: approvals,
         dbId: t.id,
@@ -4378,20 +4723,35 @@ async function _simViaCall(s) {
   try { gas = (await provider.estimateGas({ from: s.from, to: s.to, value: s.value, data: s.data })).toString(); } catch(_){}
   return { status:'pass', gas, assets: [], basic: true };
 }
+// Stamp a result with the wall-clock time it was produced, so a panel left on
+// screen never reads as fresher than it is.
+function _simStamp(r) {
+  r.at = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  return r;
+}
 // Run a simulation for {from,to,value,data}; never throws (returns a revert result).
 async function runSim(s) {
+  let r;
   try {
-    try { return await _simViaSimulateV1(s); }
-    catch(_) { return await _simViaCall(s); }
+    try { r = await _simViaSimulateV1(s); }
+    catch(_) { r = await _simViaCall(s); }
   } catch(e) {
-    return { status:'revert', reason: e.reason || e.shortMessage || _revertReason(e?.data) };
+    return _simStamp({ status:'revert', reason: e.reason || e.shortMessage || _revertReason(e?.data) });
   }
+  // Native ETH leaving the vault only shows up in the log trace when the RPC
+  // supports traceTransfers; when it doesn't, derive it from the call value so
+  // the ledger never silently omits the largest movement in the transaction.
+  if(r.status === 'pass' && s.value > 0n) {
+    r.assets = r.assets || [];
+    if(!r.assets.some(a => a.symbol === 'ETH')) r.assets.unshift({ symbol:'ETH', decimals:18, delta: -s.value });
+  }
+  return _simStamp(r);
 }
 async function simulateProposal(vi, nonce) {
   const v = S.vaults[vi];
   const tx = v.queue.find(t => t.nonce === nonce);
   if(!tx) return;
-  if(S.demoMode) { tx._sim = { status:'pass', demo:true, assets: [] }; render(); return; }
+  if(S.demoMode) { tx._sim = _simStamp({ status:'pass', demo:true, assets: [] }); render(); return; }
   tx._sim = { loading:true }; render();
   tx._sim = await runSim(_simTx(v, tx));
   render();
@@ -4404,13 +4764,23 @@ async function buildSimInput() {
   if(!v) return null;
   const from = v.address;
   if(S.txMode === 'TRANSFER') {
-    const amt = stripCommas(document.getElementById('tx-amount')?.value || '0');
-    const to = document.getElementById('tx-to')?.value || '';
+    const amt = stripCommas(document.getElementById('tx-amount')?.value || S.txAmount || '0');
+    const to = document.getElementById('tx-to')?.value || S.txTo || '';
     if(!to || !amt || !(parseFloat(amt) > 0)) throw new Error('FILL IN AMOUNT AND RECIPIENT');
     const toAddr = await resolveName(to);
     const tokenInfo = curTok(v);
-    if(tokenInfo.address === ethers.ZeroAddress) return { from, to: toAddr, value: ethers.parseEther(amt), data: '0x' };
-    return { from, to: tokenInfo.address, value: 0n, data: erc20Iface.encodeFunctionData('transfer', [toAddr, ethers.parseUnits(amt, tokenInfo.decimals)]) };
+    const isEth = tokenInfo.address === ethers.ZeroAddress;
+    const amountRaw = isEth ? ethers.parseEther(amt) : ethers.parseUnits(amt, tokenInfo.decimals);
+    // SLOW delivery proposes a depositTo (plus an atomic approve for ERC20),
+    // not a plain transfer — dry-run the call that will actually be queued.
+    if(S.txSlow && slowAvailable()) {
+      const { target, value, data } = await buildSlowOutbound({
+        tokenInfo, toAddr, amountRaw, delaySec: S.txSlowDelaySec, vaultAddr: v.address,
+      });
+      return { from, to: target, value: BigInt(value), data };
+    }
+    if(isEth) return { from, to: toAddr, value: amountRaw, data: '0x' };
+    return { from, to: tokenInfo.address, value: 0n, data: erc20Iface.encodeFunctionData('transfer', [toAddr, amountRaw]) };
   }
   if(S.txMode === 'CUSTOM') {
     const target = S.cxTarget || document.getElementById('cx-target')?.value || '';
@@ -4432,7 +4802,7 @@ async function buildSimInput() {
 }
 let _builderSim = null;
 async function simulateBuilder() {
-  if(S.demoMode) { _builderSim = { status:'pass', demo:true, assets: [] }; render(); return; }
+  if(S.demoMode) { _builderSim = _simStamp({ status:'pass', demo:true, assets: [] }); render(); return; }
   _builderSim = { loading:true }; render();
   let s;
   try { s = await buildSimInput(); }
@@ -4441,18 +4811,59 @@ async function simulateBuilder() {
   _builderSim = await runSim(s);
   render();
 }
-function renderSimResult(sim) {
-  if(sim.loading) return `<div class="sim-result">SIMULATING &hellip;</div>`;
-  if(sim.status === 'revert') return `<div class="sim-result revert">&#10007; WOULD REVERT${sim.reason?` &middot; ${esc(sim.reason)}`:''}</div>`;
-  let assetLines = '';
-  if(sim.assets && sim.assets.length) {
-    assetLines = '<div style="margin-top:6px">' + sim.assets.map(a => {
-      const neg = a.delta < 0n, abs = neg ? -a.delta : a.delta;
-      return `<div class="${neg?'sim-send':'sim-recv'}">${neg?'&minus;':'+'}${esc(ethers.formatUnits(abs, a.decimals))} ${esc(a.symbol)}</div>`;
-    }).join('') + '</div>';
-  }
-  const gasLine = sim.gas ? `<div style="color:var(--d);margin-top:2px">GAS ~${Number(sim.gas).toLocaleString()}</div>` : '';
-  return `<div class="sim-result pass">&#10003; SIMULATION PASSED${sim.demo?' &middot; DEMO':''}${sim.basic?' &middot; REVERT-CHECK ONLY':''}${assetLines}${gasLine}</div>`;
+// The dry-run panel. Three states — running, reverted, passed — each carrying
+// the detail that state actually justifies: a scan bar while it works, the
+// decoded revert reason when it fails, and the vault's per-asset balance
+// ledger plus gas when it passes.
+// opts: { rerun, dismiss } are onclick expressions; both optional.
+function renderSim(sim, opts) {
+  opts = opts || {};
+  const actions = `<span class="sim-tags">
+    ${sim.at ? `<span class="sim-tag">${esc(sim.at)}</span>` : ''}
+    ${sim.demo ? '<span class="sim-tag">DEMO</span>' : ''}
+    ${sim.basic ? '<span class="sim-tag" title="This RPC does not support eth_simulateV1 — the call was checked for revert only, with no balance trace">REVERT-CHECK ONLY</span>' : ''}
+    ${opts.rerun ? `<button class="sim-x" onclick="${opts.rerun}" title="Run again against the latest block">&#8635;</button>` : ''}
+    ${opts.dismiss ? `<button class="sim-x" onclick="${opts.dismiss}" title="Dismiss">&#10005;</button>` : ''}
+  </span>`;
+
+  if(sim.loading) return `<div class="sim run">
+    <div class="sim-h"><span class="mark">&#9679;</span><span>SIMULATING</span></div>
+    <div class="sim-b"><div class="sim-scan"></div><div class="sim-sub">REPLAYING THE CALL FROM THE VAULT AGAINST THE LATEST BLOCK&hellip;</div></div>
+  </div>`;
+
+  if(sim.status === 'revert') return `<div class="sim revert">
+    <div class="sim-h"><span class="mark">&#10007;</span><span>WOULD REVERT</span>${actions}</div>
+    <div class="sim-b">
+      ${sim.reason ? `<div class="sim-reason">${esc(sim.reason)}</div>` : ''}
+      <div class="sim-sub" style="margin-top:9px">THIS PROPOSAL CAN STILL BE CREATED AND SIGNED, BUT IT WILL FAIL WHEN EXECUTED. CHECK THE BALANCE, THE RECIPIENT AND ANY ALLOWANCE FIRST.</div>
+    </div>
+  </div>`;
+
+  const assets = (sim.assets || []).filter(a => a.delta !== 0n);
+  const ledger = assets.length
+    ? `<div class="sim-led">${assets.map(a => {
+        const neg = a.delta < 0n, abs = neg ? -a.delta : a.delta;
+        return `<div class="sim-row ${neg?'sim-out':'sim-in'}">
+          <span class="dir">${neg ? 'OUT' : 'IN'}</span>
+          ${tokIcon(a.symbol,'sm')}<span>${esc(a.symbol)}</span>
+          <span class="val">${neg ? '&minus;' : '+'}${esc(groupInt(fmtAmount(abs, a.decimals)))}</span>
+        </div>`;
+      }).join('')}</div>`
+    : `<div class="sim-sub">NO BALANCE CHANGE TO THE VAULT${sim.basic ? '' : ' &mdash; NOTHING ENTERS OR LEAVES IT'}.</div>`;
+
+  return `<div class="sim pass">
+    <div class="sim-h"><span class="mark">&#10003;</span><span>SIMULATION PASSED</span>${actions}</div>
+    <div class="sim-b">
+      ${assets.length ? '<div class="sim-sub" style="margin-bottom:2px">VAULT BALANCE CHANGES</div>' : ''}
+      ${ledger}
+      ${sim.gas ? `<div class="sim-foot"><span>ESTIMATED GAS</span><span>~${Number(sim.gas).toLocaleString()}</span></div>` : ''}
+    </div>
+  </div>`;
+}
+function dismissBuilderSim(){ _builderSim = null; render(); }
+function dismissProposalSim(vi, nonce){
+  const tx = (S.vaults[vi]?.queue || []).find(t => t.nonce === nonce);
+  if(tx){ tx._sim = null; render(); }
 }
 
 async function prodAccelerate(vi, nonce) {
@@ -4607,6 +5018,7 @@ async function prodSubmitTransfer() {
 
     flash(`TX #${nonce} CREATED`);
     S.showTx = false;
+    resetTxFields();
     await reloadQueue(S.sel);
   } catch(e) {
     console.error(e);
