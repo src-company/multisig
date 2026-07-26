@@ -50,6 +50,16 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
+-- 'stale' is a proposal that never happened: its nonce was consumed by
+-- something else, or it left the on-chain queue by a route this client did not
+-- observe. It used to be recorded as 'executed' with block 0, which put a row
+-- that never ran into the history ledger under a green tick. Terminal, and
+-- excluded from both the pending queue and the history view.
+-- Run as its own statement: a new enum label cannot be USED in the transaction
+-- that adds it, so nothing below may reference 'stale' at parse time (see the
+-- tx_history view, which is written as a NOT IN for exactly that reason).
+ALTER TYPE tx_status ADD VALUE IF NOT EXISTS 'stale';
+
 CREATE TABLE IF NOT EXISTS transactions (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   wallet_id       uuid NOT NULL REFERENCES wallets ON DELETE CASCADE,
@@ -73,13 +83,28 @@ CREATE TABLE IF NOT EXISTS transactions (
   execution_tx    text,
   cancelled_at    timestamptz,
   cancelled_by    text,
-  UNIQUE (wallet_id, nonce),
+  -- Identity is the EIP-712 digest, and ONLY the digest. There is deliberately
+  -- no UNIQUE (wallet_id, nonce): a nonce is contested, not owned. Several
+  -- proposals can legitimately be built against the same nonce — two owners
+  -- racing, and every cancel/reject/accelerate companion, which must be signed
+  -- over the LIVE nonce and so lands on top of whatever ordinary proposal is
+  -- already sitting there. While that constraint existed, propose_tx returned
+  -- NULL for the second of them and the caller's signature was dropped on the
+  -- floor: REJECT could never be raised at all (it is always built at the nonce
+  -- of the very proposal it skips), and CANCEL failed whenever the queue held
+  -- an unqueued proposal — that is, exactly when the brake is needed.
+  -- Only one of a contested set can ever execute; the losers are pruned to
+  -- 'stale' once the chain moves past them.
   UNIQUE (chain_id, tx_hash)
 );
 
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS queue_tx text;
+-- Migration for databases created before the constraint was dropped.
+ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_wallet_id_nonce_key;
 
 CREATE INDEX IF NOT EXISTS idx_tx_wallet_status ON transactions (wallet_id, status);
+-- Was served by the dropped UNIQUE; the queue and the prune both filter on it.
+CREATE INDEX IF NOT EXISTS idx_tx_wallet_nonce ON transactions (wallet_id, nonce);
 CREATE INDEX IF NOT EXISTS idx_tx_chain ON transactions (chain_id);
 CREATE INDEX IF NOT EXISTS idx_tx_proposed_by ON transactions (proposed_by);
 
@@ -188,7 +213,10 @@ CREATE OR REPLACE VIEW tx_history AS
     -- must order explicitly on this column (see dbGetHistory).
     COALESCE(t.executed_at, t.cancelled_at) AS sort_ts
   FROM transactions t
-  WHERE t.status IN ('executed', 'cancelled')
+  -- Everything terminal, stated as the complement of the live states so this
+  -- view carries no literal of the 'stale' label — which cannot be referenced
+  -- in the transaction that adds it to the enum above.
+  WHERE t.status NOT IN ('proposed', 'executing', 'queued')
   ORDER BY COALESCE(t.executed_at, t.cancelled_at) DESC;
 
 -- ── RLS ──────────────────────────────────────────────────────────
@@ -292,11 +320,32 @@ BEGIN
 
   INSERT INTO transactions (wallet_id, chain_id, nonce, target, value, call_data, tx_hash, threshold, proposed_by, description)
   VALUES (p_wallet_id, p_chain_id, p_nonce, p_target, p_value, p_call_data, p_tx_hash, p_threshold, p_proposed_by, p_description)
-  ON CONFLICT DO NOTHING
+  ON CONFLICT (chain_id, tx_hash) DO NOTHING
   RETURNING id INTO t_id;
 
+  -- The only conflict left is the digest, which is the proposal's identity — so
+  -- the existing row IS this proposal and the caller may sign it. Targeted at
+  -- that constraint rather than left bare: a bare ON CONFLICT would swallow any
+  -- future constraint too, and hand back whatever the fallback happened to find.
   IF t_id IS NULL THEN
-    SELECT id INTO t_id FROM transactions WHERE chain_id = p_chain_id AND tx_hash = p_tx_hash LIMIT 1;
+    -- Matched on the wallet and nonce as well as the hash. A digest commits to
+    -- the verifying contract and the nonce, so a row that carries this hash
+    -- under a different wallet or nonce was not produced by hashing this
+    -- proposal — it was squatted, and attaching signatures to it would file
+    -- them against a row the queue will never read.
+    SELECT id INTO t_id FROM transactions
+    WHERE chain_id = p_chain_id AND tx_hash = p_tx_hash
+      AND wallet_id = p_wallet_id AND nonce = p_nonce
+    LIMIT 1;
+    IF t_id IS NULL THEN
+      RAISE EXCEPTION 'Transaction hash already registered against a different proposal';
+    END IF;
+    -- Terminal rows are not revivable: an identical digest means an identical
+    -- nonce, and a nonce that reached a terminal state has been consumed on
+    -- chain. Reviving would show a proposal that can only ever revert.
+    IF (SELECT status FROM transactions WHERE id = t_id) NOT IN ('proposed', 'executing') THEN
+      RAISE EXCEPTION 'That proposal is already executed, cancelled or superseded';
+    END IF;
   END IF;
 
   RETURN t_id;
@@ -329,9 +378,15 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+-- p_caller is REQUIRED. It used to default to NULL, and the check was written
+-- `IF p_caller IS NOT NULL AND NOT is_wallet_owner(...)` — so any caller that
+-- simply omitted the argument skipped the check entirely. PostgREST fills
+-- omitted named arguments from their defaults, which made this reachable from
+-- an anonymous HTTP request: flip any proposal to executed and it leaves every
+-- owner's queue while remaining live on chain. The same held for mark_queued.
 CREATE OR REPLACE FUNCTION mark_executed(
   p_tx_id uuid, p_block bigint, p_execution_tx text,
-  p_caller text DEFAULT NULL
+  p_caller text
 ) RETURNS void AS $$
 DECLARE
   w_id uuid;
@@ -341,7 +396,7 @@ BEGIN
   IF w_id IS NULL THEN
     RAISE EXCEPTION 'Transaction not found';
   END IF;
-  IF p_caller IS NOT NULL AND NOT is_wallet_owner(w_id, p_caller) THEN
+  IF NOT is_wallet_owner(w_id, p_caller) THEN
     RAISE EXCEPTION 'Not an owner';
   END IF;
 
@@ -357,12 +412,15 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Drop the pre-queue_tx signature so no stale overload lingers on existing DBs.
-DROP FUNCTION IF EXISTS mark_queued(uuid, bigint, bigint, text);
-CREATE OR REPLACE FUNCTION mark_queued(
-  p_tx_id uuid, p_eta bigint, p_block bigint,
-  p_queue_tx text DEFAULT NULL,
-  p_caller text DEFAULT NULL
+-- Retire a proposal that never ran: its nonce was consumed by something else,
+-- or it left the on-chain queue by a route this client did not see. Separate
+-- from mark_executed, which the queue loader used to call with block 0 for this
+-- — that wrote status 'executed' and put a proposal that never happened into
+-- the history ledger under a tick, indistinguishable from one that did.
+-- cancelled_at doubles as "observed superseded at" for a stale row; cancelled_by
+-- stays NULL, because nobody cancelled it.
+CREATE OR REPLACE FUNCTION prune_tx(
+  p_tx_id uuid, p_caller text
 ) RETURNS void AS $$
 DECLARE
   w_id uuid;
@@ -371,16 +429,49 @@ BEGIN
   IF w_id IS NULL THEN
     RAISE EXCEPTION 'Transaction not found';
   END IF;
-  IF p_caller IS NOT NULL AND NOT is_wallet_owner(w_id, p_caller) THEN
+  IF NOT is_wallet_owner(w_id, p_caller) THEN
+    RAISE EXCEPTION 'Not an owner';
+  END IF;
+
+  UPDATE transactions
+  SET status = 'stale', cancelled_at = now()
+  WHERE id = p_tx_id AND status IN ('proposed', 'executing', 'queued');
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Drop the pre-queue_tx signature so no stale overload lingers on existing DBs.
+DROP FUNCTION IF EXISTS mark_queued(uuid, bigint, bigint, text);
+-- p_caller and p_queue_tx are both REQUIRED — see mark_executed above for why
+-- the defaults had to go. (Postgres will not take a mandatory parameter after
+-- an optional one, and the client has always passed both.)
+CREATE OR REPLACE FUNCTION mark_queued(
+  p_tx_id uuid, p_eta bigint, p_block bigint,
+  p_queue_tx text,
+  p_caller text
+) RETURNS void AS $$
+DECLARE
+  w_id uuid;
+  prev_status tx_status;
+BEGIN
+  SELECT wallet_id, status INTO w_id, prev_status FROM transactions WHERE id = p_tx_id;
+  IF w_id IS NULL THEN
+    RAISE EXCEPTION 'Transaction not found';
+  END IF;
+  IF NOT is_wallet_owner(w_id, p_caller) THEN
     RAISE EXCEPTION 'Not an owner';
   END IF;
 
   UPDATE transactions
   SET status = 'queued', eta = p_eta, queued_at = now(), queued_block = p_block, queue_tx = p_queue_tx
-  WHERE id = p_tx_id;
+  WHERE id = p_tx_id AND status IN ('proposed', 'executing');
 
-  -- On-chain nonce increments at queue time (execute() is called to queue)
-  UPDATE wallets SET nonce = nonce + 1 WHERE id = w_id;
+  -- On-chain nonce increments at queue time (execute() is called to queue).
+  -- Guarded on the row having actually moved: a retried write — this call goes
+  -- through the client's retry path — would otherwise advance the recorded
+  -- nonce a second time for one on-chain queueing.
+  IF prev_status IN ('proposed', 'executing') THEN
+    UPDATE wallets SET nonce = nonce + 1 WHERE id = w_id;
+  END IF;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
@@ -398,9 +489,14 @@ BEGIN
     RAISE EXCEPTION 'Not an owner';
   END IF;
 
+  -- Any live proposal, not just a queued one. The old `status = 'queued'` guard
+  -- made this a silent no-op for a proposal still collecting signatures — which
+  -- is exactly what the reject flow calls it for when it retires the proposal
+  -- whose nonce it just skipped. Nothing happened, no error was raised, and the
+  -- row sat there until the queue loader swept it up as stale.
   UPDATE transactions
   SET status = 'cancelled', cancelled_at = now(), cancelled_by = p_cancelled_by
-  WHERE id = p_tx_id AND status = 'queued';
+  WHERE id = p_tx_id AND status IN ('proposed', 'executing', 'queued');
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 

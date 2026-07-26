@@ -78,9 +78,17 @@ The privilege model is the part worth reading before deploying it:
   here is public chain data or a signature that is worthless alone, so the policies
   are permissive by design rather than by omission.
 - **Writes** go only through `SECURITY DEFINER` functions — `register_wallet`,
-  `propose_tx`, `add_signature`, `mark_executed`, `mark_queued`, `cancel_tx`, and so
-  on — each of which runs its own owner check. The anonymous role has no direct
-  `INSERT`, `UPDATE` or `DELETE` on any table.
+  `propose_tx`, `add_signature`, `mark_executed`, `mark_queued`, `cancel_tx`,
+  `prune_tx`, and so on — each of which runs its own owner check, on a caller
+  argument that is **required**: an optional one is not a check, because anything
+  speaking HTTP to PostgREST can leave it out and take the default.
+  The anonymous role has no direct `INSERT`, `UPDATE` or `DELETE` on any table.
+- That check establishes only that the address named is an owner, never that the
+  request came from it — nothing here is authenticated. It is a guard rail, not a
+  boundary. The boundary is the signature: every stored signature is re-verified
+  in the browser against the digest derived from the row's own fields before it
+  is counted toward anything, and every status the interface records is taken
+  from an event the vault itself emitted.
 - PostgREST connects as a low-privilege `authenticator` login that only holds the
   right to `SET ROLE anon`. It must **not** connect as the database owner. Render
   only auto-exposes the owner connection string, which is why `PGRST_DB_URI` is set
