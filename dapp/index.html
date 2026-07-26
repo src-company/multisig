@@ -2975,6 +2975,7 @@ function renderNow(){
       <div class="footer-r">
         <a href="docs.html" class="docs-link">DOCS</a>
         <a href="docs.html#audits" class="docs-link" target="_blank" rel="noopener" title="Security audits, findings, and how each one is answered">AUDIT</a>
+        <a href="brand.html" class="docs-link" title="Logos, boilerplate and the fact sheet — free to use, no permission needed">BRAND</a>
         ${S.vaults.length===0&&!S.demoMode?`<button class="reset-btn" onclick="S.demoMode=true;S.vaults=seed();S.sel=0;flash('DEMO LOADED');render()">DEMO</button>`:""}
         ${S.demoMode?`<button class="reset-btn" onclick="S.demoMode=false;S.vaults=[];S.sel=0;S.view='DASH';S.showTx=false;S.batch=[{t:'',v:'',d:''},{t:'',v:'',d:''}];S.adminTab='POLICY';flash('DEMO CLEARED');render()">RESET</button>`:""}
         ${!S.demoMode&&S.vaults.length>0?`<button class="reset-btn" onclick="loadAllVaults()">RELOAD</button>`:""}

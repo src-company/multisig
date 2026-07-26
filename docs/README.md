@@ -56,9 +56,17 @@ When `src/` changes, the chapters most likely to go stale are:
 | Gas figures — from `forge test --mc GasTest -vv` | `protocol/comparison.md` |
 | A new review, or a finding's disposition changing | `protocol/security.md`, `SECURITY.md` |
 | Chains, tokens, guardrails, or screens in `dapp/` | `dapp/*.md`, and `dapp/docs.html` |
-| A gas figure, a chain, a review, or the logo | `brand.md` — the press kit quotes all four |
+| A gas figure, a chain, a review, or the logo | `brand.md` **and** `dapp/brand.html` — the press kit quotes all four, in both places |
 
 `dapp/docs.html` is the *user-facing* documentation shipped with the app and is
 maintained separately. It answers questions someone has while operating a wallet;
 this book is the repository reference. Where they overlap — the deployed addresses,
 the clone bytecode, the audit ledger, the guardrails — both need updating.
+
+`dapp/brand.html` is the *published* press kit, and it is the link handed to a
+journalist — this book is not deployed anywhere, so `src/brand.md` is only ever
+read on GitHub. The two carry the same boilerplate, numbers and fact sheet
+deliberately, for two different readers. **Change one and you must change the
+other**; the boilerplate especially, since its whole value is that it can be
+quoted verbatim and a drifted second copy would put two different sentences in
+circulation under the same name.

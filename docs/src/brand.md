@@ -8,9 +8,15 @@ product, without having to ask us first.
   <img alt="Multisig" src="brand/multisig-lockup-light.svg" width="400">
 </picture>
 
+**The published version of this page is
+[multisig.software/brand.html](https://multisig.software/brand.html)** — same
+material, with a copy button on every block of boilerplate and the logos
+downloadable in place. That is the link to share. This is its source-of-truth
+twin, for anyone already reading the repository.
+
 The logo files, the palette and the placement rules are in
-[`brand/`](https://github.com/src-company/multisig/tree/main/brand). This page
-is the words: descriptions at four lengths, a plain-English explanation, the
+[`brand/`](https://github.com/src-company/multisig/tree/main/brand). Below is
+the words: descriptions at four lengths, a plain-English explanation, the
 numbers and where they come from, and what we are careful *not* to claim.
 
 All of it is MIT-licensed. Quote it, edit it, paste it into your CMS. No

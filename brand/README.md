@@ -3,9 +3,10 @@
 Logos, colours and type for Multisig, plus the script that builds them.
 
 If you are writing about the project and want the words rather than the files —
-one-liners, boilerplate at three lengths, a plain-English explainer and a fact
-sheet — go to **[Brand & Press](../docs/src/brand.md)**. This page is for
-whoever has to place a logo.
+boilerplate at four lengths, a plain-English explainer and a fact sheet — go to
+**[multisig.software/brand.html](https://multisig.software/brand.html)**, or
+its markdown twin at [`docs/src/brand.md`](../docs/src/brand.md). This page is
+for whoever has to place a logo.
 
 Everything here is MIT-licensed along with the rest of the repository. You do
 not need to ask before using it in an article, a deck, a wallet's chain-picker

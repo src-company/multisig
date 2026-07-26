@@ -339,8 +339,14 @@ def build_png():
             shoot(binary, os.path.join(OUT, name),
                   os.path.join(PNG, name.replace(".svg", f"-{w}.png")), w)
     social = os.path.join(ROOT, "brand", "social")
-    shoot(binary, os.path.join(social, "multisig-card.svg"),
-          os.path.join(social, "multisig-card-1200x630.png"), 1200)
+    card = os.path.join(social, "multisig-card-1200x630.png")
+    shoot(binary, os.path.join(social, "multisig-card.svg"), card, 1200)
+    # dapp/brand.html points og:image at multisig.software/multisig-card-1200x630.png.
+    # Unfurlers want an absolute URL on the page's own origin, and Render serves
+    # only ./dapp — so the card has to exist there, not just in brand/.
+    served = os.path.join(ROOT, "dapp", "multisig-card-1200x630.png")
+    open(served, "wb").write(open(card, "rb").read())
+    print("  " + os.path.relpath(served, ROOT))
 
 
 # ── Book mirror ──────────────────────────────────────────────────────────────
