@@ -1,5 +1,5 @@
 # AllowlistGuard
-[Git Source](https://github.com/z0r0z/multisig/blob/7a81a30eb63788e9eea9c0790c2db6cfb7f435dd/src/mods/AllowlistGuard.sol)
+[Git Source](https://github.com/src-company/multisig/blob/1828932b88ce453e8e1db15af1f08690dedefc84/src/mods/AllowlistGuard.sol)
 
 Pre-transaction guard that whitelists (target, selector) pairs.
 Deploy at a vanity address with leading 0x1111 to activate as pre-guard.

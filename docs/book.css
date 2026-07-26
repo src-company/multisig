@@ -1,13 +1,21 @@
+/* The stylesheet originally pinned the first two columns to 15%/25%, which
+   suited a book made only of forge-doc parameter tables (Name / Type /
+   Description). The prose chapters carry gas figures, audit records and
+   comparison matrices whose columns have nothing in common with that shape, so
+   the pinning is gone and tables size to their own content. */
 table {
     margin: 0 auto;
     border-collapse: collapse;
     width: 100%;
 }
 
-table td:first-child {
-    width: 15%;
+table th,
+table td {
+    vertical-align: top;
 }
-  
-table td:nth-child(2) {
-    width: 25%;
+
+/* Addresses, typehashes and clone bytecode are single unbreakable tokens; let
+   them wrap inside their cell instead of widening the table past the page. */
+table code {
+    overflow-wrap: anywhere;
 }

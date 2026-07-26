@@ -1,5 +1,5 @@
 # IMultisig
-[Git Source](https://github.com/z0r0z/multisig/blob/7a81a30eb63788e9eea9c0790c2db6cfb7f435dd/src/mods/interfaces/IMultisig.sol)
+[Git Source](https://github.com/src-company/multisig/blob/1828932b88ce453e8e1db15af1f08690dedefc84/src/mods/interfaces/IMultisig.sol)
 
 
 ## Functions

@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 440" font-family="Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="400" height="440" fill="#000"/>
+
+  <!-- Signers -->
+  <circle cx="50" cy="70" r="16" fill="none" stroke="#fff" stroke-width="2"/>
+  <circle cx="50" cy="130" r="16" fill="none" stroke="#fff" stroke-width="2"/>
+  <circle cx="50" cy="100" r="16" fill="none" stroke="#666" stroke-width="2" stroke-dasharray="3,3"/>
+  <text x="50" y="74" text-anchor="middle" font-size="14" fill="#fff">1</text>
+  <text x="50" y="134" text-anchor="middle" font-size="14" fill="#fff">k</text>
+  <text x="50" y="104" text-anchor="middle" font-size="10" fill="#666">n</text>
+  <text x="50" y="170" text-anchor="middle" font-size="10" fill="#888">signers</text>
+
+  <!-- Arrows to wallet -->
+  <defs>
+    <marker id="w" markerWidth="6" markerHeight="4" refX="6" refY="2" orient="auto">
+      <polygon points="0 0, 6 2, 0 4" fill="#fff"/>
+    </marker>
+    <marker id="g" markerWidth="6" markerHeight="4" refX="6" refY="2" orient="auto">
+      <polygon points="0 0, 6 2, 0 4" fill="#666"/>
+    </marker>
+  </defs>
+  <line x1="72" y1="70" x2="118" y2="90" stroke="#fff" stroke-width="1" marker-end="url(#w)"/>
+  <line x1="72" y1="130" x2="118" y2="110" stroke="#fff" stroke-width="1" marker-end="url(#w)"/>
+
+  <!-- Wallet -->
+  <rect x="125" y="65" width="110" height="70" fill="#111" stroke="#fff" stroke-width="2" rx="6"/>
+  <text x="180" y="95" text-anchor="middle" font-size="13" font-weight="bold" fill="#fff">execute()</text>
+  <text x="180" y="112" text-anchor="middle" font-size="9" fill="#666">single-slot state</text>
+
+  <!-- Branch: now -->
+  <line x1="235" y1="90" x2="290" y2="90" stroke="#fff" stroke-width="1.5" marker-end="url(#w)"/>
+  <text x="255" y="82" font-size="9" fill="#aaa">now</text>
+
+  <!-- Branch: delay -->
+  <line x1="235" y1="110" x2="290" y2="150" stroke="#666" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#g)"/>
+  <text x="255" y="152" font-size="9" fill="#666">delay</text>
+
+  <!-- Target -->
+  <rect x="295" y="70" width="80" height="40" fill="#1a1a1a" stroke="#fff" stroke-width="1.5" rx="4"/>
+  <text x="335" y="95" text-anchor="middle" font-size="12" font-weight="bold" fill="#fff">target</text>
+
+  <!-- Queue -->
+  <rect x="295" y="135" width="80" height="35" fill="#111" stroke="#444" rx="4"/>
+  <text x="335" y="157" text-anchor="middle" font-size="10" fill="#888">queue</text>
+
+  <!-- Queue to target -->
+  <line x1="375" y1="152" x2="390" y2="152" stroke="#666" stroke-width="1" stroke-dasharray="4,3"/>
+  <line x1="390" y1="152" x2="390" y2="90" stroke="#666" stroke-width="1" stroke-dasharray="4,3"/>
+  <line x1="390" y1="90" x2="375" y2="90" stroke="#666" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#g)"/>
+
+  <!-- Divider -->
+  <line x1="20" y1="200" x2="380" y2="200" stroke="#333"/>
+
+  <!-- Features stacked -->
+  <text x="30" y="230" font-size="11" font-weight="bold" fill="#fff">features</text>
+  <text x="30" y="254" font-size="10" fill="#aaa">EIP-712 typed signatures</text>
+  <text x="30" y="274" font-size="10" fill="#aaa">EIP-1271 contract signing</text>
+  <text x="30" y="294" font-size="10" fill="#aaa">EIP-7702 smart EOA</text>
+  <text x="30" y="314" font-size="10" fill="#aaa">executor module (no sigs, no delay)</text>
+  <text x="30" y="334" font-size="10" fill="#aaa">batch + delegatecall</text>
+  <text x="30" y="354" font-size="10" fill="#aaa">timelock queue</text>
+  <text x="30" y="374" font-size="10" fill="#aaa">CREATE2 factory clones</text>
+  <text x="30" y="394" font-size="10" fill="#aaa">ERC-721 / ERC-1155 receiver</text>
+
+  <!-- Storage slot footer -->
+  <line x1="20" y1="414" x2="380" y2="414" stroke="#333"/>
+  <text x="200" y="432" text-anchor="middle" font-size="8" fill="#666">slot 0: delay(32) | nonce(32) | threshold(16) | ownerCount(16) | executor(160)</text>
+</svg>

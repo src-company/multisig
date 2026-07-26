@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+<rect width="64" height="64" fill="#FDFDFD"/>
+<defs><path id="r" d="M4,3 H60 V61 H4 Z" fill="none"/></defs>
+<text font-family="'Courier New',monospace" font-size="4.2" fill="#0099B3" fill-opacity="0.5" letter-spacing="-0.3"><textPath href="#r">////////////////////////////////////////////////////////////////////////////////////////////////////////////////////</textPath></text>
+<path d="M16,48 V16 H22 L32,32 L42,16 H48 V48 H42 V26 L32,42 L22,26 V48 Z" fill="#0099B3"/>
+</svg>

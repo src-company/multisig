@@ -1,13 +1,14 @@
 [book]
 src = "src"
-title = ""
+title = "Multisig"
+description = "A minimal k-of-n multisig wallet with an embedded timelock, and the interface that drives it."
 
 [output.html]
 no-section-label = true
 additional-js = ["solidity.min.js"]
 additional-css = ["book.css"]
 mathjax-support = true
-git-repository-url = "https://github.com/z0r0z/multisig"
+git-repository-url = "https://github.com/src-company/multisig"
 
 [output.html.fold]
 enable = true

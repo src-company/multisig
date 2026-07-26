@@ -1,5 +1,20 @@
 # Multisig
-[Git Source](https://github.com/z0r0z/multisig/blob/7a81a30eb63788e9eea9c0790c2db6cfb7f435dd/src/Multisig.sol)
+[Git Source](https://github.com/src-company/multisig/blob/1828932b88ce453e8e1db15af1f08690dedefc84/src/Multisig.sol)
+
+
+## Constants
+### factory
+
+```solidity
+address immutable factory = msg.sender
+```
+
+
+### SENTINEL
+
+```solidity
+address constant SENTINEL = address(1)
+```
 
 
 ## State Variables
@@ -35,20 +50,6 @@ uint16 public ownerCount
 
 ```solidity
 address public executor
-```
-
-
-### factory
-
-```solidity
-address immutable factory = msg.sender
-```
-
-
-### SENTINEL
-
-```solidity
-address constant SENTINEL = address(1)
 ```
 
 
