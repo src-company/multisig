@@ -134,6 +134,58 @@ So the griefing residual bites only the case whose consequence is mild. **If you
 need guaranteed emergency response, the answer is a council executor, not
 enabling the fast path.**
 
+### Closing the residual entirely, with no redeploy
+
+The route-substitution class exists because `TimelockExecutor` authorises against
+the **wallet's own** `Execute` digest, so the bundle it needs is simultaneously a
+valid bundle for `Multisig.execute()`. The executor bypass itself needs no bundle
+at all — `msg.sender == executor` skips the signature block outright. So an
+executor that authorises against its **own** digest leaves nothing in existence
+that can be replayed against the wallet.
+
+A second `Multisig` from the same factory is exactly that, and it is deployable
+today:
+
+```
+W = k-of-n, delay > 0, executor = C    (the vault)
+C = n-of-n, delay 0, no executor       (unanimity council, same owner set)
+```
+
+This reproduces the semantics `forwardEnabled` offers — unanimity bypasses the
+timelock — but **ungriefable**, because C's signatures live in C's EIP-712 domain
+and W will never accept them. Verified in `test/CouncilExecutor.t.sol`:
+
+- ordinary `k`-of-`n` proposals on W still queue for the full delay;
+- unanimous council signatures move W immediately;
+- those signatures **cannot** be replayed against W, whole or truncated —
+  different `verifyingContract`, so the recovered signers are not W's owners;
+- front-running the council bundle is harmless, since C has no delay and the only
+  thing a copier can do is perform the action the owners already authorised;
+- cancellation routed through the council cannot be pushed into the queue by
+  anyone;
+- a bare `k`-of-`n` quorum cannot use the council at all, which is what keeps W's
+  timelock meaningful.
+
+**The tradeoff, stated plainly.** The council's threshold governs *both* bypass
+and cancellation — it is one dial, not two. At n-of-n you get ungriefable
+emergency action and ungriefable cancellation, but cancellation now costs
+unanimity where `TimelockExecutor` charged only `threshold`. Lower the council's
+threshold and cancellation gets cheaper while the vault's timelock becomes
+advisory for the owners. Separating those two powers is precisely what a V2
+module with a `mode` field would buy.
+
+So the choice today is a real one rather than a compromise:
+
+| Executor | Cancel cost | Cancel griefable? | Emergency action | Timelock |
+|---|---|---|---|---|
+| `TimelockExecutor` | `threshold` | Only by an insider holding the signatures | Unanimity, griefable | Enforced below unanimity |
+| Unanimity council | `ownerCount` | **No** | Unanimity, **ungriefable** | Enforced below unanimity |
+| Threshold council | `threshold` | **No** | `threshold`, ungriefable | Advisory for owners |
+
+`TimelockExecutor` remains the right default: cheapest cancellation, and the
+insider grief it permits is a contrived shape on a k-of-n wallet. The council
+option exists for anyone who wants the residual gone before a V2 ships.
+
 ### Where V1 is not the right answer
 
 1. **A wallet whose timelock is a public promise to third parties.** Do not
