@@ -64,31 +64,33 @@ button:active{transform:scale(.97)}
 .tx-share{display:inline-flex;align-items:center;gap:8px;font-size:8px;font-weight:700;letter-spacing:1px;color:var(--a);border:1px solid var(--a);padding:3px 4px 3px 8px;text-transform:uppercase}
 .tx-share button{background:none;border:none;color:var(--a);cursor:pointer;font-size:11px;line-height:1;padding:0 2px;opacity:.8}
 .tx-share button:hover{opacity:1}
-/* Tertiary action — one shape, three intents. All three were byte-identical
-   rules that only ever differed in the colour they resolve to on hover, so the
-   shape is declared once and each variant states just its intent:
-     .sim-btn    diagnostic, neutral
-     .alt-link   a non-destructive fallback. On-chain approval is a real
-                 capability — the only route a DAO or nested multisig has, and
-                 the one that needs no coordination service at all — but for an
-                 ordinary signer it costs gas, publishes the authorization, and
-                 gives up the front-run binding. Offered, not recommended.
+/* Tertiary action: one shape, three intents. The shape is declared once and
+   each variant states only its intent, which is the colour it resolves to on
+   hover.
+     .sim-btn     diagnostic, neutral
+     .alt-link    a non-destructive fallback. On-chain approval is a real
+                  capability, the only route a DAO or nested multisig has and
+                  the only one needing no coordination service, but for an
+                  ordinary signer it costs gas, publishes the authorization and
+                  gives up the front-run binding. Offered, not recommended.
      .reject-link destructive, and arms before it fires. */
 .alt-link,.reject-link,.sim-btn{background:transparent;border:1px solid var(--ln);color:var(--d);font-size:9px;font-weight:700;letter-spacing:2px;padding:6px 12px;cursor:pointer;font-family:var(--f);text-transform:uppercase;transition:border-color .15s,color .15s}
 .alt-link:hover,.sim-btn:hover{border-color:var(--a);color:var(--a)}
 .reject-link:hover{border-color:var(--r);color:var(--r)}
 .reject-link.armed{border-color:var(--r);color:var(--r);background:color-mix(in srgb,var(--r) 8%,transparent)}
 /* Peer of the above for undoing your own signature: destructive tone, no box.
-   It carried opacity:.5 inline, which put --r at Lc 17 on the blue — a
-   destructive control you could barely read. --r at full strength is Lc 45. */
+   --r runs at full strength, Lc 45 on the blue. Dimming it is the thing to
+   resist: at opacity .5 it falls to Lc 17, barely readable for a destructive
+   control. */
 .unsign-link{background:transparent;border:none;color:var(--r);font-size:9px;font-weight:700;letter-spacing:2px;padding:6px 0;cursor:pointer;font-family:var(--f);text-transform:uppercase;transition:opacity .15s}
 @media(hover:hover){.unsign-link:hover{opacity:.75}}
 /* Qualifier inside a filled button ("OFF-CHAIN", "VIA EXECUTOR"): subordinate
    to the verb, but it is the half of the label that says which route this is,
-   so it stops short of the .5 that had it at Lc 41 on the fill. */
+   so it stops short of .5, which would put it at Lc 41 on the fill. */
 .btn-qual{opacity:.72;font-size:9px;margin-left:4px;font-weight:700}
-/* Opacity .4 put the glyph at Lc 20 on the blue — an interactive mark under
-   APCA's Lc 30 non-text floor. .65 lands at Lc 37 and still recedes. */
+/* .65 lands the glyph at Lc 37 on the blue and still recedes. Lower is not
+   available: .4 gives Lc 20, under APCA's Lc 30 floor for an interactive
+   non-text mark. */
 .copy-btn{opacity:.65;transition:opacity .15s}
 @media(hover:hover){.copy-btn:hover{opacity:1}}
 @media(hover:hover){
@@ -131,9 +133,9 @@ button:active{transform:scale(.97)}
 .logo{font-size:36px;font-weight:700;letter-spacing:-1px;line-height:1}
 .sub{font-size:10px;letter-spacing:13px;color:var(--m);margin-top:2px;opacity:.5;user-select:none}
 /* The "?" beside the wordmark is a real control, so it is a real button and it
-   clears the text floor: at the old opacity .35 its glyph sat at Lc 21 on the
-   blue, well under the Lc 45 the ink ladder above commits to. .7 puts it at
-   Lc 49 and still reads as quieter than the wordmark it hangs off. */
+   clears the text floor: .7 puts its glyph at Lc 49 on the blue and it still
+   reads as quieter than the wordmark it hangs off. At .35 it would sit at
+   Lc 21, well under the Lc 45 the ink ladder above commits to. */
 .info-i{font-size:10px;font-weight:400;width:20px;height:20px;border-radius:50%;border:1px solid var(--a);background:transparent;padding:0;font-family:var(--f);color:var(--a);display:inline-flex;align-items:center;justify-content:center;letter-spacing:0;opacity:.7;transition:opacity .2s;cursor:pointer;vertical-align:middle;margin-left:2px;flex-shrink:0}
 @media(hover:hover){.info-i:hover{opacity:1}}
 .info-tip{display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:min(400px,88vw);max-height:85vh;max-height:85dvh;overflow-y:auto;padding:24px;background:var(--a);color:var(--bg);font-size:13px;line-height:1.9;letter-spacing:.3px;z-index:300;text-transform:none;font-weight:500}
@@ -209,20 +211,20 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
    Radius: letter identification lives in a ~3 cycles-per-x-height band, i.e. a
    stroke period of 0.172em. A Gaussian of sigma s attenuates period p by
    exp(-2(pi*s/p)^2), so 0.08em drops that band below an onlooker's detection
-   threshold at 1m. 0.11em keeps ~1.4x margin for better-than-20/20 eyes, where
-   the earlier 0.16em (2x) bought little further privacy and read as a font
-   fault rather than a deliberate veil. In em, so one radius serves the 9px
-   chrome and the 52px hero alike and it tracks every breakpoint.
+   threshold at 1m. 0.11em keeps ~1.4x margin for better-than-20/20 eyes; 2x
+   (0.16em) buys little further privacy and reads as a font fault rather than a
+   deliberate veil. In em, so one radius serves the 9px chrome and the 52px hero
+   alike and it tracks every breakpoint.
    What carries .priv is a rule, not a judgement call: a figure stating a
    QUANTITY OF MONEY — a balance, an amount, a delta — wherever it appears and
    at whatever size. Tickers, token icons, addresses, signer counts, gas, dates
    and thresholds never do. That is what keeps the veil from reading as damage:
    it lands on digits and leaves the furniture sharp.
-   (Size was the earlier boundary — 12px+ only, since 9-11px sits under the
-   ~5 arcmin detection floor at 1m. But an onlooker on a train is at 0.5m, not
-   1m, and once this is a mode the user switches on it is a promise: hiding the
-   hero balance while the same number sits sharp in the vault tab above it is a
-   broken one.) */
+   Size is deliberately not the boundary. A 12px+ rule is tempting, since 9-11px
+   sits under the ~5 arcmin detection floor at 1m, but an onlooker on a train is
+   at 0.5m; and once this is a mode the user switches on it is a promise, which
+   hiding the hero balance while the same number sits sharp in the vault tab
+   above it would break. */
 body.priv-on .priv{filter:blur(.11em);transition:filter .32s ease}
 /* Reveal by group, not by glyph. A balance and its USD line are one figure, so
    they lift together and the pointer never has to hunt for the right few
@@ -243,12 +245,12 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
 
 /* queue */
 .tx{padding:18px 8px;border-bottom:1px solid var(--ln);transition:opacity .3s,background .15s}
-/* A blocked proposal is waiting on the nonce ahead of it, not cancelled — the
+/* A blocked proposal is waiting on the nonce ahead of it, not cancelled, so the
    whole card (target, amount, who has signed) is still the thing a signer reads
-   to decide whether to unblock it. opacity .3 put that text at Lc 17, so the
-   fog was doing the signalling AND destroying the content. .72 keeps the row
-   plainly recessive at Lc 51, and the state itself is carried by the same
-   bordered status pill every other card uses. */
+   to decide whether to unblock it. .72 keeps the row plainly recessive at
+   Lc 51, and the state itself is carried by the same bordered status pill every
+   other card uses. Fog cannot do the signalling: at .3 the text falls to Lc 17,
+   which recesses the row by destroying its content. */
 .tx.blocked{opacity:.72}
 .tx-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:10px}
 .tx-nonce{font-size:10px;font-weight:700;color:var(--d)}
@@ -268,8 +270,8 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
 .pbar>i{display:block;height:100%;transition:width .4s ease}
 /* Proposal footer. The status pill reads as state and lives in the header next
    to .tx-kind, which it matches; the verbs it enables collect down here. Keeping
-   them apart matters because .tx-status shares .btn's outlined-caps treatment —
-   flush against EXECUTE/CANCEL it misread as a third, disabled button.
+   them apart matters because .tx-status shares .btn's outlined-caps treatment:
+   flush against EXECUTE/CANCEL it misreads as a third, disabled button.
    Diagnostics lead, committal actions sit on the trailing edge. */
 .tx-foot{margin-top:12px;display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap}
 .tx-foot-diag{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
@@ -285,13 +287,13 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
 /* Inline glyph button (copy, share, dismiss) that sits inside a line of text:
    it must not disturb the line box, so the visual box stays tiny and the TOUCH
    box is grown with a transparent ::after instead of with padding. Without it
-   these were ~14px targets on a phone while every other control in the app is
-   held to 44px. Declared AFTER .x-btn, which it pairs with and must override —
+   these are ~14px targets on a phone, while every other control in the app is
+   held to 44px. Declared AFTER .x-btn, which it pairs with and must override at
    equal specificity, so source order is the whole argument.
    margin-left is reset because .x-btn floats right (for the tab-row ✕) and the
-   copy glyphs were inheriting that: as a flex child beside a signer's address
-   they were shoving themselves, and the name after them, to the far edge of the
-   row. A copy affordance belongs against the thing it copies. */
+   copy glyphs otherwise inherit it: as a flex child beside a signer's address
+   that shoves the glyph, and the name after it, to the far edge of the row. A
+   copy affordance belongs against the thing it copies. */
 .icon-btn{position:relative;display:inline-flex;align-items:center;justify-content:center;min-width:auto;min-height:auto;padding:2px 5px;font-size:9px;line-height:1;vertical-align:middle;margin-left:0}
 .icon-btn::after{content:"";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:44px;height:44px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:32px}
@@ -344,9 +346,9 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
    by keyboard and announces as a control. Row chrome unchanged. */
 .net-row{width:100%;text-align:left;background:transparent;border:none;font-family:var(--f);padding:12px 8px;font-size:12px;font-weight:700;letter-spacing:2px;border-bottom:1px solid var(--ln);color:var(--d);cursor:pointer;display:flex;align-items:center;gap:8px;transition:background .15s,color .15s,transform .15s,box-shadow .15s}
 .net-row.on{color:var(--a);border-bottom:none}
-/* Both of these are read, not decoration — the chain id is how you tell two
-   deployments apart and TEST is the difference between play money and real.
-   At .4/.5 they sat at Lc 20/25 on the blue. */
+/* Both of these are read, not decoration: the chain id is how you tell two
+   deployments apart, and TEST is the difference between play money and real.
+   At .4/.5 they would sit at Lc 20/25 on the blue. */
 .net-id{font-size:9px;opacity:.65}
 .net-test{font-size:8px;opacity:.7}
 .net-panel{border-left:2px solid var(--a);background:color-mix(in srgb,var(--a) 4%,transparent);padding:2px 16px}
@@ -489,14 +491,12 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
   .nav button{font-size:10px;padding:12px 0}
 }
 /* ── OVERLAY LAYER ─────────────────────────────────────────────────
-   Every modal in the app is the same object and now says so. Previously each
-   one carried its own inline geometry and they had drifted apart: scrims at
-   .4/.5/.55, two different centring techniques, and caps of 80vh / 85vh /
-   90dvh / 92dvh — the two written in vh could be clipped by a mobile browser's
-   collapsing toolbar, hiding the footer that holds PROCEED.
-   One scrim, one cap in dvh, one scroll container. Width is the only knob a
-   caller turns, via --ow. Scrolling lives on .ovl as well as the card so a card
-   taller than the viewport can still be reached on a short screen. */
+   Every modal in the app is the same object and says so here rather than in
+   inline geometry per caller. One scrim, one cap, one scroll container. Width
+   is the only knob a caller turns, via --ow. Scrolling lives on .ovl as well as
+   the card, so a card taller than the viewport can still be reached on a short
+   screen. The cap is in dvh, never vh: a mobile browser's collapsing toolbar
+   can clip a vh cap, hiding the footer that holds PROCEED. */
 .ovl{position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;overflow-y:auto;-webkit-overflow-scrolling:touch}
 .ovl-card{width:min(var(--ow,440px),96vw);margin:auto;max-height:calc(100vh - 32px);max-height:calc(100dvh - 32px);overflow-y:auto;background:var(--bg);border:1px solid var(--a);padding:22px}
 .ovl-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:4px}
@@ -933,8 +933,53 @@ async function packSigsBound(sigs, submitter, msAddr, hash) {
     } catch(_) { /* unreadable — fall through and bind anyway; worst case it reverts */ }
   }
   let packed = '0x';
-  sigs.forEach((s, k) => { packed += k === i ? senderSlot(s.signer) : (s.sig || s.signature).slice(2); });
+  sigs.forEach((s, k) => { packed += k === i ? senderSlot(s.signer) : sigSlot(s); });
   return { packed, bound: true };
+}
+// One slot of a packed bundle, 65 bytes, as the contract reads them.
+//
+// A v=0 slot is not a signature at all: the contract takes its first 32 bytes
+// as an owner address and asks whether that owner is msg.sender or holds an
+// on-chain approval. The bytes beside it in the database are never read, and
+// they were never written by anyone this app verified — add_signature() runs as
+// the anon role and takes whatever string it is handed, then ON CONFLICT DO
+// UPDATE lets it be overwritten. Packing that string verbatim put an unchecked
+// blob of unknown length into the middle of a bundle: 65 bytes is the one thing
+// forward() and execute() both insist on, so a single mangled row made the
+// emergency cancel route revert on a length check, for every owner, until
+// somebody re-approved. Derive the slot from the signer instead — that is the
+// only thing in the row this app has actually confirmed against the chain.
+function sigSlot(s) {
+  const st = s.sigType || s.sig_type;
+  if(st === 'approval' || st === 'sender') return senderSlot(s.signer);
+  const raw = (s.sig || s.signature);
+  if(!raw || raw.length !== 132) throw new Error(`Invalid signature length from ${s.signer}: expected 132 chars, got ${raw?.length}`);
+  return raw.slice(2);
+}
+
+// An unbindable bundle is a decision, not a footnote.
+//
+// packSigsBound returns bound:false when the submitter did not sign, or when
+// they hold an on-chain approval that makes their slot usable by anyone. Either
+// way the bundle is inert in nobody's hands: an observer can lift it out of the
+// mempool and replay it down the execute() route, where a cancel is *queued*
+// for the full delay instead of running now — maturing after the transaction it
+// was meant to stop, with the nonce already burnt so the real one reverts.
+//
+// This was reported with flash(), and the progress line that follows landed in
+// the same tick and painted straight over it. The warning existed, was correct,
+// and was on screen for microseconds. So it takes the same press-again shape as
+// every other irreversible step in this interface: say it, and let the operator
+// decide, rather than say it into a toast nobody can read.
+let _unboundArmed = null, _unboundArmTimer = null;
+const UNBOUND_ARM_MS = 12000;
+function armUnbound(key, what, why) {
+  if(_unboundArmed === key) { clearTimeout(_unboundArmTimer); _unboundArmed = null; return true; }
+  clearTimeout(_unboundArmTimer);
+  _unboundArmed = key;
+  _unboundArmTimer = setTimeout(() => { _unboundArmed = null; }, UNBOUND_ARM_MS);
+  flash(`${what} IS NOT BOUND TO YOU (${why}) — ANYONE WHO SEES THESE SIGNATURES CAN REPLAY THEM DOWN THE execute() ROUTE, WHICH QUEUES IT INSTEAD OF RUNNING IT. SUBMIT FROM A SIGNING OWNER IF YOU CAN, OR PRESS AGAIN TO SEND ANYWAY.`, UNBOUND_ARM_MS);
+  return false;
 }
 
 // H-2 (fourth review). execute() reads `threshold` into a uint16 local and then
@@ -2840,7 +2885,11 @@ function hideLoading() {
   el.classList.add('fade-out');
   hideLoadingTimer = setTimeout(() => { el.style.display = 'none'; }, 350);
 }
-function flash(msg) {
+// `ms` overrides the dismissal delay. Two seconds is right for "TX SENT" and
+// far too short for a sentence someone has to read and act on — a warning that
+// asks the operator to press again cannot expire before the arming window it
+// belongs to.
+function flash(msg, ms) {
   const el = document.getElementById("toast-el");
   el.textContent = ">>> " + msg;
   el.style.display = "";
@@ -2848,7 +2897,7 @@ function flash(msg) {
   el.offsetHeight; // reflow
   el.style.animation = "";
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.style.display = "none", 2200);
+  toastTimer = setTimeout(() => el.style.display = "none", ms || 2200);
 }
 
 function toggleInfo(force) {
@@ -3588,6 +3637,7 @@ function renderDash(v,mob){
             <span class="tx-val${(!kindTag&&(kind.tone==='policy'||kind.tone==='danger'))?' '+kind.tone:''}" style="display:inline-flex;align-items:center;gap:6px">${(dv&&dv!=='0')?`${tokIcon(dt)}<span class="priv">${esc(dv)}</span> ${esc(dt)}`:esc(display)}</span>
           </div>
           <div class="tx-to">&rarr; ${S.demoMode?addrLink(tx.target,v.chain):addrLink(tx.displayTo||tx.target)}${(()=>{const a=S.demoMode?tx.target:(tx.displayTo||tx.target);return ethers.isAddress(a)?copyBtn(a):'';})()}</div>
+          ${tx.orphanedFrom?`<div class="tx-note warn">THE COORDINATION RECORD SAYS THIS PROPOSAL WAS ${esc(String(tx.orphanedFrom).toUpperCase())}. THE VAULT DISAGREES — IT IS STILL QUEUED ON CHAIN, STILL MATURING, AND ANYONE CAN EXECUTE IT ONCE IT DOES. THE CHAIN IS THE AUTHORITY: TREAT THIS AS LIVE, AND CANCEL IT IF IT SHOULD NOT RUN.</div>`:''}
           ${kindNote}
         </div>
         ${!blocked?`<span class="tx-status" style="color:${s.c}"${tx.eta>0&&!s.exec?` data-eta-status="${tx.eta}"`:``}>&bull; ${s.l}</span>`:""}
@@ -5942,6 +5992,26 @@ async function dbGetPending(wId) {
   return data || [];
 }
 
+// How many retired rows are re-checked against the chain on every queue load.
+// Bounded because it rides in a multicall and a busy vault's history is not:
+// what is being looked for is a proposal that is *still queued on chain*, and
+// one of those can only have been retired recently — every earlier one has been
+// overtaken by the vault's own nonce many times over.
+const TERMINAL_RECHECK = 40;
+
+// The most recently retired proposals: cancelled, executed, or superseded.
+// Read so the chain can be asked whether they really are gone — a status in this
+// database is written by an RPC that authenticates by a claimed address, so it
+// is a claim about the vault, not the vault. See loadVaultQueue.
+async function dbGetRecentTerminal(wId, limit) {
+  const { data } = await sb.from('tx_history')
+    .select('id, nonce, target, value, call_data, status, description, eta, queue_tx')
+    .eq('wallet_id', wId)
+    .order('sort_ts', { ascending: false })
+    .limit(limit || TERMINAL_RECHECK);
+  return data || [];
+}
+
 async function dbGetTxByHash(txHash) {
   if(!txHash || txHash === '\u2014') return null;
   const { data } = await sb.from('transactions')
@@ -6008,10 +6078,15 @@ async function dbPruneTx(txId) {
   await sb.rpc('prune_tx', { p_tx_id: txId, p_caller: window._connectedAddress });
 }
 
-async function dbSyncWalletState(vaultAddr, dbId) {
+// `state` is an already-loaded multicallLoad() result. Its only caller has one
+// in hand — reloadVault reads the whole configuration at the top and then called
+// this at the bottom, which read it again: a second aggregate3 plus a second
+// getBalance against the same address, after every action, for numbers that were
+// already sitting in a local. Still falls back to reading when nothing is passed.
+async function dbSyncWalletState(vaultAddr, dbId, state) {
   if(!dbId || !vaultAddr || !window._connectedAddress) return;
   try {
-    const s = await multicallLoad(vaultAddr);
+    const s = state || await multicallLoad(vaultAddr);
     await sb.rpc('sync_wallet_state', {
       p_wallet_id: dbId,
       p_caller: window._connectedAddress,
@@ -6107,6 +6182,36 @@ async function loadAllVaults() {
   }
 }
 
+// Is this vault's executor a TimelockExecutor, and is its fast path on?
+//
+// One eth_call, and it used to answer both questions from a single bare catch —
+// so an RPC that was merely unreachable read exactly like an executor that is
+// not a TimelockExecutor at all. That is not a cosmetic difference: `isTE` is
+// what canForwardCancel() gates on, and it is the only route a queued proposal
+// can be stopped through. A network blip therefore took the CANCEL button off
+// every card, on a vault that could cancel perfectly well, and left the owners
+// watching a proposal mature with no brake in sight and no error explaining it.
+//
+// A revert (or an answer that will not decode) is a real answer: whatever is at
+// that address, it does not implement forwardEnabled, so it is not one. Anything
+// else is silence, and silence falls back to the address itself — the canonical
+// singleton is a TimelockExecutor whether or not this call got through. The fast
+// path is reported off only, never on, from a failed read: the honest direction
+// for an unknown is the one that offers no shortcut.
+async function readExecutorState(executor, vaultAddr) {
+  const off = { isTE: false, fpEnabled: false };
+  if(!executor || executor === ethers.ZeroAddress) return off;
+  try {
+    const tl = new ethers.Contract(executor, TIMELOCK_EXECUTOR_ABI, provider);
+    return { isTE: true, fpEnabled: await tl.forwardEnabled(vaultAddr) };
+  } catch(e) {
+    const code = e && e.code;
+    const answered = code === 'CALL_EXCEPTION' || code === 'BAD_DATA';
+    if(answered) return off;
+    return { isTE: String(executor).toLowerCase() === TIMELOCK_EXECUTOR.toLowerCase(), fpEnabled: false, unread: true };
+  }
+}
+
 async function loadSingleVaultData(addr, dbWallet) {
   // Re-read the vault's own name every time its data is loaded. This runs on
   // explicit loads — page load, chain switch, deep link, a deploy landing —
@@ -6133,12 +6238,7 @@ async function loadSingleVaultData(addr, dbWallet) {
   // Phase 2: owner labels + executor check + token balances + owner names in parallel
   const [labelsRaw, fpResult, holdings, ownerNames, codeKind] = await Promise.all([
     dbW?.id ? dbGetOwnerLabels(dbW.id) : Promise.resolve([]),
-    s.executor !== ethers.ZeroAddress ? (async () => {
-      try {
-        const tlContract = new ethers.Contract(s.executor, TIMELOCK_EXECUTOR_ABI, provider);
-        return { isTE: true, fpEnabled: await tlContract.forwardEnabled(addr) };
-      } catch(_) { return { isTE: false, fpEnabled: false }; }
-    })() : Promise.resolve({ isTE: false, fpEnabled: false }),
+    readExecutorState(s.executor, addr),
     loadTokenBalances(addr, s.balance),
     // The vault rides along in the owners' reverse-resolution batch: same
     // multicall, same forward verification, one more entry. A vault that has
@@ -6207,18 +6307,9 @@ function proposalDigest(v, t) {
   } catch(_) { return null; }
 }
 
-// Ask the vault which of the stored approval/sender rows it actually holds an
-// on-chain approval for. Returns a Set of "txId|signer" (signer lowercased).
-//
-// A row that cannot be confirmed is not counted. That direction is deliberate:
-// under-reporting shows an owner who really did approve as un-signed, which
-// costs them one harmless re-approve and repairs itself on the next load;
-// over-reporting shows a quorum that is not there, and the only way to find out
-// is to send the transaction. The same reasoning applies when the read fails
-// outright — an unreachable chain is not evidence of an approval.
-async function fetchOnchainApprovals(v, txs, sigMap, digests) {
-  const confirmed = new Set();
-  if(!v || !v.address || !ethers.isAddress(v.address)) return confirmed;
+// Which stored approval/sender rows the vault might actually be holding an
+// approval for — one {id, hash, signer} per row worth asking about.
+function approvalPairsFor(txs, sigMap, digests) {
   const pairs = [];
   for(const t of txs) {
     const hash = digests.get(t.id);
@@ -6230,28 +6321,94 @@ async function fetchOnchainApprovals(v, txs, sigMap, digests) {
       pairs.push({ id: t.id, hash, signer: s.signer });
     }
   }
-  if(!pairs.length) return confirmed;
-  try {
-    const res = await getMC3().aggregate3(pairs.map(p => ({
-      target: v.address, allowFailure: true,
-      callData: msIface.encodeFunctionData('approved', [p.signer, p.hash]),
-    })));
-    res.forEach((r, i) => {
-      if(!r || !r.success) return;
-      try {
-        if(msIface.decodeFunctionResult('approved', r.returnData)[0])
-          confirmed.add(pairs[i].id + '|' + pairs[i].signer.toLowerCase());
-      } catch(_) {}
-    });
-  } catch(e) { console.error('On-chain approvals:', e); }
-  return confirmed;
+  return pairs;
+}
+
+// Both of the questions the queue has to put to the vault, in one round trip:
+// which digests it still holds queued, and which of the stored approval rows it
+// actually confirms.
+//
+// These were two aggregate3 calls in series — the approvals one could not even
+// start until the signatures came back from the database — against the same
+// contract, through the same batching primitive, on every queue load and after
+// every action. There was never a reason for them to be two.
+//
+// An approval row is not a signature. It is a *claim* that an owner registered
+// approval in the vault itself, and verifySigs takes it on trust because "the
+// contract validates those". The contract does, at execute time; nothing
+// validates it here. add_signature() runs as the anon role and checks only that
+// the claimed signer is an owner, so anyone at all can mark any owner as having
+// approved any proposal — and the queue would show a quorum that does not
+// exist, right up until whoever acted on it paid gas for a transaction the
+// vault rejects. So: ask the vault.
+//
+// A row that cannot be confirmed is not counted, and a read that fails outright
+// confirms nothing. That direction is deliberate: under-reporting shows an owner
+// who really did approve as un-signed, which costs them one harmless re-approve
+// and repairs itself on the next load; over-reporting shows a quorum that is not
+// there, and the only way to find out is to send the transaction. Likewise a
+// failed read leaves `queued` empty, which means nothing is pruned — an
+// unreachable chain is not evidence that a proposal has gone.
+async function chainCheckQueue(v, queuedTxs, pairs) {
+  const out = { queued: {}, approved: new Set() };
+  if(!v || !v.address || !ethers.isAddress(v.address)) return out;
+  if(!queuedTxs.length && !pairs.length) return out;
+  const calls = [
+    ...queuedTxs.map(q => ({ target: v.address, allowFailure: true,
+      callData: msIface.encodeFunctionData('queued', [q.hash]) })),
+    ...pairs.map(p => ({ target: v.address, allowFailure: true,
+      callData: msIface.encodeFunctionData('approved', [p.signer, p.hash]) })),
+  ];
+  let res;
+  try { res = await getMC3().aggregate3(calls); }
+  catch(e) { console.error('Queue/approval verification:', e); return out; }
+  queuedTxs.forEach((q, i) => {
+    const r = res[i];
+    if(!r || !r.success) return;
+    try { out.queued[q.id] = Number(msIface.decodeFunctionResult('queued', r.returnData)[0]); } catch(_) {}
+  });
+  pairs.forEach((p, i) => {
+    const r = res[queuedTxs.length + i];
+    if(!r || !r.success) return;
+    try {
+      if(msIface.decodeFunctionResult('approved', r.returnData)[0])
+        out.approved.add(p.id + '|' + p.signer.toLowerCase());
+    } catch(_) {}
+  });
+  return out;
 }
 
 async function loadVaultQueue(vi) {
   const v = S.vaults[vi];
   if(!v || !v.dbId) return;
   try {
-    const txs = await dbGetPending(v.dbId);
+    // The live rows, and the recently-retired ones — because a retired row is a
+    // claim, not a fact.
+    //
+    // Every status write in this database goes through an RPC that authenticates
+    // by a *claimed* address: cancel_tx, prune_tx, mark_executed and mark_queued
+    // all check `is_wallet_owner(wallet, p_caller)` against a string the caller
+    // supplies, and an owner's address is public — it is in the `owners` table,
+    // which anon may read, and it is on chain regardless. So one anonymous HTTP
+    // request can flip any live proposal to cancelled / executed / stale.
+    // dbGetPending filters on status, so the proposal then leaves every owner's
+    // queue while it sits on chain, maturing, executable by anyone once it does.
+    // That is the exact failure this interface refuses to commit itself (see
+    // prodCancel: "recording one that did not happen is the single most damaging
+    // thing this interface can get wrong") — it just could not be committed on
+    // its behalf.
+    //
+    // It cannot be fixed in the database: PostgREST has no session here and
+    // Postgres cannot recover a secp256k1 signature, so `p_caller` can never be
+    // more than a claim. It can be fixed by not believing it. A proposal the
+    // vault still holds queued is live no matter what any row says, and the
+    // vault is already being asked about the queued ones — so ask it about the
+    // retired ones too, in the same call, and put back anything it still has.
+    const [pending, retired] = await Promise.all([
+      dbGetPending(v.dbId),
+      dbGetRecentTerminal(v.dbId, TERMINAL_RECHECK),
+    ]);
+    const txs = pending;
     const you = window._connectedAddress;
     const queue = [];
 
@@ -6260,40 +6417,37 @@ async function loadVaultQueue(vi) {
     // front, because both the on-chain reads below key off it.
     const digests = new Map();
     txs.forEach(t => digests.set(t.id, proposalDigest(v, t)));
+    retired.forEach(t => digests.set(t.id, proposalDigest(v, t)));
 
-    // Fetch sigs (one batched request) + verify on-chain queue state in parallel
-    const queuedTxs = txs.filter(t => t.status === 'queued' && digests.get(t.id));
-    const [sigMap, onchainQueued] = await Promise.all([
-      dbGetSigsByTxIds(txs.map(t => t.id)),
-      (async () => {
-        const result = {};
-        if(!queuedTxs.length) return result;
-        try {
-          const mc = getMC3();
-          const calls = queuedTxs.map(t => ({
-            target: v.address, allowFailure: true,
-            callData: msIface.encodeFunctionData('queued', [digests.get(t.id)])
-          }));
-          const results = await mc.aggregate3(calls);
-          queuedTxs.forEach((t, i) => {
-            if(results[i].success) {
-              result[t.id] = Number(msIface.decodeFunctionResult('queued', results[i].returnData)[0]);
-            }
-          });
-        } catch(e) { console.error('Queue verification:', e); }
-        return result;
-      })()
-    ]);
+    const sigMap = await dbGetSigsByTxIds([...txs.map(t => t.id), ...retired.map(t => t.id)]);
 
-    // An approval row is not a signature — it is a *claim* that an owner
-    // registered approval in the vault itself, and verifySigs takes it on trust
-    // because "the contract validates those". The contract does, at execute
-    // time; nothing validates it here. add_signature() runs as the anon role and
-    // checks only that the claimed signer is an owner, so anyone at all can mark
-    // any owner as having approved any proposal — and the queue would show a
-    // quorum that does not exist, right up until whoever acted on it paid gas
-    // for a transaction the vault rejects. Ask the vault instead.
-    const approvedOnChain = await fetchOnchainApprovals(v, txs, sigMap, digests);
+    // One aggregate3 for both questions — see chainCheckQueue. The retired rows
+    // ride in the same `queued()` batch as the live ones; a nonzero eta on one
+    // of them is the vault contradicting the record.
+    // Queueing goes through execute(), which consumes the nonce before it writes
+    // the entry — so anything the vault still holds queued has a nonce strictly
+    // below the live one. A retired row at or above it was never queued and
+    // cannot be, which takes most of them out of the batch for free.
+    const askQueued = [
+      ...txs.filter(t => t.status === 'queued' && digests.get(t.id)),
+      ...retired.filter(t => digests.get(t.id) && t.nonce < v.nonce),
+    ].map(t => ({ id: t.id, hash: digests.get(t.id) }));
+    const chain = await chainCheckQueue(v, askQueued, approvalPairsFor(txs, sigMap, digests));
+    const onchainQueued = chain.queued;
+    const approvedOnChain = chain.approved;
+
+    // Anything the vault still holds goes back in the queue, flagged, so the
+    // owners can see it and stop it. Its recorded status is left alone: this
+    // client is not the one that wrote it and has no way to tell a forgery from
+    // an honest write it simply did not observe, and overwriting the row would
+    // only start a fight with whoever is writing it.
+    for(const t of retired) {
+      if(!onchainQueued[t.id]) continue;
+      t.eta = onchainQueued[t.id];
+      t.orphanedFrom = t.status;
+      t.status = 'queued';
+      txs.push(t);
+    }
 
     // Track stale txs to clean up in DB
     const staleTxIds = [];
@@ -6324,6 +6478,10 @@ async function loadVaultQueue(vi) {
     };
     const cOwners = v.loadedOwners || v.owners.map(o => o.addr);
     const cDomain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address };
+    // lowercased owner address → the owner key `approvals` is filed under. Built
+    // once; the proposal loop below needs it for every row.
+    const addrKey = {};
+    v.owners.forEach(o => addrKey[o.addr.toLowerCase()] = o.addr);
     const companionSigners = (t, kind) => {
       if(t.nonce !== v.nonce) return null;
       if(!t.target || !v.address || t.target.toLowerCase() !== v.address.toLowerCase()) return null;
@@ -6398,7 +6556,7 @@ async function loadVaultQueue(vi) {
       if(!digest) { console.warn('Skipping proposal with no derivable digest:', t.id, t.target); continue; }
 
       // Drop approval/sender rows the vault does not actually confirm — see
-      // fetchOnchainApprovals. Done here rather than inside verifySigs so the
+      // chainCheckQueue. Done here rather than inside verifySigs so the
       // filtered list is also what lands in tx.signatures, and therefore what
       // collectSigs later packs into a transaction.
       const sigs = (sigMap.get(t.id) || []).filter(s => {
@@ -6412,14 +6570,14 @@ async function loadVaultQueue(vi) {
       // corrupted sig shows its owner as un-signed (prompting a re-sign, which
       // repairs the row) rather than a false "approved" that fails at execute
       // time.
-      const ownerAddrs = v.loadedOwners || v.owners.map(o => o.addr);
-      const sigDomain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address };
+      // cOwners / cDomain are the same owner set and the same EIP-712 domain the
+      // companion scan above built; they do not vary per row, and rebuilding
+      // them (and the address-case map) once per proposal was work done N times
+      // for one answer.
       const sigMsg = { target: t.target, value: BigInt(rawValue), data: t.call_data || '0x', nonce: t.nonce };
-      const validSigs = verifySigs(sigs, sigDomain, EIP712_TYPES, sigMsg, ownerAddrs);
+      const validSigs = verifySigs(sigs, cDomain, EIP712_TYPES, sigMsg, cOwners);
       const approvals = {};
       v.owners.forEach(o => approvals[o.addr] = false);
-      const addrKey = {};
-      v.owners.forEach(o => addrKey[o.addr.toLowerCase()] = o.addr);
       validSigs.forEach(s => { const k = addrKey[s.signer.toLowerCase()]; if(k) approvals[k] = true; });
 
       const dataLabel = selectorToLabel(t.call_data);
@@ -6481,6 +6639,10 @@ async function loadVaultQueue(vi) {
         callData: t.call_data,
         rawValue: rawValue,
         signatures: sigs.map(s => ({signer: s.signer, sig: s.signature, sigType: s.sig_type})),
+        // Set only when the vault contradicted the record — see the retired-row
+        // re-check above. The card says so; nothing else about the proposal is
+        // treated differently, because nothing else about it is different.
+        orphanedFrom: t.orphanedFrom || null,
         accelSigners: accelSigs[t.nonce] || null,
         cancelSigners: cancelSigs[t.nonce] || null,
         rejectSigners: rejectSigs[t.nonce] || null
@@ -6574,12 +6736,7 @@ async function reloadVault(vi) {
     delete v._pendingLabel;
     // Executor check + token balances + queue + history + owner names in parallel
     const [fpResult, holdings, , , ownerNames, slowOut] = await Promise.all([
-      s.executor !== ethers.ZeroAddress ? (async () => {
-        try {
-          const tlContract = new ethers.Contract(s.executor, TIMELOCK_EXECUTOR_ABI, provider);
-          return { isTE: true, fpEnabled: await tlContract.forwardEnabled(v.address) };
-        } catch(_) { return { isTE: false, fpEnabled: false }; }
-      })() : Promise.resolve({ isTE: false, fpEnabled: false }),
+      readExecutorState(s.executor, v.address),
       loadTokenBalances(v.address, s.balance),
       loadVaultQueue(vi),
       loadVaultHistory(vi),
@@ -6591,7 +6748,7 @@ async function reloadVault(vi) {
     v.fastPath = fpResult.fpEnabled;
     v.holdings = holdings;
     v.slowOut = slowOut;
-    if(v.dbId) dbSyncWalletState(v.address, v.dbId);
+    if(v.dbId) dbSyncWalletState(v.address, v.dbId, s);
     render();
   } catch(e) {
     console.error('reloadVault:', e);
@@ -7575,13 +7732,12 @@ async function prodUnsign(vi, nonce) {
   render();
 }
 
+// Same slot rules as packSigsBound — see sigSlot. An approval/sender row's
+// stored bytes are anon-writable and are not what the contract reads anyway, so
+// the slot is rebuilt from the signer rather than copied out of the database.
 function packSigs(sigs) {
   let packed = '0x';
-  for(const s of sigs) {
-    const raw = (s.sig || s.signature);
-    if(!raw || raw.length !== 132) throw new Error(`Invalid signature length from ${s.signer}: expected 132 chars, got ${raw?.length}`);
-    packed += raw.slice(2);
-  }
+  for(const s of sigs) packed += sigSlot(s);
   return packed;
 }
 
@@ -7722,7 +7878,7 @@ async function prodSubmit(vi, nonce) {
       // sort last — which is the submitter's own about (threshold/ownerCount)
       // of the time, and the submitter's slot is the one carrying the binding.
       const bnd = await packSigsBound(pickSigs(sigs, v.threshold, connectedAddress), connectedAddress, v.address, tx.txHash);
-      if(!bnd.bound) flash(`CANCEL NOT BOUND TO YOU (${bnd.why}) — THESE SIGNATURES CAN BE REPLAYED TO QUEUE THE CANCEL INSTEAD.`);
+      if(!bnd.bound && !armUnbound(`submit-cancel|${v.address}|${nonce}`, 'THIS CANCEL', bnd.why)) return;
       flash('CANCELLING VIA EXECUTOR...');
       atx = await tlContract.forward(v.address, target, value, data, bnd.packed);
     } else {
@@ -7788,6 +7944,19 @@ async function prodExecute(vi, nonce) {
     flash('TX SENT, WAITING...');
     const receipt = await atx.wait();
 
+    // Ask the vault what happened, exactly as the executor routes do. A mined
+    // receipt is not evidence: a call to an address holding no code does not
+    // revert, it is an ordinary transaction to an empty account — which is what
+    // this is on a chain the vault was never cloned to, or against an address
+    // that was pasted rather than deployed. This path was the one terminal
+    // write that trusted the receipt, and recording an execution that did not
+    // happen retires the proposal from every owner's queue while it sits on
+    // chain, matured and executable by anyone.
+    if(!sawExecuted(receipt, v.address, tx.txHash)) {
+      flash(`THE VAULT DID NOT REPORT #${nonce} AS EXECUTED — NOTHING RECORDED. RELOADING.`);
+      await reloadVault(vi);
+      return;
+    }
     if(tx.dbId) await dbMarkExecuted(tx.dbId, Number(receipt.blockNumber), receipt.hash);
 
     // Detect a cancel, which announces itself as Queued(hash, 0, 0). Read from
@@ -7838,7 +8007,7 @@ async function prodFastExecute(vi, nonce) {
     // Audit H-01 — bind to this submitter. Copied, this bundle would queue the
     // transaction through execute() and burn the nonce instead of running it.
     const bnd = await packSigsBound(sigs, connectedAddress, v.address, tx.txHash);
-    if(!bnd.bound) flash(`NOT BOUND TO YOU (${bnd.why}) — THESE SIGNATURES CAN BE REPLAYED TO QUEUE THIS INSTEAD.`);
+    if(!bnd.bound && !armUnbound(`fast|${v.address}|${nonce}`, 'THIS INSTANT EXECUTE', bnd.why)) return;
     flash('INSTANT EXECUTING VIA EXECUTOR...');
     const atx = await tlContract.forward(v.address, target, value, data, bnd.packed);
     flash('TX SENT, WAITING...');
@@ -7967,7 +8136,7 @@ async function prodCancel(vi, nonce) {
     // tight bundle is also what makes the binding airtight — one slot bound
     // leaves threshold-1 usable signatures, one short of what execute() needs.
     const bnd = await packSigsBound(pickSigs(sigs, v.threshold, connectedAddress), connectedAddress, v.address, cancelTxHash);
-    if(!bnd.bound) flash(`CANCEL NOT BOUND TO YOU (${bnd.why}) — THESE SIGNATURES CAN BE REPLAYED TO QUEUE THE CANCEL INSTEAD. SUBMIT FROM A SIGNING OWNER IF YOU CAN.`);
+    if(!bnd.bound && !armUnbound(`cancel|${v.address}|${nonce}`, 'THIS CANCEL', bnd.why)) return;
     flash('CANCELLING VIA EXECUTOR...');
     const atx = await tlContract.forward(v.address, v.address, 0n, cancelData, bnd.packed);
     flash('TX SENT, WAITING...');
@@ -8014,6 +8183,20 @@ async function prodReject(vi, nonce) {
   const rejectData = '0x';     // no-op self-call
   const domain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address };
   const ownerAddrs = v.loadedOwners || v.owners.map(o => o.addr);
+
+  // The head of the queue is not always at the live nonce: the proposal that was
+  // there can be executed, cancelled or overtaken by another client, leaving the
+  // next one along in front with a nonce the vault has not reached. execute()
+  // hashes against the live nonce, so signatures made over any other one are
+  // unusable — and this used to collect a full quorum of them before finding
+  // out, then report it as "NONCE CHANGED" as though something had moved. Say
+  // it before the first wallet prompt, and name the nonce a reject would have
+  // to be raised at instead.
+  if(typeof v.nonce === 'number' && rejectNonce !== v.nonce) {
+    flash(`#${nonce} IS NOT AT THE VAULT'S LIVE NONCE (${v.nonce}) — A REJECT SIGNED HERE COULD NEVER EXECUTE. RELOADING.`, 6000);
+    await reloadVault(vi);
+    return;
+  }
 
   try {
     const msg = { target: v.address, value: 0n, data: rejectData, nonce: rejectNonce };
@@ -8565,7 +8748,7 @@ async function prodAccelerate(vi, nonce) {
     // execute() queues the acceleration behind the delay it meant to skip and
     // burns the nonce, so the real one reverts.
     const bnd = await packSigsBound(sigs, connectedAddress, v.address, accelTxHash);
-    if(!bnd.bound) flash(`ACCELERATE NOT BOUND TO YOU (${bnd.why}) — THESE SIGNATURES CAN BE REPLAYED TO QUEUE IT INSTEAD.`);
+    if(!bnd.bound && !armUnbound(`accel|${v.address}|${nonce}`, 'THIS ACCELERATE', bnd.why)) return;
     flash('ACCELERATING VIA EXECUTOR...');
     const atx = await tlContract.forward(v.address, v.address, 0n, accelData, bnd.packed);
     flash('TX SENT, WAITING...');

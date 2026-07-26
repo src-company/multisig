@@ -273,10 +273,45 @@ CREATE OR REPLACE FUNCTION register_wallet(
 DECLARE
   w_id uuid;
   i int;
+  existed boolean;
 BEGIN
   -- Deployer must be in the owner list (case-insensitive)
   IF NOT (SELECT lower(p_deployer) = ANY(SELECT lower(unnest(p_owners)))) THEN
     RAISE EXCEPTION 'Deployer must be an owner';
+  END IF;
+
+  -- Is this a registration or a re-registration? Asked before the upsert,
+  -- because the answer decides whether the owner set below may be rewritten.
+  -- Case-insensitive and oldest-first, matching how the client looks a wallet up
+  -- (dbFindWallet): the uniqueness constraint is on the address as a *string*, so
+  -- a database that collected a differently-cased pair before that was fixed must
+  -- still resolve every caller to the same one of them.
+  SELECT id INTO w_id FROM wallets
+  WHERE chain_id = p_chain_id AND lower(address) = lower(p_address)
+  ORDER BY created_at ASC LIMIT 1;
+  existed := w_id IS NOT NULL;
+
+  -- A vault that is already registered does not get its owner set replaced by
+  -- whoever asks. This function is anon-callable and the owner list is one of
+  -- its arguments, so ON CONFLICT DO UPDATE followed by an unconditional
+  -- rewrite meant one HTTP request could retire every real owner of any vault
+  -- in this database (is_current = false) and install the caller in their
+  -- place. That is not a cosmetic edit: is_wallet_owner() is what gates every
+  -- write function here, and my_wallets is what lists a vault on its owners'
+  -- dashboards — so the real owners lost both their vault and their ability to
+  -- propose, sign or cancel anything in it, while the caller gained all three.
+  --
+  -- Re-registration by someone who is already a current owner is the ordinary
+  -- case (a re-deploy, a vault reached by address, a client resyncing) and is
+  -- still allowed. For anyone else this degrades to a lookup: they get the
+  -- wallet id, which is all a viewer needs, and change nothing.
+  -- The owner-set test is skipped for a row that has no current owners at all,
+  -- which is not reachable through this file but would otherwise be a wallet
+  -- nobody could ever re-register or write to again.
+  IF existed
+     AND EXISTS (SELECT 1 FROM owners WHERE wallet_id = w_id AND is_current = true)
+     AND NOT is_wallet_owner(w_id, p_deployer) THEN
+    RETURN w_id;
   END IF;
 
   INSERT INTO wallets (chain_id, address, deployer, salt, name, threshold, owner_count, delay, executor, nonce, created_block, created_tx)
