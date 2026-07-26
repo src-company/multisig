@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'none'; form-action 'none'; base-uri 'none'; upgrade-insecure-requests">
 <title>multisig.software — brand &amp; press</title>
 <meta name="description" content="Press kit for Multisig: boilerplate at four lengths, logos, the numbers and where they come from, and a fact sheet. MIT-licensed, quote it verbatim.">
 <!-- This page exists to be pasted into Slack, a DM and a CMS, so it carries the
@@ -178,10 +179,19 @@ const mob=()=>window.innerWidth<=640;
 const TABS=["BOILERPLATE","EXPLAINER","NUMBERS","LOGOS","FACTS"];
 
 const tabFromHash=()=>{
-  const h=decodeURIComponent(location.hash.replace(/^#/,'')).toUpperCase();
+  // decodeURIComponent throws a URIError on a malformed escape — '#%' is
+  // enough — and this runs at load as well as on every hashchange, so an
+  // unguarded call turns a mistyped link into a blank page.
+  let h;
+  try{ h=decodeURIComponent(location.hash.replace(/^#/,'')).toUpperCase(); }
+  catch(e){ return "BOILERPLATE"; }
   return TABS.includes(h)?h:"BOILERPLATE";
 };
-let dark=!localStorage.getItem('ms_light'),tab=tabFromHash();
+// Storage can be blocked or partitioned away, and it throws on read when it
+// is — which at top level would take the whole page down over a theme.
+const lsGet=k=>{ try{ return localStorage.getItem(k); }catch(e){ return null; } };
+const lsSet=(k,v)=>{ try{ localStorage.setItem(k,v); }catch(e){} };
+let dark=!lsGet('ms_light'),tab=tabFromHash();
 function go(t){ if(!TABS.includes(t)) return; tab=t; location.hash=t.toLowerCase(); render(); }
 
 const REPO="https://github.com/src-company/multisig";
@@ -516,7 +526,7 @@ function render(){
         <h1 class="logo"><a href="index.html">MULTISIG</a></h1>
         <div class="logo-sub">BRAND &amp; PRESS</div>
       </div>
-      <button class="theme-btn" onclick="dark=!dark;localStorage.setItem('ms_light',dark?'':'1');render()" aria-label="Switch to ${dark?"light":"dark"} theme" title="Switch to ${dark?"light":"dark"} theme"><span aria-hidden="true">${dark?"☀":"●"}</span></button>
+      <button class="theme-btn" onclick="dark=!dark;lsSet('ms_light',dark?'':'1');render()" aria-label="Switch to ${dark?"light":"dark"} theme" title="Switch to ${dark?"light":"dark"} theme"><span aria-hidden="true">${dark?"☀":"●"}</span></button>
     </div>
     <nav class="tabs">
       ${TABS.map(t=>`<button class="tab${tab===t?" on":""}"${tab===t?' aria-current="page"':''} onclick="go('${t}')">${t}</button>`).join("")}

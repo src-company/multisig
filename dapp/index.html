@@ -715,7 +715,10 @@ input.amt-in:focus{outline:none;box-shadow:none!important;border-bottom-color:tr
 </noscript>
 <script>
 (function(){
-  var d=!localStorage.getItem('ms_light');
+  // Guarded: reading localStorage throws outright where storage is blocked or
+  // partitioned, and a throw here leaves the boot overlay an empty coloured
+  // rectangle with no mark and no LOADING text for as long as it is up.
+  var d=true; try{ d=!localStorage.getItem('ms_light'); }catch(e){}
   var el=document.getElementById('loading');
   el.className='loading-overlay '+(d?'dark-bg':'light-bg');
   var svg=d
@@ -1659,7 +1662,7 @@ function tokIcon(sym, cls){ if(!sym) return ''; return `<span class="tok-ico${cl
 function _ctokKey(chainId, addr){ return `ms_ctok:${chainId}:${(addr||'').toLowerCase()}`; }
 function customTokensFor(chainId, addr){
   if(!addr) return [];
-  try { const v = JSON.parse(localStorage.getItem(_ctokKey(chainId, addr)) || '[]'); return Array.isArray(v) ? v : []; } catch(_) { return []; }
+  try { const v = JSON.parse(lsGet(_ctokKey(chainId, addr)) || '[]'); return Array.isArray(v) ? v : []; } catch(_) { return []; }
 }
 // Persist a custom token against the vault it was added for. Returns whether
 // the token is on disk afterwards: without a vault address there is no key we
@@ -1787,6 +1790,23 @@ const PG_MAX_ATTEMPTS = 4;       // 1 try + 3 retries
 const PG_RETRY_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 const pgSleep = ms => new Promise(r => setTimeout(r, ms));
 
+// PostgREST serialises a `numeric` column as a bare JSON number, and a wei
+// amount is routinely larger than the 2^53 a JavaScript number can hold exactly.
+// JSON.parse rounds it before any of this code sees it, so a proposal for
+// 1234567890123456789 wei is read back as …6800 — a different value, a different
+// EIP-712 digest, and every signature stored against the original silently stops
+// verifying. MAX on an ETH send is exactly the case that produces such a figure,
+// because it sends the raw balance rather than a rounded one.
+//
+// So re-quote long integers before parsing, turning them into strings the way
+// every consumer here already expects (`BigInt(t.value)`). The key has to sit in
+// key position — preceded by `{` or `,` — or a description containing the text
+// `\"value\":123…` would be rewritten inside its own string literal.
+const _PG_BIGNUM = /([{,]\s*)"(value|salt)"(\s*:\s*)(-?\d{16,})(?=\s*[,}])/g;
+function pgJson(text) {
+  return JSON.parse(String(text).replace(_PG_BIGNUM, '$1"$2"$3"$4"'));
+}
+
 async function pgFetch(path, init) {
   let lastErr = null;
   for(let attempt = 0; attempt < PG_MAX_ATTEMPTS; attempt++) {
@@ -1826,7 +1846,7 @@ class PgQuery {
     try {
       const res = await pgFetch(`${this._table}?${this._params}`, { headers: { 'Accept': 'application/json' } });
       if(!res.ok) return { data: null, error: { status: res.status, message: await res.text() } };
-      const rows = await res.json();
+      const rows = pgJson(await res.text());
       return { data: this._single ? (rows[0] ?? null) : rows, error: null };
     } catch(e) { return { data: null, error: e.pgError || { message: String(e) } }; }
   }
@@ -1843,7 +1863,7 @@ const sb = {
       });
       if(!res.ok) return { data: null, error: { status: res.status, message: await res.text() } };
       const text = await res.text();
-      return { data: text ? JSON.parse(text) : null, error: null };
+      return { data: text ? pgJson(text) : null, error: null };
     } catch(e) { return { data: null, error: e.pgError || { message: String(e) } }; }
   }
 };
@@ -1969,13 +1989,23 @@ function seed() {
 }
 
 // ── STATE ─────────────────────────────────────────────────────────
+// localStorage throws on *read* as well as write in more places than it is
+// comfortable to ignore: Safari in private mode, a browser with cookies blocked,
+// and any embedding where storage is partitioned away. The writes below were
+// already guarded one by one; the reads were not — and three of them sit in this
+// object literal, where a throw is a top-level script error and the entire app
+// never renders. One accessor, used everywhere, so there is nowhere left for the
+// exception to escape from.
+function lsGet(k) { try { return localStorage.getItem(k); } catch(_) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch(_) {} }
+
 const S = {
-  dark: !localStorage.getItem('ms_light'),
+  dark: !lsGet('ms_light'),
   // Clear by default. A vault's first job is to show you what it holds, and
   // veiling it before anyone has asked reads as a rendering fault rather than a
   // feature. The eye in the header turns it on when the room warrants it, and
   // that choice is remembered — so the cost is one click, once.
-  priv: localStorage.getItem('ms_priv') === '1',
+  priv: lsGet('ms_priv') === '1',
   view: "DASH",
   sel: 0,
   vaults: [],
@@ -2024,7 +2054,7 @@ const S = {
   ndUnit: 'h',
 
   // chain / network
-  chainId: parseInt(localStorage.getItem('ms_chain') || '1'),
+  chainId: parseInt(lsGet('ms_chain') || '1'),
   showChains: false,
   latestBlock: 0,
 
@@ -2061,6 +2091,27 @@ function jstr(s) {
 const DECIMALS = { ETH: 18, USDC: 6, USDT: 6, USDT0: 6, DAI: 18, WBTC: 8, wstETH: 18, cbBTC: 8 };
 
 function stripCommas(s) { return String(s).replace(/,/g, ''); }
+
+// A proposal's `value` reaches this interface from a row anyone can write:
+// propose_tx() runs as the anon role and checks only that the address the row
+// *claims* proposed it is an owner. The column is `numeric`, which accepts
+// 1.5 and -1 and 1e40, and every render path that touches a proposal hands it
+// straight to BigInt() — where BigInt('1.5') throws. One such row would empty
+// the whole queue on load, and reach txKind() on render if it got that far.
+// Returns a canonical wei string, or null for anything that is not a
+// non-negative whole number — which is anything the vault could never execute.
+function weiStr(v) {
+  if(v == null) return '0';
+  const s = String(v).trim();
+  if(!/^\d+$/.test(s)) return null;
+  try { return BigInt(s).toString(); } catch(_) { return null; }
+}
+// The same guard for the render path, which has no row to skip and must not
+// throw: an unreadable value counts as zero and the proposal is still drawn.
+function bigOr0(v) {
+  const s = weiStr(v);
+  return s === null ? 0n : BigInt(s);
+}
 
 function toUnits(val, dec) {
   if (!val || val === "0") return "0";
@@ -2140,7 +2191,7 @@ function selectorToLabel(callData) {
 // movements carry no note: the amount and the recipient already say it.
 function txKind(tx, v) {
   const data = tx.callData || '0x';
-  const val = tx.rawValue ? BigInt(tx.rawValue) : 0n;
+  const val = bigOr0(tx.rawValue);
   const self = !!(v.address && tx.target && tx.target.toLowerCase() === v.address.toLowerCase());
   const sel = selOf(data);
   const is = name => sel === SEL[name];
@@ -2504,7 +2555,7 @@ const EYE_OFF = _EYE + `<path d="M4 20 20 4"/></svg>`;
 
 function togglePriv(){
   S.priv = !S.priv;
-  try { localStorage.setItem('ms_priv', S.priv ? '1' : '0'); } catch(_){}
+  lsSet('ms_priv', S.priv ? '1' : '0');
   flash(S.priv ? 'BALANCES VEILED' : 'BALANCES VISIBLE');
   render();
 }
@@ -2812,6 +2863,13 @@ document.addEventListener("keydown", e => {
   else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
 });
 
+// The page's own URL with the hash stripped — the base every shareable link is
+// built on. location.origin alone drops the path, so a co-sign link generated by
+// an app served from anywhere but the domain root pointed at a page that does
+// not exist. The vault link beside it copies location.href and was therefore
+// already correct; the two disagreed.
+function appBase() { return location.origin + location.pathname; }
+
 function explorerTxLink(hash) {
   if(!hash || !/^0x[0-9a-fA-F]{64}$/.test(hash)) return esc(hash||'');
   const c = CHAINS[S.chainId];
@@ -2952,11 +3010,11 @@ function renderNow(){
       <div>
         <div style="display:flex;align-items:center;gap:4px"><h1 class="logo">MULTISIG</h1><button type="button" id="info-btn" class="info-i" onclick="toggleInfo()" aria-expanded="false" aria-haspopup="dialog" aria-label="What this is">?</button></div>
         <div class="sub" aria-hidden="true">.software</div>
-        ${v?`<div class="addr">${vAddr}${!S.demoMode&&v.address&&ethers.isAddress(v.address)?` <button class="x-btn copy-btn icon-btn" onclick="copyText(location.href,'LINK COPIED')" aria-label="Copy shareable link to this vault" title="Copy shareable link \u00B7 ${location.origin}/#${S.chainId}/${v.address}">\u29C9</button>`:""}</div>`:""}
+        ${v?`<div class="addr">${vAddr}${!S.demoMode&&v.address&&ethers.isAddress(v.address)?` <button class="x-btn copy-btn icon-btn" onclick="copyText(location.href,'LINK COPIED')" aria-label="Copy shareable link to this vault" title="Copy shareable link \u00B7 ${esc(appBase())}#${S.chainId}/${v.address}">\u29C9</button>`:""}</div>`:""}
       </div>
       <div class="hdr-r">
         <button class="theme-btn priv-btn" onclick="togglePriv()" aria-pressed="${S.priv}" aria-label="${S.priv?'Balances veiled. Show them.':'Balances visible. Veil them.'}" title="${S.priv?'Balances veiled \u00B7 hover or tap a figure to read it. Click to show them.':'Balances visible. Click to veil them.'}">${S.priv?EYE_OFF:EYE_ON}</button>
-        <button class="theme-btn" onclick="S.dark=!S.dark;localStorage.setItem('ms_light',S.dark?'':'1');render()" aria-label="Switch to ${S.dark?"light":"dark"} theme" title="Switch to ${S.dark?"light":"dark"} theme"><span aria-hidden="true">${S.dark?"\u2600":"\u25CF"}</span></button>
+        <button class="theme-btn" onclick="S.dark=!S.dark;lsSet('ms_light',S.dark?'':'1');render()" aria-label="Switch to ${S.dark?"light":"dark"} theme" title="Switch to ${S.dark?"light":"dark"} theme"><span aria-hidden="true">${S.dark?"\u2600":"\u25CF"}</span></button>
         <button class="wallet-btn" id="wallet-btn" onclick="${walletOnclick}" ${S.demoMode?'':'aria-haspopup="dialog"'}>${walletDot}${esc(walletLabel)}</button>
       </div>
     </div>
@@ -3418,14 +3476,14 @@ function renderDash(v,mob){
       ?`<span class="tx-kind ${esc(kind.tone||'')}">${kind.icon?`${tokIcon(kind.icon,'sm')} `:''}${esc(kind.label)}</span>`
       :'';
     const kindNote=kind.note?`<div class="tx-note${kind.warn?' warn':''}">${kind.note}</div>`:'';
-    const txLink=!S.demoMode&&v.address&&ethers.isAddress(v.address)?`${location.origin}/#${S.chainId}/${v.address}/tx/${tx.nonce}`:'';
+    const txLink=!S.demoMode&&v.address&&ethers.isAddress(v.address)?`${appBase()}#${S.chainId}/${v.address}/tx/${tx.nonce}`:'';
     const isFocus=_focusNonce!==null&&tx.nonce===_focusNonce&&!!v.address&&v.address.toLowerCase()===(_focusVaultAddr||'').toLowerCase();
     return`<div class="tx privg${blocked?" blocked":""}${isFocus?" tx-focus":""}" data-tx-nonce="${tx.nonce}">
-      ${isFocus?`<div style="margin-bottom:10px"><span class="tx-share">SHARED FOR REVIEW${txLink?` <button onclick="event.stopPropagation();copyText('${txLink}','CO-SIGN LINK COPIED')" aria-label="Copy co-sign link" title="Copy co-sign link">⧉</button>`:''}<button onclick="dismissFocus()" aria-label="Dismiss shared-for-review banner" title="Dismiss">&#10005;</button></span></div>`:''}
+      ${isFocus?`<div style="margin-bottom:10px"><span class="tx-share">SHARED FOR REVIEW${txLink?` <button onclick="event.stopPropagation();copyText('${jstr(txLink)}','CO-SIGN LINK COPIED')" aria-label="Copy co-sign link" title="Copy co-sign link">⧉</button>`:''}<button onclick="dismissFocus()" aria-label="Dismiss shared-for-review banner" title="Dismiss">&#10005;</button></span></div>`:''}
       <div class="tx-top">
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
-            <span class="tx-nonce">#${tx.nonce}${isCancel?" VIA EXECUTOR":i===firstUnqueued&&!isQueued?" NEXT":""}${txLink?` <button class="x-btn copy-btn icon-btn" onclick="event.stopPropagation();copyText('${txLink}','CO-SIGN LINK COPIED')" aria-label="Copy co-sign link for proposal ${tx.nonce}" title="Copy co-sign link">\u29C9</button>`:""}</span>
+            <span class="tx-nonce">#${tx.nonce}${isCancel?" VIA EXECUTOR":i===firstUnqueued&&!isQueued?" NEXT":""}${txLink?` <button class="x-btn copy-btn icon-btn" onclick="event.stopPropagation();copyText('${jstr(txLink)}','CO-SIGN LINK COPIED')" aria-label="Copy co-sign link for proposal ${tx.nonce}" title="Copy co-sign link">\u29C9</button>`:""}</span>
             ${kindTag}
           </div>
           <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-top:6px">
@@ -3578,6 +3636,16 @@ function txMissing(){
   const miss = [];
   if(S.txMode === 'STAKE'){
     if(!(parseFloat(stripCommas(S.stakeAmount || '')) > 0)) miss.push('AN AMOUNT TO STAKE');
+    return miss;
+  }
+  // NAME asks for a label, not an amount and a recipient. Answering for it in
+  // the transfer's vocabulary is what put "ENTER AMOUNT + RECIPIENT" under a
+  // form that has neither field.
+  if(S.txMode === 'NAME'){
+    const v = S.vaults[S.sel];
+    if(!v) return miss;
+    const plan = wnsProposalPlan(v, S.wnsLabel);
+    if(!plan.calls.length) miss.push(asciiLower(String(S.wnsLabel || '').trim()) ? 'A FREE NAME' : 'A NAME');
     return miss;
   }
   if(!(parseFloat(stripCommas(S.txAmount || '')) > 0)) miss.push('AMOUNT');
@@ -3772,6 +3840,17 @@ function txReviewBody(v){
     <div class="review-rows">${rows}</div>
     ${warns.map(w => `<div class="review-warn">${w}</div>`).join('')}`;
 }
+// The submit button's readiness and the line under it, from one source. NAME
+// keeps the enabled/disabled state its own render decided — that tab's button
+// is btn-fill or btn-disabled outright rather than dimmed — but it still says
+// what it is waiting for, in the same words every other tab uses.
+function _paintTxReady(){
+  const miss = txMissing();
+  const btn = document.getElementById('tx-submit');
+  if(btn && S.txMode !== 'NAME') btn.classList.toggle('btn-pending', miss.length > 0);
+  const note = document.getElementById('tx-ready-note');
+  if(note) note.textContent = miss.length ? 'ENTER ' + miss.join(' + ') : '';
+}
 // Repaint the review card + submit affordance in place (no re-render, so the
 // amount/recipient fields keep focus while the summary tracks each keystroke).
 function updateTxReview(){
@@ -3790,11 +3869,18 @@ function updateTxReview(){
     if(sW) sW.textContent = (sAvail > 0 && sN > sAvail) ? 'EXCEEDS VAULT ETH BALANCE' : '';
     const sUsd = document.getElementById('stake-amount-usd');
     if(sUsd){ const r = Number(sUsd.dataset.rate) || 0; sUsd.textContent = (r > 0 && sN > 0) ? fmtUsd(sN * r) : ''; }
-    const sMiss = txMissing();
-    const sBtn = document.getElementById('tx-submit');
-    if(sBtn) sBtn.classList.toggle('btn-pending', sMiss.length > 0);
-    const sNote = document.getElementById('tx-ready-note');
-    if(sNote) sNote.textContent = sMiss.length ? 'ENTER ' + sMiss.join(' + ') : '';
+    _paintTxReady();
+    return;
+  }
+  // Every tab that owns a #tx-review card has to be named here. It was not, so
+  // the NAME tab painted its own review and then had it overwritten — by the
+  // TRANSFER card, on the very next line — on every render: a poll tick, an
+  // availability lookup landing, a keystroke echo. What a co-signer read under
+  // REVIEW was a send of nothing to nobody, and the note below the button asked
+  // for an amount and a recipient the tab does not have.
+  if(S.txMode === 'NAME'){
+    host.innerHTML = nameReviewBody(v);
+    _paintTxReady();
     return;
   }
   host.innerHTML = txReviewBody(v);
@@ -3814,11 +3900,7 @@ function updateTxReview(){
   const st = document.getElementById('tx-to-status');
   if(st){ const s = _addrState(S.txTo); st.textContent = s.txt; st.style.color = s.color || ''; }
 
-  const miss = txMissing();
-  const btn = document.getElementById('tx-submit');
-  if(btn) btn.classList.toggle('btn-pending', miss.length > 0);
-  const note = document.getElementById('tx-ready-note');
-  if(note) note.textContent = miss.length ? 'ENTER ' + miss.join(' + ') : '';
+  _paintTxReady();
 }
 // Shared address/name field feedback (returns state; writes to a status node).
 function _addrState(t){
@@ -4068,7 +4150,7 @@ function renderTopUp(){
   const sending = t.sending;
   const btnLabel = sending ? (t.txHash ? 'CONFIRMING…' : 'CONFIRM IN WALLET…') : `SEND ${esc(sel.symbol)} TO VAULT`;
 
-  return `<div class="ovl" onclick="if(event.target===this&&!S.topup.sending)closeTopUp()">
+  return `<div class="ovl" onclick="if(event.target===this&&!(S.topup&&S.topup.sending))closeTopUp()">
     <div class="ovl-card" role="dialog" aria-modal="true" aria-label="Top up ${esc(v.name)}">
       <div class="ovl-head">
         <div class="ovl-title">TOP UP &middot; ${esc(v.name)}</div>
@@ -4298,7 +4380,7 @@ function renderTxBuilder(v,mob){
           <div id="tx-review">${nameReviewBody(v)}</div>
         </div>
         <button class="btn ${ready?'btn-fill':'btn-disabled'} btn-w btn-big" id="tx-submit" style="margin-top:14px" onclick="${ready?'submitName()':''}">SIGN + SUBMIT</button>
-        <div class="review-miss" id="tx-ready-note">${ready?'':typed?'PICK A FREE NAME TO CONTINUE':'ENTER A NAME TO CONTINUE'}</div>
+        <div class="review-miss" id="tx-ready-note">${ready?'':'ENTER '+txMissing().join(' + ')}</div>
       </div></div>`;
   }else if(S.txMode==="CUSTOM"){
     const hasFns = Array.isArray(S.cxAbi) && S.cxAbi.length > 0;
@@ -5732,12 +5814,22 @@ async function dbGetTxByHash(txHash) {
   return data;
 }
 
+// Signatures for one transaction. Its only callers are the cancel / reject /
+// accelerate companion flows, and those companions are always signed off-chain
+// with signTypedData — so an approval/sender row on one is either noise or
+// someone taking advantage of add_signature() accepting unverified rows from
+// anyone. Either way it cannot be checked here the way verifySigs checks an
+// ECDSA sig, and counting it toward a threshold buys a reverted transaction at
+// the submitter's expense. Drop it, and let verifySigs judge the rest.
 async function dbGetSigs(txId) {
   const { data } = await sb.from('signatures')
     .select('signer, signature, sig_type')
     .eq('tx_id', txId)
     .order('signer', { ascending: true });
-  return data || [];
+  return (data || []).filter(s => {
+    const st = s.sig_type || s.sigType;
+    return st !== 'approval' && st !== 'sender';
+  });
 }
 
 // Batch variant: fetch signatures for many txs in ONE request instead of
@@ -5947,6 +6039,67 @@ async function loadSingleVaultData(addr, dbWallet) {
   };
 }
 
+// The EIP-712 digest a proposal row actually has, derived from its own
+// target/value/data/nonce rather than read from the tx_hash column beside them.
+// That column is written by the same anon-callable propose_tx() as the rest of
+// the row and is never checked against it, yet it is what a cancel is built
+// around: cancelQueued() takes a hash, so a row carrying one that does not match
+// its own fields would have co-signers approving the cancellation of something
+// else entirely. It is also what the queued() lookup keys off, where a wrong
+// hash reads as "no longer queued" and quietly prunes a live proposal.
+// Returns null for a row whose fields cannot produce a digest at all.
+function proposalDigest(v, t) {
+  const wei = weiStr(t.value);
+  if(wei === null || !v || !v.address || !ethers.isAddress(v.address)) return null;
+  try {
+    return ethers.TypedDataEncoder.hash(
+      { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address },
+      EIP712_TYPES,
+      { target: t.target, value: BigInt(wei), data: t.call_data || '0x', nonce: t.nonce }
+    );
+  } catch(_) { return null; }
+}
+
+// Ask the vault which of the stored approval/sender rows it actually holds an
+// on-chain approval for. Returns a Set of "txId|signer" (signer lowercased).
+//
+// A row that cannot be confirmed is not counted. That direction is deliberate:
+// under-reporting shows an owner who really did approve as un-signed, which
+// costs them one harmless re-approve and repairs itself on the next load;
+// over-reporting shows a quorum that is not there, and the only way to find out
+// is to send the transaction. The same reasoning applies when the read fails
+// outright — an unreachable chain is not evidence of an approval.
+async function fetchOnchainApprovals(v, txs, sigMap, digests) {
+  const confirmed = new Set();
+  if(!v || !v.address || !ethers.isAddress(v.address)) return confirmed;
+  const pairs = [];
+  for(const t of txs) {
+    const hash = digests.get(t.id);
+    if(!hash) continue;
+    for(const s of (sigMap.get(t.id) || [])) {
+      const st = s.sig_type || s.sigType;
+      if(st !== 'approval' && st !== 'sender') continue;
+      if(!s.signer || !ethers.isAddress(s.signer)) continue;
+      pairs.push({ id: t.id, hash, signer: s.signer });
+    }
+  }
+  if(!pairs.length) return confirmed;
+  try {
+    const res = await getMC3().aggregate3(pairs.map(p => ({
+      target: v.address, allowFailure: true,
+      callData: msIface.encodeFunctionData('approved', [p.signer, p.hash]),
+    })));
+    res.forEach((r, i) => {
+      if(!r || !r.success) return;
+      try {
+        if(msIface.decodeFunctionResult('approved', r.returnData)[0])
+          confirmed.add(pairs[i].id + '|' + pairs[i].signer.toLowerCase());
+      } catch(_) {}
+    });
+  } catch(e) { console.error('On-chain approvals:', e); }
+  return confirmed;
+}
+
 async function loadVaultQueue(vi) {
   const v = S.vaults[vi];
   if(!v || !v.dbId) return;
@@ -5955,8 +6108,14 @@ async function loadVaultQueue(vi) {
     const you = window._connectedAddress;
     const queue = [];
 
+    // Every digest, derived from each row's own fields rather than read out of
+    // the tx_hash column beside them — see proposalDigest. Computed once, up
+    // front, because both the on-chain reads below key off it.
+    const digests = new Map();
+    txs.forEach(t => digests.set(t.id, proposalDigest(v, t)));
+
     // Fetch sigs (one batched request) + verify on-chain queue state in parallel
-    const queuedTxs = txs.filter(t => t.status === 'queued' && t.tx_hash);
+    const queuedTxs = txs.filter(t => t.status === 'queued' && digests.get(t.id));
     const [sigMap, onchainQueued] = await Promise.all([
       dbGetSigsByTxIds(txs.map(t => t.id)),
       (async () => {
@@ -5966,12 +6125,12 @@ async function loadVaultQueue(vi) {
           const mc = getMC3();
           const calls = queuedTxs.map(t => ({
             target: v.address, allowFailure: true,
-            callData: msIface.encodeFunctionData('queued', [t.tx_hash])
+            callData: msIface.encodeFunctionData('queued', [digests.get(t.id)])
           }));
           const results = await mc.aggregate3(calls);
           queuedTxs.forEach((t, i) => {
             if(results[i].success) {
-              result[t.tx_hash] = Number(msIface.decodeFunctionResult('queued', results[i].returnData)[0]);
+              result[t.id] = Number(msIface.decodeFunctionResult('queued', results[i].returnData)[0]);
             }
           });
         } catch(e) { console.error('Queue verification:', e); }
@@ -5979,28 +6138,39 @@ async function loadVaultQueue(vi) {
       })()
     ]);
 
+    // An approval row is not a signature — it is a *claim* that an owner
+    // registered approval in the vault itself, and verifySigs takes it on trust
+    // because "the contract validates those". The contract does, at execute
+    // time; nothing validates it here. add_signature() runs as the anon role and
+    // checks only that the claimed signer is an owner, so anyone at all can mark
+    // any owner as having approved any proposal — and the queue would show a
+    // quorum that does not exist, right up until whoever acted on it paid gas
+    // for a transaction the vault rejects. Ask the vault instead.
+    const approvedOnChain = await fetchOnchainApprovals(v, txs, sigMap, digests);
+
     // Track stale txs to clean up in DB
     const staleTxIds = [];
 
-    // Build accelerate/cancel/reject sig counts: map original nonce → set of signers
+    // Build accelerate/cancel/reject sig counts: map original nonce → set of signers.
+    // Counted the same way dbGetSigs collects them, so the "CANCEL 2/3" a row
+    // advertises is the count the cancel flow will actually be able to pack —
+    // an approval row on an off-chain-signed companion is not a signature it can
+    // use, and showing it here would promise a quorum that reverts.
+    const companionSigners = t => new Set((sigMap.get(t.id) || [])
+      .filter(s => { const st = s.sig_type || s.sigType; return st !== 'approval' && st !== 'sender'; })
+      .map(s => String(s.signer).toLowerCase()));
     const accelSigs = {}, cancelSigs = {}, rejectSigs = {};
     for(let ti = 0; ti < txs.length; ti++) {
       const t = txs[ti];
       if(t.description && t.description.startsWith('Accelerate #')) {
         const origNonce = parseInt(t.description.replace('Accelerate #', ''));
-        if(!isNaN(origNonce)) {
-          accelSigs[origNonce] = new Set((sigMap.get(t.id) || []).map(s => s.signer.toLowerCase()));
-        }
+        if(!isNaN(origNonce)) accelSigs[origNonce] = companionSigners(t);
       } else if(t.description && t.description.startsWith('Cancel #')) {
         const origNonce = parseInt(t.description.replace('Cancel #', ''));
-        if(!isNaN(origNonce)) {
-          cancelSigs[origNonce] = new Set((sigMap.get(t.id) || []).map(s => s.signer.toLowerCase()));
-        }
+        if(!isNaN(origNonce)) cancelSigs[origNonce] = companionSigners(t);
       } else if(t.description && t.description.startsWith('Reject #')) {
         const origNonce = parseInt(t.description.replace('Reject #', ''));
-        if(!isNaN(origNonce)) {
-          rejectSigs[origNonce] = new Set((sigMap.get(t.id) || []).map(s => s.signer.toLowerCase()));
-        }
+        if(!isNaN(origNonce)) rejectSigs[origNonce] = companionSigners(t);
       }
     }
 
@@ -6017,27 +6187,41 @@ async function loadVaultQueue(vi) {
       if(t.description && (t.description.startsWith('Accelerate #') || t.description.startsWith('Cancel #') || t.description.startsWith('Reject #'))) continue;
 
       // Prune queued txs that are no longer queued on-chain (executed or cancelled externally)
-      if(t.status === 'queued' && t.tx_hash && t.tx_hash in onchainQueued) {
-        if(onchainQueued[t.tx_hash] === 0) {
+      if(t.status === 'queued' && t.id in onchainQueued) {
+        if(onchainQueued[t.id] === 0) {
           staleTxIds.push(t.id);
           continue;
         }
         // Update ETA if on-chain differs from DB
-        if(onchainQueued[t.tx_hash] !== (t.eta || 0)) {
-          t.eta = onchainQueued[t.tx_hash];
+        if(onchainQueued[t.id] !== (t.eta || 0)) {
+          t.eta = onchainQueued[t.id];
         }
       }
 
-      const sigs = sigMap.get(t.id) || [];
+      // A value the vault could never execute is a row that cannot correspond to
+      // anything real. Skip it rather than let BigInt() throw out of this loop
+      // and take every other proposal in the queue with it.
+      const rawValue = weiStr(t.value);
+      if(rawValue === null) { console.warn('Skipping proposal with an unusable value:', t.id, t.value); continue; }
+
+      // Drop approval/sender rows the vault does not actually confirm — see
+      // fetchOnchainApprovals. Done here rather than inside verifySigs so the
+      // filtered list is also what lands in tx.signatures, and therefore what
+      // collectSigs later packs into a transaction.
+      const sigs = (sigMap.get(t.id) || []).filter(s => {
+        const st = s.sig_type || s.sigType;
+        if(st !== 'approval' && st !== 'sender') return true;
+        return approvedOnChain.has(t.id + '|' + String(s.signer).toLowerCase());
+      });
       // Verify each stored sig against THIS tx's digest before counting it as
       // an approval. add_signature runs as anon with ON CONFLICT DO UPDATE, so
       // anyone can overwrite a stored sig with garbage. Verifying here means a
       // corrupted sig shows its owner as un-signed (prompting a re-sign, which
       // repairs the row) rather than a false "approved" that fails at execute
-      // time. approval/sender sigs are trusted — the contract validates those.
+      // time.
       const ownerAddrs = v.loadedOwners || v.owners.map(o => o.addr);
       const sigDomain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address };
-      const sigMsg = { target: t.target, value: t.value ? BigInt(t.value) : 0n, data: t.call_data || '0x', nonce: t.nonce };
+      const sigMsg = { target: t.target, value: BigInt(rawValue), data: t.call_data || '0x', nonce: t.nonce };
       const validSigs = verifySigs(sigs, sigDomain, EIP712_TYPES, sigMsg, ownerAddrs);
       const approvals = {};
       v.owners.forEach(o => approvals[o.addr] = false);
@@ -6047,7 +6231,7 @@ async function loadVaultQueue(vi) {
 
       const dataLabel = selectorToLabel(t.call_data);
 
-      const ethVal = t.value && t.value !== '0' ? ethers.formatEther(BigInt(t.value)) : '0';
+      const ethVal = rawValue !== '0' ? ethers.formatEther(BigInt(rawValue)) : '0';
       const value = ethVal === '0' ? '0' : ethVal;
       const token = (t.call_data === '0x' || !t.call_data) && ethVal !== '0' ? 'ETH' : '';
       let displayValue = value, displayToken = token, displayTo = null, slowDelay = 0;
@@ -6065,7 +6249,7 @@ async function loadVaultQueue(vi) {
               || customTokensFor(S.chainId, v.address).find(x => x.address.toLowerCase() === tk.toLowerCase());
           if(info) {
             // ETH rides in msg.value; the encoded amount is zero for that path.
-            displayValue = fmtAmount(isEth ? BigInt(t.value || '0') : BigInt(amt), info.decimals);
+            displayValue = fmtAmount(isEth ? BigInt(rawValue) : BigInt(amt), info.decimals);
             displayToken = info.symbol;
           }
           displayTo = to;
@@ -6099,10 +6283,10 @@ async function loadVaultQueue(vi) {
         eta: t.eta || 0,
         approvals: approvals,
         dbId: t.id,
-        txHash: t.tx_hash,
+        txHash: digests.get(t.id) || t.tx_hash,
         queueTx: t.queue_tx || null,
         callData: t.call_data,
-        rawValue: t.value,
+        rawValue: rawValue,
         signatures: sigs.map(s => ({signer: s.signer, sig: s.signature, sigType: s.sig_type})),
         accelSigners: accelSigs[t.nonce] || null,
         cancelSigners: cancelSigs[t.nonce] || null,
@@ -6129,7 +6313,8 @@ async function loadVaultHistory(vi) {
     const rows = await dbGetHistory(v.dbId, 50);
     v.history = rows.map(t => {
       const act = selectorToLabel(t.call_data);
-      const ethVal = t.value && t.value !== '0' ? ethers.formatEther(BigInt(t.value)) : null;
+      const hv = weiStr(t.value);
+      const ethVal = (hv !== null && hv !== '0') ? ethers.formatEther(BigInt(hv)) : null;
       // Split when the line is ours to split: a derived "0.4 ETH → 0x12ab" has a
       // figure to veil, a description the user typed is arbitrary text and is left whole.
       const derived = !t.description && !!ethVal;
@@ -6393,7 +6578,7 @@ const _sameAddr = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
 // previous address.
 function _readAllResume(){
   let raw = null;
-  try { raw = JSON.parse(localStorage.getItem(RESUME_KEY) || 'null'); } catch(_) { return []; }
+  try { raw = JSON.parse(lsGet(RESUME_KEY) || 'null'); } catch(_) { return []; }
   const list = Array.isArray(raw) ? raw : (raw ? [raw] : []);
   return list.filter(_resumeValid).sort((a, b) => b.ts - a.ts);
 }
@@ -8597,7 +8782,7 @@ async function prodAdminPropose(action, val) {
 function adoptChain(id) {
   if(!CHAINS[id]) return false;
   S.chainId = id;
-  try { localStorage.setItem('ms_chain', String(id)); } catch(_) {}
+  lsSet('ms_chain', String(id));
   provider = makeProvider(id);
   S.showChains = false;
   S.latestBlock = 0;
@@ -8720,7 +8905,7 @@ function onWalletConnect() {
         const walletChain = parseInt(wc, 16);
         if(walletChain !== S.chainId && CHAINS[walletChain]) {
           S.chainId = walletChain;
-          localStorage.setItem('ms_chain', String(S.chainId));
+          lsSet('ms_chain', String(S.chainId));
           provider = makeProvider(S.chainId);
           S.latestBlock = 0;
           fetchBlock();
@@ -8762,7 +8947,7 @@ function handleDeepLink() {
     const linkChain = parseInt(match[1]);
     if(CHAINS[linkChain]) {
       S.chainId = linkChain;
-      localStorage.setItem('ms_chain', String(S.chainId));
+      lsSet('ms_chain', String(S.chainId));
       provider = makeProvider(S.chainId);
       fetchBlock();
       // Sync wallet target chain so auto-reconnect uses the deep-linked chain
@@ -8902,7 +9087,7 @@ setInterval(tickSlowCountdowns, 1000);
   const hasDeepLink = handleDeepLink();
   render();
   if(!hasDeepLink) {
-    const hasSavedWallet = !!localStorage.getItem('ms_wallet');
+    const hasSavedWallet = !!lsGet('ms_wallet');
     if(hasSavedWallet) {
       window._onAutoReconnectFail = () => { clearTimeout(_initLoadingTimer); hideLoading(); };
       // The boot overlay is painted by the inline script above, so it never went
