@@ -3791,7 +3791,9 @@ ${/* The name used to sit here too. It moved up to the header, beside the
             <span class="tx-val${(!kindTag&&(kind.tone==='policy'||kind.tone==='danger'))?' '+kind.tone:''}" style="display:inline-flex;align-items:center;gap:6px">${(dv&&dv!=='0')?`${tokIcon(dt)}<span class="priv">${esc(dv)}</span> ${esc(dt)}`:esc(display)}</span>
           </div>
           <div class="tx-to">&rarr; ${S.demoMode?addrLink(tx.target,v.chain):addrLink(tx.displayTo||tx.target)}${(()=>{const a=S.demoMode?tx.target:(tx.displayTo||tx.target);return ethers.isAddress(a)?copyBtn(a):'';})()}</div>
-          ${tx.orphanedFrom?`<div class="tx-note warn">THE COORDINATION RECORD SAYS THIS PROPOSAL WAS ${esc(String(tx.orphanedFrom).toUpperCase())}. THE VAULT DISAGREES — IT IS STILL QUEUED ON CHAIN, STILL MATURING, AND ANYONE CAN EXECUTE IT ONCE IT DOES. THE CHAIN IS THE AUTHORITY: TREAT THIS AS LIVE, AND CANCEL IT IF IT SHOULD NOT RUN.</div>`:''}
+          ${tx.orphanedFrom?`<div class="tx-note warn">${tx.orphanedFrom==='proposed'
+            ? 'THE COORDINATION RECORD HAS THIS PROPOSAL AS NEVER QUEUED.'
+            : `THE COORDINATION RECORD SAYS THIS PROPOSAL WAS ${esc(String(tx.orphanedFrom).toUpperCase())}.`} THE VAULT DISAGREES — IT IS QUEUED ON CHAIN, STILL MATURING, AND ANYONE CAN EXECUTE IT ONCE IT DOES. THE CHAIN IS THE AUTHORITY: TREAT THIS AS LIVE, AND CANCEL IT IF IT SHOULD NOT RUN.</div>`:''}
           ${kindNote}
         </div>
         ${!blocked?`<span class="tx-status" style="color:${s.c}"${tx.eta>0&&!s.exec?` data-eta-status="${tx.eta}"`:``}>&bull; ${s.l}</span>`:""}
@@ -6631,8 +6633,13 @@ async function loadVaultQueue(vi) {
     // the entry — so anything the vault still holds queued has a nonce strictly
     // below the live one. A retired row at or above it was never queued and
     // cannot be, which takes most of them out of the batch for free.
+    // Every live row is asked about, not only the ones claiming to be queued.
+    // The extra answers are what let an unsigned row be dropped below without
+    // guessing: `queued()` returning zero is the vault saying "I am not holding
+    // this", which is a different fact from never having asked. They ride in an
+    // aggregate3 that is being made anyway, one call each.
     const askQueued = [
-      ...txs.filter(t => t.status === 'queued' && digests.get(t.id)),
+      ...txs.filter(t => digests.get(t.id)),
       ...retired.filter(t => digests.get(t.id) && t.nonce < v.nonce),
     ].map(t => ({ id: t.id, hash: digests.get(t.id) }));
     const chain = await chainCheckQueue(v, askQueued, approvalPairsFor(txs, sigMap, digests));
@@ -6720,10 +6727,23 @@ async function loadVaultQueue(vi) {
     for(let ti = 0; ti < txs.length; ti++) {
       const t = txs[ti];
 
-      // Prune proposed txs whose nonce is behind on-chain nonce (already consumed)
+      // Prune proposed txs whose nonce is behind on-chain nonce (already
+      // consumed) — unless the vault is still holding this one queued.
+      //
+      // A queued proposal ALWAYS has a nonce below the live one: execute()
+      // consumes the nonce before it writes the queue entry. So the rows this
+      // prunes are exactly the rows that could be queued, and the only thing
+      // saying they are not is `status`, which mark_queued() writes on the word
+      // of a caller-supplied address like everything else in this database.
+      // Flip one live proposal back to 'proposed' with an anonymous request and
+      // it left every owner's queue while sitting on chain, maturing, executable
+      // by anyone the moment it matured. The vault gets asked now, and it is
+      // asked before the record is believed.
       if(t.status === 'proposed' && t.nonce < v.nonce) {
-        staleTxIds.push(t.id);
-        continue;
+        if(!onchainQueued[t.id]) { staleTxIds.push(t.id); continue; }
+        t.eta = onchainQueued[t.id];
+        t.orphanedFrom = t.status;
+        t.status = 'queued';
       }
 
       // Skip accelerate/cancel/reject companions — they aggregate sigs separately
@@ -6779,6 +6799,37 @@ async function loadVaultQueue(vi) {
       // for one answer.
       const sigMsg = { target: t.target, value: BigInt(rawValue), data: t.call_data || '0x', nonce: t.nonce };
       const validSigs = verifySigs(sigs, cDomain, EIP712_TYPES, sigMsg, cOwners);
+
+      // A proposal nobody can be shown to have raised is not shown.
+      //
+      // propose_tx() authenticates its caller by a string the caller supplies —
+      // is_wallet_owner(wallet, p_proposed_by) against an owner list that is
+      // public on chain and anon-readable here — so one unauthenticated HTTP
+      // request puts a row in this queue naming any owner as its author. It
+      // cannot be signed into existence by the forger: every signature counted
+      // above is recovered against this row's own digest and matched to a
+      // current owner. But it renders, and a plausible row sitting in the queue
+      // beside the real ones, apparently raised by a co-signer, only has to be
+      // convincing for as long as it takes somebody to press SIGN. That is the
+      // whole of the attack, and it needs the row to be visible.
+      //
+      // The test is the vault's own answer, not the record's. `queued()`
+      // returning zero is the vault saying it is not holding this proposal;
+      // undefined is a read that did not happen, and hiding a live proposal on
+      // the strength of a failed read is the one direction that must never be
+      // taken — a queued proposal is executable by anyone the moment it matures,
+      // and its signatures can be deleted by the same anonymous request that
+      // wrote the row. So: drop only what the chain positively disclaims AND no
+      // owner has signed.
+      //
+      // A genuine proposal is unsigned for the width of one await — dbProposeTx
+      // then dbAddSig — so a second client polling in that window will not see
+      // it, and will on the next poll. Nothing is lost; it arrives late.
+      if(!validSigs.length && onchainQueued[t.id] === 0) {
+        console.warn('Hiding unsigned proposal (no valid owner signature, not queued on chain):', t.id, t.target);
+        continue;
+      }
+
       const approvals = {};
       v.owners.forEach(o => approvals[o.addr] = false);
       validSigs.forEach(s => { const k = addrKey[s.signer.toLowerCase()]; if(k) approvals[k] = true; });
