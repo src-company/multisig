@@ -292,6 +292,34 @@ at an address with the `0x1111` prefix or suffix.
 > neutralised brake, and the remaining mitigation is operational: protected or
 > private submission so the bundle is never public before inclusion.
 >
+> **How much that residual actually matters.** Less than the mechanism suggests,
+> for three reasons we want on the record rather than discovered later:
+>
+> 1. **The griefed transaction still executes.** It lands in the queue and runs
+>    after the delay. It cannot be blocked, and the grief cannot be repeated —
+>    once queued, it is queued. The worst outcome is experiencing the timelock
+>    the owners configured.
+> 2. **Acceleration recovers it.** `forward()` a self-call to
+>    `executeQueued(target, value, data, originalNonce)`; the wallet answers with
+>    `msg.sender == address(this)`, the ETA check is skipped, and the transaction
+>    runs immediately with the queued entry cleared first. The accelerate bundle
+>    is griefable by the same route, so this is a recovery rather than a
+>    guarantee — but private submission prevents the original grief entirely,
+>    since the attack requires the bundle to be public before it lands.
+> 3. **Both timing-critical needs have an ungriefable path.** Cancellation is
+>    closed by the binding. And guaranteed emergency *action* should not use the
+>    fast path at all — the README's security-council pattern installs a separate
+>    multisig as `executor`, which calls `wallet.execute(target, value, data, "")`
+>    directly. Its signatures are over the *council's* digest, not the wallet's,
+>    so there is no bundle an observer can replay against the wallet; with the
+>    council at `delay = 0` there is no queue branch to force it into either.
+>
+> The residual therefore bites exactly the case whose consequence is mild — a
+> convenience speed-up degrading to the configured delay — while the two cases
+> where timing is critical are each covered by a path that cannot be griefed.
+> Guidance follows from that: **if you need guaranteed emergency response, install
+> a council executor rather than enabling the fast path.**
+>
 > ### Structural fix
 >
 > We agree the replacement executor is the right end state, and the reviewer's

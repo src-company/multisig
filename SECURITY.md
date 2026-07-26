@@ -97,6 +97,43 @@ Relative to baseline multisig the marginal harm is small: a defecting co-signer
 could always refuse to sign. What they gain here is the ability to impose `delay`
 on something that already reached quorum.
 
+### The residual is narrower than the mechanism suggests
+
+Grief the fast path and the transaction lands in the queue and executes after
+your delay. It cannot be blocked and it cannot be repeated — once queued, it is
+queued. **The worst outcome of the fast-path grief is experiencing the timelock
+you configured.**
+
+Acceleration does recover it: `forward()` a self-call to
+`executeQueued(target, value, data, originalNonce)`, which the wallet answers
+with `msg.sender == address(this)` so the ETA check is skipped and the
+transaction runs immediately. That accelerate bundle is itself griefable by the
+same route, so it is a recovery rather than a guarantee — but the grief is
+prevented at source by submitting through a private RPC, since the attack needs
+the bundle to be public before it lands. On Base, Arbitrum and OP there is no
+public mempool to read in the first place.
+
+**The two cases where timing is critical each have a path that cannot be griefed
+at all:**
+
+| Need | Tool | Griefable? |
+|---|---|---|
+| Stop something queued | Cancel — `threshold` sigs, no `forwardEnabled` | **No** — exactly `threshold` slots, so binding one leaves a copier short |
+| Guaranteed emergency action | Security-council executor (README pattern) | **No** — there is no bundle to steal |
+| Convenience speed-up | Fast path / accelerate | Yes — but prevented by private submission, and the worst case is your own delay |
+
+The security-council row is the important one. A separate multisig installed as
+`executor` calls `wallet.execute(target, value, data, "")` directly:
+`msg.sender == executor` skips signatures and the delay, and the council's own
+signatures are over the *council's* digest, not the wallet's — so nothing an
+observer sees can be replayed against the wallet. With the council itself at
+`delay = 0` it has no queue branch to be forced into either. Ungriefable by
+construction.
+
+So the griefing residual bites only the case whose consequence is mild. **If you
+need guaranteed emergency response, the answer is a council executor, not
+enabling the fast path.**
+
 ### Where V1 is not the right answer
 
 1. **A wallet whose timelock is a public promise to third parties.** Do not

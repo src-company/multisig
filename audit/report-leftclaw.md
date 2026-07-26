@@ -399,6 +399,16 @@ a distinct EIP-712 typehash/domain tag.
 > re-signing rather than a neutralised brake, and protected submission is the
 > remaining mitigation.
 >
+> That residual is narrower than it first reads. A griefed transaction still
+> executes after the delay — it cannot be blocked, and the grief cannot be
+> repeated once the entry is queued. It can be recovered by forwarding a
+> self-call to `executeQueued`, which skips the ETA because `msg.sender` is the
+> wallet itself. And the two cases where timing genuinely matters each have a
+> path that cannot be griefed at all: cancellation, closed by the binding, and
+> guaranteed emergency action via the README's security-council executor, which
+> has no signature bundle for an observer to replay. See the disposition in
+> `SECURITY.md` for the full narrowing.
+>
 > One detail this report adds that GPT-5.6's did not: the explicit note that
 > **truncating** an oversized bundle to `threshold*65` is what makes the direct
 > call valid. That is why our binding also trims bundles to exactly the required
