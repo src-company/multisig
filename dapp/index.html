@@ -2884,6 +2884,27 @@ let _submitting = false;
 // Deep-linked transaction focus (someone was sent a /tx/<nonce> link to co-sign).
 // Persists across re-renders so the shared tx stays highlighted until dismissed.
 let _focusNonce = null, _focusVaultAddr = null, _focusScroll = false;
+
+// A followed link is a claim, staked the moment the page is read, and it takes
+// several round trips to make good on — resolve a name, then read a vault. Auto-
+// reconnect is racing it the whole way, and in a second tab, where the wallet is
+// already authorised and answers instantly, auto-reconnect usually wins.
+//
+// These two are how the claim is visible to that race before it has an answer.
+// _deepLinkPending is set synchronously, so anything that would clear or replace
+// the vault list can wait for it rather than read an array it has not filled
+// yet. _deepLinkChain records the chain the LINK asked for, which is not the
+// same fact as the chain the wallet is sitting on.
+// _deepLinkAddr is the vault the link resolved to, and it outlives the load:
+// loadAllVaults() rebuilds S.vaults from the operator's own wallets whenever it
+// answers, which can be at any point after, so "the vault this visitor asked
+// for" cannot be an index — it has to be an address, looked up again each time.
+let _deepLinkPending = null, _deepLinkChain = null, _deepLinkAddr = null;
+function deepLinkIndex() {
+  if(!_deepLinkAddr) return -1;
+  return S.vaults.findIndex(x => x && x.address &&
+    x.address.toLowerCase() === _deepLinkAddr.toLowerCase());
+}
 function dismissFocus(){ _focusNonce = null; _focusVaultAddr = null; _focusScroll = false; render(); }
 
 function guardSubmit(fn) {
@@ -6293,6 +6314,16 @@ async function dbGetHistory(wId, limit) {
 
 // ── PRODUCTION: VAULT LOADING ─────────────────────────────────────
 
+// Where a vault sits in S.vaults is not a property of the vault — the array is
+// rebuilt from scratch every time the operator's wallet list is re-read. Any
+// selection that has to survive one of those rebuilds is carried as an address
+// and looked up again on the other side.
+function reselect(list, prev) {
+  const a = prev && prev.address ? String(prev.address).toLowerCase() : '';
+  const i = a ? list.findIndex(v => v && v.address && v.address.toLowerCase() === a) : -1;
+  return i === -1 ? 0 : i;
+}
+
 async function loadAllVaults() {
   if(S.demoMode) return;
   const addr = window._connectedAddress;
@@ -6310,11 +6341,10 @@ async function loadAllVaults() {
       render();
       return;
     }
-    // Preserve vaults loaded via deep link that aren't in the user's DB set
-    const existing = S.vaults.filter(v => v.address && !wallets.some(w => w.address.toLowerCase() === v.address.toLowerCase()));
     if(!wallets.length) {
-      S.vaults = existing;
-      S.sel = 0;
+      const kept = S.vaults.filter(v => v && v.address);
+      S.sel = reselect(kept, S.vaults[S.sel]);
+      S.vaults = kept;
       hideLoading();
       render();
       return;
@@ -6322,11 +6352,24 @@ async function loadAllVaults() {
     const results = await Promise.allSettled(wallets.map(w => loadSingleVaultData(w.address, { id: w.id, name: w.name })));
     const vaults = results.filter(r => r.status === 'fulfilled' && r.value).map(r => r.value);
     results.filter(r => r.status === 'rejected').forEach(r => console.error('Load vault:', r.reason));
-    S.vaults = [...existing, ...vaults];
-    S.sel = 0;
-    if(vaults.length) {
-      S.nt = vaults[0].threshold;
-      setNd(vaults[0].delay);
+    // Decide what to keep against S.vaults as it is NOW. This filter used to be
+    // built before the await above, from a list that did not yet contain a vault
+    // a deep link was still resolving in parallel — so that vault was absent
+    // from the "keep" set and was dropped on the floor when the array below was
+    // rebuilt. Following a link and losing it a second later was this line.
+    const loaded = new Set(vaults.map(v => String(v.address).toLowerCase()));
+    const keep = S.vaults.filter(v => v && v.address && !loaded.has(v.address.toLowerCase()));
+    // Selection is an index into the array this replaces, so it has to be
+    // re-found by address. Whatever is on screen stays on screen: the vault a
+    // link just opened, or another one clicked since. Selecting 0 moved the
+    // visitor to an arbitrary vault a second or two after the right one arrived.
+    const was = S.vaults[S.sel];
+    S.vaults = [...keep, ...vaults];
+    S.sel = reselect(S.vaults, was);
+    const shown = S.vaults[S.sel];
+    if(shown) {
+      S.nt = shown.threshold;
+      setNd(shown.delay);
     }
     hideLoading();
     render();
@@ -9684,8 +9727,25 @@ window.onWalletAccountsChanged = function(addr, prev) {
 
 // ── WALLET INTEGRATION ────────────────────────────────────────────
 
+// walletInit calls its onConnect callbacks synchronously and logs whatever they
+// throw. The body below has to await, so it is kept behind a plain function that
+// hands the rejection back to the same place it used to surface — an async
+// callback would turn a failed render into an unhandled rejection instead.
 function onWalletConnect() {
+  _onWalletConnect().catch(e => console.error('onConnect error:', e));
+}
+async function _onWalletConnect() {
   if(S.demoMode) S.demoMode = false;
+  // Wait for a link that is still being followed before touching the vault
+  // list. This used to snapshot S.vaults synchronously and restore it further
+  // down, which works only if the link has already landed — and in a second tab
+  // it has not: the wallet is authorised there, answers without a prompt, and
+  // gets here while the link is still a name and two round trips. The snapshot
+  // then read an empty array, found nothing worth restoring, and loadAllVaults()
+  // below replaced the screen with the operator's own vaults. Which of the two
+  // the visitor ended up looking at was decided by whichever request answered
+  // first, and that is the whole of the unreliability.
+  if(_deepLinkPending) { try { await _deepLinkPending; } catch(_) {} }
   const deepLinked = S.vaults.length > 0 ? [...S.vaults] : null;
   S.vaults = [];
   S.sel = 0;
@@ -9694,33 +9754,41 @@ function onWalletConnect() {
   reconcileDeployResume().catch(e => console.error('Resume reconcile:', e));
 
   if(window._connectedWalletProvider) {
-    (async () => {
-      try {
-        const wc = await window._connectedWalletProvider.request({method:'eth_chainId'});
-        const walletChain = parseInt(wc, 16);
-        if(walletChain !== S.chainId && CHAINS[walletChain]) {
-          S.chainId = walletChain;
-          lsSet('ms_chain', String(S.chainId));
-          provider = makeProvider(S.chainId);
-          S.latestBlock = 0;
-          fetchBlock();
-        }
-        S.walletChain = walletChain;
-      } catch(_) {}
-      // Restore deep-linked vaults so they aren't lost on auto-reconnect
-      if(deepLinked) { S.vaults = deepLinked; S.sel = 0; }
-      render();
-      loadAllVaults();
-    })();
-  } else {
-    if(deepLinked) { S.vaults = deepLinked; S.sel = 0; }
-    render();
-    loadAllVaults();
+    try {
+      const wc = await window._connectedWalletProvider.request({method:'eth_chainId'});
+      const walletChain = parseInt(wc, 16);
+      // A link names its chain; a wallet merely happens to be on one. Following
+      // the wallet here moved a link opened from a second tab onto whatever
+      // network that tab had left selected — and for a WNS name, which resolves
+      // on mainnet and nowhere else, that lands the vault it just resolved on a
+      // chain the name does not even exist on. The link wins: it is the only one
+      // of the two that is an instruction. The mismatch is already handled where
+      // it has to be — requireSigner() refuses to sign and names the chain to
+      // switch to — so nothing is lost by staying put.
+      // Consumed once. A later account switch comes back through here, and by
+      // then the link is history, not a standing instruction.
+      const claimed = _deepLinkChain; _deepLinkChain = null;
+      if(!claimed && walletChain !== S.chainId && CHAINS[walletChain]) {
+        S.chainId = walletChain;
+        lsSet('ms_chain', String(S.chainId));
+        provider = makeProvider(S.chainId);
+        S.latestBlock = 0;
+        fetchBlock();
+      }
+      S.walletChain = walletChain;
+    } catch(_) {}
   }
+  if(deepLinked) { S.vaults = deepLinked; S.sel = 0; }
+  render();
+  loadAllVaults();
 }
 
 function onWalletDisconnect() {
-  S.vaults = [];
+  // A vault opened from a link is public, and was readable before any wallet was
+  // connected — disconnecting is not a reason to take it off the screen. The
+  // rest of the list is there because of the wallet, so it leaves with it.
+  const li = deepLinkIndex();
+  S.vaults = li === -1 ? [] : [S.vaults[li]];
   S.sel = 0;
   render();
 }
@@ -9810,7 +9878,10 @@ function handleDeepLink() {
   }).catch(_=>{});
 
   showLoading(link.isName ? 'RESOLVING ' + link.ref.toUpperCase() : 'LOADING VAULT');
-  (async () => {
+  // Staked before the first await, so onWalletConnect can wait for it instead of
+  // snapshotting a vault list this has not filled yet.
+  _deepLinkChain = link.chainId;
+  _deepLinkPending = (async () => {
     try {
       let addr = link.ref;
       if(link.isName) {
@@ -9825,23 +9896,44 @@ function handleDeepLink() {
       // by address, and until the name has resolved there is no address to
       // match on. Nothing is painted in between — the overlay is up.
       if(link.nonce !== null){ _focusNonce = link.nonce; _focusVaultAddr = addr; _focusScroll = true; }
+      _deepLinkAddr = addr;
       const vData = await loadSingleVaultData(addr);
       if(vData) {
-        S.vaults = [vData];
+        // Take the selection, not the whole list. With a wallet connected,
+        // loadAllVaults() may already have landed the operator's own vaults —
+        // and replacing the array wholesale is what made following a link cost
+        // you your vault list, depending only on which request answered first.
+        // Whoever lands last now, both survive and the link's vault is the one
+        // on screen.
+        const others = S.vaults.filter(x => x && x.address &&
+          x.address.toLowerCase() !== addr.toLowerCase());
+        S.vaults = [vData, ...others];
         S.sel = 0;
         S.nt = vData.threshold;
         setNd(vData.delay);
         hideLoading();
         render();
-        await Promise.all([loadVaultQueue(0), loadVaultHistory(0)]);
-        render();
-        // If the linked proposal isn't in the queue, say what became of it.
-        // Someone followed this link to co-sign; "may be executed or
-        // cancelled" leaves them to work out which, and the answer is
-        // already loaded — loadVaultHistory ran in the same breath above.
-        if(_focusNonce !== null && !S.vaults[0].queue.some(t => t.nonce === _focusNonce)) {
-          flash(deepLinkOutcome(S.vaults[0], _focusNonce));
-          _focusNonce = null; _focusVaultAddr = null; _focusScroll = false;
+        // Look the index up again rather than trusting the 0 just written.
+        // loadAllVaults() can answer at any point across these awaits, and it
+        // rebuilds S.vaults wholesale — dropping this vault from its "existing"
+        // set precisely when the visitor turns out to own it, which is the
+        // common case for a link sent between co-signers. Loading a queue into
+        // whatever ended up at index 0 filled a different vault's queue with
+        // this one's proposals.
+        const li = deepLinkIndex();
+        if(li !== -1) {
+          S.sel = li;
+          await Promise.all([loadVaultQueue(li), loadVaultHistory(li)]);
+          render();
+          // If the linked proposal isn't in the queue, say what became of it.
+          // Someone followed this link to co-sign; "may be executed or
+          // cancelled" leaves them to work out which, and the answer is
+          // already loaded — loadVaultHistory ran in the same breath above.
+          const lv = S.vaults[deepLinkIndex()];
+          if(_focusNonce !== null && lv && !lv.queue.some(t => t.nonce === _focusNonce)) {
+            flash(deepLinkOutcome(lv, _focusNonce));
+            _focusNonce = null; _focusVaultAddr = null; _focusScroll = false;
+          }
         }
       } else {
         hideLoading();
@@ -9867,6 +9959,36 @@ function deepLinkFailure(link, e) {
   const what = link.isName ? link.ref.toUpperCase() : shortAddr(link.ref);
   return `${what} — FAILED TO LOAD. IS THIS A MULTISIG?`;
 }
+
+// A link pasted into a tab that is already open, or followed from one page of
+// the app to another. Nothing listened for this before, so the address bar
+// changed and the page did not — which reads as the link being broken.
+//
+// Only real navigation arrives here: the canonical fragment is kept in sync with
+// replaceState, and replaceState does not fire hashchange. But the fragment may
+// still name what is already on screen, and reloading a vault to arrive where
+// you already are throws away its queue and history to repaint the same page.
+window.addEventListener('hashchange', () => {
+  const link = parseDeepLink(location.hash.slice(1));
+  const v = S.vaults[S.sel];
+  const here = link && v && !S.demoMode && link.chainId === S.chainId && (link.isName
+    ? link.ref === String(v.wnsName || '').toLowerCase()
+    : link.ref.toLowerCase() === String(v.address || '').toLowerCase());
+  if(here) {
+    // Same vault, different proposal — a co-sign link for the queue on screen.
+    // Move the focus and say what became of it, exactly as arriving fresh would,
+    // but without the reload.
+    _focusNonce = link.nonce; _focusVaultAddr = v.address; _focusScroll = link.nonce !== null;
+    render();
+    if(link.nonce !== null && !v.queue.some(t => t.nonce === link.nonce)) {
+      flash(deepLinkOutcome(v, link.nonce));
+      _focusNonce = null; _focusVaultAddr = null; _focusScroll = false;
+      render();
+    }
+    return;
+  }
+  handleDeepLink();
+});
 
 // ── TICK (block number + ETA updates) ─────────────────────────────
 async function fetchBlock() {
