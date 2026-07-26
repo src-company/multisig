@@ -108,7 +108,10 @@ td a:hover{border-bottom-color:var(--a)}
 .audit-scope{grid-column:2/-1;font-size:11px;color:var(--m);line-height:1.6}
 .audit-scope .op{color:var(--d)}
 .audit-find{grid-column:2/-1;display:flex;flex-wrap:wrap;gap:5px;align-items:center}
-.audit-meth{font-size:11px;color:var(--d);line-height:1.6}
+/* Method is how the review was run, not what it covered — dimmer than the scope,
+   and placed explicitly like its siblings so a record that omits one row does not
+   shuffle the rest into column 1. */
+.audit-meth{grid-column:2/-1;font-size:11px;color:var(--d);line-height:1.6}
 /* Severity chip. Tone is the severity CLASS, not a verdict on the project —
    the same vocabulary every report uses. A zero count keeps its slot (0 high is
    the most informative cell in the row) but drops its tone, so the eye lands on
@@ -142,8 +145,9 @@ td a:hover{border-bottom-color:var(--a)}
   .audit-when{grid-area:1/1}
   .audit-who{grid-area:2/1;font-size:12px}
   .audit-scope{grid-area:3/1}
-  .audit-find{grid-area:4/1}
-  .audit-links{grid-area:5/1;justify-self:start;gap:16px;margin-top:3px}
+  .audit-meth{grid-area:4/1}
+  .audit-find{grid-area:5/1}
+  .audit-links{grid-area:6/1;justify-self:start;gap:16px;margin-top:3px}
   .audit-who .q{display:block;margin-left:0;margin-top:2px}
   th,td{padding-right:14px}
 }
@@ -204,7 +208,7 @@ OVERVIEW:`
 
 CONTRACT:`
 <h2>MULTISIG.SOL</h2>
-<p>Single contract, ~200 lines. Owners stored as a linked list (sentinel pattern). Sequential nonce. EIP-712 signatures. ERC-1271 support via <code>isValidSignature</code>.</p>
+<p>One file, 321 lines, holding the wallet and its factory. Owners stored as a linked list (sentinel pattern). Sequential nonce. EIP-712 signatures. ERC-1271 support via <code>isValidSignature</code>.</p>
 
 <h2>STATE</h2>
 <pre>uint32  delay        // timelock in seconds (0 = unlocked)
@@ -305,39 +309,57 @@ address executor     // bypass role (typically TimelockExecutor)</pre>
 
 AUDITS:`
 <h2>AUDITS</h2>
-<p>Four independent reviews of the deployed contracts, by different auditors using different methods. Each report is reproduced in full in <code>audit/</code> with our response inline against every finding, including the ones we disputed.</p>
-<table>
-<tr><th>DATE</th><th>AUDITOR</th><th>RESULT</th><th>REPORT</th></tr>
-<tr>
-  <td>2026-07-26</td>
-  <td>GPT-5.6 Sol<br><span style="color:var(--d);font-size:11px">Pro</span></td>
-  <td>1 high &middot; 1 medium<br>4 low &middot; 5 info</td>
-  <td><a href="https://github.com/src-company/multisig/blob/main/audit/report-gpt56-sol.md" target="_blank" rel="noopener">READ &nearr;</a><br><a href="https://chatgpt.com/share/6a650af3-f6bc-83ea-b5f3-f83452e9c744" target="_blank" rel="noopener">TRANSCRIPT &nearr;</a></td>
-</tr>
-<tr>
-  <td>2026-07-26</td>
-  <td>Claude Opus 5<br><span style="color:var(--d);font-size:11px">max effort</span></td>
-  <td>2 high &middot; 6 medium<br>6 low &middot; 9 info</td>
-  <td><a href="https://github.com/src-company/multisig/blob/main/audit/report-opus5-max.md" target="_blank" rel="noopener">READ &nearr;</a><br><a href="https://claude.ai/share/c8a3a7d4-962f-4cb3-9fea-5690e9c7c7a2" target="_blank" rel="noopener">TRANSCRIPT &nearr;</a></td>
-</tr>
-<tr>
-  <td>2026-07-25</td>
-  <td>leftclaw<br><span style="color:var(--d);font-size:11px">multi-agent pipeline</span></td>
-  <td>1 critical &middot; 2 high<br>4 medium &middot; 5 low</td>
-  <td><a href="https://github.com/src-company/multisig/blob/main/audit/report-leftclaw.md" target="_blank" rel="noopener">READ &nearr;</a><br><a href="https://leftclaw.services/result/500.html" target="_blank" rel="noopener">ORIGINAL &nearr;</a></td>
-</tr>
-<tr>
-  <td>2026-07-11</td>
-  <td><a href="https://www.shredsecurity.io/" target="_blank" rel="noopener">Shred Security</a><br><span style="color:var(--d);font-size:11px">kenzo &middot; yashar</span></td>
-  <td>0 high &middot; 0 medium<br>2 low &middot; 2 info</td>
-  <td><a href="https://github.com/src-company/multisig/blob/main/audit/report-shred-security.md" target="_blank" rel="noopener">READ &nearr;</a><br><a href="https://audit.multisig.wei.limo" target="_blank" rel="noopener">PDF &nearr;</a></td>
-</tr>
-</table>
+<p>Five independent reviews, by different auditors using different methods. Each report is reproduced in full in <code>audit/</code> with our response against every finding, including the ones we disputed.</p>
+
+<div class="audit">
+  <div class="audit-when">2026-07-26</div>
+  <div class="audit-who">GPT-5.6 Sol<span class="q">Pro</span></div>
+  <div class="audit-links"><a href="https://github.com/src-company/multisig/blob/main/audit/report-gpt56-sol.md" target="_blank" rel="noopener">READ &nearr;</a><a href="https://chatgpt.com/share/6a650af3-f6bc-83ea-b5f3-f83452e9c744" target="_blank" rel="noopener">TRANSCRIPT &nearr;</a></div>
+  <div class="audit-scope">The vault and its executor module <span class="op">as a composition</span>, at <span class="op">main</span></div>
+  <div class="audit-find"><span class="sev high">1 HIGH</span><span class="sev med">1 MEDIUM</span><span class="sev low">4 LOW</span><span class="sev">5 INFO</span></div>
+</div>
+
+<div class="audit">
+  <div class="audit-when">2026-07-26</div>
+  <div class="audit-who">Claude Opus 5<span class="q">max effort</span></div>
+  <div class="audit-links"><a href="https://github.com/src-company/multisig/blob/main/audit/report-opus5-max.md" target="_blank" rel="noopener">READ &nearr;</a><a href="https://claude.ai/share/c8a3a7d4-962f-4cb3-9fea-5690e9c7c7a2" target="_blank" rel="noopener">TRANSCRIPT &nearr;</a></div>
+  <div class="audit-scope">The vault and its executor module, at <span class="op">09e2c38</span></div>
+  <div class="audit-meth">Plus 20 adversarial proof-of-concept tests. Every finding configuration-dependent.</div>
+  <div class="audit-find"><span class="sev high">2 HIGH</span><span class="sev med">6 MEDIUM</span><span class="sev low">6 LOW</span><span class="sev">9 INFO</span></div>
+</div>
+
+<div class="audit">
+  <div class="audit-when">2026-07-25</div>
+  <div class="audit-who">leftclaw<span class="q">multi-agent pipeline, via One Dollar Audit</span></div>
+  <div class="audit-links"><a href="https://github.com/src-company/multisig/blob/main/audit/report-leftclaw.md" target="_blank" rel="noopener">READ &nearr;</a><a href="https://leftclaw.services/result/500.html" target="_blank" rel="noopener">ORIGINAL &nearr;</a></div>
+  <div class="audit-scope">The vault, its executor module and the module interface</div>
+  <div class="audit-meth">Found the threshold-overflow bug two earlier reviews had mis-sized by a factor of 65. Its critical rested on a misreading and was rejected.</div>
+  <div class="audit-find"><span class="sev crit">1 CRITICAL</span><span class="sev high">2 HIGH</span><span class="sev med">4 MEDIUM</span><span class="sev low">5 LOW</span></div>
+</div>
+
+<div class="audit">
+  <div class="audit-when">2026-07-11</div>
+  <div class="audit-who"><a href="https://www.shredsecurity.io/" target="_blank" rel="noopener">Shred Security</a><span class="q">kenzo &middot; yashar</span></div>
+  <div class="audit-links"><a href="https://github.com/src-company/multisig/blob/main/audit/report-shred-security.md" target="_blank" rel="noopener">READ &nearr;</a><a href="https://audit.multisig.wei.limo" target="_blank" rel="noopener">PDF &nearr;</a></div>
+  <div class="audit-scope">The vault, at <span class="op">2329339</span></div>
+  <div class="audit-meth">Four-day human review plus a stateful invariant fuzzing campaign. Cover page marked DRAFT.</div>
+  <div class="audit-find"><span class="sev zero">0 HIGH</span><span class="sev zero">0 MEDIUM</span><span class="sev low">2 LOW</span><span class="sev">2 INFO</span></div>
+</div>
+
+<div class="audit">
+  <div class="audit-when">2026-04-03<br>&mdash; 04-04</div>
+  <div class="audit-who">Pashov Skills<span class="q">8-agent parallelized &middot; internal &middot; multi-pass</span></div>
+  <div class="audit-links"><a href="https://github.com/src-company/multisig/blob/main/audit/report-multisig.md" target="_blank" rel="noopener">VAULT &nearr;</a><a href="https://github.com/src-company/multisig/blob/main/audit/report-mods.md" target="_blank" rel="noopener">MODULES &nearr;</a><a href="https://github.com/src-company/multisig/blob/main/audit/report-timelock-executor.md" target="_blank" rel="noopener">EXECUTOR &nearr;</a></div>
+  <div class="audit-scope">The vault, the factory, all five modules, and the executor module's composition with the vault &mdash; the widest scope of any pass</div>
+  <div class="audit-meth">Ran first, and internally. Several findings were fixed in code rather than acknowledged, and those fixes are in the deployed contracts &mdash; <code>cancelQueued</code> exists because this pass found that queued transactions could not be cancelled at all.</div>
+  <div class="audit-find"><span class="sev zero">0 CRITICAL</span><span class="sev zero">0 HIGH</span><span class="sev med">7 MEDIUM</span><span class="sev low">9 LOW</span><span class="sev">4 LEADS</span></div>
+</div>
 
 <h2>WHAT THEY FOUND</h2>
-<p><strong>No reviewer found a way for an unauthorised party to move funds from a correctly configured vault.</strong> The signature scheme, nonce handling, owner list, replay protection and clone bytecode were each independently verified sound by three or four of them. Nothing found warranted redeploying the contracts, which are immutable singletons already live at mined addresses on every supported chain.</p>
+<p><strong>No reviewer found a way for an unauthorised party to move funds from a correctly configured vault.</strong> The signature scheme, nonce handling, owner list, replay protection and clone bytecode were each independently verified sound by several of them. Nothing found warranted redeploying the contracts, which are immutable singletons already live at mined addresses on every supported chain.</p>
 <p>What they did find falls into two groups. <strong>Configuration traps</strong> — one-way doors a vault's owners would have to deliberately sign their way into. This app now refuses to build every one of them. And <strong>composition issues</strong> between the vault and its executor module, which cost timing rather than funds. Those are answered below.</p>
 <div class="note">Severities were inconsistent across reports — one filed a critical that rested on a misreading of which address a code branch tests, and two mis-sized the same arithmetic bug by a factor of 65. Each report's response records where we agreed, where we did not, and why. Disputed findings are argued in the reports rather than quietly dropped.</div>
+<div class="note">The 2026-04 pass is the reason several later reviews came back clean, and its own record is worth reading for one reversal. It found the route-substitution mechanism first and accepted it, on the grounds that the worst case was a <em>delayed</em> cancel rather than no cancel. That holds for an ordinary transaction and fails for a cancellation, which is the case it missed — and which the July reviews escalated. An impact argument that holds in general can still fail on the one call whose whole value is being fast.</div>
 
 <h2>CONFIGURING A VAULT</h2>
 <p>The choices that actually matter, in the order you make them.</p>
@@ -377,7 +399,7 @@ AUDITS:`
 <h2>WHAT THIS APP GUARDS</h2>
 <p>Every finding the reviews raised that a client can answer is answered here, at the point the transaction is built — so a proposal raised by other tooling is flagged the same way.</p>
 
-<div class="sig">REPLAYED SIGNATURE BUNDLES <span class="params">— GPT-5.6 H-01, leftclaw M-2</span></div>
+<div class="sig">REPLAYED SIGNATURE BUNDLES <span class="params">— GPT-5.6 H-01, leftclaw M-2, Pashov executor F-1</span></div>
 <div class="desc">Every executor bundle spends one slot on a sender slot bound to whoever submits, so a copied bundle is inert on either route. Complete for cancellation. Partial for unanimous fast-path bundles on a k-of-n vault, where a threshold subset of the remaining signatures can still be extracted to queue the action — which delays rather than defeats it.</div>
 
 <div class="sig">EXECUTORS THAT BRICK THE VAULT <span class="params">— Shred L-1, Opus M-1, leftclaw H-1</span></div>
