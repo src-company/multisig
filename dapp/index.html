@@ -2944,7 +2944,17 @@ document.addEventListener("keydown", e => {
 // an app served from anywhere but the domain root pointed at a page that does
 // not exist. The vault link beside it copies location.href and was therefore
 // already correct; the two disagreed.
-function appBase() { return location.origin + location.pathname; }
+// The base every shareable link is built on. A directory index answers at both
+// `/index.html` and `/`, and the second is the one that belongs in a link sent
+// to a co-signer — the filename is an artefact of how this page happened to be
+// requested, not part of where the vault lives. Left alone off http(s): a
+// file:// link with the name stripped points at a directory listing.
+function appPath() {
+  return /^https?:$/.test(location.protocol)
+    ? location.pathname.replace(/(^|\/)index\.html$/i, '$1')
+    : location.pathname;
+}
+function appBase() { return location.origin + appPath(); }
 
 function explorerTxLink(hash) {
   if(!hash || !/^0x[0-9a-fA-F]{64}$/.test(hash)) return esc(hash||'');
@@ -3065,6 +3075,14 @@ function renderNow(){
 
   const vAddr = v ? (S.demoMode ? addrLink(v.address,v.chain) : addrLink(v.address)) : '';
 
+  // The shareable link to this vault, built rather than read back out of the
+  // address bar. location.href carries whatever is currently in it — including
+  // the /tx/<n> suffix a co-signer arrived on — so "copy link to this vault"
+  // could hand over a link to one proposal instead. It also carries the
+  // filename, which appBase() drops.
+  const vaultLink = (v && !S.demoMode && v.address && ethers.isAddress(v.address))
+    ? `${appBase()}#${S.chainId}/${v.address}` : '';
+
   // Sync URL hash for deep linking. Only when it actually changes: renderNow
   // runs on every poll tick, token switch and overlay open, and Safari caps
   // replaceState at ~100 calls per 30s and then THROWS — which, from here,
@@ -3073,7 +3091,7 @@ function renderNow(){
     ? '#' + S.chainId + '/' + v.address
     : (!v || S.demoMode) ? '' : null;
   if(wantHash !== null && wantHash !== location.hash) {
-    try { history.replaceState(null, '', wantHash || location.pathname); } catch(_) {}
+    try { history.replaceState(null, '', wantHash || appPath()); } catch(_) {}
   }
 
   const _appEl = document.getElementById("app");
@@ -3086,7 +3104,7 @@ function renderNow(){
       <div>
         <div style="display:flex;align-items:center;gap:4px"><h1 class="logo">MULTISIG</h1><button type="button" id="info-btn" class="info-i" onclick="toggleInfo()" aria-expanded="false" aria-haspopup="dialog" aria-label="What this is">?</button></div>
         <div class="sub" aria-hidden="true">.software</div>
-        ${v?`<div class="addr">${vAddr}${!S.demoMode&&v.address&&ethers.isAddress(v.address)?` <button class="x-btn copy-btn icon-btn" onclick="copyText(location.href,'LINK COPIED')" aria-label="Copy shareable link to this vault" title="Copy shareable link \u00B7 ${esc(appBase())}#${S.chainId}/${v.address}">\u29C9</button>`:""}</div>`:""}
+        ${v?`<div class="addr">${vAddr}${!S.demoMode&&v.address&&ethers.isAddress(v.address)?` <button class="x-btn copy-btn icon-btn" onclick="copyText('${jstr(vaultLink)}','LINK COPIED')" aria-label="Copy shareable link to this vault" title="Copy shareable link \u00B7 ${esc(vaultLink)}">\u29C9</button>`:""}</div>`:""}
       </div>
       <div class="hdr-r">
         <button class="theme-btn priv-btn" onclick="togglePriv()" aria-pressed="${S.priv}" aria-label="${S.priv?'Balances veiled. Show them.':'Balances visible. Veil them.'}" title="${S.priv?'Balances veiled \u00B7 hover or tap a figure to read it. Click to show them.':'Balances visible. Click to veil them.'}">${S.priv?EYE_OFF:EYE_ON}</button>
