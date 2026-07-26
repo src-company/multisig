@@ -443,6 +443,15 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- omitted named arguments from their defaults, which made this reachable from
 -- an anonymous HTTP request: flip any proposal to executed and it leaves every
 -- owner's queue while remaining live on chain. The same held for mark_queued.
+--
+-- Dropped first, because removing that default is exactly what CREATE OR REPLACE
+-- will not do: "cannot remove parameter defaults from existing function". The
+-- argument types are unchanged, so nothing here hinted that a replace would fail
+-- — and on the database this was written for, it did, taking the rest of the
+-- file down with it. The rule, for anything added below: a function needs an
+-- explicit DROP whenever this release changes its arity, its argument types, its
+-- return type, or its defaults. mark_queued has one for the same reason.
+DROP FUNCTION IF EXISTS mark_executed(uuid, bigint, text, text);
 CREATE OR REPLACE FUNCTION mark_executed(
   p_tx_id uuid, p_block bigint, p_execution_tx text,
   p_caller text
