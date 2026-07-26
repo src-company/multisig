@@ -144,6 +144,10 @@ button:active{transform:scale(.97)}
 .info-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:299}
 .info-backdrop.open{display:block}
 .addr{font-size:10px;letter-spacing:2px;color:var(--m);margin-top:4px}
+/* The vault's WNS name in the header, beside its address. Accent-coloured and
+   heavier so the eye lands on it first — it is the readable half of the pair —
+   without growing the line: same size as the address it sits next to. */
+.vault-name{font-weight:700;color:var(--a)}
 .hdr-r{display:flex;gap:10px;align-items:center}
 .theme-btn{background:transparent;border:1px solid var(--ln);color:var(--a);width:40px;height:40px;font-size:14px;display:flex;align-items:center;justify-content:center;transition:background .15s}
 .wallet-btn{background:transparent;border:1px solid var(--ln);color:var(--m);height:40px;padding:0 14px;font-size:10px;font-weight:600;letter-spacing:1px;display:flex;align-items:center;gap:6px;transition:background .15s;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -1244,6 +1248,17 @@ const NAME_SERVICES = [
 // the resolvers can never drift apart. '.gwei' does not end in '.wei', so the
 // suffixes stay unambiguous.
 const NAME_RE = /\.(eth|g?wei)$/i;
+// The subset of those a link may be built on. A deep link is resolved with no
+// operator watching and no field to type a correction into, so it takes only
+// names that answer from one mainnet contract in two calls: WNS and its .gwei
+// fork. ENS is excluded deliberately — a .eth name may resolve through an
+// offchain gateway (ENSIP-10) that can be down, blocked, or simply slow, and a
+// vault link that opens on some networks and not others is worse than one that
+// always spells its address out. `<label>.id.wei` is the shape this app mints,
+// but the matcher is the whole namespace: a vault holding a plain .wei name
+// bought elsewhere should be reachable by it on the same terms. At least one
+// label in front of the suffix, so a bare `.wei` is not a link to anything.
+const WNS_NAME_RE = /^[a-z0-9_-]+(?:\.[a-z0-9_-]+)*\.g?wei$/i;
 function nsFor(name) {
   const v = name.toLowerCase();
   return NAME_SERVICES.find(s => v.endsWith(s.suffix)) || null;
@@ -3013,6 +3028,37 @@ function appPath() {
 }
 function appBase() { return location.origin + appPath(); }
 
+// How a vault is spelled in the links this app hands out. An address is always
+// available and always correct; a name is neither, so one is used only where it
+// has been proven to point back — v.wnsName is set from the same forward-
+// verified reverse lookup the header badge is drawn from, never from a bare
+// reverseResolve — and only on the chain WNS is deployed on.
+//
+// A named link is not equivalent to an address link and is not offered as one.
+// It re-resolves on every arrival, so it follows the name: the vault's owners
+// can repoint it with setPrimaryName, and the name's holder can sell it out
+// from under the vault entirely. What that buys is a link a co-signer can read
+// in a chat window and recognise. What it costs is that the loader has to treat
+// whatever comes back as unverified — which it already does, for every vault,
+// by reading the code at the address and saying so when it is not the audited
+// clone. The address stays in the header beside it either way.
+function vaultRef(v) {
+  if(!v || !v.address || !ethers.isAddress(v.address)) return null;
+  return (S.chainId === WNS_CHAIN_ID && v.wnsName && WNS_NAME_RE.test(v.wnsName))
+    ? v.wnsName.toLowerCase()
+    : v.address;
+}
+
+// The fragment for a vault reference, and optionally one proposal in it.
+// An address gets the chain in front of it because it says nothing about which
+// chain it lives on and the same address is a different vault — or nothing at
+// all — on each. A name says it already: WNS is on mainnet and nowhere else, so
+// the number would be the one part of the link able to contradict the rest.
+function refHash(ref, nonce) {
+  const base = ethers.isAddress(ref) ? S.chainId + '/' + ref : ref;
+  return '#' + base + (nonce === undefined || nonce === null ? '' : '/tx/' + nonce);
+}
+
 function explorerTxLink(hash) {
   if(!hash || !/^0x[0-9a-fA-F]{64}$/.test(hash)) return esc(hash||'');
   const c = CHAINS[S.chainId];
@@ -3132,20 +3178,40 @@ function renderNow(){
 
   const vAddr = v ? (S.demoMode ? addrLink(v.address,v.chain) : addrLink(v.address)) : '';
 
+  // The vault's own name, beside the truncated address it stands in for. The
+  // header is the one line on the page that is always visible, and a name is
+  // the only thing on it a person can hold in their head — `0x005C…E15E` is
+  // read by comparing characters, `nrd.id.wei` is read by reading it.
+  //
+  // It sits after the address rather than replacing it, because the two say
+  // different things: the address is what the vault IS, and the name is what it
+  // currently answers to. Only shown for a name that resolved forward back to
+  // this address — the same verified pair the links are built on — and never in
+  // demo mode, where there is no chain to have verified anything against.
+  const vName = (v && !S.demoMode && v.wnsName)
+    ? ` <span class="vault-name" title="This vault's on-chain identity. ${esc(v.wnsName)} reverse-resolves to this address on WNS and forward-resolves back to it — verified, not merely claimed — and is what the shareable link above spells.">${esc(v.wnsName)}</span>`
+    : '';
+
   // The shareable link to this vault, built rather than read back out of the
   // address bar. location.href carries whatever is currently in it — including
   // the /tx/<n> suffix a co-signer arrived on — so "copy link to this vault"
   // could hand over a link to one proposal instead. It also carries the
   // filename, which appBase() drops.
-  const vaultLink = (v && !S.demoMode && v.address && ethers.isAddress(v.address))
-    ? `${appBase()}#${S.chainId}/${v.address}` : '';
+  // vaultRef() prefers the vault's own verified WNS name over its address, so a
+  // named mainnet vault hands out a link a co-signer can read.
+  const vRef = vaultRef(v);
+  const vaultLink = (vRef && !S.demoMode) ? appBase() + refHash(vRef) : '';
 
   // Sync URL hash for deep linking. Only when it actually changes: renderNow
   // runs on every poll tick, token switch and overlay open, and Safari caps
   // replaceState at ~100 calls per 30s and then THROWS — which, from here,
   // would abort the rest of the render and leave the page half-built.
-  const wantHash = (v && !S.demoMode && v.address && ethers.isAddress(v.address))
-    ? '#' + S.chainId + '/' + v.address
+  //
+  // A vault arrived at by name is rewritten to its name and not to its address,
+  // and one arrived at by address is rewritten to its name too, once the name
+  // has been read and verified. Both settle on the same spelling, so the URL
+  // does not depend on which door was used to get in.
+  const wantHash = (vRef && !S.demoMode) ? refHash(vRef)
     : (!v || S.demoMode) ? '' : null;
   if(wantHash !== null && wantHash !== location.hash) {
     try { history.replaceState(null, '', wantHash || appPath()); } catch(_) {}
@@ -3161,7 +3227,7 @@ function renderNow(){
       <div>
         <div style="display:flex;align-items:center;gap:4px"><h1 class="logo">MULTISIG</h1><button type="button" id="info-btn" class="info-i" onclick="toggleInfo()" aria-expanded="false" aria-haspopup="dialog" aria-label="What this is">?</button></div>
         <div class="sub" aria-hidden="true">.software</div>
-        ${v?`<div class="addr">${vAddr}${!S.demoMode&&v.address&&ethers.isAddress(v.address)?` <button class="x-btn copy-btn icon-btn" onclick="copyText('${jstr(vaultLink)}','LINK COPIED')" aria-label="Copy shareable link to this vault" title="Copy shareable link \u00B7 ${esc(vaultLink)}">\u29C9</button>`:""}</div>`:""}
+        ${v?`<div class="addr">${vAddr}${vName}${!S.demoMode&&v.address&&ethers.isAddress(v.address)?` <button class="x-btn copy-btn icon-btn" onclick="copyText('${jstr(vaultLink)}','LINK COPIED')" aria-label="Copy shareable link to this vault" title="Copy shareable link \u00B7 ${esc(vaultLink)}">\u29C9</button>`:""}</div>`:""}
       </div>
       <div class="hdr-r">
         <button class="theme-btn priv-btn" onclick="togglePriv()" aria-pressed="${S.priv}" aria-label="${S.priv?'Balances veiled. Show them.':'Balances visible. Veil them.'}" title="${S.priv?'Balances veiled \u00B7 hover or tap a figure to read it. Click to show them.':'Balances visible. Click to veil them.'}">${S.priv?EYE_OFF:EYE_ON}</button>
@@ -3527,7 +3593,10 @@ function renderDash(v,mob){
         :`<span style="border-left:2px solid var(--y);padding-left:10px;margin-left:2px;color:var(--y)"><strong>UNLOCKED</strong></span>`}
       <span>${S.demoMode?v.chain:chainName()}</span>
       ${v.address&&ethers.isAddress(v.address)?`<span>${S.demoMode?addrLink(v.address,v.chain):addrLink(v.address)}${copyBtn(v.address)}</span>`:""}
-      ${v.wnsName?`<span style="color:var(--a)" title="This vault's on-chain identity: ${esc(v.wnsName)} reverse-resolves to this address on WNS, and forward-resolves back to it — verified, not just claimed.">${esc(v.wnsName)}</span>`:""}
+${/* The name used to sit here too. It moved up to the header, beside the
+           address it stands in for, where it is visible from every tab rather
+           than only this one — and repeating it a hundred pixels below said
+           nothing the first one had not. */''}
       ${v.executor===ethers.ZeroAddress||v.executor==="0x0000...0000"?'<span style="color:var(--y)">NO EXECUTOR</span>':""}
       ${v.codeKind==='foreign'?'<span style="color:var(--r)" title="The code at this address is not the audited Multisig clone. Everything below is read from a contract this interface cannot vouch for.">UNVERIFIED CODE</span>':""}
       ${v.codeKind==='7702'?'<span style="color:var(--m)" title="An EOA delegating to the Multisig implementation under EIP-7702. The key behind the address can revoke that delegation at any time.">EIP-7702</span>':""}
@@ -3658,7 +3727,8 @@ function renderDash(v,mob){
       ?`<span class="tx-kind ${esc(kind.tone||'')}">${kind.icon?`${tokIcon(kind.icon,'sm')} `:''}${esc(kind.label)}</span>`
       :'';
     const kindNote=kind.note?`<div class="tx-note${kind.warn?' warn':''}">${kind.note}</div>`:'';
-    const txLink=!S.demoMode&&v.address&&ethers.isAddress(v.address)?`${appBase()}#${S.chainId}/${v.address}/tx/${tx.nonce}`:'';
+    const _txRef=vaultRef(v);
+    const txLink=!S.demoMode&&_txRef?appBase()+refHash(_txRef,tx.nonce):'';
     const isFocus=_focusNonce!==null&&tx.nonce===_focusNonce&&!!v.address&&v.address.toLowerCase()===(_focusVaultAddr||'').toLowerCase();
     return`<div class="tx privg${blocked?" blocked":""}${isFocus?" tx-focus":""}" data-tx-nonce="${tx.nonce}">
       ${isFocus?`<div style="margin-bottom:10px"><span class="tx-share">SHARED FOR REVIEW${txLink?` <button onclick="event.stopPropagation();copyText('${jstr(txLink)}','CO-SIGN LINK COPIED')" aria-label="Copy co-sign link" title="Copy co-sign link">⧉</button>`:''}<button onclick="dismissFocus()" aria-label="Dismiss shared-for-review banner" title="Dismiss">&#10005;</button></span></div>`:''}
@@ -9625,70 +9695,122 @@ function deepLinkOutcome(v, nonce) {
   return `TX #${nonce} IS NOT IN THIS VAULT'S QUEUE`;
 }
 
-function handleDeepLink() {
-  const hash = location.hash.slice(1);
-  const matchTx = hash.match(/^(\d+)\/(0x[0-9a-fA-F]{40})\/tx\/(\d+)$/);
-  const match = matchTx || hash.match(/^(\d+)\/(0x[0-9a-fA-F]{40})$/);
-  if(match) {
-    const linkChain = parseInt(match[1]);
-    if(CHAINS[linkChain]) {
-      S.chainId = linkChain;
-      lsSet('ms_chain', String(S.chainId));
-      provider = makeProvider(S.chainId);
-      fetchBlock();
-      // Sync wallet target chain so auto-reconnect uses the deep-linked chain
-      walletSwitchChain({
-        chainId: linkChain,
-        chainHex: CHAINS[linkChain].hex,
-        rpc: CHAINS[linkChain].rpcs[0],
-        addChainParams: ADD_CHAIN_PARAMS[linkChain] || null
-      }).catch(_=>{});
-      // Load this specific vault, at its canonical spelling. A fragment is the
-      // one part of a URL that gets retyped, wrapped and case-folded on its way
-      // between owners, and it arrives here as whatever survived that. Every
-      // other entry point already normalises — resolveName() ends in
-      // getAddress(), getOwners() decodes checksummed — so this was the one
-      // route by which a vault could be read under an address that did not
-      // match its own. Lowercased before checksumming so a link that lost its
-      // case still opens: EIP-55 is there to catch a typo, and a typo'd address
-      // is caught better downstream, where the code at it is read and reported
-      // as not being a Multisig clone.
-      const addr = ethers.getAddress(match[2].toLowerCase());
-      if(matchTx){ _focusNonce = parseInt(match[3]); _focusVaultAddr = addr; _focusScroll = true; }
-      showLoading('LOADING VAULT');
-      (async () => {
-        try {
-          const vData = await loadSingleVaultData(addr);
-          if(vData) {
-            S.vaults = [vData];
-            S.sel = 0;
-            S.nt = vData.threshold;
-            setNd(vData.delay);
-            hideLoading();
-            render();
-            await Promise.all([loadVaultQueue(0), loadVaultHistory(0)]);
-            render();
-            // If the linked proposal isn't in the queue, say what became of it.
-            // Someone followed this link to co-sign; "may be executed or
-            // cancelled" leaves them to work out which, and the answer is
-            // already loaded — loadVaultHistory ran in the same breath above.
-            if(_focusNonce !== null && !S.vaults[0].queue.some(t => t.nonce === _focusNonce)) {
-              flash(deepLinkOutcome(S.vaults[0], _focusNonce));
-              _focusNonce = null; _focusVaultAddr = null; _focusScroll = false;
-            }
-          } else {
-            hideLoading();
-          }
-        } catch(e) {
-          console.error('Deep link load:', e);
-          hideLoading();
-          render();
-        }
-      })();
-      return true;
-    }
+// What a deep link can say, in the two spellings a vault can be named in:
+//
+//   #1/0xabc…             #1/0xabc…/tx/7
+//   #nrd.id.wei           #nrd.id.wei/tx/7        (#1/nrd.id.wei also opens)
+//
+// An address carries no chain of its own — the same twenty bytes is a different
+// vault, or nothing, on each of them — so the prefix in front of it is required
+// and is the only thing that picks one. A name carries one implicitly: WNS is
+// deployed on mainnet and nowhere else, so a named link is a mainnet link. A
+// prefix in front of a name is accepted only when it agrees, because `8453/`
+// in front of a name would be a link asserting two different chains at once,
+// and guessing which half was meant is not this function's business.
+//
+// Parsing stops at "which of the two is it". The name still has to leave the
+// machine to become an address, and that belongs in the loader below, where
+// there is an overlay to do it under and somewhere to report a failure.
+// Returns { chainId, ref, isName, nonce } or null.
+function parseDeepLink(hash) {
+  const m = String(hash || '').match(/^(?:(\d+)\/)?([^\/]+)(?:\/tx\/(\d+))?$/);
+  if(!m) return null;
+  const prefix = m[1] === undefined ? null : parseInt(m[1]);
+  const ref = m[2];
+  const nonce = m[3] === undefined ? null : parseInt(m[3]);
+  if(/^0x[0-9a-fA-F]{40}$/.test(ref)) {
+    if(prefix === null || !CHAINS[prefix]) return null;
+    // Canonical spelling. A fragment is the one part of a URL that gets
+    // retyped, wrapped and case-folded on its way between owners, and it
+    // arrives here as whatever survived that. Every other entry point already
+    // normalises — resolveName() ends in getAddress(), getOwners() decodes
+    // checksummed — so this was the one route by which a vault could be read
+    // under an address that did not match its own. Lowercased before
+    // checksumming so a link that lost its case still opens: EIP-55 is there to
+    // catch a typo, and a typo'd address is caught better downstream, where the
+    // code at it is read and reported as not being a Multisig clone.
+    return { chainId: prefix, ref: ethers.getAddress(ref.toLowerCase()), isName: false, nonce };
   }
-  return false;
+  if(WNS_NAME_RE.test(ref)) {
+    if(prefix !== null && prefix !== WNS_CHAIN_ID) return null;
+    return { chainId: WNS_CHAIN_ID, ref: ref.toLowerCase(), isName: true, nonce };
+  }
+  return null;
+}
+
+function handleDeepLink() {
+  const link = parseDeepLink(location.hash.slice(1));
+  if(!link) return false;
+
+  S.chainId = link.chainId;
+  lsSet('ms_chain', String(S.chainId));
+  provider = makeProvider(S.chainId);
+  fetchBlock();
+  // Sync wallet target chain so auto-reconnect uses the deep-linked chain
+  walletSwitchChain({
+    chainId: link.chainId,
+    chainHex: CHAINS[link.chainId].hex,
+    rpc: CHAINS[link.chainId].rpcs[0],
+    addChainParams: ADD_CHAIN_PARAMS[link.chainId] || null
+  }).catch(_=>{});
+
+  showLoading(link.isName ? 'RESOLVING ' + link.ref.toUpperCase() : 'LOADING VAULT');
+  (async () => {
+    try {
+      let addr = link.ref;
+      if(link.isName) {
+        // resolveName() ends in getAddress() and throws a NameError that already
+        // distinguishes "no such name" from "mainnet did not answer" — which is
+        // the whole difference between a link that is wrong and a link that is
+        // fine but arrived during an outage.
+        addr = await resolveName(link.ref);
+        showLoading('LOADING VAULT');
+      }
+      // Set after resolution rather than before: the focus banner matches rows
+      // by address, and until the name has resolved there is no address to
+      // match on. Nothing is painted in between — the overlay is up.
+      if(link.nonce !== null){ _focusNonce = link.nonce; _focusVaultAddr = addr; _focusScroll = true; }
+      const vData = await loadSingleVaultData(addr);
+      if(vData) {
+        S.vaults = [vData];
+        S.sel = 0;
+        S.nt = vData.threshold;
+        setNd(vData.delay);
+        hideLoading();
+        render();
+        await Promise.all([loadVaultQueue(0), loadVaultHistory(0)]);
+        render();
+        // If the linked proposal isn't in the queue, say what became of it.
+        // Someone followed this link to co-sign; "may be executed or
+        // cancelled" leaves them to work out which, and the answer is
+        // already loaded — loadVaultHistory ran in the same breath above.
+        if(_focusNonce !== null && !S.vaults[0].queue.some(t => t.nonce === _focusNonce)) {
+          flash(deepLinkOutcome(S.vaults[0], _focusNonce));
+          _focusNonce = null; _focusVaultAddr = null; _focusScroll = false;
+        }
+      } else {
+        hideLoading();
+        flash(deepLinkFailure(link, null), 4000);
+      }
+    } catch(e) {
+      console.error('Deep link load:', e);
+      hideLoading();
+      flash(deepLinkFailure(link, e), 4000);
+      render();
+    }
+  })();
+  return true;
+}
+
+// Why a followed link showed nothing. Silence was survivable while a link could
+// only carry an address — a wrong one is a wrong one — but a name has more ways
+// to come up empty than to succeed, and they call for different responses:
+// unregistered is permanent, mainnet-unreachable is not, and resolving fine but
+// loading nothing means the name points at something that is not a vault.
+function deepLinkFailure(link, e) {
+  if(e instanceof NameError) return nameErrText(link.ref, e);
+  const what = link.isName ? link.ref.toUpperCase() : shortAddr(link.ref);
+  return `${what} — FAILED TO LOAD. IS THIS A MULTISIG?`;
 }
 
 // ── TICK (block number + ETA updates) ─────────────────────────────
