@@ -536,8 +536,11 @@ BEGIN
   IF NOT is_wallet_owner(p_wallet_id, p_caller) THEN
     RAISE EXCEPTION 'Not an owner';
   END IF;
+  -- Case-insensitive, like every other address comparison in this file. It was
+  -- the one that was not, so a label set against an address in a different case
+  -- than the stored row updated nothing and reported success.
   UPDATE owners SET label = p_label
-  WHERE wallet_id = p_wallet_id AND address = p_address AND is_current = true;
+  WHERE wallet_id = p_wallet_id AND lower(address) = lower(p_address) AND is_current = true;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
