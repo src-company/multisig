@@ -324,6 +324,14 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
 .docs-link{color:var(--d);font-size:9px;letter-spacing:2px;text-decoration:none}
 .docs-link:hover{color:var(--a)}
 
+/* colophon — the SRC_CO mark, below the bottom rule and outside the functional
+   footer row, because it is a credit and not a control. Held at .7 so it reads
+   as a signature rather than competing with DOCS and AUDIT; full strength on
+   hover, when someone has decided to look at it. */
+.colophon{align-self:flex-end;display:inline-flex;align-items:center;gap:7px;margin:10px 0 16px;font-size:9px;letter-spacing:2px;color:var(--d);text-decoration:none;opacity:.7;transition:opacity .2s ease,color .2s ease}
+.colophon:hover,.colophon:focus-visible{opacity:1;color:var(--a)}
+.colophon svg{width:14px;height:14px;display:block;flex:none;user-select:none}
+
 /* toast */
 .toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:var(--a);color:var(--bg);padding:12px 24px;padding-bottom:max(12px,env(safe-area-inset-bottom));font-size:11px;font-weight:700;letter-spacing:2px;z-index:999;animation:toastIn .2s ease;text-align:center}
 
@@ -378,6 +386,26 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
 .safe-src .x-btn{min-width:24px;min-height:24px;padding:0;font-size:11px}
 .safe-row{display:flex;align-items:center;gap:8px;font-size:10px;font-weight:700;letter-spacing:1px;color:var(--m);border:1px solid var(--ln);padding:10px;margin-top:8px;cursor:pointer;text-align:left;width:100%;background:transparent;transition:border-color .15s,color .15s}
 .safe-row:hover{border-color:#12FF80;color:#12FF80}
+/* ── FREE id.wei IDENTITY ──────────────────────────────────────────
+   One line under the vault name. It sits between a text field and the
+   owner list, both of which are load-bearing, so it stays quiet until
+   it is ticked: no fill, no colour, and a checkbox rather than the
+   filled button the permanent choices on this form use. */
+.wns-opt{display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-size:9px;font-weight:700;letter-spacing:1.5px;color:var(--d);border-left:2px solid var(--ln);padding:7px 0 7px 10px;margin:0 0 16px;transition:border-color .15s}
+.wns-opt.on{border-left-color:var(--a);color:var(--m)}
+.wns-opt.off{color:var(--d);opacity:.75}
+.wns-opt b{color:var(--m);font-weight:700;letter-spacing:1px}
+.wns-opt.on b{color:var(--a)}
+.wns-box{width:14px;height:14px;flex-shrink:0;padding:0;background:transparent;border:1px solid var(--fr);color:var(--a);font-size:9px;line-height:1;display:inline-flex;align-items:center;justify-content:center;transition:border-color .15s}
+.wns-box:hover:not(:disabled){border-color:var(--a)}
+.wns-box:disabled{opacity:.4;cursor:not-allowed}
+.wns-opt.on .wns-box{border-color:var(--a)}
+.wns-st{letter-spacing:2px;font-size:8px}
+/* The tooltip carries the whole tradeoff — what is claimed, what it costs,
+   what it cannot do — so the line itself does not have to. */
+.wns-q{width:13px;height:13px;flex-shrink:0;border:1px solid var(--ln);color:var(--d);font-size:8px;line-height:11px;text-align:center;cursor:help;margin-left:auto}
+.wns-q:hover,.wns-q:focus{border-color:var(--a);color:var(--a)}
+.wns-why{flex-basis:100%;font-size:8px;letter-spacing:1.5px;color:var(--y);line-height:1.6;padding-left:23px}
 .preview-text{font-size:12px;line-height:2;color:var(--m);padding:16px 18px;white-space:pre;border-left:2px solid var(--a);background:color-mix(in srgb,var(--a) 4%,transparent);overflow-x:auto}
 
 /* mobile */
@@ -438,6 +466,8 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
   .toast{bottom:max(20px,env(safe-area-inset-bottom));max-width:88vw}
   .footer{font-size:8px;letter-spacing:1px}
   .footer-l,.footer-r{gap:8px}
+  .colophon{font-size:8px;letter-spacing:1px;gap:6px;margin:8px 0 12px}
+  .colophon svg{width:12px;height:12px}
   .empty{padding:60px 0}
   .empty-title{font-size:28px}
   .admin-tabs{gap:14px;margin-bottom:24px}
@@ -615,6 +645,19 @@ input.amt-in:focus{outline:none;box-shadow:none!important;border-bottom-color:tr
 .stake-after{font-size:10px;letter-spacing:1px;line-height:1.75;color:var(--d);border-top:1px solid var(--ln);padding-top:14px}
 .stake-after b{color:var(--m);font-weight:700}
 .tx-kind.stake{color:var(--a);border-color:var(--fr);display:inline-flex;align-items:center;gap:5px}
+
+/* ── NAME ──────────────────────────────────────────────────────────
+   The diagram is two-headed on purpose: the pair of calls buys one
+   direction each, and which one is missing is the thing a reader
+   has to be able to see at a glance. */
+.wns-flow{display:flex;align-items:stretch;justify-content:center;gap:28px;border:1px solid var(--ln);border-left:2px solid var(--a);background:color-mix(in srgb,var(--a) 4%,transparent);padding:20px 16px}
+.wns-node{flex:0 1 200px;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:7px}
+.wns-node b{font-size:14px;font-weight:700;letter-spacing:-.2px;word-break:break-all}
+.wns-node span{font-size:8px;font-weight:700;letter-spacing:1.5px;color:var(--d)}
+.wns-arrows{align-self:center;display:flex;flex-direction:column;gap:2px;font-size:15px;line-height:1.1;color:var(--a);opacity:.65;flex-shrink:0}
+.wns-input{display:flex;align-items:center;gap:0;border-bottom:1px solid var(--ln)}
+.wns-input .inp{flex:1;min-width:0;border-bottom:none}
+.wns-suffix{flex-shrink:0;font-size:13px;font-weight:700;letter-spacing:1px;color:var(--d);padding-bottom:9px}
 
 /* ── QUEUE CARDS ───────────────────────────────────────────────── */
 /* Badge tone maps to what a proposal can do, not to what it is called:
@@ -1094,6 +1137,245 @@ const SLOW_ABI = [
 ];
 const slowIface = new ethers.Interface(SLOW_ABI);
 
+// ── WNS / GNS ─────────────────────────────────────────────────────
+// GNS (.gwei) is a direct fork of WNS (.wei): same ABI, same NameNFT calls,
+// also on mainnet. Both are registered below and resolved identically; the
+// only asymmetry is preference order — .wei wins when an address has both.
+const WEINS = '0x0000000000696760E15f265e828DB644A0c242EB';
+const GWEINS = '0x9D51D507BC7264d4fE8Ad1cf7Fe191933A0a81d6';
+const WEINS_ABI = [
+  'function computeId(string) pure returns (uint256)',
+  // Canonical forward resolution: inactive/expired -> 0; explicitly-set
+  // recipient address if any; otherwise the current owner. Use this rather
+  // than ownerOf so a name pointed at a different address resolves correctly.
+  'function resolve(uint256) view returns (address)',
+  'function reverseResolve(address) view returns (string)',
+  // Reverse resolution is opt-in and set by the holder: this is the call that
+  // makes reverseResolve(holder) answer with a name the holder owns.
+  'function setPrimaryName(uint256)',
+];
+const weinsIface = new ethers.Interface(WEINS_ABI);
+// Preference order for reverse resolution — .wei first, .gwei as fallback.
+const NAME_SERVICES = [
+  { suffix: '.wei',  addr: WEINS },
+  { suffix: '.gwei', addr: GWEINS },
+];
+// One matcher for every name we accept, so the field hints, the validators and
+// the resolvers can never drift apart. '.gwei' does not end in '.wei', so the
+// suffixes stay unambiguous.
+const NAME_RE = /\.(eth|g?wei)$/i;
+function nsFor(name) {
+  const v = name.toLowerCase();
+  return NAME_SERVICES.find(s => v.endsWith(s.suffix)) || null;
+}
+
+// ── WNS · FREE id.wei IDENTITY ────────────────────────────────────
+// A vault with no name is forty-two hex characters in every wallet, every
+// explorer and every co-signer's chat window, and the only way to tell two of
+// them apart is to read the middle. WNS sells .wei names, but the `id.wei` node
+// runs a subdomain registrar that mints `<label>.id.wei` for nothing — no
+// fee, no commit/reveal, no renewal — so a vault can carry a name a human reads
+// from the block it is deployed in.
+//
+// Two calls, and both have to be made BY the vault, or the name lands on
+// whoever paid the gas instead of on the wallet it is supposed to identify:
+//
+//   registrar.register(namehash('id.wei'), label)  mints <label>.id.wei to msg.sender
+//   WNS.setPrimaryName(id)                         makes reverseResolve(vault) answer with it
+//
+// They are separable and they do different things. The first makes the name
+// resolve TO the vault; only the second makes the vault answer WITH the name,
+// which is the direction this interface (and everything else reading WNS) uses
+// to put a name beside an address. Claiming without the second leaves a name
+// that works in one direction only, so both are offered together.
+const WNS_ID_REGISTRAR = '0x53745292f0d30d68204a63002C17bDa16C772bf7';
+// namehash('id.wei'). Hard-coded rather than computed from a string, because it
+// is the single argument that decides which namespace a name is claimed in —
+// deriving it would let a typo mint under a node nobody checked.
+const WNS_ID_PARENT = '0xcea9efa56b7c8a673303d04b917a7119a2a68f8c4803d8e6fd1c3a1f0d2e4ebe';
+const WNS_ID_SUFFIX = '.id.wei';
+// WNS lives on mainnet only. Every other chain this app deploys to has no code
+// at either address, where a call is not an error — it succeeds, mints nothing
+// and returns nothing. So the offer is gated on chain 1 rather than attempted
+// everywhere and silently lost on six of seven chains.
+const WNS_CHAIN_ID = 1;
+const wnsRegIface = new ethers.Interface([
+  'function register(uint256 parentId, string label) payable returns (uint256)',
+]);
+// NotAvailable() — the registrar's single refusal. It covers both "that name is
+// taken" and "that label is not legal", so a revert carrying it is not by
+// itself a reason to tell someone their name is spelled wrong.
+const WNS_NOT_AVAILABLE = '0xd9b91419';
+// A stand-in sender for availability probes made before there is a real one —
+// the create form asks about a name for a vault that does not exist yet, and
+// with no sender at all the probe reverts on the mint rather than on the name.
+// Any address with no code answers identically, and availability itself does
+// not depend on who asks — only the mint's receiver check does, and a codeless
+// address passes it the same way the deployer's wallet would.
+const WNS_PROBE_FROM = '0x0000000000000000000000000000000000000001';
+
+// The registrar lowercases the label byte-wise before hashing, which is ASCII
+// lowercasing and not String.prototype.toLowerCase — the latter also folds
+// non-ASCII (É → é) and would compute an id the contract never will.
+function asciiLower(s){ return String(s == null ? '' : s).replace(/[A-Z]/g, c => c.toLowerCase()); }
+
+// The token id of `<label>.id.wei`. WNS ids are ENS namehashes, so this is
+// keccak(parent ‖ keccak(label)) and needs no RPC — which is the point:
+// setPrimaryName has to be pointed at the name in the same transaction that
+// mints it, before the name exists anywhere to be looked up.
+function wnsSubId(label) {
+  return BigInt(ethers.keccak256(ethers.concat([
+    WNS_ID_PARENT, ethers.keccak256(ethers.toUtf8Bytes(asciiLower(label))),
+  ])));
+}
+function wnsFullName(label){ return asciiLower(label) + WNS_ID_SUFFIX; }
+
+// What this interface will claim, which is deliberately narrower than what the
+// registrar will mint. The contract refuses only an empty label, one holding a
+// dot or any byte at or below 0x20, and one with a hyphen at either end —
+// everything else is a legal name, including a zero-width space, a non-breaking
+// space, and Latin and Cyrillic letters in the same word. A name exists to be
+// read by a human deciding whether to sign something, so a label that can be
+// drawn to look like a different label is worse than no label at all. Latin
+// letters, digits, hyphen and underscore, and never a hyphen on the edge.
+const WNS_LABEL_RE = /^[a-z0-9](?:[a-z0-9_-]*[a-z0-9_])?$/;
+// Not a contract limit — the registrar takes any length. It is the length past
+// which a name stops being readable in the places names are read: a queue row,
+// a badge, a wallet's address book.
+const WNS_LABEL_MAX = 63;
+function wnsLabelValid(label){
+  const l = String(label || '');
+  return l.length > 0 && l.length <= WNS_LABEL_MAX && WNS_LABEL_RE.test(l);
+}
+// A vault name is free text; a label is not. Fold one into the other rather
+// than making the operator type the same thing twice — and show them the
+// result, because what gets claimed is the fold, not what they typed.
+function wnsSlug(name) {
+  return String(name || '')
+    .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')   // café → cafe
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, '-')
+    .replace(/^[-_]+/, '').replace(/-+$/, '')
+    .slice(0, WNS_LABEL_MAX)
+    .replace(/-+$/, '');
+}
+
+// Is `<label>.id.wei` free, and if not, who holds it?
+//
+// Availability is asked of the registrar by static call to the exact function
+// that would run, rather than inferred from a resolve() that returns zero both
+// for names nobody owns and for names that exist but point nowhere. A dry-run
+// of the real call is the only answer that cannot disagree with the
+// transaction. `free` is true, false, or null — null meaning mainnet would not
+// answer, which is not the same as taken and must never be shown as one.
+//
+// The holder is read alongside it because "taken" and "taken by the vault you
+// are standing in" are different situations with different remedies: the first
+// is a dead end, the second means the mint already happened and only the
+// reverse record is missing.
+//
+// `from` is not optional in practice and is not a formality. The registrar
+// mints with _safeMint, so the call reverts TransferToZeroAddress() with no
+// sender at all, and TransferToNonERC721ReceiverImplementer() when the sender
+// is a contract with no onERC721Received — which is a real answer, not noise:
+// asking as the vault that will make the call is how "this vault cannot hold
+// this name" gets found here rather than on execution. Availability itself is
+// the same for every caller; only the receiver check is not.
+async function wnsLookup(label, from) {
+  if(!wnsLabelValid(label)) return { free:false, holder:null };
+  const lab = asciiLower(label);
+  const rpc = mainnetRpc();
+  const [availR, holderR] = await Promise.allSettled([
+    _nameRace(rpc.call({ to: WNS_ID_REGISTRAR, from: from || WNS_PROBE_FROM,
+      data: wnsRegIface.encodeFunctionData('register', [BigInt(WNS_ID_PARENT), lab]) })),
+    _nameRace(rpc.call({ to: WEINS,
+      data: weinsIface.encodeFunctionData('resolve', [wnsSubId(lab)]) })),
+  ]);
+  let free = null;
+  if(availR.status === 'fulfilled') free = true;
+  else {
+    const e = availR.reason;
+    const d = e && (e.data || (e.info && e.info.error && e.info.error.data));
+    if(typeof d === 'string' && d.toLowerCase().startsWith(WNS_NOT_AVAILABLE)) free = false;
+    else console.error('wns availability:', e);
+  }
+  let holder = null;
+  if(holderR.status === 'fulfilled') {
+    try {
+      const a = weinsIface.decodeFunctionResult('resolve', holderR.value)[0];
+      if(a && a !== ethers.ZeroAddress) holder = a;
+    } catch(_) {}
+  }
+  return { free, holder };
+}
+// The deploy path only ever needs the yes/no.
+async function wnsAvailable(label, from){ return (await wnsLookup(label, from)).free; }
+
+// The two calls, in the order they have to run, ready for a factory init-call
+// list or a multisig batch. `primary` is separable because a vault that already
+// holds its name only needs the second one.
+function wnsClaimCalls(label, { primary = true, registerToo = true } = {}) {
+  const id = wnsSubId(label);
+  const calls = [];
+  if(registerToo) calls.push({ target: WNS_ID_REGISTRAR, value: 0n,
+    data: wnsRegIface.encodeFunctionData('register', [BigInt(WNS_ID_PARENT), asciiLower(label)]) });
+  if(primary) calls.push({ target: WEINS, value: 0n,
+    data: weinsIface.encodeFunctionData('setPrimaryName', [id]) });
+  return calls;
+}
+
+// Availability, memoised and repainted when it lands, so that a form which
+// re-derives its slug on every render does not spend a mainnet round trip on
+// every render. Returns { state, holder }, state being one of:
+//   'invalid' | 'checking' | 'free' | 'taken' | 'unknown'
+//
+// Keyed on the asking address as well as the name, because half the answer is
+// the asker's property and not the name's: the same free name is claimable by
+// a wallet that can hold an ERC721 and not by one that cannot.
+//
+// A lookup mainnet would not answer is recorded as 'unknown' rather than
+// dropped, because dropping it would have every subsequent render fire the
+// same failing call again — a poll loop against a backend already struggling.
+// It is retried on demand instead, the way an owner name that would not
+// resolve is.
+function wnsAvKey(label, from){ return asciiLower(label) + '@' + String(from || WNS_PROBE_FROM).toLowerCase(); }
+function wnsAvState(label, from){
+  if(!wnsLabelValid(label)) return { state:'invalid', holder:null };
+  const k = wnsAvKey(label, from);
+  if(S.wnsAv[k] !== undefined) return S.wnsAv[k];
+  S.wnsAv[k] = { state:'checking', holder:null };
+  wnsLookup(label, from).then(r => {
+    S.wnsAv[k] = { state: r.free === true ? 'free' : r.free === false ? 'taken' : 'unknown', holder: r.holder };
+    render();
+  });
+  return S.wnsAv[k];
+}
+function retryWnsAv(label, from){ delete S.wnsAv[wnsAvKey(label, from)]; render(); }
+
+// Read a batch back and decide whether it is the identity pair above — the one
+// this app builds — or merely two calls that happen to hit the same contracts.
+// The check that matters is the last one: setPrimaryName takes an id, not a
+// name, and an id is a one-way hash, so a batch whose reverse record points at
+// some *other* name would read exactly like this one in a queue row. Comparing
+// it against the id of the label being minted is the only way to know that the
+// name shown and the name set are the same name.
+// Returns { label, full, primary } or null.
+function wnsIdentityBatch(targets, values, datas) {
+  if(!targets || targets.length < 1 || targets.length > 2) return null;
+  if(values.some(v => BigInt(v) !== 0n)) return null;
+  if(selOf(datas[0]) !== SEL.wnsRegister) return null;
+  if(String(targets[0]).toLowerCase() !== WNS_ID_REGISTRAR.toLowerCase()) return null;
+  let d; try { d = wnsRegIface.decodeFunctionData('register', datas[0]); } catch(_) { return null; }
+  if(BigInt(d[0]) !== BigInt(WNS_ID_PARENT)) return null;
+  const label = asciiLower(d[1]);
+  if(targets.length === 1) return { label, full: label + WNS_ID_SUFFIX, primary: false };
+  if(selOf(datas[1]) !== SEL.wnsSetPrimary) return null;
+  if(String(targets[1]).toLowerCase() !== WEINS.toLowerCase()) return null;
+  let p; try { p = weinsIface.decodeFunctionData('setPrimaryName', datas[1]); } catch(_) { return null; }
+  if(BigInt(p[0]) !== wnsSubId(label)) return null;
+  return { label, full: label + WNS_ID_SUFFIX, primary: true };
+}
+
 // ── SELECTORS ─────────────────────────────────────────────────────
 // Every 4-byte selector this interface compares against, resolved once at load.
 // They were being recomputed through iface.getFunction(name).selector on each
@@ -1113,6 +1395,8 @@ const SEL = {
   delegateCall:  msIface.getFunction('delegateCall').selector,
   enableForward: tlIface.getFunction('enableForward').selector,
   depositTo:     slowIface.getFunction('depositTo').selector,
+  wnsRegister:   wnsRegIface.getFunction('register').selector,
+  wnsSetPrimary: weinsIface.getFunction('setPrimaryName').selector,
 };
 // The leading 4 bytes of `callData`, but only when they really are 4 bytes of
 // hex. `call_data` reaches this interface from a row anyone can write, so a
@@ -1564,35 +1848,6 @@ const sb = {
   }
 };
 
-// ── WNS / GNS ─────────────────────────────────────────────────────
-// GNS (.gwei) is a direct fork of WNS (.wei): same ABI, same NameNFT calls,
-// also on mainnet. Both are registered below and resolved identically; the
-// only asymmetry is preference order — .wei wins when an address has both.
-const WEINS = '0x0000000000696760E15f265e828DB644A0c242EB';
-const GWEINS = '0x9D51D507BC7264d4fE8Ad1cf7Fe191933A0a81d6';
-const WEINS_ABI = [
-  'function computeId(string) pure returns (uint256)',
-  // Canonical forward resolution: inactive/expired -> 0; explicitly-set
-  // recipient address if any; otherwise the current owner. Use this rather
-  // than ownerOf so a name pointed at a different address resolves correctly.
-  'function resolve(uint256) view returns (address)',
-  'function reverseResolve(address) view returns (string)',
-];
-const weinsIface = new ethers.Interface(WEINS_ABI);
-// Preference order for reverse resolution — .wei first, .gwei as fallback.
-const NAME_SERVICES = [
-  { suffix: '.wei',  addr: WEINS },
-  { suffix: '.gwei', addr: GWEINS },
-];
-// One matcher for every name we accept, so the field hints, the validators and
-// the resolvers can never drift apart. '.gwei' does not end in '.wei', so the
-// suffixes stay unambiguous.
-const NAME_RE = /\.(eth|g?wei)$/i;
-function nsFor(name) {
-  const v = name.toLowerCase();
-  return NAME_SERVICES.find(s => v.endsWith(s.suffix)) || null;
-}
-
 // ── EIP-712 ───────────────────────────────────────────────────────
 const EIP712_DOMAIN = { name:'Multisig', version:'1' };
 const EIP712_TYPES = { Execute: [
@@ -1736,6 +1991,8 @@ const S = {
   txAmount: "",
   txTo: "",
   stakeAmount: "",       // ETH to wrap into wstETH (STAKE tab, mainnet only)
+  wnsLabel: "",          // the label being claimed (NAME tab, mainnet only)
+  wnsPrimary: true,      // also point reverse resolution at it
   showCustomTok: false,
   txSlow: false,          // outbound delivery mode: false = INSTANT, true = SLOW (delayed)
   txSlowDelaySec: 86400,  // SLOW timelock in seconds (default 1 day)
@@ -1749,7 +2006,11 @@ const S = {
     name: '', threshold: "1", delayVal: "24", delayUnit: 'h', net: 0, clone: [], fastPath: false,
     owners: [{ addr: '', label: '' }, { addr: '', label: '' }, { addr: '', label: '' }],
     safeSrc: null,        // set when the signer set was cloned from a Gnosis Safe
+    wns: false,           // claim <slug(name)>.id.wei in the deploy transaction
   },
+  // "label@asker" -> { state, holder }. Shared by the create form and the NAME
+  // tab; see wnsAvState for why the asker is part of the key.
+  wnsAv: {},
   safeClone: null,        // the clone-a-Safe modal: { input, busy, err, found }
 
   // admin
@@ -1854,6 +2115,7 @@ const SELECTOR_LABELS = {
   [SEL.executeQueued]: 'ACCELERATE',  [SEL.batch]:        'BATCH',
   [SEL.delegateCall]: 'DELEGATE CALL',[SEL.enableForward]:'ENABLE FORWARD',
   [SEL.depositTo]: 'SLOW TRANSFER',
+  [SEL.wnsRegister]: 'CLAIM NAME',    [SEL.wnsSetPrimary]:'SET PRIMARY NAME',
 };
 function selectorToLabel(callData) {
   if(!callData || callData === '0x') return 'TRANSFER';
@@ -1988,6 +2250,26 @@ function txKind(tx, v) {
         : `TURNS OFF THE FAST PATH — EVERY PROPOSAL MUST THEN SERVE THE FULL TIMELOCK, WITH NO UNANIMOUS SHORTCUT.` };
   }
 
+  // ── on-chain identity ──
+  // Named off the target as well as the selector. A four-byte match proves
+  // nothing about which contract is being called, and "CLAIM NAME" beside a
+  // stranger's address would be this interface vouching for something it never
+  // checked — the same reasoning the executor branch above runs on.
+  if(is('wnsRegister') && tx.target && tx.target.toLowerCase() === WNS_ID_REGISTRAR.toLowerCase()) {
+    const d = dec('register', wnsRegIface);
+    if(!d || BigInt(d[0]) !== BigInt(WNS_ID_PARENT)) return { label:'CLAIM NAME · UNKNOWN NAMESPACE', tone:'code', warn:true,
+      note:`MINTS A SUBDOMAIN UNDER A PARENT NODE THIS INTERFACE DOES NOT RECOGNISE — NOT UNDER id.wei. THE NAME THIS PRODUCES IS NOT THE NAME THE LABEL READS AS. CHECK THE PARENT ID BEFORE SIGNING.` };
+    const full = wnsFullName(d[1]).toUpperCase();
+    return { label:`CLAIM NAME · ${full}`, tone:'policy',
+      note:`REGISTERS ${full} TO THE VAULT, FREE — THE NAME IS AN NFT THE VAULT THEN HOLDS, SO MOVING IT LATER TAKES A FULL MULTISIG ROUND LIKE ANY OTHER ASSET. IT MAKES ${full} RESOLVE TO THIS ADDRESS. IT DOES NOT MAKE THIS ADDRESS ANSWER WITH ${full} — THAT IS setPrimaryName, AND IT IS NOT IN THIS PROPOSAL.` };
+  }
+  if(is('wnsSetPrimary') && tx.target && tx.target.toLowerCase() === WEINS.toLowerCase()) {
+    // The id is a one-way hash, so which name this points at cannot be read off
+    // the calldata alone. Say that rather than name a name we did not verify.
+    return { label:'SET PRIMARY NAME', tone:'policy',
+      note:`POINTS REVERSE RESOLUTION AT ONE .wei NAME THE VAULT HOLDS, SO WALLETS AND EXPLORERS SHOW THAT NAME WHEREVER THIS ADDRESS APPEARS. IT MOVES NOTHING AND GRANTS NOBODY ANYTHING. WHICH NAME IS GIVEN AS A HASHED ID, NOT AS TEXT, SO IT CANNOT BE READ BACK FROM THIS PROPOSAL — CONFIRM IT AGAINST THE NAME YOU EXPECT BEFORE SIGNING.` };
+  }
+
   // ── queue control ──
   if(is('cancelQueued')) return { label:'CANCEL QUEUED', tone:'danger',
     note:`DROPS A PROPOSAL THAT IS ALREADY QUEUED, BEFORE ITS TIMELOCK ELAPSES. THE CANCELLED PROPOSAL CANNOT THEN EXECUTE.` };
@@ -1999,6 +2281,12 @@ function txKind(tx, v) {
     const d = dec('batch');
     if(d) {
       const [targets, values, datas] = d;
+      // The mint and the reverse record are one decision, so they are one
+      // proposal — and a queue row reading "BATCH · 2 CALLS" would bury the
+      // only thing a co-signer needs to check, which is the name itself.
+      const ident = wnsIdentityBatch(targets, values, datas);
+      if(ident) return { label:`ON-CHAIN IDENTITY · ${ident.full.toUpperCase()}`, tone:'policy',
+        note:`CLAIMS ${ident.full.toUpperCase()} FOR THIS VAULT AND POINTS REVERSE RESOLUTION AT IT, ATOMICALLY — AFTER THIS THE NAME RESOLVES TO THIS ADDRESS AND THIS ADDRESS ANSWERS WITH THE NAME. THE SUBDOMAIN IS FREE; THE ONLY COST IS THE GAS TO EXECUTE. THE NAME BECOMES AN NFT THE VAULT HOLDS. IT GRANTS NOBODY ANY POWER OVER THE VAULT AND MOVES NOTHING OUT OF IT.` };
       const parts = datas.map((cd, i) => (!cd || cd === '0x') && BigInt(values[i]) > 0n ? 'ETH TRANSFER' : selectorToLabel(cd));
       return { label:`BATCH · ${targets.length} CALLS`, tone:'code',
         note:`${parts.join(' + ')} — EXECUTED ATOMICALLY, SO EITHER EVERY CALL LANDS OR THE WHOLE PROPOSAL REVERTS AND NOTHING DOES.` };
@@ -2172,6 +2460,15 @@ function loadingSvg() {
   return matchMedia('(prefers-reduced-motion: reduce)').matches ? s.replace(/<animate\b[^>]*>/g, '') : s;
 }
 
+// The SRC_CO mark, unchanged from the brand original: same slashed border as the
+// MULTISIG mark above, so the colophon reads as family rather than as a badge
+// stuck on at the end. It keeps its own #7DFFBA in both themes — it is a logo,
+// not an accent to be re-tinted — which happens to be exactly the green this
+// interface already uses for a met threshold. Ids are prefixed so they cannot
+// collide with the loading marks in the same document.
+const SRC_MARK = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><rect width="64" height="64" fill="#7DFFBA"/><defs><path id="sct" d="M4,4 H60" fill="none"/><path id="scr" d="M60,4 V60" fill="none"/><path id="scb" d="M60,60 H4" fill="none"/><path id="scl" d="M4,60 V4" fill="none"/></defs><text font-family="Helvetica,Arial,sans-serif" font-size="4" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.2"><textPath href="#sct">//////////////////////////////</textPath></text><text font-family="Helvetica,Arial,sans-serif" font-size="4" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.2"><textPath href="#scr">//////////////////////////////</textPath></text><text font-family="Helvetica,Arial,sans-serif" font-size="4" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.2"><textPath href="#scb">//////////////////////////////</textPath></text><text font-family="Helvetica,Arial,sans-serif" font-size="4" fill="#0A0A0A" fill-opacity="0.6" letter-spacing="-0.2"><textPath href="#scl">//////////////////////////////</textPath></text><text x="32" y="29" font-family="Helvetica,Arial,sans-serif" font-size="19" font-weight="bold" fill="#0A0A0A" text-anchor="middle" letter-spacing="-1">SRC</text><text x="32" y="48" font-family="Helvetica,Arial,sans-serif" font-size="19" font-weight="bold" fill="#0A0A0A" text-anchor="middle" letter-spacing="-1">CO</text></svg>`;
+const SRC_URL = 'https://source.wei.domains';
+
 // ── VISUAL PRIVACY ───────────────────────────────────────────────
 // The header eye. Drawn rather than typed: the geometric-shape glyphs that
 // would carry this meaning (◐ ◉ ◌) are not all in IBM Plex Mono, so they fall
@@ -2336,7 +2633,7 @@ function requireSigner() {
 }
 
 const _todayStr = new Date().toLocaleDateString("en-US", { year: "2-digit", month: "short", day: "numeric" }).toUpperCase();
-let toastTimer, hideLoadingTimer, _initLoadingTimer, _safetyLoadingTimer;
+let toastTimer, hideLoadingTimer, _initLoadingTimer, _safetyLoadingTimer, _slowLoadingTimer;
 let _submitting = false;
 // Deep-linked transaction focus (someone was sent a /tx/<nonce> link to co-sign).
 // Persists across re-renders so the shared tx stays highlighted until dismissed.
@@ -2350,10 +2647,25 @@ function guardSubmit(fn) {
     try { await fn(...args); } finally { _submitting = false; }
   };
 }
+// Waits longer than a few seconds are usually an RPC taking its time, and the
+// honest thing to say then is not a louder "LOADING". A wallet whose whole
+// premise is that a delay protects you can afford to be relaxed about four
+// seconds of one.
+const SLOW_LOADING_MSG = 'TIME IS ON YOUR SIDE';
+function armSlowLoading() {
+  clearTimeout(_slowLoadingTimer);
+  _slowLoadingTimer = setTimeout(() => {
+    const el = document.getElementById('loading');
+    if(!el || el.style.display === 'none' || el.classList.contains('fade-out')) return;
+    const textEl = el.querySelector('.loading-text');
+    if(textEl) textEl.textContent = SLOW_LOADING_MSG;
+  }, 4000);
+}
 function showLoading(msg) {
   clearTimeout(hideLoadingTimer);
   clearTimeout(_initLoadingTimer);
   clearTimeout(_safetyLoadingTimer);
+  armSlowLoading();
   const el = document.getElementById('loading');
   const targetClass = 'loading-overlay ' + (S.dark ? 'dark-bg' : 'light-bg');
   const wasVisible = el.style.display !== 'none' && !el.classList.contains('fade-out');
@@ -2373,6 +2685,7 @@ function hideLoading() {
   clearTimeout(hideLoadingTimer);
   clearTimeout(_initLoadingTimer);
   clearTimeout(_safetyLoadingTimer);
+  clearTimeout(_slowLoadingTimer);
   const el = document.getElementById('loading');
   el.classList.add('fade-out');
   hideLoadingTimer = setTimeout(() => { el.style.display = 'none'; }, 350);
@@ -2442,7 +2755,9 @@ function restoreOvlFocus() {
 function dismissTop() {
   if (document.getElementById("info-modal").classList.contains("open")) { toggleInfo(false); return true; }
   if (S.topup) { if (!S.topup.sending) closeTopUp(); return true; }
-  if (S.deploy) { if (S.deploy.done || S.deploy.phase === "review") closeDeploy(); return true; }
+  // Preflight is read-only — no wallet is holding anything yet — so Escape works
+  // there too. It stops being an exit once the chain walk starts.
+  if (S.deploy) { if (S.deploy.done || S.deploy.phase === "review" || S.deploy.phase === "preflight") closeDeploy(); return true; }
   if (S.safeClone) { closeSafeClone(); return true; }
   if (S.showChains) { S.showChains = false; render(); return true; }
   return false;
@@ -2641,6 +2956,7 @@ function renderNow(){
       </div>
     </div>
     <div class="hbar" aria-hidden="true">${ASC200}</div>
+    <a class="colophon" href="${SRC_URL}" target="_blank" rel="noopener" title="SRC_CO &middot; source.wei.domains">PUBLIC GOOD BY SRC_CO${SRC_MARK}</a>
   </div>
   ${S.showChains?renderChainOverlay(mob):""}
   ${S.safeClone?renderSafeCloneModal():""}
@@ -2674,13 +2990,18 @@ function renderDeployOverlay(){
     if(phase==='preflight'){ g='◐'; gc='var(--y)'; right=`<span style="font-size:9px;color:var(--d)">CHECKING…</span>`; }
     else if(phase==='review'){
       const bad = s.pf && (s.pf.gasOk===false || s.pf.executorOk===false || s.pf.factoryOk===false || s.pf.implOk===false);
+      // null means the chain would not answer, which is not the same as ready.
+      // Now that every deploy stops here, a green READY has to have been earned
+      // by a reply — otherwise a dead RPC reads as a cleared preflight.
+      const unread = s.pf && (s.pf.factoryOk===null || s.pf.gasOk===null);
       const w=[];
       if(s.pf&&s.pf.factoryOk===false)w.push('NO FACTORY');
       if(s.pf&&s.pf.implOk===false)w.push('UNKNOWN FACTORY');
       if(s.pf&&s.pf.gasOk===false)w.push('NO GAS');
       if(s.pf&&s.pf.executorOk===false)w.push('NO EXECUTOR');
-      g = bad?'✕':'●'; gc = bad?'var(--y)':'var(--g)';
-      right = `<span style="font-size:9px;letter-spacing:1px;color:${bad?'var(--y)':'var(--g)'}">${w.length?w.join(' · '):'READY'}</span>`;
+      const amber = bad || (!w.length && unread);
+      g = bad?'✕':unread?'◐':'●'; gc = amber?'var(--y)':'var(--g)';
+      right = `<span style="font-size:9px;letter-spacing:1px;color:${amber?'var(--y)':'var(--g)'}">${w.length?w.join(' · '):unread?'UNCHECKED · NO REPLY':'READY'}</span>`;
     } else {
       const canRetry = s.status==='failed' && d.done;
       // A deploy that could not be read back is still a deploy — say so, but
@@ -2700,10 +3021,59 @@ function renderDeployOverlay(){
       const href = s.txHash ? `${eb}/tx/${s.txHash}` : `${eb}/address/${s.address}`;
       xlink = `<a class="tx-explorer" href="${href}" target="_blank" rel="noopener" title="${s.txHash?'View deploy transaction':'View vault on explorer'} · ${esc(s.name)}">↗</a>`;
     }
-    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--ln)">
+    // A name that was asked for and did not land is reported on the chain it
+    // was asked for on. The deploy still succeeded, so this is a second line
+    // under a green row rather than a failure — but it is never left silent,
+    // because "deployed" would otherwise cover a claim that never happened.
+    const idText = s.wnsName
+      ? { color:'var(--g)', html:`CLAIMED <b>${esc(s.wnsName)}</b> &middot; REVERSE RESOLUTION SET` }
+      : s.wnsSkipped
+        ? { color:'var(--y)', html:(s.wnsSkipped==='taken' ? 'NAME WAS CLAIMED BY SOMEONE ELSE FIRST &mdash; DEPLOYED WITHOUT IT'
+            : s.wnsSkipped==='unchecked' ? 'COULD NOT CONFIRM THE NAME WAS FREE &mdash; DEPLOYED WITHOUT IT RATHER THAN RISK REVERTING THE DEPLOY'
+            : 'NAME DID NOT READ BACK FROM WNS &mdash; THE VAULT DEPLOYED, THE CLAIM IS UNCONFIRMED')
+            + '. CLAIM ONE FROM THE NAME TAB.' }
+        : null;
+    const idLine = idText ? `<div style="font-size:9px;letter-spacing:1.5px;line-height:1.6;color:${idText.color};padding:0 0 10px 24px;border-bottom:1px solid var(--ln)">${idText.html}</div>` : '';
+    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:${idLine?'none':'1px solid var(--ln)'}">
       <span style="color:${gc};font-size:12px;width:14px;text-align:center">${g}</span>
-      ${chainIcon(s.id)}<span style="flex:1;font-size:12px;font-weight:700;letter-spacing:1px">${esc(s.name)}</span>${right}${xlink}</div>`;
+      ${chainIcon(s.id)}<span style="flex:1;font-size:12px;font-weight:700;letter-spacing:1px">${esc(s.name)}</span>${right}${xlink}</div>${idLine}`;
   }).join('');
+
+  // Every chain in this deploy has its own explorer, and the vault has one
+  // address across all of them. Link it on the primary target rather than on the
+  // connected chain: during the chain walk that is a moving target, and before
+  // the walk starts the wallet may not be sitting on a target chain at all.
+  const primaryId = (d.chains && d.chains[0]) ? d.chains[0].id : (d.steps[0] ? d.steps[0].id : null);
+  const xbase = (CHAINS[primaryId] && CHAINS[primaryId].explorer) || 'https://etherscan.io';
+  const xa = (a, txt) => `<a href="${xbase}/address/${esc(a)}" target="_blank" rel="noopener" title="${esc(a)} &middot; view on explorer" style="color:var(--m);text-decoration:none;border-bottom:1px solid var(--ln)">${esc(txt || a)}</a>`;
+
+  // What is about to be signed for, spelled out. The owner set is the part that
+  // cannot be corrected afterwards without a full multisig round of the vault
+  // being created, so every owner is listed at the address it resolved to —
+  // names included, since a name is not what goes on chain.
+  let summary = '';
+  if(phase === 'review' && d.ctx){
+    const ct = d.ctx, n = ct.resolvedOwners.length;
+    const ownerRows = ct.resolvedOwners.map((a,i)=>{
+      const lb = (ct.ownerLabels && ct.ownerLabels[i]) || '';
+      const you = ct.connectedAddress && a.toLowerCase() === ct.connectedAddress.toLowerCase();
+      return `<div style="display:flex;align-items:baseline;gap:8px;padding:3px 0;font-size:10px;letter-spacing:1px">
+        <span style="color:var(--d)">${String(i+1).padStart(2,'0')}</span>${xa(a, shortAddr(a))}
+        ${lb?`<span style="color:var(--d);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(lb)}</span>`:''}
+        ${you?'<span style="color:var(--g);font-size:8px;margin-left:auto">YOU</span>':''}
+      </div>`;
+    }).join('');
+    summary = `<div style="margin-top:4px;margin-bottom:16px">
+      <div style="font-size:9px;color:var(--d);letter-spacing:1px;margin-bottom:4px">${n} OWNER${n>1?'S':''} &middot; IMMUTABLE WITHOUT A MULTISIG VOTE</div>
+      ${ownerRows}
+      <div class="rrow"><span>SIGNATURES</span><b>${ct.thresh} OF ${n}</b></div>
+      <div class="rrow"><span>TIMELOCK</span><b${ct.del>0?'':' class="hi"'}>${ct.del>0?esc(fmtD(ct.del)):'NONE &middot; EXECUTES AT QUORUM'}</b></div>
+      ${ct.del>0?`<div class="rrow"><span>INSTANT EXECUTION</span><b>${ct.wantForward?'ENABLED &middot; ALL OWNERS SKIP THE DELAY':'DISABLED'}</b></div>`:''}
+      ${ct.wns?`<div class="rrow"><span>IDENTITY</span><b${d.wnsAvail===true?'':' class="hi"'}>${esc(ct.wns.full.toUpperCase())} &middot; ${d.wnsAvail===true?'FREE, CLAIMED ON ETHEREUM':d.wnsAvail===false?'NO LONGER AVAILABLE':'AVAILABILITY UNCONFIRMED'}</b></div>`:''}
+      <div class="rrow"><span>CALL</span><b>${ct.wantForward||ct.wns?'createWithCalls()':'create()'}</b></div>
+      <div class="rrow"><span>FACTORY</span><b>${xa(FACTORY, shortAddr(FACTORY))}</b></div>
+    </div>`;
+  }
 
   let footer;
   if(phase==='review'){
@@ -2713,13 +3083,27 @@ function renderDeployOverlay(){
     const badImpl = d.steps.some(s=>s.pf&&s.pf.implOk===false);
     const notOwner = d.ctx && d.ctx.deployerIsOwner === false;
     const fpVoid = d.ctx && d.ctx.fastPathVoid === true;
-    footer = `<div style="margin-top:14px;font-size:10px;color:var(--y);letter-spacing:1px;line-height:1.6">${fpVoid?`At ${d.ctx.thresh}-of-${d.ctx.resolvedOwners.length} every quorum is already unanimous, so instant execution makes the timelock advisory rather than enforced — the same signatures can queue or execute, whichever the submitter picks. Lower the threshold, or leave instant execution off, to keep the delay enforced. `:''}${noFac?'No factory on some chains — the vault cannot be deployed there. ':''}${badImpl?'On some chains the factory address holds code that does not name the audited implementation — a vault deployed there would not be the reviewed contract. ':''}${noExec?'No TimelockExecutor on some chains — fast path can’t be enabled there. ':''}${noGas?'No gas in the connected wallet on some chains. ':''}${notOwner?'You are not one of the owners — the vault will deploy, but it will not appear in your history. ':''}Proceed anyway and those chains may fail.</div>
-      <div style="display:flex;gap:8px;margin-top:16px"><button class="btn btn-outline btn-w" onclick="closeDeploy()">CANCEL</button><button class="btn btn-fill btn-w" onclick="proceedDeploy()">PROCEED</button></div>`;
+    const unread = d.steps.some(s=>s.pf&&(s.pf.factoryOk===null||s.pf.gasOk===null));
+    // The review screen is now the checkpoint for every deploy, clean ones
+    // included, so the warning block only appears when there is something to
+    // warn about — and "proceed anyway and those chains may fail" is not
+    // something to tell someone whose preflight came back green.
+    const warnText = `${fpVoid?`At ${d.ctx.thresh}-of-${d.ctx.resolvedOwners.length} every quorum is already unanimous, so instant execution makes the timelock advisory rather than enforced — the same signatures can queue or execute, whichever the submitter picks. Lower the threshold, or leave instant execution off, to keep the delay enforced. `:''}${noFac?'No factory on some chains — the vault cannot be deployed there. ':''}${badImpl?'On some chains the factory address holds code that does not name the audited implementation — a vault deployed there would not be the reviewed contract. ':''}${noExec?'No TimelockExecutor on some chains — fast path can’t be enabled there. ':''}${noGas?'No gas in the connected wallet on some chains. ':''}${notOwner?'You are not one of the owners — the vault will deploy, but it will not appear in your history. ':''}${d.ctx&&d.ctx.wns&&d.wnsAvail!==true?`${d.ctx.wns.full} ${d.wnsAvail===false?'has been claimed by someone else since you picked it':'could not be confirmed free — mainnet did not answer'}. The vault deploys either way; the name is dropped rather than reverting the deploy, and you can claim another one from the NAME tab afterwards. `:''}`;
+    const anyWarn = !!warnText;
+    footer = `${anyWarn?`<div style="margin-top:14px;font-size:10px;color:var(--y);letter-spacing:1px;line-height:1.6">${warnText}Proceed anyway and those chains may fail.</div>`
+      :`<div style="margin-top:14px;font-size:9px;color:var(--d);letter-spacing:1px;line-height:1.6">${unread?'Some chains would not answer the preflight — they are listed as unchecked, not as ready. ':''}${nch>1?`Deploys run one chain at a time and each one needs a network switch plus a signature in your wallet — ${nch} in total.`:'Needs one signature in your wallet.'}</div>`}
+      <div style="display:flex;gap:8px;margin-top:16px"><button class="btn btn-outline btn-w" onclick="closeDeploy()">CANCEL</button><button class="btn btn-fill btn-w" onclick="proceedDeploy()">${nch>1?`DEPLOY &middot; ${nch} CHAINS`:'DEPLOY'}</button></div>`;
   } else if(d.done){
     const dbWarn = d.steps.some(s=>s.dbWarn);
     footer = `${dbWarn?`<div style="margin-top:14px;font-size:10px;color:var(--y);letter-spacing:1px;line-height:1.6">Deployed on-chain, but not recorded in history — the vault is live at the address above.</div>`:''}<button class="btn btn-fill btn-w" style="margin-top:20px" onclick="closeDeploy()">${anyFail?'CLOSE':'VIEW VAULT'}</button>`;
   } else if(phase==='deploying'){
     footer = `<div style="margin-top:16px;font-size:9px;color:var(--d);letter-spacing:1px;text-align:center">APPROVE EACH WALLET PROMPT TO CONTINUE</div>`;
+  } else if(phase==='preflight'){
+    // Preflight reads N chains and mines the address; a wedged RPC used to leave
+    // this dialog with no way out at all, on a step where nothing has been signed
+    // and there is nothing to abandon.
+    footer = `<div style="margin-top:16px;font-size:9px;color:var(--d);letter-spacing:1px;line-height:1.6;text-align:center">READING THE FACTORY, YOUR GAS AND THE VAULT ADDRESS ON EACH CHAIN. NOTHING IS SIGNED YET.</div>
+      <button class="btn btn-outline btn-w" style="margin-top:14px" onclick="closeDeploy()">CANCEL</button>`;
   } else { footer = ''; }
 
   // No click-out: this dialog is either mid-flight against a wallet or holding
@@ -2729,7 +3113,13 @@ function renderDeployOverlay(){
   return `<div class="ovl">
     <div class="ovl-card" style="--ow:460px;padding:24px" role="dialog" aria-modal="true" aria-label="Deploy vault" aria-busy="${!d.done && d.phase!=='review'}">
       <div class="ovl-title" style="margin-bottom:6px">${title}</div>
-      ${d.address?`<div style="font-size:11px;color:var(--m);letter-spacing:1px;margin-bottom:16px;word-break:break-all">${addrLink(d.address)}</div>`:`<div style="font-size:10px;color:var(--d);letter-spacing:1px;margin-bottom:16px">Same vault address on every chain</div>`}
+      ${d.address
+        ? `<div style="margin-bottom:16px">
+             <div style="font-size:9px;color:var(--d);letter-spacing:1px;margin-bottom:3px">${d.done||phase==='deploying'?'VAULT ADDRESS':'WILL DEPLOY TO'}${nch>1?` &middot; SAME ON ALL ${nch} CHAINS`:''}</div>
+             <div style="font-size:11px;color:var(--m);letter-spacing:1px;word-break:break-all">${xa(d.address)}</div>
+           </div>`
+        : `<div style="font-size:10px;color:var(--d);letter-spacing:1px;margin-bottom:16px">${phase==='preflight'?'MINING THE VAULT ADDRESS&hellip;':'Same vault address on every chain'}</div>`}
+      ${summary}
       <div>${rows}</div>
       ${footer}
     </div>
@@ -2832,6 +3222,7 @@ function renderDash(v,mob){
         :`<span style="border-left:2px solid var(--y);padding-left:10px;margin-left:2px;color:var(--y)"><strong>UNLOCKED</strong></span>`}
       <span>${S.demoMode?v.chain:chainName()}</span>
       ${v.address&&ethers.isAddress(v.address)?`<span>${S.demoMode?addrLink(v.address,v.chain):addrLink(v.address)}${copyBtn(v.address)}</span>`:""}
+      ${v.wnsName?`<span style="color:var(--a)" title="This vault's on-chain identity: ${esc(v.wnsName)} reverse-resolves to this address on WNS, and forward-resolves back to it — verified, not just claimed.">${esc(v.wnsName)}</span>`:""}
       ${v.executor===ethers.ZeroAddress||v.executor==="0x0000...0000"?'<span style="color:var(--y)">NO EXECUTOR</span>':""}
       ${v.codeKind==='foreign'?'<span style="color:var(--r)" title="The code at this address is not the audited Multisig clone. Everything below is read from a contract this interface cannot vouch for.">UNVERIFIED CODE</span>':""}
       ${v.codeKind==='7702'?'<span style="color:var(--m)" title="An EOA delegating to the Multisig implementation under EIP-7702. The key behind the address can revoke that delegation at any time.">EIP-7702</span>':""}
@@ -3052,6 +3443,8 @@ function resetTxFields(){
   S.txAmount = '';
   S.txTo = '';
   S.stakeAmount = '';
+  S.wnsLabel = '';
+  S.wnsPrimary = true;
   _builderSim = null;
 }
 // Token switch keeps the typed amount but drops the stale unit/USD echo and
@@ -3166,6 +3559,86 @@ function stakeReviewBody(v){
     <div class="review-rows">${rows}</div>
     ${warns.map(w => `<div class="review-warn">${w}</div>`).join('')}`;
 }
+// ── NAME (WNS id.wei) ─────────────────────────────────────────────
+function wnsAvailableChain(){ return !S.demoMode && S.chainId === WNS_CHAIN_ID; }
+
+// One place decides what the NAME tab proposes, and the field hint, the review
+// panel, the dry-run and the submit all read it. Two things being encoded from
+// two different readings of the same input is how a review panel ends up
+// describing a transaction nobody signed.
+//
+// The case worth spelling out is a name the vault already holds: register()
+// would revert NotAvailable and burn the proposal's nonce doing it, so what is
+// left to propose is the reverse record alone.
+function wnsProposalPlan(v, label){
+  const lab = asciiLower(String(label || '').trim());
+  // Asked as the vault, because the vault is what will make the call — which
+  // makes this the check that a vault whose code cannot receive an ERC721
+  // (a foreign clone, an EIP-7702 delegation) never gets offered a name it
+  // would revert on.
+  const st = lab ? wnsAvState(lab, v.address) : { state:'invalid', holder:null };
+  const holder = st.holder;
+  const owned = st.state === 'taken' && !!holder && !!v.address
+    && holder.toLowerCase() === v.address.toLowerCase();
+  const registerToo = st.state === 'free';
+  const primary = !!S.wnsPrimary;
+  const calls = (registerToo || (owned && primary))
+    ? wnsClaimCalls(lab, { primary, registerToo })
+    : [];
+  return { label:lab, full:wnsFullName(lab), av:st.state, holder, owned, registerToo, primary, calls };
+}
+// {target,value,data,desc} for the plan — one call proposed directly, two
+// wrapped in the vault's own batch() so the mint and the reverse record either
+// both land or neither does. A vault that minted a name and then failed to
+// point at it would need a second proposal to finish a job that reads as done.
+function buildWnsProposal(v, plan){
+  const calls = plan.calls;
+  if(!calls.length) return null;
+  if(calls.length === 1) return {
+    target: calls[0].target, value: '0', data: calls[0].data, batched: false,
+    desc: plan.registerToo ? `Claim ${plan.full}` : `Primary name → ${plan.full}` };
+  return {
+    target: v.address, value: '0', batched: true,
+    data: msIface.encodeFunctionData('batch',
+      [calls.map(c => c.target), calls.map(() => 0n), calls.map(c => c.data)]),
+    desc: `On-chain identity ${plan.full}` };
+}
+function nameReviewBody(v){
+  const plan = wnsProposalPlan(v, S.wnsLabel);
+  const named = plan.av !== 'invalid';
+  const nameHtml = named
+    ? `<div class="review-amt" style="font-size:20px">${esc(plan.full)}</div>`
+    : `<div class="review-amt ph" style="font-size:20px">name${WNS_ID_SUFFIX}</div>`;
+  const steps = plan.calls.length
+    ? plan.calls.map(c => c.target === WNS_ID_REGISTRAR ? 'register() &rarr; NAME RESOLVES TO THE VAULT' : 'setPrimaryName() &rarr; VAULT ANSWERS WITH THE NAME').join('<br>')
+    : '&mdash;';
+  const rows = [
+    ['REGISTRY', `<b>WNS &middot; ${xaWns(WEINS)}</b>`],
+    ['REGISTRAR', `<b>${xaWns(WNS_ID_REGISTRAR)}</b>`],
+    ['PRICE', '<b>FREE &middot; NO FEE, NO RENEWAL</b>'],
+    ['CALLS', `<b>${plan.calls.length ? (plan.calls.length > 1 ? 'BATCH &middot; 2' : '1') : '&mdash;'}</b>`],
+    ['SIGNATURES', `<b>${v.threshold} OF ${v.ownerCount}</b>`],
+    ['TIMELOCK', v.delay > 0
+      ? `<b>${esc(fmtD(v.delay))}${v.fastPath ? ' &middot; SKIPPABLE' : ''}</b>`
+      : '<b>NONE &middot; EXECUTES AT QUORUM</b>'],
+  ].map(([k, val]) => `<div class="rrow"><span>${k}</span>${val}</div>`).join('');
+  const warns = [];
+  if(plan.av === 'taken' && !plan.owned) warns.push('THAT NAME IS ALREADY HELD BY ANOTHER ADDRESS. NOTHING CAN BE PROPOSED FOR IT.');
+  if(plan.owned && !plan.primary) warns.push('THE VAULT ALREADY HOLDS THIS NAME AND REVERSE RESOLUTION IS EXCLUDED, SO THERE IS NOTHING LEFT TO PROPOSE.');
+  if(plan.av === 'unknown') warns.push('MAINNET WOULD NOT SAY WHETHER THIS NAME IS FREE. A REGISTER THAT LANDS ON A TAKEN NAME REVERTS AND CONSUMES THE PROPOSAL NONCE.');
+  if(plan.calls.length && v.delay > 0) warns.push('NAMES ARE FIRST COME, FIRST SERVED. THIS PROPOSAL SERVES THE VAULT TIMELOCK BEFORE IT CAN EXECUTE, AND THE NAME CAN BE TAKEN IN THE MEANTIME.');
+  return `${nameHtml}
+    <div class="review-arrow">&darr; WHAT EXECUTES</div>
+    <div class="review-to${plan.calls.length?'':' ph'}" style="line-height:1.9">${steps}</div>
+    <div class="review-rows">${rows}</div>
+    ${warns.map(w => `<div class="review-warn">${w}</div>`).join('')}`;
+}
+// Both WNS contracts live on mainnet whatever chain the app is pointed at, so
+// their links are pinned to mainnet's explorer rather than the connected one.
+function xaWns(a){
+  return `<a href="https://etherscan.io/address/${esc(a)}" target="_blank" rel="noopener" title="${esc(a)} &middot; view on Etherscan" style="color:inherit;text-decoration:none;border-bottom:1px solid var(--ln)">${esc(shortAddr(a))}</a>`;
+}
+
 // The live proposal summary: exactly what SIGN + SUBMIT will construct,
 // down to the call it encodes and the nonce it will occupy.
 function txReviewBody(v){
@@ -3564,7 +4037,8 @@ function renderTxBuilder(v,mob){
   // STAKE is mainnet-only; if the chain changed underneath a selected STAKE tab,
   // fall back rather than render an empty builder.
   if(S.txMode==="STAKE"&&!stakeAvailable()) S.txMode="TRANSFER";
-  const modes=["TRANSFER",...(stakeAvailable()?["STAKE"]:[]),"CUSTOM","BATCH"];
+  if(S.txMode==="NAME"&&!wnsAvailableChain()) S.txMode="TRANSFER";
+  const modes=["TRANSFER",...(stakeAvailable()?["STAKE"]:[]),...(wnsAvailableChain()?["NAME"]:[]),"CUSTOM","BATCH"];
   const tabs=modes.map(m=>`<button class="txb-tab${S.txMode===m?" on":""}"${S.txMode===m?' aria-current="true"':''} onclick="S.txMode='${m}';_builderSim=null;render()">${m}</button>`).join("");
   let body="";
   if(S.txMode==="TRANSFER"){
@@ -3693,6 +4167,70 @@ function renderTxBuilder(v,mob){
         <button class="btn btn-fill btn-w btn-big" id="tx-submit" style="margin-top:14px" onclick="submitStake()">SIGN + SUBMIT</button>
         <div class="review-miss" id="tx-ready-note"></div>
       </div></div>`;
+  }else if(S.txMode==="NAME"){
+    // Two calls and one decision. The tab's job is to make it obvious which of
+    // the two directions each call buys, because a name that resolves forward
+    // but not back looks broken in every wallet and is the mistake this layout
+    // exists to prevent.
+    const label = asciiLower(S.wnsLabel.trim());
+    const typed = !!label;
+    const full = wnsFullName(label);
+    const plan = wnsProposalPlan(v, label);
+    const av = plan.av;
+    const status = !typed ? `<span class="fhint">A LABEL, NOT A FULL NAME &mdash; <b>${WNS_ID_SUFFIX.slice(1)}</b> IS ADDED FOR YOU</span>`
+      : av === 'invalid' ? `<span class="fhint" style="color:var(--r)">LETTERS, DIGITS, HYPHEN AND UNDERSCORE ONLY, UP TO ${WNS_LABEL_MAX} CHARACTERS, AND NOT A HYPHEN AT EITHER END</span>`
+      : av === 'checking' ? `<span class="fhint" style="color:var(--a)">CHECKING <b>${esc(full)}</b>&hellip;</span>`
+      : av === 'free' ? `<span class="fhint" style="color:var(--g)"><b>${esc(full)}</b> IS FREE</span>`
+      : plan.owned ? `<span class="fhint" style="color:var(--g)">THIS VAULT ALREADY HOLDS <b>${esc(full)}</b> &mdash; ONLY THE REVERSE RECORD IS MISSING</span>`
+      : av === 'taken' ? `<span class="fhint" style="color:var(--y)"><b>${esc(full)}</b> IS HELD BY ${plan.holder?esc(shortAddr(plan.holder)):'ANOTHER ADDRESS'} &mdash; PICK ANOTHER</span>`
+      : `<span class="fhint" style="color:var(--y)">MAINNET DID NOT ANSWER <button class="reject-link" style="padding:1px 8px;margin-left:6px" onclick="retryWnsAv('${jstr(label)}','${jstr(v.address)}')">RETRY</button></span>`;
+    const held = plan.owned;
+    const ready = plan.calls.length > 0;
+    body=`<div class="send-grid">
+      <div>
+        <div class="fset">
+          <div class="wns-flow">
+            <div class="wns-node"><b>${esc(wnsFullName(label) || 'name'+WNS_ID_SUFFIX)}</b><span>THE NAME</span></div>
+            <div class="wns-arrows" aria-hidden="true"><span>&rarr;</span><span>&larr;</span></div>
+            <div class="wns-node"><b>${esc(shortAddr(v.address))}</b><span>THIS VAULT</span></div>
+          </div>
+          <div class="stake-note">TWO CALLS, ONE PROPOSAL. <b>register()</b> MINTS THE NAME TO THE VAULT, WHICH MAKES THE NAME RESOLVE TO THIS ADDRESS. <b>setPrimaryName()</b> MAKES THIS ADDRESS ANSWER WITH THE NAME, WHICH IS THE DIRECTION WALLETS AND EXPLORERS READ. <b>id.wei</b> SUBDOMAINS COST NOTHING &mdash; NO FEE, NO RENEWAL &mdash; SO THE ONLY COST IS THE GAS TO EXECUTE.</div>
+        </div>
+
+        <div class="fset">
+          <div class="fhead"><label class="lbl" for="wns-label">NAME</label><span class="fhint">FREE &middot; WNS</span></div>
+          <div class="wns-input">
+            <input class="inp" id="wns-label" style="margin:0" placeholder="treasury" aria-describedby="wns-status" value="${esc(S.wnsLabel)}" oninput="S.wnsLabel=this.value" onchange="_builderSim=null;render()" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur()}">
+            <span class="wns-suffix">${WNS_ID_SUFFIX}</span>
+          </div>
+          <div id="wns-status" role="status" style="margin-top:8px">${status}</div>
+        </div>
+
+        <div class="fset">
+          <span class="lbl">REVERSE RESOLUTION</span>
+          <div style="display:flex;align-items:center;gap:12px;margin-top:8px;flex-wrap:wrap">
+            <button class="btn ${S.wnsPrimary?'btn-fill':'btn-outline'}" aria-pressed="${!!S.wnsPrimary}" style="padding:0 16px;font-size:10px" onclick="S.wnsPrimary=!S.wnsPrimary;_builderSim=null;render()">${S.wnsPrimary?'INCLUDED':'EXCLUDED'}</button>
+            <span style="font-size:10px;color:var(--d);line-height:1.5;flex:1;min-width:180px">${S.wnsPrimary?'The vault will answer with this name wherever its address appears':'The name will resolve to the vault, but the vault will keep showing as an address'}</span>
+          </div>
+          ${v.wnsName && !held ? `<div style="margin-top:10px;font-size:9px;letter-spacing:1.5px;color:var(--y);line-height:1.6">THIS VAULT ALREADY ANSWERS WITH <b>${esc(v.wnsName)}</b>. EXECUTING THIS REPLACES THAT RECORD &mdash; THE OLD NAME KEEPS RESOLVING TO THE VAULT, IT JUST STOPS BEING THE ONE SHOWN.</div>` : ''}
+        </div>
+
+        <div class="fset">
+          <div class="stake-after">
+            <div class="lbl" style="margin-bottom:8px">WHAT IT DOES NOT DO</div>
+            <div>HOLDING A NAME GRANTS NOBODY ANY POWER OVER THE VAULT, AND THE VAULT'S OWNERS, THRESHOLD AND TIMELOCK ARE UNCHANGED BY IT. THE NAME IS AN NFT THE VAULT ITSELF HOLDS, SO IT CAN ONLY BE MOVED THE WAY ANY OTHER ASSET IS MOVED &mdash; BY A PROPOSAL THAT REACHES QUORUM.</div>
+            <div style="margin-top:10px">WNS IS ON ETHEREUM MAINNET. A VAULT CLONED TO OTHER CHAINS SHARES THIS ADDRESS BUT NOT THIS NAME.</div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="review">
+          <div class="review-h"><span>REVIEW</span><span class="review-tag">NONCE #${nextNonce(v)}</span></div>
+          <div id="tx-review">${nameReviewBody(v)}</div>
+        </div>
+        <button class="btn ${ready?'btn-fill':'btn-disabled'} btn-w btn-big" id="tx-submit" style="margin-top:14px" onclick="${ready?'submitName()':''}">SIGN + SUBMIT</button>
+        <div class="review-miss" id="tx-ready-note">${ready?'':typed?'PICK A FREE NAME TO CONTINUE':'ENTER A NAME TO CONTINUE'}</div>
+      </div></div>`;
   }else if(S.txMode==="CUSTOM"){
     const hasFns = Array.isArray(S.cxAbi) && S.cxAbi.length > 0;
     const isUnverified = S.cxAddr && Array.isArray(S.cxAbi) && S.cxAbi.length === 0;
@@ -3762,39 +4300,190 @@ function getProdTokenSymbols(){
 }
 
 // ── CREATE ────────────────────────────────────────────────────────
+// Owner names are previewed against chain 1: ENS, WNS (.wei) and GNS (.gwei)
+// all live on mainnet, and an owner is a signer rather than a recipient, so
+// ENSIP-11's per-chain address records do not apply to it. Pinning the preview
+// key to 1 also means the resolution survives flipping the form between chains
+// instead of being re-fetched, and re-shown as RESOLVING…, on every click.
+const OWNER_NS_CHAIN = 1;
+
 // Synchronous create-form validation. Classifies each owner (address / name /
 // invalid / duplicate) and reports whether the form is ready to deploy.
-// Names (.eth/.wei/.gwei) are accepted here and resolved at deploy time.
+// Names (.eth/.wei/.gwei) are resolved here, in the form, and the address each
+// one lands on is shown next to it — the owner set is the one thing about a
+// vault that can never be changed without a full multisig round, so it must not
+// be signed for while half of it is still a string nobody has seen resolve.
+// Resolution is async and cached; each pending lookup repaints the form when it
+// lands. The returned entry rides along on the owner so the renderer can show
+// it without repeating the lookup.
 function validateCreate(c, demo){
   const seen = new Map();
   const owners = c.owners.map(o => {
     const raw = (o.addr || '').trim();
-    if(!raw) return { state: 'empty' };
-    let state, key;
+    if(!raw) return { state: 'empty', raw, pv: null };
+    let state, key, pv = null;
     // init() walks a linked list headed by address(1) and requires each owner
     // to be strictly greater than the one before, so 0x0 and 0x1 are not owners
     // the contract can hold — reject them here, not with a reverted deploy.
     if(ethers.isAddress(raw) && BigInt(raw) <= 1n) { state = 'invalid'; key = null; }
     else if(ethers.isAddress(raw)) { state = 'address'; key = 'a:' + raw.toLowerCase(); }
-    else if(NAME_RE.test(raw)) { state = 'name'; key = 'n:' + raw.toLowerCase(); }
+    else if(NAME_RE.test(raw)) {
+      state = 'name';
+      pv = demo ? null : previewName(raw, OWNER_NS_CHAIN, render);
+      // Dedup on the resolved address once it is known. Two names, or a name
+      // and the address it points at, are the same owner — and init() reverts
+      // on a repeat, after the salt has been mined and the gas paid.
+      key = (pv && pv.state === 'ok') ? 'a:' + pv.addr.toLowerCase() : 'n:' + raw.toLowerCase();
+    }
     else if(demo) { state = 'address'; key = 'x:' + raw.toLowerCase(); }
     else { state = 'invalid'; key = null; }
     if(key) { if(seen.has(key)) state = 'dup'; else seen.set(key, true); }
-    return { state };
+    return { state, raw, pv };
   });
   const filled = owners.filter(o => o.state !== 'empty').length;
   const t = parseInt(c.threshold) || 0;
   const delayOk = !c.delayVal || (/^\d*\.?\d*$/.test(String(c.delayVal)) && parseFloat(c.delayVal) >= 0);
+  const badName = owners.find(o => o.pv && o.pv.state === 'err');
+  // A name can point anywhere, including at the sentinels the owner list is
+  // built out of, so the 0x0/0x1 rejection has to be re-run on what it resolved
+  // to and not only on what was typed.
+  const sentinelName = owners.find(o => o.pv && o.pv.state === 'ok' && BigInt(o.pv.addr) <= 1n);
+  const resolving = owners.some(o => o.pv && o.pv.state === 'resolving');
   let ready = true, reason = '';
   if(filled < 1) { ready = false; reason = 'ADD AT LEAST ONE OWNER'; }
   else if(!demo && owners.some(o => o.state === 'invalid')) { ready = false; reason = 'ONE OR MORE OWNER ADDRESSES ARE INVALID'; }
+  else if(badName) { ready = false; reason = badName.pv.err || (badName.raw.toUpperCase() + ' DOES NOT RESOLVE'); }
+  else if(sentinelName) { ready = false; reason = sentinelName.raw.toUpperCase() + ' RESOLVES TO 0x0 — NOT A VALID OWNER'; }
   else if(owners.some(o => o.state === 'dup')) { ready = false; reason = 'DUPLICATE OWNER ADDRESSES'; }
+  // Deploying while a name is still in flight would sign for an owner set the
+  // operator has not seen. It is a second or two, and it only ever blocks a
+  // form that has an unresolved name in it.
+  else if(resolving) { ready = false; reason = 'RESOLVING OWNER NAMES…'; }
+  // Audit H-2 — the same ceiling prodDeploy enforces, raised here so it is a
+  // disabled button rather than a rejection after the form is filled in.
+  else if(!demo && filled > MAX_SAFE_THRESHOLD) { ready = false; reason = `MORE THAN ${MAX_SAFE_THRESHOLD} OWNERS CAN OVERFLOW THE SIGNATURE-LENGTH CHECK`; }
   else if(t < 1 || t > filled) { ready = false; reason = 'THRESHOLD MUST BE 1..' + filled; }
   else if(!delayOk) { ready = false; reason = 'DELAY MUST BE A POSITIVE NUMBER'; }
   return { owners, filled, ready, reason };
 }
 
 const _OWNER_STATE_COLOR = { address:'var(--g)', name:'var(--a)', invalid:'var(--r)', dup:'var(--r)', empty:'var(--d)' };
+
+// A failed lookup is cached, so a name that could not be reached once would stay
+// unresolvable for the rest of the session — and since an unresolved name now
+// holds the DEPLOY button, a single rate-limited burst against mainnet would wedge
+// the form with no way out but a page reload. Dropping the cache entry lets the
+// operator ask again.
+function retryOwnerName(i){
+  const raw = ((S.cf.owners[i] || {}).addr || '').trim();
+  if(raw) delete _namePreview[_pvKey(raw, OWNER_NS_CHAIN)];
+  render();
+}
+
+// The note under an owner row, and the colour of its row number. A name is only
+// as good as the address it resolves to, so it is shown — truncated, and linked
+// to the explorer of the chain this form is aimed at, so it can be checked
+// against whatever the operator is holding it up against.
+function ownerRowNote(ow, i, explorerBase){
+  const pv = ow.pv;
+  if(ow.state === 'invalid') return { html:'NOT A VALID ADDRESS OR .eth / .wei / .gwei NAME', color:'var(--r)', num:'var(--r)' };
+  if(ow.state === 'dup') return {
+    html: pv && pv.state === 'ok' ? `DUPLICATE &mdash; ${esc(shortAddr(pv.addr))} IS ALREADY LISTED ABOVE` : 'DUPLICATE &mdash; ALREADY LISTED ABOVE',
+    color:'var(--r)', num:'var(--r)' };
+  if(ow.state !== 'name') return { html:'', color:'var(--d)', num:_OWNER_STATE_COLOR[ow.state] || 'var(--d)' };
+  if(!pv || pv.state === 'resolving') return { html:'NAME &middot; RESOLVING&hellip;', color:'var(--a)', num:'var(--a)' };
+  if(pv.state === 'err') return {
+    html: `${esc(pv.err)} <button class="reject-link" style="padding:1px 8px;margin-left:6px" onclick="retryOwnerName(${i})">RETRY</button>`,
+    color:'var(--r)', num:'var(--r)' };
+  return {
+    html: `&rarr; <a href="${explorerBase}/address/${esc(pv.addr)}" target="_blank" rel="noopener" title="${esc(pv.addr)} &middot; view on explorer" style="color:var(--g);text-decoration:none;border-bottom:1px solid var(--ln)">${esc(shortAddr(pv.addr))}</a>`,
+    color:'var(--g)', num:'var(--g)' };
+}
+
+// The identity offer, folded out of the vault name that is already being typed.
+// Deliberately small: it is one free, reversible, no-privilege addition to a
+// form whose other decisions are permanent, and it should not read like one of
+// them. Everything a decision needs is here in one line — the exact name, that
+// it costs nothing, and whether it is still free — with the rest behind the
+// tooltip for anyone who wants it.
+//
+// WNS is a mainnet contract, so claiming means deploying on Ethereum. Rather
+// than grey the offer out for anyone who picked another chain — which leaves
+// them reading a disabled control and guessing why — ticking it adds Ethereum
+// to the deploy, says so on the line before it is ticked, and ticks Ethereum
+// visibly in the network panel below where it can be unticked again. What it
+// must never do is add a mainnet transaction, at mainnet gas, off a checkbox
+// that did not mention it.
+// Dropping the claim also drops the chain the claim added, and only that one:
+// Ethereum the operator selected themselves stays selected.
+function cancelCreateWns(c){
+  c.wns = false;
+  if(c.wnsAddedNet){
+    const mi = NETS.findIndex(n => n.id === WNS_CHAIN_ID);
+    c.clone = (c.clone || []).filter(i => i !== mi);
+    c.wnsAddedNet = false;
+  }
+}
+function toggleCreateWns(){
+  const c = S.cf, mi = NETS.findIndex(n => n.id === WNS_CHAIN_ID);
+  if(c.wns) { cancelCreateWns(c); render(); return; }
+  c.wns = true;
+  if(mi >= 0 && c.net !== mi && !(c.clone || []).includes(mi)){
+    c.clone = [...(c.clone || []), mi];
+    c.wnsAddedNet = true;   // ours to remove; a chain the operator picked is not
+  }
+  render();
+}
+function renderCreateWns(c){
+  // Not in the demo. Every other control on this form is pretend there; a live
+  // registry lookup against a name someone could really lose is not, and the
+  // demo deploy has no transaction to carry the claim in anyway.
+  if(S.demoMode || !c.name || !c.name.trim()) return '';
+  const slug = wnsSlug(c.name);
+  const mainIdx = NETS.findIndex(n => n.id === WNS_CHAIN_ID);
+  const onMainnet = c.net === mainIdx || (c.clone || []).includes(mainIdx);
+  // Unticking Ethereum in the panel below cancels the claim rather than leaving
+  // a ticked box for a chain the deploy no longer touches. Normalised here, at
+  // the one place that reads both, so the network panel does not have to know
+  // this option exists.
+  if(c.wns && !onMainnet) cancelCreateWns(c);
+  const tip = `Registers ${slug || 'a name'}${WNS_ID_SUFFIX} to the vault inside the very transaction that deploys it, and points reverse resolution at it — so the vault reads as a name instead of an address here, in wallets, and anywhere else that reads WNS. id.wei subdomains are free: no fee, no auction, no renewal, and nothing to pay again. The name is minted to the vault itself, so it is an asset only a full multisig round can move, and holding it grants nobody any power over the vault. WNS lives on Ethereum mainnet, so claiming means deploying there too; clones on other chains share this vault's address, not its name. You can also claim one later, from the NAME tab, as an ordinary proposal.`;
+  if(!slug){ cancelCreateWns(c); return `<div class="wns-opt off"><span style="flex:1">NO <b>.id.wei</b> NAME CAN BE FOLDED OUT OF THIS VAULT NAME &mdash; LETTERS, DIGITS AND HYPHENS ONLY</span><span class="wns-q" tabindex="0" role="note" aria-label="${esc(tip)}" title="${esc(tip)}">?</span></div>`; }
+  // Asked as the connected wallet, or as the codeless stand-in when there is
+  // none. Not as the vault: the vault does not exist yet, and the address it
+  // will have holds no code until the deploy lands — so the receiver half of
+  // the answer is settled by the audited clone's own onERC721Received, and
+  // confirmed by reading the name back off WNS after the deploy.
+  const asker = window._connectedAddress || WNS_PROBE_FROM;
+  const av = wnsAvState(slug, asker).state;
+  const free = av === 'free';
+  // Renaming the vault re-folds the slug, and the new one may be taken or
+  // unreadable. A tick left standing over it would carry a claim the operator
+  // never made into the review screen — so a claim only survives while the name
+  // it names is still free. 'checking' is left alone: it is a state the lookup
+  // is passing through, not an answer.
+  if(c.wns && (av === 'taken' || av === 'invalid')) cancelCreateWns(c);
+  const status =
+    av === 'checking' ? `<span class="wns-st" style="color:var(--a)">CHECKING&hellip;</span>` :
+    av === 'free'     ? `<span class="wns-st" style="color:var(--g)">FREE</span>` :
+    av === 'taken'    ? `<span class="wns-st" style="color:var(--y)">ALREADY CLAIMED</span>` :
+    av === 'invalid'  ? `<span class="wns-st" style="color:var(--r)">NOT A VALID LABEL</span>` :
+    `<span class="wns-st" style="color:var(--y)">COULD NOT CHECK <button class="reject-link" style="padding:1px 8px;margin-left:6px" onclick="retryWnsAv('${jstr(slug)}','${jstr(asker)}')">RETRY</button></span>`;
+  const on = !!c.wns;
+  // Stated before the tick, not after it, and again in the review screen.
+  const why = on && c.wnsAddedNet
+    ? `<div class="wns-why">ETHEREUM ADDED TO THIS DEPLOY &mdash; ONE MORE TRANSACTION, AT MAINNET GAS. UNTICK ETHEREUM BELOW TO DROP BOTH.</div>`
+    : !on && !onMainnet && free
+      ? `<div class="wns-why">CLAIMING ALSO DEPLOYS ON ETHEREUM &mdash; ONE MORE TRANSACTION, AT MAINNET GAS.</div>`
+      : '';
+  return `<div class="wns-opt${on?' on':''}">
+    <button type="button" class="wns-box" role="checkbox" aria-checked="${on}" aria-label="Claim ${esc(slug)}${WNS_ID_SUFFIX} for this vault, free" ${free?'':'disabled'} onclick="toggleCreateWns()">${on?'&#10003;':''}</button>
+    <span>CLAIM <b>${esc(slug)}${WNS_ID_SUFFIX}</b> &middot; FREE</span>
+    ${status}
+    <span class="wns-q" tabindex="0" role="note" aria-label="${esc(tip)}" title="${esc(tip)}">?</span>
+    ${why}
+  </div>`;
+}
 
 function renderCreate(mob){
   const c=S.cf,ds=toSec(c.delayVal,c.delayUnit),net=NETS[c.net],toks=DEMO_TOKENS[net.name]||["ETH"];
@@ -3806,7 +4495,8 @@ function renderCreate(mob){
   <div class="grid2" style="gap:${mob?0:48}px">
     <div>
       <label class="lbl" for="cf-name">VAULT NAME</label>
-      <input class="inp" id="cf-name" style="margin-bottom:20px" placeholder="MY VAULT" value="${esc(c.name||'')}" oninput="S.cf.name=this.value" onchange="render()">
+      <input class="inp" id="cf-name" style="margin-bottom:${c.name&&c.name.trim()?'8px':'20px'}" placeholder="MY VAULT" value="${esc(c.name||'')}" oninput="S.cf.name=this.value" onchange="render()">
+      ${renderCreateWns(c)}
       <div class="fhead"><span class="lbl" style="margin:0">OWNERS</span>
         <button class="pill safe-pill" id="safe-clone-btn" aria-haspopup="dialog" title="Copy the owners and threshold of an existing Gnosis Safe" onclick="openSafeClone()">${safeIcon()}CLONE</button>
       </div>
@@ -3816,15 +4506,19 @@ function renderCreate(mob){
         <button class="x-btn" aria-label="Undo the clone" title="Undo the clone" onclick="undoSafeClone()">&#10005;</button>
       </div>`})():''}
       ${(()=>{const you=window._connectedAddress;if(you&&!S.demoMode&&!c.safeSrc&&c.owners.every(o=>!o.addr.trim())){c.owners[0].addr=you;c.owners[0].label='YOU'}return''})()}${c.owners.map((o,i)=>{
-        const st=val.owners[i].state;
-        const note=st==='invalid'?'NOT A VALID ADDRESS OR .eth / .wei / .gwei NAME':st==='dup'?'DUPLICATE — ALREADY LISTED ABOVE':st==='name'?'NAME &middot; RESOLVES AT DEPLOY':'';
-        const noteColor=st==='name'?'var(--d)':'var(--r)';
+        const ow=val.owners[i], st=ow.state;
+        const bad=st==='invalid'||st==='dup'||(ow.pv&&ow.pv.state==='err');
+        const note=ownerRowNote(ow,i,explorerBase);
+        // Stable ids: a name resolving in the background repaints this form, and
+        // captureFocus/restoreFocus can only put the caret back into a field it
+        // can name. Without them, a lookup landing (or any poll tick) while the
+        // operator is typing an address drops them out of the field mid-paste.
         return`<div class="owner-row">
-        <span class="o-num" style="color:${_OWNER_STATE_COLOR[st]||'var(--d)'}">${String(i+1).padStart(2,"0")}</span>
-        <input class="inp o-addr" aria-label="Owner ${i+1} address or name" aria-invalid="${st==='invalid'||st==='dup'}" style="${st==='invalid'||st==='dup'?'border-bottom-color:var(--r)':''}" placeholder="0x... or .eth/.(g)wei" value="${esc(shortAddr(o.addr))}" onfocus="this.value=S.cf.owners[${i}].addr" onblur="this.value=shortAddr(S.cf.owners[${i}].addr)" oninput="S.cf.owners[${i}].addr=this.value;const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;if(+S.cf.threshold>fc){S.cf.threshold=String(fc)}" onchange="S.cf.owners[${i}].addr=this.value;render()">
-        <input class="inp o-label" aria-label="Owner ${i+1} label" placeholder="LABEL" value="${esc(o.label)}" oninput="S.cf.owners[${i}].label=this.value" onchange="render()">
+        <span class="o-num" style="color:${note.num}">${String(i+1).padStart(2,"0")}</span>
+        <input class="inp o-addr" id="cf-own-${i}" aria-label="Owner ${i+1} address or name" aria-invalid="${bad}"${note.html?` aria-describedby="cf-own-note-${i}"`:''} style="${bad?'border-bottom-color:var(--r)':''}" placeholder="0x... or .eth/.(g)wei" value="${esc(shortAddr(o.addr))}" onfocus="this.value=S.cf.owners[${i}].addr" onblur="this.value=shortAddr(S.cf.owners[${i}].addr)" oninput="S.cf.owners[${i}].addr=this.value;const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;if(+S.cf.threshold>fc){S.cf.threshold=String(fc)}" onchange="S.cf.owners[${i}].addr=this.value;render()">
+        <input class="inp o-label" id="cf-own-lbl-${i}" aria-label="Owner ${i+1} label" placeholder="LABEL" value="${esc(o.label)}" oninput="S.cf.owners[${i}].label=this.value" onchange="render()">
         ${c.owners.length>1?`<button class="x-btn red o-del" aria-label="Remove owner ${i+1}" title="Remove this owner" onclick="S.cf.owners.splice(${i},1);const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;S.cf.threshold=String(Math.min(+S.cf.threshold||1,fc));render()">&#10005;</button>`:""}
-      </div>${note?`<div class="owner-note" style="color:${noteColor}">${note}</div>`:''}`}).join("")}
+      </div>${note.html?`<div class="owner-note" id="cf-own-note-${i}" style="color:${note.color}">${note.html}</div>`:''}`}).join("")}
       <button class="link-btn" onclick="S.cf.owners.push({addr:'',label:''});S.cf.threshold=String(Math.min(+S.cf.threshold||1,S.cf.owners.length));render()">+ ADD</button>
       <div class="sep"></div>
       <div class="grid2" style="gap:32px">
@@ -3855,7 +4549,8 @@ function renderCreate(mob){
       </div>
     </div>
     <div style="margin-top:${mob?36:0}px">
-      ${!mob?`<span class="lbl">PREVIEW</span><div class="preview-text">NAME        ${esc(c.name||'UNNAMED')}
+      ${!mob?`<span class="lbl">PREVIEW</span><div class="preview-text">NAME        ${esc(c.name||'UNNAMED')}${c.wns?`
+IDENTITY    ${esc(wnsSlug(c.name))}${WNS_ID_SUFFIX} &middot; FREE &middot; ETHEREUM ONLY`:''}
 OWNERS      ${c.owners.filter(o=>o.addr.trim()).length||0}${c.owners.some(o=>o.label&&o.addr.trim())?" ("+c.owners.filter(o=>o.label&&o.addr.trim()).map(o=>esc(o.label)).join(", ")+")":""}
 THRESHOLD   ${c.threshold}/${c.owners.filter(o=>o.addr.trim()).length||1}${c.safeSrc?`
 CLONED FROM ${esc(shortAddr(c.safeSrc.addr))} &middot; SAFE${c.safeSrc.version?" v"+esc(c.safeSrc.version):""}`:""}
@@ -3864,7 +4559,7 @@ NETWORK     ${net.name} (${net.id})
 TOKENS      ${toks.join(", ")}
 FACTORY     <a href="${explorerBase}/address/${FACTORY}" target="_blank" rel="noopener" style="color:var(--a);text-decoration:none;border-bottom:1px solid var(--ln)">${FACTORY.slice(0,10)}...${FACTORY.slice(-4)}</a>
 EXECUTOR    ${ds>0?`<a href="${explorerBase}/address/${TIMELOCK_EXECUTOR}" target="_blank" rel="noopener" style="color:var(--a);text-decoration:none;border-bottom:1px solid var(--ln)">${TIMELOCK_EXECUTOR}</a>`:"NONE &mdash; UNLOCKED VAULT"}
-METHOD      ${c.fastPath&&ds>0?"createWithCalls()":"create()"}</div><div class="sep"></div>`:""}
+METHOD      ${(c.fastPath&&ds>0)||c.wns?"createWithCalls()":"create()"}</div><div class="sep"></div>`:""}
       <span class="lbl" id="lbl-network">NETWORK</span>
       <div class="net-panel" role="group" aria-labelledby="lbl-network">${NETS.map((n,i)=>{const on=c.net===i,t=DEMO_TOKENS[n.name]||["ETH"];return`<div>
         <button type="button" class="net-row${on?" on":""}"${on?' aria-current="true"':''} onclick="S.cf.net=${i};S.cf.clone=(S.cf.clone||[]).filter(x=>x!==${i});render()">
@@ -3902,6 +4597,10 @@ function renderAdmin(v,mob){
       <input class="inp" id="admin-vault-name" style="margin:0;flex:1" placeholder="${esc(v.name)}" value="${esc(v.name)}" onkeydown="if(event.key==='Enter'){event.preventDefault();renameVault()}">
       <button class="btn btn-outline btn-sm" style="flex-shrink:0" onclick="renameVault()">SAVE</button>
     </div>
+    <div style="font-size:9px;letter-spacing:1.5px;color:var(--d);line-height:1.7;margin-top:8px;max-width:520px">A LABEL THIS INTERFACE STORES &mdash; NOTHING ON CHAIN READS IT.${
+      v.wnsName ? ` ON CHAIN THIS VAULT ANSWERS TO <b style="color:var(--a)">${esc(v.wnsName)}</b>.`
+      : wnsAvailableChain() ? ` FOR A NAME EVERY WALLET AND EXPLORER CAN READ, CLAIM A FREE <b style="color:var(--m)">${WNS_ID_SUFFIX.slice(1)}</b> SUBDOMAIN FROM THE <b style="color:var(--m)">NAME</b> TAB OF A NEW PROPOSAL.`
+      : ` A FREE <b style="color:var(--m)">${WNS_ID_SUFFIX.slice(1)}</b> ON-CHAIN NAME CAN BE CLAIMED FOR THIS VAULT FROM ETHEREUM MAINNET.`}</div>
     <div class="sep"></div>
     <div class="grid2" style="gap:${mob?32:48}px">
       <div>
@@ -4067,6 +4766,18 @@ function submitBatch() {
     addTxDemo({ value: "0", token: "", target: v.address, dataLabel: `BATCH (${S.batch.length})` });
   } else {
     guardSubmit(prodSubmitBatch)();
+  }
+}
+
+function submitName() {
+  // The NAME tab is gated on mainnet and the demo runs off no chain at all, so
+  // this branch exists only for the seeded vaults, where it produces a row that
+  // reads like the real one and touches nothing.
+  if (S.demoMode) {
+    const v = S.vaults[S.sel];
+    addTxDemo({ value: "0", token: "", target: v.address, dataLabel: `IDENTITY ${wnsFullName(S.wnsLabel)}` });
+  } else {
+    guardSubmit(prodSubmitName)();
   }
 }
 
@@ -4408,7 +5119,17 @@ function renderSafeCloneModal(){
     </div>
   </div>`;
 }
-function closeDeploy(){ S.deploy = null; S.view = 'DASH'; S.showTx = false; render(); }
+// CANCEL and VIEW VAULT are the same button in different clothes, but they are
+// not the same navigation. Cancelling from the review screen means "let me change
+// something" — landing on a dashboard that has nothing new on it throws the form
+// away from under the operator. Only a run that actually produced a vault leaves
+// the create screen.
+function closeDeploy(){
+  const landed = !!(S.deploy && S.deploy.lastVaultAddr);
+  S.deploy = null;
+  if(landed){ S.view = 'DASH'; S.showTx = false; }
+  render();
+}
 
 function doDeploy() {
   if (S.demoMode) { demoDeploy(); return; }
@@ -4431,7 +5152,7 @@ async function demoDeploy() {
   const addr = "0x" + Array.from({length:40},()=>((Math.random()*16)|0).toString(16)).join("");
   const chainIdxs = [c.net, ...(c.clone||[])].filter((v,i,a)=>a.indexOf(v)===i);
 
-  S.deploy = { steps: chainIdxs.map(i=>({ id:NETS[i].id, name:NETS[i].name, status:'pending' })), phase:'deploying', address:null, done:false };
+  S.deploy = { run: ++_deployRun, chains: chainIdxs.map(i=>NETS[i]), steps: chainIdxs.map(i=>({ id:NETS[i].id, name:NETS[i].name, status:'pending' })), phase:'deploying', address:null, done:false, lastVaultAddr:null };
   render();
   for (let k=0; k<chainIdxs.length; k++) {
     const st = S.deploy.steps[k];
@@ -4440,6 +5161,9 @@ async function demoDeploy() {
     st.status='deploying'; render(); await new Promise(r=>setTimeout(r,600));
     st.status='done'; st.address=addr; render(); await new Promise(r=>setTimeout(r,150));
   }
+  // Marks the run as having produced a vault, which is what tells closeDeploy to
+  // hand over to the dashboard rather than back to the form.
+  S.deploy.lastVaultAddr = addr;
   S.deploy.done = true;
   const id = "V-" + String(S.vaults.length + 1).padStart(3, "0");
   S.vaults.push({
@@ -5080,7 +5804,11 @@ async function loadSingleVaultData(addr, dbWallet) {
       } catch(_) { return { isTE: false, fpEnabled: false }; }
     })() : Promise.resolve({ isTE: false, fpEnabled: false }),
     loadTokenBalances(addr, s.balance),
-    resolveOwnerNames([...s.owners]),
+    // The vault rides along in the owners' reverse-resolution batch: same
+    // multicall, same forward verification, one more entry. A vault that has
+    // claimed a name should read as that name in its own header, and paying a
+    // separate round trip for it would have been the reason not to.
+    resolveOwnerNames([...s.owners, addr]),
     // What is actually running at this address. A vault can arrive here from a
     // pasted address or a history row, and answering threshold()/getOwners()
     // proves only that something implements the shape — not that it is the
@@ -5117,7 +5845,8 @@ async function loadSingleVaultData(addr, dbWallet) {
     fastPath: fpEnabled,
     loadedOwners: [...s.owners],
     isTimelockExecutor: isTE,
-    codeKind
+    codeKind,
+    wnsName: ownerNames[addr.toLowerCase()] || null,
   };
 }
 
@@ -5514,6 +6243,15 @@ async function vaultMatchesCtx(addr, ctx){
 
 // ── PRODUCTION: DEPLOY ────────────────────────────────────────────
 
+// Every deploy run carries a serial number, and the async work it started checks
+// that number before writing anything back. `S.deploy` being non-null is not the
+// same question: cancelling during preflight and starting a second deploy leaves
+// the first run's mining and factory probes in flight, and they would land in
+// the *new* S.deploy — filing a salt mined against the old chain set, and the
+// old chains' readiness, against the run the operator is about to approve.
+let _deployRun = 0;
+const _deployLive = run => !!S.deploy && S.deploy.run === run;
+
 async function prodDeploy() {
   const w = requireSigner(); if(!w) return;
   const { signer, addr: connectedAddress } = w;
@@ -5529,9 +6267,18 @@ async function prodDeploy() {
   // sorted as pairs. Sorting the addresses alone leaves the labels behind in
   // form order and silently files every signer under someone else's name —
   // which a cloned Safe, whose getOwners() order is arbitrary, hits every time.
+  //
+  // assertPreviewed welds the deploy to the form: the create screen already
+  // showed the address each name resolves to, and a name that repoints between
+  // being reviewed and being signed for would otherwise install a signer the
+  // operator never saw — permanently, since the owner set can only be changed by
+  // a full multisig round of the vault it is being installed into.
   let pairs;
   try {
-    pairs = await Promise.all(valid.map(async o => ({ addr: await resolveName(o.addr), label: o.label || '' })));
+    pairs = await Promise.all(valid.map(async o => ({
+      addr: assertPreviewed(o.addr, await resolveName(o.addr), OWNER_NS_CHAIN),
+      label: o.label || '',
+    })));
   } catch(e) {
     flash(`OWNER: ${e.shortMessage || e.message}`);
     return;
@@ -5580,15 +6327,36 @@ async function prodDeploy() {
   const chains = chainIdxs.map(i => NETS[i]).filter(n => CHAINS[n.id]);
   if(!chains.length) { flash('SELECT A NETWORK'); return; }
 
+  // Optional on-chain identity, carried as two extra init calls on the mainnet
+  // step only. Whether it is still free is not decided here — it is re-asked in
+  // the preflight and again immediately before signing, because between typing
+  // a name and approving a wallet prompt is exactly long enough for someone
+  // else to take it, and a register() that reverts takes the whole deploy with
+  // it: the vault, the mined salt and the gas, for a name that was optional.
+  const wnsLabel = c.wns ? wnsSlug(c.name) : '';
+  const wns = wnsLabel && wnsLabelValid(wnsLabel) && chains.some(n => n.id === WNS_CHAIN_ID)
+    ? { label: wnsLabel, full: wnsFullName(wnsLabel), id: wnsSubId(wnsLabel) }
+    : null;
+
   // Deploy context shared across chains + retries.
+  const run = ++_deployRun;
   S.deploy = {
-    chains,
+    run, chains,
     steps: chains.map(n => ({ id:n.id, name:n.name, status:'pending' })),
-    ctx: { resolvedOwners, del, thresh, executor, wantForward, ownerLabels, connectedAddress, cfName: c.name || null, salt:null, minedAddr:null, deployerIsOwner, fastPathVoid },
-    phase:'preflight', address:null, done:false, lastVaultAddr:null,
+    ctx: { resolvedOwners, del, thresh, executor, wantForward, ownerLabels, connectedAddress, cfName: c.name || null, salt:null, minedAddr:null, deployerIsOwner, fastPathVoid, wns },
+    phase:'preflight', address:null, done:false, lastVaultAddr:null, wnsAvail:null,
   };
   render();
+  // Handed off rather than awaited, so guardSubmit's lock is released the moment
+  // the overlay is up. Holding it across the preflight would mean that pressing
+  // CANCEL and pressing DEPLOY again did nothing at all until the RPC that caused
+  // the cancelling finally answered. From here the run token and S.deploy are
+  // what keep a second deploy from interleaving with this one.
+  _deployPreflight(run, chains, connectedAddress, wantForward)
+    .catch(e => { console.error('Deploy preflight:', e); if(_deployLive(run)){ S.deploy.phase = 'review'; render(); } });
+}
 
+async function _deployPreflight(run, chains, connectedAddress, wantForward) {
   // Preflight (read-only, no chain switch): is the factory deployed on each
   // chain, does the wallet have gas there, and — when fast-path is on — is the
   // TimelockExecutor present? The factory check is the one that cannot be
@@ -5621,19 +6389,31 @@ async function prodDeploy() {
   const minePromise = (async () => {
     try {
       const mined = await mineVanitySalt(FACTORY, IMPLEMENTATION, connectedAddress, chains.map(n => makeProvider(n.id)));
-      if(S.deploy){ S.deploy.ctx.salt = mined.salt; S.deploy.ctx.minedAddr = mined.address; S.deploy.address = mined.address; render(); }
+      if(_deployLive(run)){ S.deploy.ctx.salt = mined.salt; S.deploy.ctx.minedAddr = mined.address; S.deploy.address = mined.address; render(); }
     } catch(e){ console.error('Vanity mining (preflight):', e); }
+  })();
+  // Is the requested name still free? Read alongside the rest of the preflight
+  // so the review screen can say so before anything is signed, rather than
+  // reporting it afterwards as a step that quietly did less than it said.
+  const wnsPromise = (async () => {
+    const ctx = S.deploy && S.deploy.ctx;
+    if(!ctx || !ctx.wns) return;
+    const ok = await wnsAvailable(ctx.wns.label, connectedAddress);
+    if(_deployLive(run)){ S.deploy.wnsAvail = ok; render(); }
   })();
   const pf = await pfPromise;
   await minePromise;
-  if(!S.deploy) return;   // user cancelled during preflight
+  await wnsPromise;
+  if(!_deployLive(run)) return;   // cancelled during preflight, or superseded
   pf.forEach((r,i)=>{ S.deploy.steps[i].pf = r; });
-  const noFactory = pf.some(r => r.factoryOk === false);                 // factory truly missing
-  const badImpl = pf.some(r => r.implOk === false);                      // wrong code at the factory address
-  const blocked = wantForward && pf.some(r => r.executorOk === false);   // executor truly missing
-  const warn = pf.some(r => r.gasOk === false);
-  if(noFactory || badImpl || blocked || warn || !deployerIsOwner || fastPathVoid){ S.deploy.phase = 'review'; render(); return; }  // wait for user to PROCEED
-  runDeploy();
+  // Always stop at the review screen. This is the last point before a chain of
+  // wallet prompts that mints an immutable owner set on N chains and costs gas on
+  // each, and it is the only place the mined CREATE2 address — the address funds
+  // will be sent to — can be read before anything is signed. Skipping it when the
+  // preflight happened to come back clean saved one click and spent the only
+  // checkpoint the flow has.
+  S.deploy.phase = 'review';
+  render();
 }
 
 // Wait for the connected wallet's active chain to match `id`, polling to absorb
@@ -5652,7 +6432,9 @@ async function deployOnChain(k){
   const d = S.deploy; if(!d) return false;
   const net = d.chains[k], step = d.steps[k], ctx = d.ctx;
   try {
-    step.status='switching'; step.err=null; render();
+    // Cleared alongside the error: a retry re-asks whether the name is free, so
+    // last attempt's answer must not still be on screen under this attempt's row.
+    step.status='switching'; step.err=null; step.wnsSkipped=null; step.wnsName=null; render();
     if(net.id !== S.chainId) await switchChain(net.id, true);
     // Confirm the wallet landed on this chain before signing. Poll briefly: some
     // wallets (esp. over WalletConnect) resolve the switch request before the
@@ -5689,12 +6471,34 @@ async function deployOnChain(k){
       }
       step.status='skipped'; step.address=ctx.minedAddr; d.lastVaultAddr=ctx.minedAddr; render(); return true;
     }
+    // Init calls run inside the deploy, from the vault, before the real
+    // executor is installed. The fast path is one; the identity claim is two
+    // more, and only on the chain WNS is deployed to — a register() sent to a
+    // chain without it is a call to a codeless address, which succeeds, mints
+    // nothing and reports nothing.
+    const initCalls = [];
+    if(ctx.wantForward) initCalls.push({ target: TIMELOCK_EXECUTOR, value: 0,
+      data: tlIface.encodeFunctionData('enableForward', [true]) });
+    if(ctx.wns && net.id === WNS_CHAIN_ID){
+      // Asked once more, here, against the block this transaction will be built
+      // on. The claim is optional and the vault is not: rather than send a
+      // register() that would revert and take the whole deploy with it, drop
+      // the name and say so. The vault still lands at the mined address, and
+      // the NAME tab can claim a different name afterwards for the price of
+      // one proposal. A lookup that would not answer is treated the same way —
+      // "not confirmed free" is the only safe reading of silence when the cost
+      // of being wrong is the deploy itself.
+      const free = await wnsAvailable(ctx.wns.label, ctx.connectedAddress);
+      if(free === true) initCalls.push(...wnsClaimCalls(ctx.wns.label));
+      else step.wnsSkipped = free === false ? 'taken' : 'unchecked';
+      render();
+    }
     step.status='deploying'; render();
     const factory = new ethers.Contract(FACTORY, FACTORY_ABI, signer);
     let tx;
-    if(ctx.wantForward){
-      const enableData = tlIface.encodeFunctionData('enableForward', [true]);
-      tx = await factory.createWithCalls(ctx.resolvedOwners, ctx.del, ctx.thresh, ctx.executor, ctx.salt, [TIMELOCK_EXECUTOR], [0], [enableData]);
+    if(initCalls.length){
+      tx = await factory.createWithCalls(ctx.resolvedOwners, ctx.del, ctx.thresh, ctx.executor, ctx.salt,
+        initCalls.map(c=>c.target), initCalls.map(c=>c.value), initCalls.map(c=>c.data));
     } else {
       tx = await factory.create(ctx.resolvedOwners, ctx.del, ctx.thresh, ctx.executor, ctx.salt);
     }
@@ -5726,6 +6530,18 @@ async function deployOnChain(k){
     // kind === null / configOk === null: the chain would not answer. The deploy
     // itself succeeded, so record it, but do not claim it was verified.
     step.verified = kind !== null && configOk === true;
+    // The name is read back off WNS rather than inferred from the transaction
+    // succeeding: createWithCalls executes each init call through the vault's
+    // own execute(), and this interface should only put a name beside an
+    // address once the registry it came from agrees.
+    if(ctx.wns && net.id === WNS_CHAIN_ID && !step.wnsSkipped){
+      try {
+        const wnsC = new ethers.Contract(WEINS, WEINS_ABI, makeProvider(WNS_CHAIN_ID));
+        const holder = await wnsC.resolve(ctx.wns.id);
+        if(String(holder).toLowerCase() === String(walletAddr).toLowerCase()) step.wnsName = ctx.wns.full;
+        else step.wnsSkipped = 'unconfirmed';
+      } catch(e){ console.error('WNS read-back:', e); step.wnsSkipped = 'unconfirmed'; }
+    }
     d.lastVaultAddr = walletAddr;
     try {
       const ms = new ethers.Contract(walletAddr, MULTISIG_ABI, provider);
@@ -5762,19 +6578,26 @@ async function _finishDeploy(){
 }
 async function runDeploy(){
   if(!S.deploy) return;
+  const run = S.deploy.run;
   S.deploy.phase = 'deploying'; render();
   for(let k=0; k<S.deploy.chains.length; k++){
+    // Re-checked every lap: each chain is a wallet round-trip, and the run this
+    // loop belongs to must not keep walking chains into a deploy that replaced it.
+    if(!_deployLive(run)) return;
     const st = S.deploy.steps[k];
     if(st.status === 'done' || st.status === 'skipped') continue;
     await deployOnChain(k);
   }
+  if(!_deployLive(run)) return;
   await _finishDeploy();
 }
 function proceedDeploy(){ if(S.deploy){ S.deploy.phase='deploying'; render(); runDeploy(); } }
 async function retryChain(k){
   if(!S.deploy) return;
+  const run = S.deploy.run;
   S.deploy.done = false; render();
   await deployOnChain(k);
+  if(!_deployLive(run)) return;
   await _finishDeploy();
 }
 
@@ -6532,6 +7355,11 @@ async function buildSimInput() {
     if(!amt || !(parseFloat(amt) > 0)) throw new Error('ENTER AN AMOUNT TO STAKE');
     return { from, to: WSTETH_ADDRESS, value: ethers.parseEther(amt), data: '0x' };
   }
+  if(S.txMode === 'NAME') {
+    const p = buildWnsProposal(v, wnsProposalPlan(v, S.wnsLabel));
+    if(!p) throw new Error('PICK A FREE NAME FIRST');
+    return { from, to: p.target, value: 0n, data: p.data };
+  }
   if(S.txMode === 'CUSTOM') {
     const target = S.cxTarget || document.getElementById('cx-target')?.value || '';
     if(!target) throw new Error('ENTER TARGET');
@@ -6778,6 +7606,59 @@ async function prodSubmitTransfer() {
 
     if(v.dbId) {
       const txId = await dbProposeTx(v.dbId, nonce, target, value, data, txHash, v.threshold, connectedAddress, desc);
+      if(txId) await dbAddSig(txId, connectedAddress, sig);
+    }
+
+    flash(`TX #${nonce} CREATED`);
+    S.showTx = false;
+    resetTxFields();
+    await reloadQueue(S.sel);
+  } catch(e) {
+    console.error(e);
+    flash(e.shortMessage || e.message || 'FAILED');
+  }
+}
+
+// Identity: claim a free id.wei subdomain for the vault, and point reverse
+// resolution at it. Both calls are made by the vault, which is the whole point
+// — a name minted by the operator and transferred afterwards would be a second
+// transaction, a second chance to get the recipient wrong, and a window where
+// the name belongs to a person rather than to the multisig.
+async function prodSubmitName() {
+  const w = requireSigner(); if(!w) return;
+  const { signer, addr: connectedAddress } = w;
+  const v = S.vaults[S.sel];
+  if(!v) return;
+  if(S.chainId !== WNS_CHAIN_ID){ flash('WNS NAMES ARE ETHEREUM MAINNET ONLY'); return; }
+
+  try {
+    // Re-asked here rather than trusted from the form. The gap between reading
+    // a name as free and signing for it is however long the operator took, and
+    // a register() that reverts does not just fail — it consumes the nonce it
+    // was proposed at and blocks everything queued behind it until the vault
+    // burns that nonce with a no-op.
+    const label = asciiLower(String(S.wnsLabel || '').trim());
+    if(!wnsLabelValid(label)) { flash('ENTER A VALID NAME'); return; }
+    retryWnsAv(label, v.address);
+    const fresh = await wnsLookup(label, v.address);
+    const ownedNow = fresh.free === false && fresh.holder
+      && fresh.holder.toLowerCase() === v.address.toLowerCase();
+    if(fresh.free === null) { flash('COULD NOT CHECK THE NAME ON MAINNET — TRY AGAIN'); return; }
+    if(fresh.free === false && !ownedNow) { flash(`${wnsFullName(label).toUpperCase()} HAS JUST BEEN CLAIMED — PICK ANOTHER`); return; }
+
+    const calls = wnsClaimCalls(label, { primary: !!S.wnsPrimary, registerToo: fresh.free === true });
+    if(!calls.length) { flash('NOTHING TO PROPOSE — THE VAULT ALREADY HOLDS THIS NAME'); return; }
+    const plan = { label, full: wnsFullName(label), registerToo: fresh.free === true, calls };
+    const p = buildWnsProposal(v, plan);
+
+    const domain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address };
+    const nonce = nextNonce(v);
+    const msg = { target: p.target, value: 0n, data: p.data, nonce };
+    const sig = await signer.signTypedData(domain, EIP712_TYPES, msg);
+    const txHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg);
+
+    if(v.dbId) {
+      const txId = await dbProposeTx(v.dbId, nonce, p.target, '0', p.data, txHash, v.threshold, connectedAddress, p.desc);
       if(txId) await dbAddSig(txId, connectedAddress, sig);
     }
 
@@ -7369,6 +8250,10 @@ setInterval(tickSlowCountdowns, 1000);
     const hasSavedWallet = !!localStorage.getItem('ms_wallet');
     if(hasSavedWallet) {
       window._onAutoReconnectFail = () => { clearTimeout(_initLoadingTimer); hideLoading(); };
+      // The boot overlay is painted by the inline script above, so it never went
+      // through showLoading — arm the slow-wait line by hand for the one wait
+      // that is allowed to run five seconds.
+      armSlowLoading();
       _initLoadingTimer = setTimeout(hideLoading, 5000);
     } else {
       _initLoadingTimer = setTimeout(hideLoading, 400);

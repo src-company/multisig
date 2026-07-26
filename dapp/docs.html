@@ -192,6 +192,9 @@ OVERVIEW:`
 <p>The default executor plugin (TimelockExecutor) adds two parallel paths: <strong>cancel</strong> a queued transaction with threshold signatures, or <strong>instantly execute</strong> with unanimous (all-owner) signatures when opted in. The fast path is optional — vaults must explicitly enable it via <code>enableForward</code>.</p>
 <p>Setting delay to 0 creates an <strong>unlocked</strong> vault — transactions execute immediately once threshold is met, with no timelock. The fast path toggle is hidden since there is no delay to bypass.</p>
 
+<h2>TWO WAYS TO GET ONE</h2>
+<p>Deploy a vault — a CREATE2 clone, same address on every chain — or delegate an <strong>existing EOA</strong> to the same implementation under EIP-7702, which keeps the address you already have and adds batching, ERC-1271 signing, an optional delay and optional co-signers to it. The first is custody; the second is capability. Many accounts want the second long before they need the first, and delegating costs one transaction and moves nothing. See <a href="#contract">CONTRACT</a>.</p>
+
 <h2>CHAINS</h2>
 <p>Ethereum, Base, MegaETH, Arbitrum, Optimism. Same contract, same address via CREATE2. Testnets: Sepolia, Base Sepolia.</p>
 
@@ -255,6 +258,29 @@ address executor     // bypass role (typically TimelockExecutor)</pre>
 <h2>FACTORY</h2>
 <p><code>MultisigFactory.create()</code> deploys minimal proxy clones via CREATE2 with PUSH0 and calls <code>init()</code> on the new proxy. Salt must start with 0x0 or msg.sender for frontrun protection.</p>
 <p><code>createWithCalls()</code> deploys with the factory as temporary executor, executes post-init calls (like <code>enableForward(true)</code> on the TimelockExecutor), then sets the real executor. Used when the fast path needs to be enabled at deploy time.</p>
+<p>Post-init calls are one list, not one call. Enabling the fast path and claiming an on-chain name are independent options that produce one, two or three entries in the same <code>targets/values/datas</code> arrays, executed in order by the new vault before the real executor is installed. Every call runs as the vault, which is why a name claimed this way is minted to the vault rather than to the deployer.</p>
+
+<h2>EIP-7702 DELEGATION</h2>
+<p>The implementation the factory clones can be installed on an existing EOA instead of deployed beside it. An EIP-7702 authorisation points the account's code at the implementation, and a self-call to <code>init(owners, delay, threshold, executor)</code> in the same transaction configures it — <code>init</code> accepts the factory <em>or</em> the account itself, which is the whole of what makes the second path work. Nothing is deployed and nothing is transferred: the address, its history, its holdings and its name stay where they are.</p>
+<p>Treat it as an onboarding step rather than a commitment. An account that wants batching today can delegate today and deploy a real vault later, when there is something worth guarding — or never, if co-signing on the address it already has is the whole requirement.</p>
+
+<div class="sig">WHAT THE ACCOUNT GAINS</div>
+<div class="desc"><code>batch()</code> for atomic multicalls — approve and swap as one transaction, or pay thirty addresses without signing thirty times; <code>delegateCall</code>; ERC-1271 <code>isValidSignature</code>, so the account can authorise Permit2, Seaport and intent orders as a smart account rather than as a bare key; ERC-721/1155 receive callbacks; an optional timelock; and the executor slot with its guard hooks. <code>batch</code> and <code>delegateCall</code> are onlySelf, and the delegating key satisfies onlySelf directly — a solo delegation uses both with no signature collection at all. Where ECDSA signatures are collected instead, <code>execute()</code> is permissionless, so a third party can relay it and pay the gas.</div>
+
+<div class="sig">CO-SIGNING WITHOUT SHARED CUSTODY</div>
+<div class="desc">Owners can be the account itself plus one other key, at 2-of-2. The account's own slot is filled by the sender bypass — <code>v=0</code> with its address in <code>r</code>, satisfied because <code>msg.sender</code> is the account — so exactly one signature is ever collected, and pressing send <em>is</em> your half of the quorum. The other key can equally be the submitter, with your ECDSA signature or on-chain approval filling your slot.</div>
+
+<div class="sig">THE AGENTIC 2-OF-2</div>
+<div class="desc">The natural use of that shape: your EOA delegates, and an agent's key is the second owner. The agent can prepare, sign and submit whatever it likes and can complete nothing alone, because it holds one of two required slots. Add a delay and its proposals queue in the open where you can cancel them; set a guard as executor and its reach narrows to an allowlist. The direction matters — <strong>you</strong> must hold the delegating key. Inverted, with the agent holding it, the quorum protects nothing, for the reason below.</div>
+
+<div class="sig">THE KEY IS STILL A SUPERUSER</div>
+<div class="desc">The delegating EOA never stops being an EOA. It can send ordinary transactions that touch none of this logic, it satisfies every onlySelf function directly — <code>setThreshold</code>, <code>addOwner</code>, <code>setDelay</code> — and it can revoke the delegation whenever it likes. The threshold is therefore a floor for everyone <em>except</em> that key: co-signers are bound, the key is not, and the delay constrains the quorum route rather than the account. That is exactly right for delegating capability to an agent or a co-signer, and exactly wrong for a treasury where no single key should be able to move funds. For that, deploy a clone — a clone has no superuser.</div>
+
+<div class="sig">CONFIGURE ONCE, NOT TWICE</div>
+<div class="desc">Revoking the delegation does not clear the storage it wrote. The owners, threshold and nonce survive, and <code>init()</code> refuses to run a second time, so an account cannot be re-delegated and re-configured from scratch; the same slot written by some <em>other</em> delegate is the same hazard in reverse, and this implementation should not be pointed at an account that has carried one. Ordinary reconfiguration still works — the setters are reachable, and the key can call them directly. It is the reset that is unavailable. See <a href="#audits">AUDITS</a> — EIP-7702 configuration is effectively permanent.</div>
+
+<div class="sig">PER CHAIN, AND BOUND TO THE ACCOUNT</div>
+<div class="desc">Authorisation and init are per chain: the same EOA elsewhere is a plain EOA until delegated and inited there, with its own independent owner set and nonce. The EIP-712 domain separator is the account's own address and live chain id, so signatures collected for a delegated account cannot be aimed at a clone, at another account, or at the same account on another chain.</div>
 
 <h2>SIGNATURES</h2>
 <p>EIP-712 typed data with <code>Execute(address target,uint256 value,bytes data,uint32 nonce)</code> typehash. Packed as 65-byte chunks (r, s, v). v=0 indicates on-chain approval — address packed in r, verified against the <code>approved</code> mapping or msg.sender. Signers must be sorted ascending (contract enforces signer > prev). Same signature format for Multisig.execute() and TimelockExecutor.forward().</p>
@@ -270,7 +296,7 @@ address executor     // bypass role (typically TimelockExecutor)</pre>
 </table>
 <p>Same addresses on all supported chains. Proxy clones deployed via CREATE2 inherit the implementation. View on <a href="https://contractscan.xyz" target="_blank" rel="noopener" style="color:var(--a);border-bottom:1px solid var(--ln);text-decoration:none">contractscan.xyz</a> for multichain verification.</p>
 
-<div class="note">None of the three singletons above has a withdrawal path, and the implementation is never initialized, so it has no owners who could authorize one. <strong>ETH or tokens sent directly to the factory, the implementation or the TimelockExecutor are unrecoverable by anyone, permanently.</strong> This app will not build a transaction that sends value to them. Value passed to <code>create()</code> is unaffected — the factory forwards it into the CREATE2 as the new vault's opening balance. See <a href="#audits">AUDITS</a> — finding L-2.</div>
+<div class="note">None of the three singletons above has a withdrawal path, and the implementation is never initialized, so it has no owners who could authorize one. <strong>ETH or tokens sent directly to the factory, the implementation or the TimelockExecutor are unrecoverable by anyone, permanently.</strong> This app will not build a transaction that sends value to them. Value passed to <code>create()</code> is unaffected — the factory forwards it into the CREATE2 as the new vault's opening balance. See <a href="#audits">AUDITS</a> — unrecoverable destinations.</div>
 
 <p>Every wallet is the same 45-byte clone, so its runtime code can be checked against the audited build directly:</p>
 <pre>0x5f5f365f5f37365f73D54cb65224410F3Ff97a8E72f363f224419f4FB0
@@ -279,131 +305,115 @@ address executor     // bypass role (typically TimelockExecutor)</pre>
 
 AUDITS:`
 <h2>AUDITS</h2>
-<div class="audits">
-<div class="audit">
-  <span class="audit-when">2026-07-11</span>
-  <span class="audit-who"><a href="https://www.shredsecurity.io/" target="_blank" rel="noopener">Shred Security</a><span class="q">kenzo &middot; yashar</span></span>
-  <span class="audit-links"><a href="https://audit.multisig.wei.limo" target="_blank" rel="noopener">READ &nearr;</a></span>
-  <div class="audit-scope">Multisig.sol @ 2329339 <span class="op">+</span> stateful invariant fuzzing</div>
-  <div class="audit-find">
-    <span class="sev zero">0 HIGH</span><span class="sev zero">0 MEDIUM</span><span class="sev low">2 LOW</span><span class="sev">2 INFO</span>
-  </div>
-</div>
-<div class="audit">
-  <span class="audit-when">2026-07-25</span>
-  <span class="audit-who">leftclaw<span class="q">multi-agent pipeline via One Dollar Audit</span></span>
-  <span class="audit-links"><a href="https://github.com/src-company/multisig/blob/main/audit/report-leftclaw.md" target="_blank" rel="noopener">READ &nearr;</a><a href="https://leftclaw.services/result/500.html" target="_blank" rel="noopener">ORIGINAL &nearr;</a></span>
-  <div class="audit-scope">Multisig.sol <span class="op">&middot;</span> TimelockExecutor.sol <span class="op">&middot;</span> IMultisig</div>
-  <div class="audit-find">
-    <span class="sev crit">1 CRITICAL</span><span class="sev high">2 HIGH</span><span class="sev med">4 MEDIUM</span><span class="sev low">5 LOW</span>
-  </div>
-</div>
-<div class="audit">
-  <span class="audit-when">2026-07-26</span>
-  <span class="audit-who">GPT-5.6 Sol<span class="q">Pro, independent</span></span>
-  <span class="audit-links"><a href="https://github.com/src-company/multisig/blob/main/audit/report-gpt56-sol.md" target="_blank" rel="noopener">READ &nearr;</a><a href="https://chatgpt.com/share/6a650af3-f6bc-83ea-b5f3-f83452e9c744" target="_blank" rel="noopener">TRANSCRIPT &nearr;</a></span>
-  <div class="audit-scope">Multisig.sol <span class="op">&middot;</span> TimelockExecutor.sol <span class="op">+</span> composition review</div>
-  <div class="audit-find">
-    <span class="sev high">1 HIGH</span><span class="sev med">1 MEDIUM</span><span class="sev low">4 LOW</span><span class="sev">5 INFO</span>
-  </div>
-</div>
-<div class="audit">
-  <span class="audit-when">2026-07-26</span>
-  <span class="audit-who">Claude Opus 5<span class="q">max effort, adversarial</span></span>
-  <span class="audit-links"><a href="https://github.com/src-company/multisig/blob/main/audit/report-opus5-max.md" target="_blank" rel="noopener">READ &nearr;</a><a href="https://claude.ai/share/c8a3a7d4-962f-4cb3-9fea-5690e9c7c7a2" target="_blank" rel="noopener">TRANSCRIPT &nearr;</a></span>
-  <div class="audit-scope">Multisig.sol <span class="op">&middot;</span> TimelockExecutor.sol <span class="op">+</span> 20 PoC tests</div>
-  <div class="audit-find">
-    <span class="sev high">2 HIGH</span><span class="sev med">6 MEDIUM</span><span class="sev low">6 LOW</span><span class="sev">9 INFO</span><span class="audit-meth">all config-dependent</span>
-  </div>
-</div>
-<div class="audit">
-  <span class="audit-when">2026-04-03</span>
-  <span class="audit-who">Internal review<span class="q">Pashov Skills methodology</span></span>
-  <span class="audit-links"><a href="https://github.com/src-company/multisig/tree/main/audit" target="_blank" rel="noopener">READ &nearr;</a></span>
-  <div class="audit-scope">Multisig.sol <span class="op">&middot;</span> modules <span class="op">&middot;</span> TimelockExecutor</div>
-  <div class="audit-find"><span class="audit-meth">8-agent parallel review <span class="op">&middot;</span> four passes <span class="op">&middot;</span> no separate tally</span></div>
-</div>
-</div>
-<div class="note">The Shred Security report is stamped DRAFT on its cover page. Every report is reproduced in full in <code>audit/</code> with the maintainers' response inline against each finding; dispositions are summarised in <code>SECURITY.md</code>. <strong>No finding from any of the four external reviews lets an unauthorised party move funds from a correctly configured vault</strong>, and none warranted redeploying the contracts — they are immutable singletons already live at mined addresses on every supported chain. Each is answered here instead, where the transaction is built.</div>
+<p>Four independent reviews of the deployed contracts, by different auditors using different methods. Each report is reproduced in full in <code>audit/</code> with our response inline against every finding, including the ones we disputed.</p>
+<table>
+<tr><th>DATE</th><th>AUDITOR</th><th>RESULT</th><th>REPORT</th></tr>
+<tr>
+  <td>2026-07-26</td>
+  <td>GPT-5.6 Sol<br><span style="color:var(--d);font-size:11px">Pro</span></td>
+  <td>1 high &middot; 1 medium<br>4 low &middot; 5 info</td>
+  <td><a href="https://github.com/src-company/multisig/blob/main/audit/report-gpt56-sol.md" target="_blank" rel="noopener">READ &nearr;</a><br><a href="https://chatgpt.com/share/6a650af3-f6bc-83ea-b5f3-f83452e9c744" target="_blank" rel="noopener">TRANSCRIPT &nearr;</a></td>
+</tr>
+<tr>
+  <td>2026-07-26</td>
+  <td>Claude Opus 5<br><span style="color:var(--d);font-size:11px">max effort</span></td>
+  <td>2 high &middot; 6 medium<br>6 low &middot; 9 info</td>
+  <td><a href="https://github.com/src-company/multisig/blob/main/audit/report-opus5-max.md" target="_blank" rel="noopener">READ &nearr;</a><br><a href="https://claude.ai/share/c8a3a7d4-962f-4cb3-9fea-5690e9c7c7a2" target="_blank" rel="noopener">TRANSCRIPT &nearr;</a></td>
+</tr>
+<tr>
+  <td>2026-07-25</td>
+  <td>leftclaw<br><span style="color:var(--d);font-size:11px">multi-agent pipeline</span></td>
+  <td>1 critical &middot; 2 high<br>4 medium &middot; 5 low</td>
+  <td><a href="https://github.com/src-company/multisig/blob/main/audit/report-leftclaw.md" target="_blank" rel="noopener">READ &nearr;</a><br><a href="https://leftclaw.services/result/500.html" target="_blank" rel="noopener">ORIGINAL &nearr;</a></td>
+</tr>
+<tr>
+  <td>2026-07-11</td>
+  <td><a href="https://www.shredsecurity.io/" target="_blank" rel="noopener">Shred Security</a><br><span style="color:var(--d);font-size:11px">kenzo &middot; yashar</span></td>
+  <td>0 high &middot; 0 medium<br>2 low &middot; 2 info</td>
+  <td><a href="https://github.com/src-company/multisig/blob/main/audit/report-shred-security.md" target="_blank" rel="noopener">READ &nearr;</a><br><a href="https://audit.multisig.wei.limo" target="_blank" rel="noopener">PDF &nearr;</a></td>
+</tr>
+</table>
 
-<h2>TIMELOCK &amp; THE FAST PATH</h2>
-<p>The clearest thing to understand before configuring a vault, because two reviews raised issues that both live here.</p>
-<div class="sig">THE EXECUTOR IS WHAT MAKES A TIMELOCK CANCELLABLE</div>
-<div class="desc">With a delay and no executor, queueing works fine and third parties get their full notice period — but nothing can be stopped. cancelQueued is onlySelf, so a cancel routes through execute() and is queued for the same delay, maturing no earlier than what it cancels. Setting the TimelockExecutor as executor adds the missing piece: a cancel on threshold signatures, executing immediately. This app always pairs a non-zero delay with it, and will not remove it while a delay is set.</div>
-<div class="sig">CANCELLING NEVER NEEDS THE FAST PATH</div>
-<div class="desc">The cancel route requires only threshold signatures and does not check forwardEnabled, so the brake works on every vault using this executor whether or not the fast path is on. If you are considering enabling the fast path for emergencies, you already have what you need.</div>
-<div class="sig">BUT A CANCEL MUST BE SUBMITTED BY A SIGNER</div>
-<div class="desc">Both routes verify the same signatures, so a cancel bundle copied from the mempool can be replayed through execute() instead — where it is queued for the full delay rather than executing now, and burns the nonce so the real one reverts. The proposal it was meant to stop was queued first, matures first, and anyone can run it. This app defends against that by spending one slot of every executor bundle on a sender slot bound to whoever submits: a copier is not that address, so the bundle is useless to them. It works only if the submitter is one of the signers — if it cannot be bound, the app says so before sending.</div>
-<div class="sig">WHAT THE FAST PATH IS ACTUALLY FOR</div>
-<div class="desc">Velocity, not emergencies. A vault that needs only partial consensus to act slowly can act immediately when everyone is aligned — routine payments, trading. Signatures accrue: collect the threshold and a proposal is queueable; if a further owner signs the same proposal before it is submitted, it becomes instantly executable, with nobody re-signing.</div>
+<h2>WHAT THEY FOUND</h2>
+<p><strong>No reviewer found a way for an unauthorised party to move funds from a correctly configured vault.</strong> The signature scheme, nonce handling, owner list, replay protection and clone bytecode were each independently verified sound by three or four of them. Nothing found warranted redeploying the contracts, which are immutable singletons already live at mined addresses on every supported chain.</p>
+<p>What they did find falls into two groups. <strong>Configuration traps</strong> — one-way doors a vault's owners would have to deliberately sign their way into. This app now refuses to build every one of them. And <strong>composition issues</strong> between the vault and its executor module, which cost timing rather than funds. Those are answered below.</p>
+<div class="note">Severities were inconsistent across reports — one filed a critical that rested on a misreading of which address a code branch tests, and two mis-sized the same arithmetic bug by a factor of 65. Each report's response records where we agreed, where we did not, and why. Disputed findings are argued in the reports rather than quietly dropped.</div>
+
+<h2>CONFIGURING A VAULT</h2>
+<p>The choices that actually matter, in the order you make them.</p>
+
+<div class="sig">A TIMELOCK NEEDS AN EXECUTOR TO BE CANCELLABLE</div>
+<div class="desc">With a delay and no executor, queueing works and third parties get their full notice period — but nothing can be stopped. Cancelling is a self-call, so it routes through the queue like everything else and matures no earlier than the thing it cancels. Setting the TimelockExecutor as executor adds the missing half: a cancel on threshold signatures, executing immediately. This app always pairs a non-zero delay with it, and refuses to remove it while a delay is set.</div>
+
+<div class="sig">CANCELLING IS THE RELIABLE BRAKE</div>
+<div class="desc">It needs only threshold signatures, works whether or not the fast path is enabled, and executes immediately. If you are considering the fast path for emergencies, you already have what you need. One operational detail: a cancel should be submitted by one of its signers. The app spends a slot of the bundle on that signer so a copy of it is useless to anyone else — see below — and tells you if it could not.</div>
+
+<div class="sig">THE FAST PATH IS FOR SPEED, NOT EMERGENCIES</div>
+<div class="desc">It lets a vault that needs only partial consensus to act slowly act immediately when every owner agrees — routine payments, trading. Signatures accrue toward it: collect the threshold and a proposal is queueable; if a further owner signs the same proposal before it is submitted, it becomes instantly executable, with nobody re-signing.</div>
+
 <div class="sig">EXCEPT WHERE THE THRESHOLD IS THE OWNER COUNT</div>
-<div class="desc">On a 2-of-2 or 3-of-3 every quorum is already unanimous, so there is no higher bar to escalate to — the same signatures queue or execute, at the submitter's choice, including anyone who sees them in the mempool. The delay becomes the default route rather than a guarantee. Legitimate if that is what you want; this app flags it at create and needs a second press in admin rather than refusing. The cancel brake is unaffected.</div>
-<div class="sig">TWO WAYS TO AUTHORISE, AND WHY BOTH EXIST</div>
-<div class="desc">Signing produces an off-chain EIP-712 signature: free, private, and it keeps the front-run protection described below. Approving registers authorisation in the vault itself: it costs gas and is publicly readable, but it is the only route a DAO or nested multisig owner has — a contract cannot produce a signature — and it is the only route that needs no coordination service whatsoever. A vault whose owners all approve on-chain keeps working if this app, its database, or its operator disappear. That independence is the point, and it is why the option stays even though most signers should prefer signing.</div>
-<div class="sig">KEEPING BOTH: INDEPENDENCE AND PROTECTION</div>
-<div class="desc">An on-chain approval is world-readable, so the slot it fills can be assembled by anyone — which forfeits the binding that stops a collected bundle being replayed into the queueing route. The two are not actually in conflict: have every owner but one approve on-chain, and let the remaining owner submit without approving. Their slot stays sender-only, a copier is left one signature short, and the vault still needed no coordination service to get there.</div>
-<div class="sig">APPROVALS ARE SCOPED TO ONE NONCE</div>
-<div class="desc">The approved hash commits to the vault's nonce, and both execution routes compute against the live one, so an approval becomes permanently unreachable the moment the nonce advances past it. Stale approvals for consumed nonces are inert. The only ones worth revoking are those made for a nonce the vault has not yet reached.</div>
-<div class="sig">IF A FAST-PATH PROPOSAL GETS FORCED INTO THE QUEUE</div>
-<div class="desc">Because both routes accept the same signatures, someone who sees your bundle before it lands can submit it down the queueing route instead — your proposal is queued rather than executed now, and the nonce is consumed. It is not blocked and not lost: it executes when the delay elapses, and the same trick cannot be repeated once the entry is queued. To recover, accelerate it — the app forwards a self-call to executeQueued, which the vault answers itself and so skips the remaining wait. To avoid it entirely, submit through a private RPC; the attack needs your bundle to be public first. On Base, Arbitrum and OP there is no public mempool to read.</div>
-<div class="sig">WHAT TO USE WHEN TIMING REALLY MATTERS</div>
-<div class="desc">The fast path is a convenience, and the worst case of it being griefed is that you wait the delay you chose. The two cases where timing is critical each have a route that cannot be griefed. To <b>stop</b> something queued, cancel: threshold signatures, no forwardEnabled, and the bundle is bound to whoever submits so a copier is always one signature short. To <b>guarantee</b> emergency action, use a separate multisig as the executor rather than enabling the fast path.</div>
-<div class="sig">THE COUNCIL PATTERN — NO REPLAY POSSIBLE AT ALL</div>
-<div class="desc">The reason a bundle can be replayed is that the TimelockExecutor authorises against the vault's own signing digest, so the same signatures open both routes. The executor bypass needs no signatures at all — the vault skips its checks for whatever address is set as executor. So an executor that authorises against its <em>own</em> digest leaves nothing that can be replayed against the vault. A second vault is exactly that: deploy one with the same owners, unanimous threshold and no timelock, and set it as your main vault's executor. Ordinary proposals still queue for the full delay, unanimity acts immediately, and those council signatures can never be aimed at the main vault because they carry a different verifying contract. Cancellation through it cannot be forced into the queue by anyone.</div>
-<div class="desc">The tradeoff is that the council's threshold governs both bypass <em>and</em> cancellation — one dial, not two. At unanimous, cancelling costs every owner rather than a quorum. The default TimelockExecutor charges only a quorum to cancel and is the better choice for most vaults; the council is there if you want the replay surface gone entirely.</div>
-<div class="sig">SIGNED MESSAGES ESCAPE THE DELAY ENTIRELY</div>
-<div class="desc">A timelock constrains transactions, not ERC-1271 message signing. Anything expressible as a signed order — Permit2, Seaport, intent systems — is authorised instantly with threshold signatures on any vault, however long the delay. Worth knowing if you assume the delay gates every outflow.</div>
+<div class="desc">On a 2-of-2 or 3-of-3 every quorum is already unanimous, so there is no higher bar to escalate to — the same signatures queue or execute, at the submitter's choice. The delay becomes the default route rather than a guarantee. Legitimate if that is what you want; the app flags it at create and asks for a second press in admin rather than refusing. Cancelling is unaffected.</div>
 
-<h2>FINDINGS &amp; RESPONSE</h2>
-<p>Shred Security raised four issues, no high or medium. The Opus 5 review raised two high and six medium, all configuration-dependent — four of which re-file tradeoffs already documented as accepted, and two of which we downgraded on the evidence. What follows is what changed here as a result.</p>
+<div class="sig">SIGNED MESSAGES ARE NOT SUBJECT TO THE DELAY</div>
+<div class="desc">A timelock constrains transactions, not message signing. Anything expressible as a signed order — Permit2, Seaport, intent systems — is authorised instantly with threshold signatures on any vault, however long the delay. Worth knowing if you assume the delay gates every outflow.</div>
 
-<div class="sig">L-1 &middot; SELF-REFERENTIAL EXECUTOR <span class="params">— low, mitigated</span></div>
-<div class="desc">A vault whose address carries the 0x1111 guard marker and whose executor is set to itself recurses through the guard hook on every execute() until it reverts — and setExecutor is only reachable through execute(), so there is no way back. This app refuses to raise that proposal, and flags an inbound one as SET EXECUTOR &middot; LOCKS VAULT with "do not sign". Executors carrying the marker are permitted but need a second confirming press. Salts mined here always produce a 0x00 address prefix, so a vault deployed from this app can never carry the marker at all.</div>
+<h2>SIGNING VS APPROVING</h2>
+<div class="sig">WHY BOTH EXIST</div>
+<div class="desc">Signing produces an off-chain signature: free, private, and it keeps the front-run protection described below. Approving registers authorisation in the vault itself: it costs gas and is publicly readable, but it is the only route a DAO or contract owner has — a contract cannot produce a signature — and the only route that needs no coordination service at all. A vault whose owners approve on-chain keeps working if this app, its database, or its operator disappear. That independence is the point, and it is why the option stays even though most signers should prefer signing.</div>
+<div class="sig">KEEPING BOTH PROPERTIES AT ONCE</div>
+<div class="desc">An on-chain approval is world-readable, so the slot it fills can be assembled by anyone — which gives up the binding that stops a collected bundle being replayed. The two are not in conflict: have every owner but one approve on-chain, and let the remaining owner submit without approving. Their slot stays sender-only, a copier is left one signature short, and no coordination service was needed to get there.</div>
+<div class="sig">APPROVALS EXPIRE WITH THE NONCE</div>
+<div class="desc">The approved hash commits to the vault's nonce and both execution routes compute against the live one, so an approval becomes permanently unreachable the moment the nonce advances past it. Stale approvals for consumed nonces are inert. Only ones made for a nonce the vault has not yet reached are worth revoking.</div>
 
-<div class="sig">L-2 &middot; UNRECOVERABLE DESTINATIONS <span class="params">— low, mitigated</span></div>
-<div class="desc">Both singleton constructors are payable and neither contract has a withdrawal path, so value sent to them is gone. Transfers, custom calls and batch legs that send value to the factory, the implementation, address(0) or the owner-list sentinel are refused outright; an inbound proposal doing the same is labelled UNRECOVERABLE. Value passed to create() is unaffected.</div>
+<h2>WHEN TIMING IS CRITICAL</h2>
+<div class="sig">WHY A PROPOSAL CAN BE FORCED INTO THE QUEUE</div>
+<div class="desc">Both execution routes accept the same signatures, so someone who sees your bundle before it lands can submit it down the queueing route instead — your proposal is queued rather than executed now, and the nonce is consumed. It is not blocked and not lost: it executes when the delay elapses, and the same trick cannot be repeated once the entry is queued. To recover, accelerate it. To avoid it, submit through a private RPC — the attack needs your bundle to be public first, and on Base, Arbitrum and OP there is no public mempool to read.</div>
+<div class="sig">THE TWO ROUTES THAT CANNOT BE FORCED</div>
+<div class="desc">Cancelling is protected: the bundle is exactly threshold slots, so binding one to the submitter leaves a copier one short. And for guaranteed emergency <em>action</em>, the fast path is the wrong tool — use a separate multisig as the executor instead.</div>
+<div class="sig">THE COUNCIL PATTERN</div>
+<div class="desc">Replay is possible because the TimelockExecutor authorises against the vault's own signing digest, so one set of signatures opens both routes. The executor bypass needs no signatures at all — the vault skips its checks for whatever address is set as executor. So an executor that authorises against its <em>own</em> digest leaves nothing that can be replayed against the vault. A second vault is exactly that: deploy one with the same owners, unanimous threshold and no timelock, and set it as your main vault's executor. Ordinary proposals still queue for the full delay, unanimity acts immediately, and those signatures can never be aimed at the main vault because they carry a different verifying contract.</div>
+<div class="desc">The tradeoff: the council's threshold governs both bypass <em>and</em> cancellation — one dial, not two. At unanimous, cancelling costs every owner rather than a quorum. The default TimelockExecutor charges only a quorum to cancel and is the better choice for most vaults; the council is there if you want the replay surface gone entirely.</div>
 
-<div class="sig">I-1 &middot; QUEUE ERRORS <span class="params">— informational, mitigated</span></div>
-<div class="desc">executeQueued reverts NotReady(eta) both when nothing is queued and when the timelock has not elapsed. The two cases are already distinguishable from the revert data — eta is 0 in one and a future timestamp in the other — so this app decodes them and reports them separately, rather than showing one undecoded revert for two unrelated problems.</div>
+<h2>WHAT THIS APP GUARDS</h2>
+<p>Every finding the reviews raised that a client can answer is answered here, at the point the transaction is built — so a proposal raised by other tooling is flagged the same way.</p>
 
-<div class="sig">I-2 &middot; DOMAIN SEPARATOR GAS <span class="params">— informational, accepted</span></div>
-<div class="desc">The EIP-712 domain separator is recomputed per call rather than cached, costing ~500–800 gas. Accepted as intended design: reading block.chainid live is what makes signatures fork-safe by construction, with no cached value that can go stale. Nothing for a client to mitigate.</div>
+<div class="sig">REPLAYED SIGNATURE BUNDLES <span class="params">— GPT-5.6 H-01, leftclaw M-2</span></div>
+<div class="desc">Every executor bundle spends one slot on a sender slot bound to whoever submits, so a copied bundle is inert on either route. Complete for cancellation. Partial for unanimous fast-path bundles on a k-of-n vault, where a threshold subset of the remaining signatures can still be extracted to queue the action — which delays rather than defeats it.</div>
 
-<div class="sig">M-1 &middot; CODELESS GUARD EXECUTOR <span class="params">— medium, mitigated</span></div>
-<div class="desc">The guard hook is a high-level call, so the compiler checks the target has code first. A 0x1111 address holding none — an EOA, or a guard planned but not yet deployed — reverts every execute() and executeQueued(), and every route back is onlySelf and so runs through the execute() that is already reverting. This app reads the chain before proposing such an executor and refuses one with no code.</div>
+<div class="sig">EXECUTORS THAT BRICK THE VAULT <span class="params">— Shred L-1, Opus M-1, leftclaw H-1</span></div>
+<div class="desc">A vault set as its own executor recurses through its guard hook until it runs out of gas, and the route back is only reachable through the call that is already failing. The same is true of any 0x1111-marked address holding no code, because the hook checks for code first. The app refuses a self-referential executor outright, and reads the chain before proposing a marked one.</div>
 
-<div class="sig">M-2 &middot; M-3 &middot; UNRECOVERABLE TIMELOCK STATES <span class="params">— medium, mitigated</span></div>
-<div class="desc">setDelay takes any uint32, up to ~136 years, and the proposal that would undo a bad one waits it out first. Removing the executor while a delay is set strands every queued proposal, since a cancel is queued too. Delays over 30 days need a second press and are refused outright on a vault with no executor; setExecutor(0) is refused while a delay is live.</div>
+<div class="sig">UNRECOVERABLE TIMELOCK STATES <span class="params">— Opus M-2, M-3</span></div>
+<div class="desc">The delay accepts any value up to ~136 years, and the proposal that would undo a bad one waits it out first. Removing the executor while a delay is set strands every queued proposal. Delays over 30 days need a second press and are refused outright on a vault with no executor; clearing the executor is refused while a delay is live.</div>
 
-<div class="sig">H-01 &middot; ROUTE-UNBOUND SIGNATURES <span class="params">— high, mitigated</span></div>
-<div class="desc">The most serious issue any review has raised here, and the only one that touches the cancel path — which needs no forwardEnabled, so it reached every vault with a timelock and this executor. Every executor bundle this app builds now spends one slot on a sender slot bound to the submitter, so a copied bundle is inert on either route. For a cancel the protection is complete: the bundle is exactly threshold slots, so binding one leaves a copier a signature short. For unanimous accelerate or instant execute on a k-of-n vault it is partial — an adversary can still extract a threshold subset from the remaining signatures to queue the action and burn the nonce, which delays rather than defeats it. Private submission is the remaining mitigation there.</div>
+<div class="sig">THRESHOLD OVERFLOW <span class="params">— leftclaw H-2</span></div>
+<div class="desc">The vault computes its required signature length in 16-bit arithmetic, so at a threshold of 1009 it wraps and no signature set can satisfy both the length check and the verification loop — owner-signed execution dies permanently while the executor path keeps working. Reachable only by deliberately configuring 1009+ owners; the app caps owners and thresholds at 1008.</div>
 
-<div class="sig">H-2 &middot; THRESHOLD OVERFLOW AT 1009 <span class="params">— mitigated</span></div>
-<div class="desc">execute() computes the required signature length in uint16 inside an unchecked block, so at a threshold of 1009 it wraps to 49 while the verification loop still reads 1009 slots — no signature set can satisfy both, and owner-signed execution is dead permanently. ERC-1271 and the executor path widen correctly and keep working, which is what would make an attacker-held executor unremovable. Reachable only by deliberately configuring 1009+ owners; this app caps owners and thresholds at 1008.</div>
+<div class="sig">UNRECOVERABLE DESTINATIONS <span class="params">— Shred L-2, GPT-5.6 L-04</span></div>
+<div class="desc">None of the three singletons has a withdrawal path, and the implementation is never initialised so it has no owners who could authorise one. Transfers, custom calls and batch legs that send value to the factory, the implementation, the TimelockExecutor, address(0) or the owner-list sentinel are refused outright.</div>
 
-<div class="sig">L-04 &middot; EXECUTOR AS A DEAD END <span class="params">— low, mitigated</span></div>
-<div class="desc">The TimelockExecutor has no withdrawal path either. Plain ETH bounces since it has no receive function, but tokens sent to it are stuck forever. It is now refused as a destination alongside the factory and the implementation.</div>
-
-<div class="sig">L-2b &middot; SILENT SELF-CALL NO-OPS <span class="params">— low, mitigated</span></div>
-<div class="desc">The vault's fallback returns success for selectors it has no function for, so a mistyped governance self-call emits ExecutionSuccess, burns the nonce and changes nothing — monitoring agrees it worked. A proposal carrying a self-call the vault cannot answer is flagged SELF-CALL &middot; SILENT NO-OP.</div>
+<div class="sig">FAILURES THAT LOOK LIKE SUCCESSES <span class="params">— Shred I-1, Opus L-2</span></div>
+<div class="desc">The vault reverts with one error for both "nothing is queued" and "the timelock has not elapsed"; the app decodes the eta and reports them separately. And its fallback returns success for selectors it has no function for, so a mistyped governance self-call would burn a nonce, emit a success event and change nothing — proposals carrying one are flagged before you sign.</div>
 
 <h2>ACCEPTED, NOT FIXED</h2>
-<p>Recorded so they are not surprises. Each is documented design rather than an oversight:</p>
+<p>Recorded so they are not surprises. Each is documented design rather than an oversight.</p>
 <div class="sig">THE EXECUTOR IS A FULL KEY</div>
-<div class="desc">It bypasses both signatures and the delay by design. A guard is installed <em>as</em> the executor, so installing one grants full custody — unlike Safe, where a Guard can only block. Treat any guard address as a co-owner and hold it to the same standard as the vault itself.</div>
+<div class="desc">It bypasses both signatures and the delay by design. A guard is installed <em>as</em> the executor, so installing one grants full custody — unlike Safe, where a Guard can only block. Treat any executor address as a co-owner and hold it to the same standard as the vault.</div>
 <div class="sig">STALE APPROVALS SURVIVE REMOVAL</div>
 <div class="desc">On-chain approvals are keyed by address and never cleared, so removing an owner neutralises their approvals but re-adding the same address restores them. An address removed because it was compromised must never be re-added, even after rotating the key.</div>
+<div class="sig">QUEUED PROPOSALS OUTLIVE CONFIGURATION CHANGES</div>
+<div class="desc">Execution re-checks nothing but the hash and the elapsed time — not the owner set, the threshold, or the executor — and queued entries never expire. Review and clear the queue before rotating owners, changing the threshold or the executor, or making a large deposit.</div>
 <div class="sig">EIP-7702 CONFIGURATION IS EFFECTIVELY PERMANENT</div>
-<div class="desc">Storage survives revoking the delegation and init() cannot be re-run, so a 7702 delegation to this implementation cannot be cleanly reconfigured afterwards. The EOA key also remains a superuser throughout.</div>
+<div class="desc">Storage survives revoking the delegation and initialisation cannot be re-run, so a 7702 delegation to this implementation cannot be cleanly reconfigured afterwards. The EOA key also remains a superuser throughout.</div>
 <div class="sig">ZERO-PREFIX SALTS ARE NOT FRONT-RUN PROTECTED</div>
 <div class="desc">The factory accepts a salt starting with either the zero address or the caller's. Only the caller-bound form protects a counterfactual address from being claimed first. This app mines sender-bound salts exclusively — there is no code path here that produces the open form.</div>
 
-<h2>DEPLOY &amp; LOAD VERIFICATION</h2>
-<p>The audit's deployment checklist asked for the audited build to be confirmed on-chain rather than assumed. It now is:</p>
-<div class="sig">PREFLIGHT</div>
-<div class="desc">Before deploying, the factory on every target chain is asked for its implementation() and must name the audited one. Code being present at the factory address proved nothing on its own.</div>
-<div class="sig">POST-DEPLOY</div>
-<div class="desc">A mined receipt is not a deployment — on a chain without the factory, create() is a plain transfer that mines with status 1. The vault's runtime bytecode is read back and compared against the audited 45-byte clone, and its owners, threshold, delay and executor are matched against what was requested. A chain that will not answer reads DEPLOYED &middot; UNVERIFIED rather than counting as verified.</div>
+<h2>VERIFYING A DEPLOYMENT</h2>
+<p>The reviews asked for the audited build to be confirmed on-chain rather than assumed. It now is, on every deploy and every load.</p>
+<div class="sig">BEFORE DEPLOYING</div>
+<div class="desc">The factory on every target chain is asked for its implementation address and must name the audited one. Code being present at the factory address proved nothing on its own.</div>
+<div class="sig">AFTER DEPLOYING</div>
+<div class="desc">A mined receipt is not a deployment — on a chain without the factory, the call is a plain transfer that mines successfully. The vault's runtime bytecode is read back and compared against the audited clone, and its owners, threshold, delay and executor are matched against what was requested. A chain that will not answer reads DEPLOYED &middot; UNVERIFIED rather than counting as verified.</div>
 <div class="sig">ON EVERY LOAD</div>
 <div class="desc">The same bytecode check runs each time a vault is loaded, and anything that is not the audited build is badged UNVERIFIED CODE. A vault can arrive from a pasted address, where answering threshold() and getOwners() proves only that something implements the shape.</div>
 `,
@@ -444,6 +454,7 @@ INTERFACE:`
 <p>Vault selector tabs across the top with inline status dots — green (pulsing) for executable transactions, yellow for transactions needing your signature. Primary holding displayed large, secondary tokens inline below. Vaults with no balances show a clean empty state. Metadata line shows threshold ratio, timelock duration (or UNLOCKED in yellow for delay=0), chain, and FAST PATH indicator when enabled.</p>
 <p>An action counter above the tabs summarizes pending items across all vaults: signatures needed, ready to execute, ready to submit.</p>
 <p>With no vaults loaded, the empty state offers CREATE VAULT or loading any existing vault by address or <code>.eth</code> / <code>.wei</code> / <code>.gwei</code> name. Owner addresses reverse-resolve the same way — WNS (<code>.wei</code>) first, GNS (<code>.gwei</code>) as fallback, then ENS.</p>
+<p><strong>A DELEGATED EOA LOADS LIKE ANY VAULT</strong> — an EOA delegated to the implementation under EIP-7702 answers the same ABI, so it loads by address and drives from the same screens: proposals, signing, the timelock, admin. It is badged <strong>EIP-7702</strong> rather than counted as a clone, because the code read back is <code>0xef0100</code> followed by the implementation address instead of the 45-byte clone, and because the key behind it can revoke the delegation at any time — the badge is there so a co-signer reads that before signing, not after. The delegation itself is a SET_CODE_TX signed by the account: make it from a wallet that supports EIP-7702 authorisations, then load the address here. This app operates a delegated account; it does not create the delegation.</p>
 
 <h2>SIGNING</h2>
 <p>Two paths: <strong>SIGN</strong> (off-chain EIP-712, free, filled button) or <strong>APPROVE</strong> (on-chain approve() call, costs gas, outline button). Both count toward threshold. <strong>UNSIGN</strong> (outline) withdraws your approval — calls approve(hash, false). Visual hierarchy: filled = primary action, outline = secondary or already completed.</p>
@@ -465,8 +476,9 @@ UNLOCKED (delay = 0)
 <p>The fast path appears when all owners have signed AND enableForward is active — offering both INSTANT EXECUTE and QUEUE WITH TIMELOCK as options. Unlocked vaults (delay=0) skip the queue entirely.</p>
 
 <h2>TX BUILDER</h2>
-<p>Three modes:</p>
+<p>Modes:</p>
 <p><strong>TRANSFER</strong> — Token selector shows chain-specific tokens with correct decimal handling: ETH (18), USDC/USDT (6), WBTC/cbBTC (8), DAI/wstETH (18). Amount input shows live conversion to raw token units below the field. For ERC-20s, a note clarifies the on-chain encoding: transfer(recipient, amount) on the token contract.</p>
+<p><strong>NAME</strong> — Ethereum mainnet only. Claims a free <code>&lt;label&gt;.id.wei</code> subdomain for the vault and points reverse resolution at it. Two calls: <code>register(namehash('id.wei'), label)</code> on the id.wei registrar, which mints the name to the caller and so makes the name resolve <em>to</em> the vault, and <code>setPrimaryName(id)</code> on WNS, which makes the vault answer <em>with</em> the name — the direction wallets and explorers read. Both are made by the vault, so the name is an NFT the vault itself holds and only a proposal reaching quorum can move it; holding it grants nobody any power over the vault. Where both calls are needed they are wrapped in the vault's own <code>batch()</code> so the mint and the reverse record either both land or neither does — a vault that minted a name and then failed to point at it would need a second proposal to finish a job that reads as done. Availability is checked by static-calling the exact <code>register()</code> that will run, asked <em>as the vault</em>: the registrar uses <code>_safeMint</code>, so that probe also answers whether this vault's code can receive the name at all. A name the vault already holds drops the proposal to <code>setPrimaryName</code> alone, since a second <code>register()</code> would revert and consume the nonce doing it. The interface will only claim labels of Latin letters, digits, hyphen and underscore, which is narrower than the registrar allows — the registrar accepts zero-width and non-breaking spaces and mixed scripts, and a name whose whole purpose is to be read before signing must not be able to look like another name.</p>
 <p><strong>CUSTOM</strong> — Raw target address, ETH value (with live wei conversion preview), and calldata textarea. For arbitrary contract interactions.</p>
 <p><strong>BATCH</strong> — Multiple calls with target, value (ETH with wei preview), and calldata. Add/remove calls dynamically. Encodes as a single multisig transaction via batch() — onlySelf, so the multisig calls itself.</p>
 
@@ -477,7 +489,12 @@ UNLOCKED (delay = 0)
 <p><strong>HISTORY</strong> — Executed transaction log with nonce, action type, details, and time.</p>
 
 <h2>CREATE</h2>
-<p>Deploy a new vault via MultisigFactory. Add owner addresses in any order — the app auto-sorts them ascending before submission (contract requirement). Minimum 1 owner. Threshold selector auto-clamps to owner count. Delay in hours — setting 0 shows UNLOCKED warning and hides the fast path toggle.</p>
+<p>Deploy a new vault via MultisigFactory. Add owner addresses in any order — the app auto-sorts them ascending before submission (contract requirement), carrying each label with its address so labels cannot end up filed against the wrong signer. Minimum 1 owner. Threshold selector auto-clamps to owner count. Delay in hours — setting 0 shows UNLOCKED warning and hides the fast path toggle.</p>
+<p><strong>OWNER NAMES RESOLVE IN THE FORM</strong> — an owner may be given as <code>.eth</code> / <code>.wei</code> / <code>.gwei</code> instead of an address, and the row then shows the address it resolves to, truncated and linked to the explorer of the chain being deployed to. The owner set is the one part of a vault that cannot be corrected afterwards without a full multisig round of the vault itself, so it is not signed for while any of it is still an unresolved string: DEPLOY stays disabled while a lookup is in flight, and refuses a name that does not resolve, resolves to <code>0x0</code>/<code>0x1</code> (the owner list's sentinels), or lands on an address another row already holds. That last check is why resolution happens here rather than at submission — two names, or a name and the address it points at, are the same owner, and <code>init()</code> reverts on a repeat after the salt has been mined and the gas paid. What the form resolved is what gets deployed: if a name repoints between being reviewed and being signed for, the deploy stops instead of installing a signer nobody saw.</p>
+<p><strong>ONE VAULT, MANY CHAINS</strong> — CLONE TO OTHER CHAINS deploys the same vault to the same address on every chain picked. The address is a CREATE2 address mined from the factory, the deployer and a salt, all of which are chain-independent, so the candidate is checked for existing code on <em>every</em> selected chain before it is accepted: an address that is free here but taken on a clone target would otherwise hand back a stranger's vault as though the clone had succeeded. Mixing mainnets and testnets in one go is allowed and flagged.</p>
+<p><strong>REVIEW BEFORE ANY SIGNATURE</strong> — DEPLOY runs a read-only preflight, not a transaction: per chain, is the factory there, does the factory name the audited implementation, does the connected wallet hold gas, and — with instant execution on — is the TimelockExecutor there. A chain that will not answer is reported as unchecked rather than ready. The mined vault address is shown alongside, so the address funds will be sent to can be read before anything is signed. Every deploy stops on this screen, clean preflights included: it lists each owner at its resolved address, the signature threshold, the timelock, whether instant execution is on and what that grants, and which factory call will be made. Deploys then run one chain at a time, each needing a network switch and a signature. CANCEL returns to the form with it intact; nothing is signed until PROCEED.</p>
+<p><strong>DEPLOYS ARE READ BACK, NOT ASSUMED</strong> — a mined receipt is not a deployment. A <code>create()</code> sent to a chain without the factory is a plain transfer to a codeless address: it succeeds, emits no <code>Created</code> event, and deploys nothing. So each chain is re-read after its transaction — code present, code is the audited build, and the live vault reports the owners, threshold, delay and executor that were ordered. A chain that deploys but cannot be read back is labelled UNVERIFIED rather than borrowing the word the checked ones earned, and a chain that fails can be retried on its own without redoing the ones that landed.</p>
+<p><strong>A FREE ON-CHAIN NAME, IF THE VAULT IS NAMED</strong> — typing a vault name folds it into a candidate <code>.id.wei</code> label and offers to claim it, free, in the same transaction that deploys the vault. It is a checkbox and stays one: it costs nothing, grants nobody anything, and can be done later from the NAME tab instead. Availability is read live from the registrar, again in the deploy preflight, and once more immediately before the wallet prompt — a register that reverts takes the whole <code>createWithCalls()</code> down with it, and the vault, the mined salt and the gas are not worth losing for an option. If the name is gone by then, or mainnet will not confirm it is free, the name is dropped and the vault deploys without it, reported on the chain it was asked for rather than left silent. After the transaction lands the claim is read back off WNS instead of inferred from the receipt. WNS is a mainnet contract, so ticking the box adds Ethereum to the deploy if it was not already selected — stated on the line before the tick, and shown by Ethereum appearing ticked in the network panel, where unticking it cancels the claim. Clones on other chains share the vault's address, not its name.</p>
 <p><strong>CLONE A SAFE</strong> — the Safe mark beside OWNERS opens a one-field migration tool: give it a Gnosis Safe by address or <code>.eth</code> / <code>.wei</code> / <code>.gwei</code> name and it copies that Safe's owners and threshold into the form, labelling each signer with whatever name it reverse-resolves to. Read-only — it calls <code>getOwners()</code> and <code>getThreshold()</code>, touches nothing on the Safe, and moves no funds; the new vault is a fresh deployment, so assets are transferred afterwards. Timelock, instant execution and chain selections stay whatever you set. The Safe is read on the network the form is deploying to; if it is not there, the tool reports which supported chains it did find it on, and loading one of those switches the deploy to that chain. A banner records the source Safe and undoes the clone in one click.</p>
 <p>When delay > 0, an INSTANT EXECUTION toggle enables the fast path at deploy time. If enabled, deployment uses <code>createWithCalls()</code> to call enableForward(true) on the TimelockExecutor as a post-init step with the factory as temporary executor. Network selector shows supported chains with chain IDs and token lists.</p>
 `
