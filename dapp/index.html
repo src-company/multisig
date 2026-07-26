@@ -46,6 +46,11 @@ button:focus-visible,a:focus-visible,[tabindex]:focus-visible{outline:2px solid 
 button:focus:not(:focus-visible){outline:none}
 button{cursor:pointer}
 button:active{transform:scale(.97)}
+/* Text for assistive tech only. Used where meaning is carried by a glyph or a
+   colour — a ✓ against an owner's name is unambiguous to look at and silent to
+   a screen reader. Not display:none, which would take it out of the a11y tree
+   as well. */
+.vh{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}
 ::placeholder{color:var(--d)}
 ::selection{background:var(--a);color:var(--bg)}
 ::-moz-selection{background:var(--a);color:var(--bg)}
@@ -57,21 +62,34 @@ button:active{transform:scale(.97)}
 .tx-linked{animation:txLinked 2s ease}
 .tx-focus{box-shadow:inset 2px 0 0 var(--a);background:color-mix(in srgb,var(--a) 5%,transparent)}
 .tx-share{display:inline-flex;align-items:center;gap:8px;font-size:8px;font-weight:700;letter-spacing:1px;color:var(--a);border:1px solid var(--a);padding:3px 4px 3px 8px;text-transform:uppercase}
-.tx-share button{background:none;border:none;color:var(--a);cursor:pointer;font-size:11px;line-height:1;padding:0 2px;opacity:.6}
+.tx-share button{background:none;border:none;color:var(--a);cursor:pointer;font-size:11px;line-height:1;padding:0 2px;opacity:.8}
 .tx-share button:hover{opacity:1}
-/* Quiet peer of .reject-link for a non-destructive fallback action. On-chain
-   approval is a real capability — the only route a DAO or nested multisig has,
-   and the one that needs no coordination service at all — but for an ordinary
-   signer it costs gas, publishes the authorization, and gives up the
-   front-run binding. Offered, not recommended. */
-.alt-link{background:transparent;border:1px solid var(--ln);color:var(--d);font-size:9px;font-weight:700;letter-spacing:2px;padding:6px 12px;cursor:pointer;font-family:var(--f);text-transform:uppercase;transition:border-color .15s,color .15s}
-.alt-link:hover{border-color:var(--a);color:var(--a)}
-.reject-link{background:transparent;border:1px solid var(--ln);color:var(--d);font-size:9px;font-weight:700;letter-spacing:2px;padding:6px 12px;cursor:pointer;font-family:var(--f);text-transform:uppercase;transition:border-color .15s,color .15s}
+/* Tertiary action — one shape, three intents. All three were byte-identical
+   rules that only ever differed in the colour they resolve to on hover, so the
+   shape is declared once and each variant states just its intent:
+     .sim-btn    diagnostic, neutral
+     .alt-link   a non-destructive fallback. On-chain approval is a real
+                 capability — the only route a DAO or nested multisig has, and
+                 the one that needs no coordination service at all — but for an
+                 ordinary signer it costs gas, publishes the authorization, and
+                 gives up the front-run binding. Offered, not recommended.
+     .reject-link destructive, and arms before it fires. */
+.alt-link,.reject-link,.sim-btn{background:transparent;border:1px solid var(--ln);color:var(--d);font-size:9px;font-weight:700;letter-spacing:2px;padding:6px 12px;cursor:pointer;font-family:var(--f);text-transform:uppercase;transition:border-color .15s,color .15s}
+.alt-link:hover,.sim-btn:hover{border-color:var(--a);color:var(--a)}
 .reject-link:hover{border-color:var(--r);color:var(--r)}
 .reject-link.armed{border-color:var(--r);color:var(--r);background:color-mix(in srgb,var(--r) 8%,transparent)}
-.sim-btn{background:transparent;border:1px solid var(--ln);color:var(--d);font-size:9px;font-weight:700;letter-spacing:2px;padding:6px 12px;cursor:pointer;font-family:var(--f);text-transform:uppercase;transition:border-color .15s,color .15s}
-.sim-btn:hover{border-color:var(--a);color:var(--a)}
-.copy-btn{opacity:.4;transition:opacity .15s}
+/* Peer of the above for undoing your own signature: destructive tone, no box.
+   It carried opacity:.5 inline, which put --r at Lc 17 on the blue — a
+   destructive control you could barely read. --r at full strength is Lc 45. */
+.unsign-link{background:transparent;border:none;color:var(--r);font-size:9px;font-weight:700;letter-spacing:2px;padding:6px 0;cursor:pointer;font-family:var(--f);text-transform:uppercase;transition:opacity .15s}
+@media(hover:hover){.unsign-link:hover{opacity:.75}}
+/* Qualifier inside a filled button ("OFF-CHAIN", "VIA EXECUTOR"): subordinate
+   to the verb, but it is the half of the label that says which route this is,
+   so it stops short of the .5 that had it at Lc 41 on the fill. */
+.btn-qual{opacity:.72;font-size:9px;margin-left:4px;font-weight:700}
+/* Opacity .4 put the glyph at Lc 20 on the blue — an interactive mark under
+   APCA's Lc 30 non-text floor. .65 lands at Lc 37 and still recedes. */
+.copy-btn{opacity:.65;transition:opacity .15s}
 @media(hover:hover){.copy-btn:hover{opacity:1}}
 @media(hover:hover){
   button:hover{opacity:.85}
@@ -112,8 +130,12 @@ button:active{transform:scale(.97)}
 .hdr{display:flex;justify-content:space-between;align-items:center;padding:22px 0 16px}
 .logo{font-size:36px;font-weight:700;letter-spacing:-1px;line-height:1}
 .sub{font-size:10px;letter-spacing:13px;color:var(--m);margin-top:2px;opacity:.5;user-select:none}
-.info-i{font-size:10px;font-weight:400;width:20px;height:20px;border-radius:50%;border:1px solid var(--a);color:var(--a);display:inline-flex;align-items:center;justify-content:center;letter-spacing:0;opacity:.35;transition:opacity .2s;cursor:pointer;vertical-align:middle;margin-left:2px}
-@media(hover:hover){.info-i:hover{opacity:.8}}
+/* The "?" beside the wordmark is a real control, so it is a real button and it
+   clears the text floor: at the old opacity .35 its glyph sat at Lc 21 on the
+   blue, well under the Lc 45 the ink ladder above commits to. .7 puts it at
+   Lc 49 and still reads as quieter than the wordmark it hangs off. */
+.info-i{font-size:10px;font-weight:400;width:20px;height:20px;border-radius:50%;border:1px solid var(--a);background:transparent;padding:0;font-family:var(--f);color:var(--a);display:inline-flex;align-items:center;justify-content:center;letter-spacing:0;opacity:.7;transition:opacity .2s;cursor:pointer;vertical-align:middle;margin-left:2px;flex-shrink:0}
+@media(hover:hover){.info-i:hover{opacity:1}}
 .info-tip{display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:min(400px,88vw);max-height:85vh;max-height:85dvh;overflow-y:auto;padding:24px;background:var(--a);color:var(--bg);font-size:13px;line-height:1.9;letter-spacing:.3px;z-index:300;text-transform:none;font-weight:500}
 .info-tip.open{display:block}
 .info-tip .x{position:absolute;top:12px;right:12px;background:transparent;border:none;color:var(--bg);font-size:14px;cursor:pointer;opacity:.6;padding:4px 8px}
@@ -166,7 +188,7 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 .vtab.on{color:var(--a)}
 .vtab-name{font-size:14px;font-weight:700;display:flex;align-items:center;gap:6px}
 .vtab-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;animation:pulse 2s infinite}
-.vtab-info{font-size:10px;opacity:.7;margin-top:3px}
+.vtab-info{font-size:10px;opacity:.85;margin-top:3px}
 
 /* stats */
 .stats{padding:36px 0 8px}
@@ -221,15 +243,24 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
 
 /* queue */
 .tx{padding:18px 8px;border-bottom:1px solid var(--ln);transition:opacity .3s,background .15s}
-.tx.blocked{opacity:.3}
+/* A blocked proposal is waiting on the nonce ahead of it, not cancelled — the
+   whole card (target, amount, who has signed) is still the thing a signer reads
+   to decide whether to unblock it. opacity .3 put that text at Lc 17, so the
+   fog was doing the signalling AND destroying the content. .72 keeps the row
+   plainly recessive at Lc 51, and the state itself is carried by the same
+   bordered status pill every other card uses. */
+.tx.blocked{opacity:.72}
 .tx-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:10px}
 .tx-nonce{font-size:10px;font-weight:700;color:var(--d)}
 .tx-val{font-size:20px;font-weight:700}
 .tx-to{font-size:11px;color:var(--m);margin-top:3px;word-break:break-all}
-.tx-status{font-size:10px;font-weight:700;letter-spacing:2px}
-.approvals{display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:10px;letter-spacing:1px}
-.ap-ok{color:var(--g);font-weight:600}
-.ap-no{color:var(--d);font-weight:600}
+/* State pill in the card header. Outlined in whatever colour the state resolves
+   to, so it reads as status rather than as a third button. */
+.tx-status{font-size:10px;font-weight:700;letter-spacing:2px;border:1px solid currentColor;padding:4px 9px;white-space:nowrap}
+.approvals{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:10px;letter-spacing:1px}
+.ap-ok,.ap-no{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border:1px solid var(--ln);letter-spacing:1px;font-weight:600}
+.ap-ok{color:var(--g);border-color:color-mix(in srgb,var(--g) 40%,transparent);background:color-mix(in srgb,var(--g) 8%,transparent)}
+.ap-no{color:var(--d)}
 .eta{color:var(--d);margin-left:auto;font-size:10px}
 .tx-progress{display:flex;align-items:center;gap:10px;margin:14px 0 12px;font-size:9px;font-weight:700;letter-spacing:2px;color:var(--d)}
 .tx-progress>.plabel{min-width:78px}
@@ -251,6 +282,18 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
 .txb-tab.on{color:var(--a)}
 .x-btn{background:transparent;border:none;color:var(--d);font-size:14px;padding:8px;min-width:40px;min-height:40px;display:flex;align-items:center;justify-content:center;margin-left:auto}
 .x-btn.red{color:var(--r)}
+/* Inline glyph button (copy, share, dismiss) that sits inside a line of text:
+   it must not disturb the line box, so the visual box stays tiny and the TOUCH
+   box is grown with a transparent ::after instead of with padding. Without it
+   these were ~14px targets on a phone while every other control in the app is
+   held to 44px. Declared AFTER .x-btn, which it pairs with and must override —
+   equal specificity, so source order is the whole argument.
+   margin-left is reset because .x-btn floats right (for the tab-row ✕) and the
+   copy glyphs were inheriting that: as a flex child beside a signer's address
+   they were shoving themselves, and the name after them, to the far edge of the
+   row. A copy affordance belongs against the thing it copies. */
+.icon-btn{position:relative;display:inline-flex;align-items:center;justify-content:center;min-width:auto;min-height:auto;padding:2px 5px;font-size:9px;line-height:1;vertical-align:middle;margin-left:0}
+.icon-btn::after{content:"";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:44px;height:44px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:32px}
 .grid3{display:grid;grid-template-columns:1fr 1fr 2fr;gap:16px}
 .tok-ico{display:inline-flex;align-items:center;vertical-align:middle;line-height:0}
@@ -289,11 +332,15 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
 .empty-title{font-size:44px;font-weight:700;letter-spacing:-2px}
 .empty-sub{font-size:12px;color:var(--m);letter-spacing:2px;margin:12px 0 32px}
 
-/* network selector */
-.net-row{padding:12px 8px;font-size:12px;font-weight:700;letter-spacing:2px;border-bottom:1px solid var(--ln);color:var(--d);cursor:pointer;display:flex;align-items:center;gap:8px;transition:background .15s,color .15s,transform .15s,box-shadow .15s}
+/* network selector — a real <button> per row, so the chain picker is reachable
+   by keyboard and announces as a control. Row chrome unchanged. */
+.net-row{width:100%;text-align:left;background:transparent;border:none;font-family:var(--f);padding:12px 8px;font-size:12px;font-weight:700;letter-spacing:2px;border-bottom:1px solid var(--ln);color:var(--d);cursor:pointer;display:flex;align-items:center;gap:8px;transition:background .15s,color .15s,transform .15s,box-shadow .15s}
 .net-row.on{color:var(--a);border-bottom:none}
-.net-id{font-size:9px;opacity:.4}
-.net-test{font-size:8px;opacity:.5}
+/* Both of these are read, not decoration — the chain id is how you tell two
+   deployments apart and TEST is the difference between play money and real.
+   At .4/.5 they sat at Lc 20/25 on the blue. */
+.net-id{font-size:9px;opacity:.65}
+.net-test{font-size:8px;opacity:.7}
 .net-panel{border-left:2px solid var(--a);background:color-mix(in srgb,var(--a) 4%,transparent);padding:2px 16px}
 .net-panel .net-row:last-child,.net-panel .net-tokens:last-child{border-bottom:none}
 .net-tokens{padding:8px 0 12px 16px;border-bottom:1px solid var(--ln);font-size:10px;color:var(--d);display:flex;gap:10px;flex-wrap:wrap}
@@ -376,9 +423,8 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
   .row{padding:14px 6px}
   .sep{margin:24px 0}
   .grid2,.grid3{grid-template-columns:1fr;gap:0}
-  .txb{padding:16px 12px}
-  .txb-tabs{gap:12px}
   .txb{padding:20px 6px}
+  .txb-tabs{gap:12px}
   .token-pills{margin-bottom:12px}
   .pill{height:38px;padding:0 12px}
   .approvals{gap:6px}
@@ -412,6 +458,29 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
   .empty-title{font-size:24px}
   .nav button{font-size:10px;padding:12px 0}
 }
+/* ── OVERLAY LAYER ─────────────────────────────────────────────────
+   Every modal in the app is the same object and now says so. Previously each
+   one carried its own inline geometry and they had drifted apart: scrims at
+   .4/.5/.55, two different centring techniques, and caps of 80vh / 85vh /
+   90dvh / 92dvh — the two written in vh could be clipped by a mobile browser's
+   collapsing toolbar, hiding the footer that holds PROCEED.
+   One scrim, one cap in dvh, one scroll container. Width is the only knob a
+   caller turns, via --ow. Scrolling lives on .ovl as well as the card so a card
+   taller than the viewport can still be reached on a short screen. */
+.ovl{position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.ovl-card{width:min(var(--ow,440px),96vw);margin:auto;max-height:calc(100vh - 32px);max-height:calc(100dvh - 32px);overflow-y:auto;background:var(--bg);border:1px solid var(--a);padding:22px}
+.ovl-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:4px}
+.ovl-title{font-size:12px;font-weight:700;letter-spacing:2px}
+.ovl-sub{font-size:10px;color:var(--m);letter-spacing:1px;margin-bottom:16px;word-break:break-all}
+/* While a modal owns the screen the page behind it must not scroll under the
+   thumb. wallet.css declares the same rule for its own modal; stated here too
+   so the app's overlays do not depend on a stylesheet they don't own. */
+body.modal-open{overflow:hidden}
+@media(max-width:640px){
+  .ovl{padding:8px}
+  .ovl-card{padding:18px;max-height:calc(100vh - 16px);max-height:calc(100dvh - 16px)}
+}
+
 /* loading overlay */
 .loading-overlay{position:fixed;inset:0;z-index:500;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:18px;transition:opacity .35s ease}
 .loading-overlay.dark-bg{background:#2D5FE8}
@@ -562,10 +631,6 @@ input.amt-in:focus{outline:none;box-shadow:none!important;border-bottom-color:tr
 .tx-val.danger{color:var(--r)}
 .tx-note{font-size:10px;letter-spacing:1px;line-height:1.65;color:var(--d);margin-top:8px;max-width:76ch}
 .tx-note.warn{color:var(--y);border-left:2px solid var(--y);background:color-mix(in srgb,var(--y) 6%,transparent);padding:7px 10px;margin-top:10px}
-.tx-status{border:1px solid currentColor;padding:4px 9px;white-space:nowrap}
-.approvals{gap:6px}
-.ap-ok,.ap-no{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border:1px solid var(--ln);letter-spacing:1px}
-.ap-ok{color:var(--g);border-color:color-mix(in srgb,var(--g) 40%,transparent);background:color-mix(in srgb,var(--g) 8%,transparent)}
 
 @media(max-width:900px){
   .send-grid{grid-template-columns:minmax(0,1fr) 264px;gap:26px}
@@ -596,8 +661,15 @@ input.amt-in:focus{outline:none;box-shadow:none!important;border-bottom-color:tr
 </style>
 </head>
 <body>
-<div class="scan"></div>
-<div id="loading" class="loading-overlay"></div>
+<div class="scan" aria-hidden="true"></div>
+<div id="loading" class="loading-overlay" role="status" aria-label="Loading"></div>
+<noscript>
+  <div style="max-width:520px;margin:64px auto;padding:0 20px;font-family:'IBM Plex Mono','Courier New',monospace;color:#F5FBFF;font-size:13px;line-height:1.9;letter-spacing:.3px">
+    <div style="font-size:28px;font-weight:700;letter-spacing:-1px">MULTISIG</div>
+    <p style="margin-top:16px">This wallet reads chain state and signs EIP-712 messages in your browser, so it needs JavaScript enabled. Nothing is rendered server-side.</p>
+    <p style="margin-top:12px">The contracts do not depend on this interface: a vault can be operated with any tool that can call <code>execute</code>. See <a href="docs.html" style="color:#F5FBFF">the docs</a>.</p>
+  </div>
+</noscript>
 <script>
 (function(){
   var d=!localStorage.getItem('ms_light');
@@ -612,8 +684,11 @@ input.amt-in:focus{outline:none;box-shadow:none!important;border-bottom-color:tr
 </script>
 <div id="app"></div>
 <div id="info-backdrop" class="info-backdrop" onclick="toggleInfo()"></div>
-<div id="info-modal" class="info-tip"><button class="x" onclick="toggleInfo()">&#10005;</button>Multichain multisig with an embedded timelock. Protects against everyday mistakes by adding a delay before execution. Defends protocols and their users from malicious upgrades and migrations. More peace of mind than a regular multisig.</div>
-<div id="toast-el" class="toast" style="display:none"></div>
+<div id="info-modal" class="info-tip" role="dialog" aria-modal="true" aria-label="What this is"><button class="x" onclick="toggleInfo()" aria-label="Close">&#10005;</button>Multichain multisig with an embedded timelock. Protects against everyday mistakes by adding a delay before execution. Defends protocols and their users from malicious upgrades and migrations. More peace of mind than a regular multisig.</div>
+<!-- Confirmations and failures are announced here, not just shown: every flash()
+     lands in one polite live region, so a screen reader hears "ADDRESS COPIED"
+     or "SWITCH WALLET TO BASE" the same moment a sighted user reads it. -->
+<div id="toast-el" class="toast" role="status" aria-live="polite" aria-atomic="true" style="display:none"></div>
 
 <script src="./ethers.min.js"></script>
 <script src="./wallet.js"></script>
@@ -967,15 +1042,27 @@ function isStakeCall(target, callData){
 }
 // stETH per wstETH, 1e18-scaled. Cached per page load: it drifts with rewards,
 // far slower than anything the user does inside one visit to the builder.
-let _stEthPerToken = null;
+// The in-flight promise is held as well as the result: renderTxBuilder kicks
+// this off whenever the STAKE tab paints with no rate yet, and that is every
+// render — a poll tick, a keystroke echo, an overlay opening. Without the
+// guard, one slow (or failing) read became a new RPC call per frame.
+let _stEthPerToken = null, _stakeRatePromise = null, _stakeRateRetryAt = 0;
 async function loadStakeRate(){
   if(!stakeAvailable() || _stEthPerToken != null) return _stEthPerToken;
-  try {
-    const c = new ethers.Contract(WSTETH_ADDRESS, WSTETH_ABI, provider);
-    _stEthPerToken = BigInt(await c.stEthPerToken());
-    render();
-  } catch(_) {}
-  return _stEthPerToken;
+  if(_stakeRatePromise) return _stakeRatePromise;
+  if(Date.now() < _stakeRateRetryAt) return null;   // a read just failed — back off
+  _stakeRatePromise = (async () => {
+    try {
+      const c = new ethers.Contract(WSTETH_ADDRESS, WSTETH_ABI, provider);
+      _stEthPerToken = BigInt(await c.stEthPerToken());
+      render();
+    } catch(_) {
+      // Leave the rate null so a later visit retries — just not every frame.
+      _stakeRateRetryAt = Date.now() + 15000;
+    } finally { _stakeRatePromise = null; }
+    return _stEthPerToken;
+  })();
+  return _stakeRatePromise;
 }
 // wstETH minted for an ETH amount at the current rate. Lido's submit() is 1:1
 // ETH→stETH, so the wrap rate is the only conversion. An estimate by nature —
@@ -1006,6 +1093,39 @@ const SLOW_ABI = [
   'function pendingTransfers(uint256) view returns (uint96 timestamp, address from, address to, uint256 id, uint256 amount)',
 ];
 const slowIface = new ethers.Interface(SLOW_ABI);
+
+// ── SELECTORS ─────────────────────────────────────────────────────
+// Every 4-byte selector this interface compares against, resolved once at load.
+// They were being recomputed through iface.getFunction(name).selector on each
+// comparison, which put a dozen ABI lookups inside txKind() — a function the
+// dashboard runs for every queued proposal on every render.
+const SEL = {
+  transfer:      erc20Iface.getFunction('transfer').selector,
+  approve:       erc20Iface.getFunction('approve').selector,
+  addOwner:      msIface.getFunction('addOwner').selector,
+  removeOwner:   msIface.getFunction('removeOwner').selector,
+  setThreshold:  msIface.getFunction('setThreshold').selector,
+  setDelay:      msIface.getFunction('setDelay').selector,
+  setExecutor:   msIface.getFunction('setExecutor').selector,
+  cancelQueued:  msIface.getFunction('cancelQueued').selector,
+  executeQueued: msIface.getFunction('executeQueued').selector,
+  batch:         msIface.getFunction('batch').selector,
+  delegateCall:  msIface.getFunction('delegateCall').selector,
+  enableForward: tlIface.getFunction('enableForward').selector,
+  depositTo:     slowIface.getFunction('depositTo').selector,
+};
+// The leading 4 bytes of `callData`, but only when they really are 4 bytes of
+// hex. `call_data` reaches this interface from a row anyone can write, so a
+// selector is untrusted text until it has been shaped — and it is interpolated
+// into labels and notes that are emitted as HTML. Anything else reads as "no
+// selector", which every caller already handles.
+const SEL_RE = /^0x[0-9a-fA-F]{8}$/;
+function selOf(callData) {
+  if(typeof callData !== 'string' || callData.length < 10) return '';
+  const s = callData.slice(0, 10);
+  return SEL_RE.test(s) ? s.toLowerCase() : '';
+}
+
 const SLOW_CHAIN_ID = 1;
 const SLOW_PRESETS = [
   { s: 3600,    l: '1H'  }, { s: 21600,  l: '6H'  }, { s: 86400,   l: '1D'  },
@@ -1307,7 +1427,18 @@ async function fetchTokenMeta(address){
   if(res[0]?.success) symbol = _decodeSymbol(res[0].returnData);
   if(res[1]?.success){ try { decimals = Number(erc20Iface.decodeFunctionResult('decimals', res[1].returnData)[0]); } catch(_){} }
   if(decimals == null || isNaN(decimals) || decimals < 0 || decimals > 36) throw new Error('NOT AN ERC-20 TOKEN');
-  return { address: addr, symbol: (symbol && String(symbol).trim()) || (addr.slice(0,6)+'…'+addr.slice(-4)), decimals };
+  // symbol() is attacker-chosen text that then labels a pill, a ticker and a
+  // proposal line. Strip control characters and bidi overrides (which can make
+  // one symbol render as another), and cap the length — a ticker is a ticker,
+  // and an unbounded one wraps every pill row it lands in.
+  const clean = String(symbol || '')
+    .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u2028\u2029\u202A-\u202E\u2066-\u2069]/g, '')
+    // Markup characters go the same way. Every render site escapes, so this is
+    // belt and braces — but the symbol is persisted to localStorage and read
+    // back into a dozen templates, and no real ticker has ever held a `<`.
+    .replace(/[<>"'&`\\]/g, '')
+    .trim().slice(0, 12);
+  return { address: addr, symbol: clean || (addr.slice(0,6)+'…'+addr.slice(-4)), decimals };
 }
 // Effective token list for a vault: built-ins + its saved custom tokens.
 function vaultTokens(v){
@@ -1471,7 +1602,16 @@ const EIP712_TYPES = { Execute: [
 
 // ── PROVIDER STATE ────────────────────────────────────────────────
 let provider = null;
-function getMC3() { return new ethers.Contract(MC3, MC3_ABI, provider); }
+// One Multicall3 handle per provider instance. It was being reconstructed —
+// parsing the ABI fragment and building the method proxies — on every batched
+// read, and the batched reads are the whole point of it. Keyed on the provider
+// so a chain switch, or makeProvider rebuilding a wedged one, still gets a
+// handle bound to the live backend.
+let _mc3 = null, _mc3Provider = null;
+function getMC3() {
+  if(_mc3Provider !== provider) { _mc3 = new ethers.Contract(MC3, MC3_ABI, provider); _mc3Provider = provider; }
+  return _mc3;
+}
 const SENTINEL = '0x0000000000000000000000000000000000000001';
 // ── DEMO DATA ─────────────────────────────────────────────────────
 const DEMO_YOU = "0x1a2bc8e5c135b427a7b75e21483ae304399c3c4d";
@@ -1634,10 +1774,23 @@ const S = {
 };
 
 // ── UTILITIES ─────────────────────────────────────────────────────
+// One pass, not five. render() rebuilds the page from a string and this is the
+// function it calls most, so the five chained replaces were five full scans and
+// four throwaway strings per escaped value.
+const _ESC = { "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" };
+const _escOne = c => _ESC[c];
 function esc(s) {
-  return String(s)
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  return String(s).replace(/[&<>"']/g, _escOne);
+}
+
+// esc() is correct for TEXT and for attribute values, but not for a string
+// literal inside an inline handler: the browser HTML-decodes the attribute
+// before the JS parser ever sees it, so esc()'s &#39; arrives back as a bare
+// quote and closes the literal early. Anything reaching a handler this way —
+// notably an ERC-20 `symbol()`, which is whatever an arbitrary contract chose to
+// return — has to be escaped for JS first and for HTML second.
+function jstr(s) {
+  return esc(String(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'"));
 }
 
 const DECIMALS = { ETH: 18, USDC: 6, USDT: 6, USDT0: 6, DAI: 18, WBTC: 8, wstETH: 18, cbBTC: 8 };
@@ -1693,27 +1846,20 @@ function setNd(sec) { const p = fromSec(sec); S.nd = p.val; S.ndUnit = p.unit; }
 // middle-ellipsis for a full 0x address; passes anything else through unchanged
 function shortAddr(a){return /^0x[0-9a-fA-F]{40}$/.test(a||"")?a.slice(0,6)+"…"+a.slice(-4):(a||"");}
 
-const _selectorLabels = {};
+const SELECTOR_LABELS = {
+  [SEL.transfer]: 'ERC20 TRANSFER',   [SEL.approve]:      'ERC20 APPROVE',
+  [SEL.addOwner]: 'ADD OWNER',        [SEL.removeOwner]:  'REMOVE OWNER',
+  [SEL.setThreshold]: 'SET THRESHOLD',[SEL.setDelay]:     'SET DELAY',
+  [SEL.setExecutor]: 'SET EXECUTOR',  [SEL.cancelQueued]: 'CANCEL',
+  [SEL.executeQueued]: 'ACCELERATE',  [SEL.batch]:        'BATCH',
+  [SEL.delegateCall]: 'DELEGATE CALL',[SEL.enableForward]:'ENABLE FORWARD',
+  [SEL.depositTo]: 'SLOW TRANSFER',
+};
 function selectorToLabel(callData) {
   if(!callData || callData === '0x') return 'TRANSFER';
-  if(callData.length < 10) return 'CALL';
-  const sel = callData.slice(0, 10);
-  if(_selectorLabels[sel] !== undefined) return _selectorLabels[sel];
-  const map = [
-    [erc20Iface, 'transfer', 'ERC20 TRANSFER'],
-    [msIface, 'addOwner', 'ADD OWNER'], [msIface, 'removeOwner', 'REMOVE OWNER'],
-    [msIface, 'setThreshold', 'SET THRESHOLD'], [msIface, 'setDelay', 'SET DELAY'],
-    [msIface, 'setExecutor', 'SET EXECUTOR'], [msIface, 'cancelQueued', 'CANCEL'],
-    [msIface, 'executeQueued', 'ACCELERATE'], [msIface, 'batch', 'BATCH'],
-    [msIface, 'delegateCall', 'DELEGATE CALL'], [tlIface, 'enableForward', 'ENABLE FORWARD'],
-    [slowIface, 'depositTo', 'SLOW TRANSFER'], [erc20Iface, 'approve', 'ERC20 APPROVE'],
-  ];
-  for(const [iface, fn, label] of map) {
-    if(sel === iface.getFunction(fn).selector) { _selectorLabels[sel] = label; return label; }
-  }
-  const fallback = `CALL ${sel}`;
-  _selectorLabels[sel] = fallback;
-  return fallback;
+  const sel = selOf(callData);
+  if(!sel) return 'CALL';
+  return SELECTOR_LABELS[sel] || `CALL ${sel}`;
 }
 
 // ── PROPOSAL CLASSIFICATION ───────────────────────────────────────
@@ -1730,8 +1876,8 @@ function txKind(tx, v) {
   const data = tx.callData || '0x';
   const val = tx.rawValue ? BigInt(tx.rawValue) : 0n;
   const self = !!(v.address && tx.target && tx.target.toLowerCase() === v.address.toLowerCase());
-  const sel = data.length >= 10 ? data.slice(0, 10) : '';
-  const is = (iface, fn) => sel === iface.getFunction(fn).selector;
+  const sel = selOf(data);
+  const is = name => sel === SEL[name];
   const dec = (fn, iface) => { try { return (iface || msIface).decodeFunctionData(fn, data); } catch(_) { return null; } };
   const at = a => a ? shortAddr(a) : 'AN ADDRESS';
 
@@ -1749,20 +1895,20 @@ function txKind(tx, v) {
   }
 
   // ── asset movement ──
-  if(is(erc20Iface, 'transfer')) {
+  if(is('transfer')) {
     const d = dec('transfer', erc20Iface);
     const burn = d && lockedDest(d[0]);
     if(burn) return { label:'ERC20 TRANSFER · UNRECOVERABLE', tone:'danger', warn:true,
       note:`SENDS THIS TOKEN TO ${burn}, WHICH HAS NO WITHDRAWAL PATH AND CANNOT MOVE A TOKEN BALANCE. THE AMOUNT IS GONE FOR GOOD ONCE THIS EXECUTES.` };
     return { label:'ERC20 TRANSFER', tone:'value' };
   }
-  if(is(erc20Iface, 'approve')) {
+  if(is('approve')) {
     const d = dec('approve', erc20Iface);
     const max = d && d[1] != null && BigInt(d[1]) >= (2n ** 255n);
     return { label:'ERC20 APPROVE', tone:'code', warn:true,
       note:`LETS ${at(d && d[0])} MOVE ${max ? 'AN UNLIMITED AMOUNT OF' : 'UP TO THE APPROVED AMOUNT OF'} THIS TOKEN OUT OF THE VAULT, AT ANY TIME, UNTIL THE ALLOWANCE IS REVOKED. IT DOES NOT EXPIRE WITH THIS PROPOSAL.` };
   }
-  if(is(slowIface, 'depositTo')) {
+  if(is('depositTo')) {
     const d = dec('depositTo', slowIface);
     const delay = d ? Number(d[3]) : 0;
     return { label:`SLOW · ${delay ? fmtDelay(delay) : 'DELAYED'}`, tone:'slow',
@@ -1770,19 +1916,19 @@ function txKind(tx, v) {
   }
 
   // ── policy: outlives the proposal, so every one of these gets a note ──
-  if(is(msIface, 'addOwner')) {
+  if(is('addOwner')) {
     const d = dec('addOwner');
     return { label:'ADD OWNER', tone:'policy',
       note:`ADDS ${at(d && d[0])} AS AN OWNER &mdash; ${v.ownerCount} &rarr; ${v.ownerCount + 1} OWNERS. THE THRESHOLD STAYS AT ${v.threshold}, SO EACH SIGNATURE COVERS A SMALLER SHARE OF THE OWNER SET.` };
   }
-  if(is(msIface, 'removeOwner')) {
+  if(is('removeOwner')) {
     const d = dec('removeOwner');   // (prevOwner, owner) — the second is the one removed
     const tooFew = v.ownerCount <= v.threshold;
     return { label:'REMOVE OWNER', tone:'policy', warn:tooFew,
       note:`REMOVES ${at(d && d[1])} &mdash; ${v.ownerCount} &rarr; ${v.ownerCount - 1} OWNERS, STILL ${v.threshold} SIGNATURES REQUIRED.` +
         (tooFew ? ` THAT WOULD LEAVE FEWER OWNERS THAN THE THRESHOLD, SO THE CALL WILL REVERT.` : '') };
   }
-  if(is(msIface, 'setThreshold')) {
+  if(is('setThreshold')) {
     const d = dec('setThreshold');
     const n = d ? Number(d[0]) : null;
     const lower = n != null && n < v.threshold;
@@ -1790,7 +1936,7 @@ function txKind(tx, v) {
       note:`REQUIRES ${n != null ? n : '?'} OF ${v.ownerCount} SIGNATURES AFTER THIS, FROM ${v.threshold} NOW.` +
         (n === 1 ? ` AT 1, ANY SINGLE OWNER COULD MOVE EVERYTHING ON THEIR OWN.` : lower ? ` THIS LOWERS THE BAR FOR EVERY FUTURE PROPOSAL, INCLUDING ONES ALREADY IN THE QUEUE.` : '') };
   }
-  if(is(msIface, 'setDelay')) {
+  if(is('setDelay')) {
     const d = dec('setDelay');
     const s = d ? Number(d[0]) : null;
     const shorter = s != null && s < v.delay;
@@ -1804,7 +1950,7 @@ function txKind(tx, v) {
         (s === 0 ? ` AT ZERO THERE IS NO DELAY AT ALL — PROPOSALS EXECUTE THE MOMENT THEY REACH QUORUM, WITH NO WINDOW TO CANCEL ONE.` :
          shorter ? ` A SHORTER DELAY MEANS LESS TIME TO SPOT AND CANCEL A BAD PROPOSAL.` : '') };
   }
-  if(is(msIface, 'setExecutor')) {
+  if(is('setExecutor')) {
     const d = dec('setExecutor');
     const a = d ? d[0] : null;
     const clearing = a && a === ethers.ZeroAddress;
@@ -1829,7 +1975,7 @@ function txKind(tx, v) {
         ? `REMOVES THE VAULT'S EXECUTOR. THE FAST PATH AND THE CANCEL/ACCELERATE ROUTES THAT RUN THROUGH IT ALL STOP WORKING.`
         : `POINTS THE VAULT AT ${at(a)} AS ITS TIMELOCK EXECUTOR. THAT CONTRACT CAN THEN FORWARD CALLS ON THE VAULT'S BEHALF — VERIFY IT BEFORE SIGNING.` };
   }
-  if(is(tlIface, 'enableForward')) {
+  if(is('enableForward')) {
     const d = dec('enableForward', tlIface);
     const on = d ? !!d[0] : null;
     // Audit H-1 — where unanimity and quorum are the same number, "skip the
@@ -1843,13 +1989,13 @@ function txKind(tx, v) {
   }
 
   // ── queue control ──
-  if(is(msIface, 'cancelQueued')) return { label:'CANCEL QUEUED', tone:'danger',
+  if(is('cancelQueued')) return { label:'CANCEL QUEUED', tone:'danger',
     note:`DROPS A PROPOSAL THAT IS ALREADY QUEUED, BEFORE ITS TIMELOCK ELAPSES. THE CANCELLED PROPOSAL CANNOT THEN EXECUTE.` };
-  if(is(msIface, 'executeQueued')) return { label:'ACCELERATE', tone:'danger',
+  if(is('executeQueued')) return { label:'ACCELERATE', tone:'danger',
     note:`EXECUTES A QUEUED PROPOSAL IMMEDIATELY, SKIPPING WHATEVER IS LEFT OF ITS TIMELOCK. THIS IS THE STEP THE DELAY EXISTS TO PREVENT, SO IT TAKES EVERY OWNER'S SIGNATURE.` };
 
   // ── composite / raw ──
-  if(is(msIface, 'batch')) {
+  if(is('batch')) {
     const d = dec('batch');
     if(d) {
       const [targets, values, datas] = d;
@@ -1859,7 +2005,7 @@ function txKind(tx, v) {
     }
     return { label:'BATCH', tone:'code', note:`SEVERAL CALLS EXECUTED ATOMICALLY — ALL SUCCEED, OR THE WHOLE PROPOSAL REVERTS.` };
   }
-  if(is(msIface, 'delegateCall')) {
+  if(is('delegateCall')) {
     const d = dec('delegateCall');
     return { label:'DELEGATE CALL', tone:'danger', warn:true,
       note:`RUNS ${at(d && d[0])}'S CODE INSIDE THE VAULT'S OWN STORAGE. IT CAN REACH EVERY ASSET THE VAULT HOLDS AND REWRITE EVERY SETTING IT HAS, INCLUDING THE OWNER SET. ONLY APPROVE THIS IF YOU HAVE READ THAT CODE.` };
@@ -1875,8 +2021,7 @@ function txKind(tx, v) {
 
 function isCancelTx(tx, v) {
   return tx.cancelTarget != null
-    || (tx.callData && tx.callData.length >= 10
-        && tx.callData.slice(0, 10) === msIface.getFunction('cancelQueued').selector
+    || (selOf(tx.callData) === SEL.cancelQueued
         && tx.target && tx.target.toLowerCase() === v.address.toLowerCase());
 }
 
@@ -1889,17 +2034,18 @@ function nextNonce(v) {
 // Pending self-calls that mutate the owner set / threshold. Because execution
 // is strictly sequential by nonce, a new owner change created now executes
 // AFTER these and may revert if the set shifts first — used to warn the user.
-let _policySelectors = null;
+const POLICY_SELECTORS = {
+  [SEL.addOwner]: 'ADD OWNER',
+  [SEL.removeOwner]: 'REMOVE OWNER',
+  [SEL.setThreshold]: 'SET THRESHOLD',
+};
 function pendingPolicyChanges(v) {
   if(!v || !v.address || !v.queue) return [];
-  if(!_policySelectors) _policySelectors = {
-    [msIface.getFunction('addOwner').selector]: 'ADD OWNER',
-    [msIface.getFunction('removeOwner').selector]: 'REMOVE OWNER',
-    [msIface.getFunction('setThreshold').selector]: 'SET THRESHOLD',
-  };
   const self = v.address.toLowerCase();
-  return v.queue.filter(t => t.target && t.target.toLowerCase() === self && t.callData && _policySelectors[t.callData.slice(0,10)])
-    .map(t => ({ nonce: t.nonce, label: _policySelectors[t.callData.slice(0,10)] }));
+  return v.queue
+    .map(t => ({ t, label: POLICY_SELECTORS[selOf(t.callData)] }))
+    .filter(x => x.label && x.t.target && x.t.target.toLowerCase() === self)
+    .map(x => ({ nonce: x.t.nonce, label: x.label }));
 }
 
 function txSt(tx, v) {
@@ -1952,9 +2098,39 @@ function addrLink(addr, chain) {
   return `<span style="border-bottom:1px solid var(--ln)">${safe}</span>`;
 }
 
+// Copy, and only claim success if it actually copied. navigator.clipboard is
+// undefined outside a secure context and rejects when the document isn't
+// focused, so firing the confirmation unconditionally meant the UI could report
+// an address as copied that was never on the clipboard — the one thing a
+// clipboard affordance must not lie about. Falls back to a hidden textarea +
+// execCommand, and says so plainly when neither route works.
+function copyText(text, msg) {
+  const ok = () => flash(msg || 'ADDRESS COPIED');
+  const legacy = () => {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.cssText = 'position:fixed;top:-9999px;opacity:0';
+      document.body.appendChild(ta);
+      ta.select();
+      const done = document.execCommand('copy');
+      ta.remove();
+      done ? ok() : flash('COULD NOT COPY');
+    } catch(_) { flash('COULD NOT COPY'); }
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(ok, legacy);
+  } else legacy();
+}
+
 // Small copy-to-clipboard button (⧉) with a flash confirmation.
+// jstr, not esc: both arguments land inside a JS string literal inside an HTML
+// attribute, and esc() alone leaves a quote that the JS parser sees bare once
+// the browser has decoded the attribute — see jstr()'s note. Callers pass
+// addresses today, but this is a shared helper and the next one may not.
 function copyBtn(text, msg) {
-  return `<button class="x-btn copy-btn" style="display:inline-flex;min-width:auto;min-height:auto;padding:2px 5px;font-size:9px;vertical-align:middle" onclick="event.stopPropagation();navigator.clipboard.writeText('${esc(text)}');flash('${msg||'ADDRESS COPIED'}')" title="Copy address">⧉</button>`;
+  return `<button class="x-btn copy-btn icon-btn" onclick="event.stopPropagation();copyText('${jstr(text)}','${jstr(msg||'ADDRESS COPIED')}')" aria-label="Copy ${esc(shortAddr(text))} to clipboard" title="Copy address">⧉</button>`;
 }
 
 // Briefly flash a queue row (by nonce) — reused after sign/approve.
@@ -2212,17 +2388,88 @@ function flash(msg) {
   toastTimer = setTimeout(() => el.style.display = "none", 2200);
 }
 
-function toggleInfo() {
-  document.getElementById("info-modal").classList.toggle("open");
-  document.getElementById("info-backdrop").classList.toggle("open");
+function toggleInfo(force) {
+  const m = document.getElementById("info-modal");
+  const open = force != null ? !!force : !m.classList.contains("open");
+  m.classList.toggle("open", open);
+  document.getElementById("info-backdrop").classList.toggle("open", open);
+  const trigger = document.getElementById("info-btn");
+  if (trigger) trigger.setAttribute("aria-expanded", open ? "true" : "false");
+  if (open) { markOvlReturn(trigger || document.activeElement); syncScrollLock(); m.querySelector(".x").focus(); }
+  else { syncScrollLock(); restoreOvlFocus(); }
 }
 
+// ── MODAL PLUMBING ────────────────────────────────────────────────
+// Five overlays (chains, deploy, top up, Safe clone, the info card) had five
+// different escapes: some closed on click-out, one on Escape, none moved focus.
+// A modal is a single behaviour, so it is implemented once here:
+//   · Escape dismisses whatever is on top, unless dismissing would abandon a
+//     transaction the wallet is already holding (a mid-flight top up, a deploy
+//     that is still walking chains) — those keep their explicit CANCEL.
+//   · the page behind is scroll-locked while anything is over it
+//   · focus moves into the dialog on open, is trapped inside it, and returns to
+//     whatever opened it on close.
+function anyOverlayOpen() {
+  const wm = document.getElementById("walletModal");
+  return !!(S.showChains || S.topup || S.deploy || S.safeClone) ||
+    document.getElementById("info-modal").classList.contains("open") ||
+    !!(wm && wm.classList.contains("active"));
+}
+// wallet.js sets body.modal-open for its own modal, so this must ask whether
+// THAT modal is up before clearing the class, or closing a chain picker over an
+// open wallet sheet would unlock the page under it. wallet.js announces its own
+// open/close so the answer is recomputed from both sides.
+function syncScrollLock() {
+  document.body.classList.toggle("modal-open", anyOverlayOpen());
+}
+window.addEventListener("ms:overlay-change", syncScrollLock);
+// Remembered as an id first and an element second: render() rebuilds #app from
+// innerHTML, so by the time a dialog closes the button that opened it is usually
+// a different DOM node with the same identity. Overlay triggers therefore carry
+// stable ids (chain-btn, topup-btn, safe-clone-btn, deploy-btn, info-btn).
+let _ovlReturn = null, _ovlReturnId = null;
+function markOvlReturn(el) {
+  _ovlReturn = el || null;
+  _ovlReturnId = el && el.id ? el.id : null;
+}
+function restoreOvlFocus() {
+  const el = (_ovlReturnId && document.getElementById(_ovlReturnId)) ||
+    (_ovlReturn && _ovlReturn.isConnected ? _ovlReturn : null);
+  _ovlReturn = null; _ovlReturnId = null;
+  if (el && typeof el.focus === "function") el.focus({ preventScroll: true });
+}
+// What Escape is allowed to close right now, innermost first.
+function dismissTop() {
+  if (document.getElementById("info-modal").classList.contains("open")) { toggleInfo(false); return true; }
+  if (S.topup) { if (!S.topup.sending) closeTopUp(); return true; }
+  if (S.deploy) { if (S.deploy.done || S.deploy.phase === "review") closeDeploy(); return true; }
+  if (S.safeClone) { closeSafeClone(); return true; }
+  if (S.showChains) { S.showChains = false; render(); return true; }
+  return false;
+}
+const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+// Innermost dialog, by paint order: the wallet sheet sits above everything, the
+// info card above the app's overlays, and among those the last one rendered wins
+// (they share a z-index, so DOM order decides).
+function topDialog() {
+  const wm = document.getElementById("walletModal");
+  if (wm && wm.classList.contains("active")) return wm.querySelector(".wallet-modal");
+  const m = document.getElementById("info-modal");
+  if (m.classList.contains("open")) return m;
+  const ovls = document.querySelectorAll(".ovl-card");
+  return ovls.length ? ovls[ovls.length - 1] : null;
+}
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape") {
-    document.getElementById("info-modal").classList.remove("open");
-    document.getElementById("info-backdrop").classList.remove("open");
-    if (S.showChains) { S.showChains = false; render(); }
-  }
+  if (e.key === "Escape") { if (dismissTop()) e.preventDefault(); return; }
+  if (e.key !== "Tab") return;
+  const dlg = topDialog();
+  if (!dlg) return;
+  const items = [...dlg.querySelectorAll(FOCUSABLE)];
+  if (!items.length) return;
+  const first = items[0], last = items[items.length - 1];
+  if (!dlg.contains(document.activeElement)) { e.preventDefault(); first.focus(); return; }
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
 });
 
 function explorerTxLink(hash) {
@@ -2278,6 +2525,32 @@ function restoreFocus(state){
   el.scrollLeft = state.scrollLeft;
 }
 
+// An overlay is rebuilt from scratch on every render, so "did it just open?"
+// cannot be answered by looking at the DOM — it is answered by comparing which
+// overlay state is set now against which was set last time. On the transition
+// into one, park the outgoing focus and move into the dialog; on the transition
+// out, hand focus back to whatever opened it, so a keyboard user is not dropped
+// at the top of the document.
+let _ovlKey = null;
+function currentOvlKey(){
+  return S.deploy ? 'deploy' : S.topup ? 'topup' : S.safeClone ? 'safe' : S.showChains ? 'chains' : null;
+}
+function syncOverlayFocus(){
+  const key = currentOvlKey();
+  if(key === _ovlKey) return;
+  const opening = !!key && !_ovlKey;
+  if(opening) markOvlReturn(document.activeElement);
+  _ovlKey = key;
+  if(key){
+    const card = document.querySelector('.ovl-card');
+    if(!card) return;
+    if(card.contains(document.activeElement)) return;
+    const target = card.querySelector('input:not([disabled]),textarea:not([disabled])') ||
+      card.querySelector(FOCUSABLE);
+    if(target) target.focus({ preventScroll: true });
+  } else restoreOvlFocus();
+}
+
 // Coalesce render() calls: multiple state mutations in one tick (or several
 // callers firing in the same frame) collapse into a single full rebuild on the
 // next animation frame, instead of thrashing the DOM once per call.
@@ -2290,7 +2563,10 @@ function render(){
 function renderNow(){
   const v = S.vaults[S.sel] || null;
   const mob = _vw <= 640;
-  document.body.className = (S.dark ? "" : "light") + (S.priv ? " priv-on" : "");
+  // body.className is assigned wholesale, so every class that lives on <body>
+  // has to be restated here — modal-open included, or the first render after a
+  // modal opens silently unlocks the page behind it.
+  document.body.className = (S.dark ? "" : "light") + (S.priv ? " priv-on" : "") + (anyOverlayOpen() ? " modal-open" : "");
   if(_lastFaviconDark !== S.dark) {
     _lastFaviconDark = S.dark;
     document.getElementById("favicon").href = S.dark ? FAVICON_DARK : FAVICON_LIGHT;
@@ -2308,45 +2584,49 @@ function renderNow(){
     walletLabel = "CONNECT";
   }
 
-  const walletDot = (S.demoMode || window._connectedAddress) ? '<span class="dot-sm"></span>' : '';
+  const walletDot = (S.demoMode || window._connectedAddress) ? '<span class="dot-sm" aria-hidden="true"></span>' : '';
   const walletOnclick = S.demoMode
     ? (v ? `window.open('${(EXPLORERS[v.chain]||EXPLORERS.ETHEREUM)}/address/${DEMO_YOU}','_blank')` : '')
     : 'toggleWallet()';
 
   const vAddr = v ? (S.demoMode ? addrLink(v.address,v.chain) : addrLink(v.address)) : '';
 
-  // Sync URL hash for deep linking
-  if(v && !S.demoMode && v.address && ethers.isAddress(v.address)) {
-    history.replaceState(null, '', '#' + S.chainId + '/' + v.address);
-  } else if(!v || S.demoMode) {
-    if(location.hash) history.replaceState(null, '', location.pathname);
+  // Sync URL hash for deep linking. Only when it actually changes: renderNow
+  // runs on every poll tick, token switch and overlay open, and Safari caps
+  // replaceState at ~100 calls per 30s and then THROWS — which, from here,
+  // would abort the rest of the render and leave the page half-built.
+  const wantHash = (v && !S.demoMode && v.address && ethers.isAddress(v.address))
+    ? '#' + S.chainId + '/' + v.address
+    : (!v || S.demoMode) ? '' : null;
+  if(wantHash !== null && wantHash !== location.hash) {
+    try { history.replaceState(null, '', wantHash || location.pathname); } catch(_) {}
   }
 
   const _appEl = document.getElementById("app");
   const _focusState = captureFocus(_appEl);
   _appEl.innerHTML = `
   <div class="frame">
-    ${mob?"":`<div class="rail rail-l">${ASC400}</div><div class="rail rail-r">${ASC400}</div>`}
-    <div class="hbar">${ASC200}</div>
+    ${mob?"":`<div class="rail rail-l" aria-hidden="true">${ASC400}</div><div class="rail rail-r" aria-hidden="true">${ASC400}</div>`}
+    <div class="hbar" aria-hidden="true">${ASC200}</div>
     <div class="hdr">
       <div>
-        <div class="logo">MULTISIG <span class="info-i" onclick="toggleInfo()">?</span></div>
-        <div class="sub">.software</div>
-        ${v?`<div class="addr">${vAddr}${!S.demoMode&&v.address&&ethers.isAddress(v.address)?` <button class="x-btn copy-btn" style="display:inline-flex;min-width:auto;min-height:auto;padding:2px 5px;font-size:9px;vertical-align:middle" onclick="navigator.clipboard.writeText(location.href);flash('LINK COPIED')" title="Copy shareable link \u00B7 ${location.origin}/#${S.chainId}/${v.address}">\u29C9</button>`:""}</div>`:""}
+        <div style="display:flex;align-items:center;gap:4px"><h1 class="logo">MULTISIG</h1><button type="button" id="info-btn" class="info-i" onclick="toggleInfo()" aria-expanded="false" aria-haspopup="dialog" aria-label="What this is">?</button></div>
+        <div class="sub" aria-hidden="true">.software</div>
+        ${v?`<div class="addr">${vAddr}${!S.demoMode&&v.address&&ethers.isAddress(v.address)?` <button class="x-btn copy-btn icon-btn" onclick="copyText(location.href,'LINK COPIED')" aria-label="Copy shareable link to this vault" title="Copy shareable link \u00B7 ${location.origin}/#${S.chainId}/${v.address}">\u29C9</button>`:""}</div>`:""}
       </div>
       <div class="hdr-r">
-        <button class="theme-btn priv-btn" onclick="togglePriv()" aria-pressed="${S.priv}" title="${S.priv?'Balances veiled \u00B7 hover or tap a figure to read it. Click to show them.':'Balances visible. Click to veil them.'}">${S.priv?EYE_OFF:EYE_ON}</button>
-        <button class="theme-btn" onclick="S.dark=!S.dark;localStorage.setItem('ms_light',S.dark?'':'1');render()">${S.dark?"\u2600":"\u25CF"}</button>
-        <button class="wallet-btn" onclick="${walletOnclick}">${walletDot}${esc(walletLabel)}</button>
+        <button class="theme-btn priv-btn" onclick="togglePriv()" aria-pressed="${S.priv}" aria-label="${S.priv?'Balances veiled. Show them.':'Balances visible. Veil them.'}" title="${S.priv?'Balances veiled \u00B7 hover or tap a figure to read it. Click to show them.':'Balances visible. Click to veil them.'}">${S.priv?EYE_OFF:EYE_ON}</button>
+        <button class="theme-btn" onclick="S.dark=!S.dark;localStorage.setItem('ms_light',S.dark?'':'1');render()" aria-label="Switch to ${S.dark?"light":"dark"} theme" title="Switch to ${S.dark?"light":"dark"} theme"><span aria-hidden="true">${S.dark?"\u2600":"\u25CF"}</span></button>
+        <button class="wallet-btn" id="wallet-btn" onclick="${walletOnclick}" ${S.demoMode?'':'aria-haspopup="dialog"'}>${walletDot}${esc(walletLabel)}</button>
       </div>
     </div>
-    <div class="nav">
-      ${[{k:"DASH",l:"DASHBOARD",m:"DASH"},{k:"ADMIN",l:"ADMIN",m:"ADMIN"},{k:"CREATE",l:"CREATE",m:"CREATE"}].map(i=>`<button class="${S.view===i.k?"on":""}" onclick="S.view='${i.k}';S.showTx=false;render()">${mob?i.m:i.l}</button>`).join("")}
-    </div>
+    <nav class="nav">
+      ${[{k:"DASH",l:"DASHBOARD",m:"DASH"},{k:"ADMIN",l:"ADMIN",m:"ADMIN"},{k:"CREATE",l:"CREATE",m:"CREATE"}].map(i=>`<button class="${S.view===i.k?"on":""}"${S.view===i.k?' aria-current="page"':''} onclick="S.view='${i.k}';S.showTx=false;render()">${mob?i.m:i.l}</button>`).join("")}
+    </nav>
     <div class="content">${S.view==="DASH"?renderDash(v,mob):S.view==="CREATE"?renderCreate(mob):renderAdmin(v,mob)}</div>
     <div class="footer">
       <div class="footer-l">
-        <button class="reset-btn" style="display:flex;align-items:center;gap:5px" onclick="S.showChains=!S.showChains;render()"><span class="dot-sm"></span>${esc(chainName())}</button>
+        <button class="reset-btn" id="chain-btn" style="display:flex;align-items:center;gap:5px" onclick="S.showChains=!S.showChains;render()" aria-haspopup="dialog"><span class="dot-sm" aria-hidden="true"></span>${esc(chainName())}</button>
         <span style="color:var(--ln)">&middot;</span>
         <span data-block>BLOCK ${S.latestBlock?S.latestBlock.toLocaleString():'...'}</span>
         ${v?`<span style="color:var(--ln)">&middot;</span><span>NONCE ${v.nonce}</span>`:""}
@@ -2360,13 +2640,14 @@ function renderNow(){
         <span>${_todayStr}</span>
       </div>
     </div>
-    <div class="hbar">${ASC200}</div>
+    <div class="hbar" aria-hidden="true">${ASC200}</div>
   </div>
   ${S.showChains?renderChainOverlay(mob):""}
   ${S.safeClone?renderSafeCloneModal():""}
   ${S.deploy?renderDeployOverlay():""}
   ${S.topup?renderTopUp():""}`;
   restoreFocus(_focusState);
+  syncOverlayFocus();
   // Paint the send-flow review card + submit readiness from state on every
   // rebuild, so it survives token switches, polls and delivery-mode changes.
   updateTxReview();
@@ -2441,9 +2722,13 @@ function renderDeployOverlay(){
     footer = `<div style="margin-top:16px;font-size:9px;color:var(--d);letter-spacing:1px;text-align:center">APPROVE EACH WALLET PROMPT TO CONTINUE</div>`;
   } else { footer = ''; }
 
-  return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:300;display:flex;align-items:center;justify-content:center;padding:20px">
-    <div style="width:min(460px,94vw);max-height:90vh;max-height:90dvh;overflow-y:auto;background:var(--bg);border:1px solid var(--a);padding:24px">
-      <div style="font-size:12px;font-weight:700;letter-spacing:2px;margin-bottom:6px">${title}</div>
+  // No click-out: this dialog is either mid-flight against a wallet or holding
+  // the last confirmation before one, and a stray tap on the scrim must not be
+  // able to abandon either. CANCEL / CLOSE are the only exits (plus Escape once
+  // it is safe — see dismissTop()).
+  return `<div class="ovl">
+    <div class="ovl-card" style="--ow:460px;padding:24px" role="dialog" aria-modal="true" aria-label="Deploy vault" aria-busy="${!d.done && d.phase!=='review'}">
+      <div class="ovl-title" style="margin-bottom:6px">${title}</div>
       ${d.address?`<div style="font-size:11px;color:var(--m);letter-spacing:1px;margin-bottom:16px;word-break:break-all">${addrLink(d.address)}</div>`:`<div style="font-size:10px;color:var(--d);letter-spacing:1px;margin-bottom:16px">Same vault address on every chain</div>`}
       <div>${rows}</div>
       ${footer}
@@ -2453,32 +2738,31 @@ function renderDeployOverlay(){
 function renderChainOverlay(mob){
   const mainnets = NETS.filter(n=>!n.test);
   const testnets = NETS.filter(n=>n.test);
-  return`<div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200" onclick="S.showChains=false;render()"></div>
-  <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:min(400px,90vw);max-height:80vh;overflow-y:auto;background:var(--bg);border:1px solid var(--a);padding:20px;z-index:201">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-      <span style="font-size:12px;font-weight:700;letter-spacing:2px">SELECT CHAIN</span>
-      <button class="x-btn" onclick="S.showChains=false;render()" style="margin:0">&#10005;</button>
+  // One row template for both groups \u2014 they only ever differed by the TEST tag.
+  const row = n => {
+    const on = (!S.demoMode && n.id===S.chainId);
+    return`<button type="button" class="net-row${on?" on":""}"${on?' aria-current="true"':''} onclick="switchChain(${n.id})">
+      <span style="font-size:8px" aria-hidden="true">${on?"\u25CF":"\u25CB"}</span>${chainIcon(n.id)}<span>${esc(n.name)}</span>
+      <span class="net-id">${n.id}</span>${n.test?'<span class="net-test">TEST</span>':''}
+    </button>`;
+  };
+  return`<div class="ovl" onclick="if(event.target===this){S.showChains=false;render()}">
+    <div class="ovl-card" style="--ow:400px" role="dialog" aria-modal="true" aria-label="Select chain">
+      <div class="ovl-head" style="align-items:center;margin-bottom:16px">
+        <span class="ovl-title">SELECT CHAIN</span>
+        <button class="x-btn" onclick="S.showChains=false;render()" style="margin:0" aria-label="Close">&#10005;</button>
+      </div>
+      <div style="font-size:9px;letter-spacing:2px;color:var(--d);margin-bottom:8px">MAINNETS</div>
+      ${mainnets.map(row).join("")}
+      <div style="font-size:9px;letter-spacing:2px;color:var(--d);margin:12px 0 8px">TESTNETS</div>
+      ${testnets.map(row).join("")}
     </div>
-    <div style="font-size:9px;letter-spacing:2px;color:var(--d);margin-bottom:8px">MAINNETS</div>
-    ${mainnets.map(n=>{
-      const on = (!S.demoMode && n.id===S.chainId);
-      return`<div class="net-row${on?" on":""}" onclick="switchChain(${n.id})">
-        <span style="font-size:8px">${on?"\u25CF":"\u25CB"}</span>${chainIcon(n.id)}<span>${n.name}</span>
-        <span class="net-id">${n.id}</span>
-      </div>`}).join("")}
-    <div style="font-size:9px;letter-spacing:2px;color:var(--d);margin:12px 0 8px">TESTNETS</div>
-    ${testnets.map(n=>{
-      const on = (!S.demoMode && n.id===S.chainId);
-      return`<div class="net-row${on?" on":""}" onclick="switchChain(${n.id})">
-        <span style="font-size:8px">${on?"\u25CF":"\u25CB"}</span>${chainIcon(n.id)}<span>${n.name}</span>
-        <span class="net-id">${n.id}</span><span class="net-test">TEST</span>
-      </div>`}).join("")}
   </div>`;
 }
 
 // ── DASHBOARD ─────────────────────────────────────────────────────
 function renderDash(v,mob){
-  if(!v)return`<div class="empty"><div class="empty-title">NO VAULTS</div><div class="empty-sub">${S.demoMode?"":"DEPLOY YOUR FIRST MULTISIG"}</div><button class="btn btn-outline" style="padding:0 32px;height:48px" onclick="S.view='CREATE';render()">CREATE VAULT</button>${!S.demoMode?`<div style="max-width:400px;margin:44px auto 0;padding-top:32px;border-top:1px solid var(--ln)"><div style="font-size:10px;font-weight:600;letter-spacing:2px;color:var(--m)">LOAD EXISTING VAULT</div><div style="margin-top:12px;display:flex;align-items:center;gap:8px;justify-content:center;flex-wrap:wrap"><input class="inp" id="load-addr" style="max-width:320px;min-width:0;flex:1;margin:0;font-size:16px" placeholder="0x... or name.eth / name.(g)wei" oninput="updateLoadStatus(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();loadVaultByAddress()}"><button class="btn btn-outline btn-sm" onclick="loadVaultByAddress()">LOAD</button></div><div id="load-status" style="font-size:9px;letter-spacing:1px;text-align:center;min-height:12px;margin-top:6px"></div><div style="margin-top:24px"><button class="btn btn-outline" style="font-size:9px;border-color:var(--ln);color:var(--d)" onclick="S.demoMode=true;S.vaults=seed();S.sel=0;flash('DEMO LOADED');render()">LOAD DEMO</button></div></div>`:""}</div>`;
+  if(!v)return`<div class="empty"><div class="empty-title">NO VAULTS</div><div class="empty-sub">${S.demoMode?"":"DEPLOY YOUR FIRST MULTISIG"}</div><button class="btn btn-outline" style="padding:0 32px;height:48px" onclick="S.view='CREATE';render()">CREATE VAULT</button>${!S.demoMode?`<div style="max-width:400px;margin:44px auto 0;padding-top:32px;border-top:1px solid var(--ln)"><div style="font-size:10px;font-weight:600;letter-spacing:2px;color:var(--m)">LOAD EXISTING VAULT</div><div style="margin-top:12px;display:flex;align-items:center;gap:8px;justify-content:center;flex-wrap:wrap"><input class="inp" id="load-addr" style="max-width:320px;min-width:0;flex:1;margin:0;font-size:16px" placeholder="0x... or name.eth / name.(g)wei" aria-label="Vault address or name" aria-describedby="load-status" oninput="updateLoadStatus(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();loadVaultByAddress()}"><button class="btn btn-outline btn-sm" onclick="loadVaultByAddress()">LOAD</button></div><div id="load-status" role="status" style="font-size:9px;letter-spacing:1px;text-align:center;min-height:12px;margin-top:6px"></div><div style="margin-top:24px"><button class="btn btn-outline" style="font-size:9px;border-color:var(--ln);color:var(--d)" onclick="S.demoMode=true;S.vaults=seed();S.sel=0;flash('DEMO LOADED');render()">LOAD DEMO</button></div></div>`:""}</div>`;
   const you = getYou();
   const h0=v.holdings[0];
 
@@ -2497,13 +2781,18 @@ function renderDash(v,mob){
     return{rdy,needsYou};
   });
   const totalActions=needsSig+readyExec+pendingSubmit;
+  // The proposal at the head of the unqueued run — everything behind it is
+  // blocked on its nonce. One scan, hoisted out of the queue map below, where
+  // it was being recomputed (each pass re-running isCancelTx over the whole
+  // queue) once per card.
+  const firstUnqueued=v.queue.findIndex(t=>t.eta===0&&!isCancelTx(t,v));
   const attnParts=[];
   if(needsSig)attnParts.push(`${needsSig} NEED${needsSig>1?"":"S"} YOUR SIG`);
   if(readyExec)attnParts.push(`${readyExec} READY TO EXECUTE`);
   if(pendingSubmit)attnParts.push(`${pendingSubmit} READY TO SUBMIT`);
 
   return`
-  ${totalActions>0?`<div style="padding:${mob?"12px 6px":"14px 8px"};margin-bottom:4px;border-bottom:1px solid var(--ln);display:flex;align-items:center;gap:${mob?8:12}px;flex-wrap:wrap;font-size:10px;letter-spacing:2px">
+  ${totalActions>0?`<div role="status" style="padding:${mob?"12px 6px":"14px 8px"};margin-bottom:4px;border-bottom:1px solid var(--ln);display:flex;align-items:center;gap:${mob?8:12}px;flex-wrap:wrap;font-size:10px;letter-spacing:2px">
     <span style="color:var(--y);font-weight:700">${totalActions} ACTION${totalActions>1?"S":""}</span>
     <span style="color:var(--d)">${attnParts.join(" &middot; ")}</span>
   </div>`:""}
@@ -2511,13 +2800,13 @@ function renderDash(v,mob){
     ${S.vaults.map((vt,i)=>{
       const on=i===S.sel;
       const {rdy,needsYou}=vaultFlags[i];
-      const dot=rdy?'<span class="vtab-dot" style="background:var(--g)"></span>':needsYou?'<span class="vtab-dot" style="background:var(--y)"></span>':"";
+      const dot=rdy?'<span class="vtab-dot" style="background:var(--g)" title="Ready to execute" aria-hidden="true"></span>':needsYou?'<span class="vtab-dot" style="background:var(--y)" title="Needs your signature" aria-hidden="true"></span>':"";
       const pending=vt.queue.length>0?`${vt.queue.length} PENDING`:"";
       // The balance summary is a comparison aid for choosing between vaults; with a
       // single vault it only echoes the hero stat below, so drop it and keep pending.
-      const bal=vt.holdings.length?tokIcon(vt.holdings[0].token,'sm')+' <span class="priv">'+vt.holdings[0].balance+'</span> '+vt.holdings[0].token+(vt.holdings.length>1?" +"+(vt.holdings.length-1)+" MORE":""):"EMPTY";
+      const bal=vt.holdings.length?tokIcon(vt.holdings[0].token,'sm')+' <span class="priv">'+esc(vt.holdings[0].balance)+'</span> '+esc(vt.holdings[0].token)+(vt.holdings.length>1?" +"+(vt.holdings.length-1)+" MORE":""):"EMPTY";
       const info=S.vaults.length===1?pending:bal+(pending?` &middot; ${pending}`:"");
-      return`<button class="vtab${on?" on":""}" onclick="S.sel=${i};S.nt=S.vaults[${i}].threshold;setNd(S.vaults[${i}].delay);S.showTx=false;render()">
+      return`<button class="vtab${on?" on":""}"${on?' aria-current="true"':''} onclick="S.sel=${i};S.nt=S.vaults[${i}].threshold;setNd(S.vaults[${i}].delay);S.showTx=false;render()">
       <div class="vtab-name">${esc(vt.name)}${dot}</div>
       ${info?`<div class="vtab-info">${info}</div>`:""}
     </button>`}).join("")}
@@ -2525,17 +2814,17 @@ function renderDash(v,mob){
   <div class="stats">
     ${h0?`<div class="privg"${pgAttrs()} style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       ${tokIcon(h0.token,'big')}
-      <span class="stat-big priv">${h0.balance}</span>
-      <span class="stat-token">${h0.token}</span>
-      <span class="stat-usd priv">${h0.usd}</span>
+      <span class="stat-big priv">${esc(h0.balance)}</span>
+      <span class="stat-token">${esc(h0.token)}</span>
+      <span class="stat-usd priv">${esc(h0.usd)}</span>
     </div>
-    ${v.holdings.length>1?`<div class="holdings privg"${pgAttrs()}>${v.holdings.slice(1).map(h=>`<span>${tokIcon(h.token,'sm')} <span class="priv">${h.balance}</span> <strong>${h.token}</strong><span class="usd priv">${h.usd}</span></span>`).join("")}</div>`:""}`
+    ${v.holdings.length>1?`<div class="holdings privg"${pgAttrs()}>${v.holdings.slice(1).map(h=>`<span>${tokIcon(h.token,'sm')} <span class="priv">${esc(h.balance)}</span> <strong>${esc(h.token)}</strong><span class="usd priv">${esc(h.usd)}</span></span>`).join("")}</div>`:""}`
     :`<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
       <span class="stat-big" style="color:var(--d)">0</span>
       <span class="stat-token">ETH</span>
     </div>
     <div style="font-size:11px;color:var(--d);letter-spacing:2px;margin-top:8px">NO BALANCES</div>`}
-    ${!S.demoMode&&v.address&&ethers.isAddress(v.address)?`<div style="margin-top:16px"><button class="btn btn-outline btn-sm" style="display:inline-flex;align-items:center;gap:6px" onclick="openTopUp()"><span style="font-size:13px;line-height:1">&#8595;</span> TOP UP</button></div>`:""}
+    ${!S.demoMode&&v.address&&ethers.isAddress(v.address)?`<div style="margin-top:16px"><button class="btn btn-outline btn-sm" id="topup-btn" style="display:inline-flex;align-items:center;gap:6px" onclick="openTopUp()"><span style="font-size:13px;line-height:1" aria-hidden="true">&#8595;</span> TOP UP</button></div>`:""}
     <div class="meta">
       <span>${v.threshold}/${v.ownerCount} SIG</span>
       ${v.delay>0
@@ -2557,7 +2846,6 @@ function renderDash(v,mob){
   ${v.queue.length===0&&!S.showTx?`<div style="padding:48px 0;text-align:center;font-size:13px;color:var(--d);letter-spacing:2px">NO PENDING TRANSACTIONS</div>`:v.queue.map((tx,i)=>{
     const s=txSt(tx,v),isCancel=isCancelTx(tx,v);
     const isQueued=tx.eta>0;
-    const firstUnqueued=v.queue.findIndex(t=>t.eta===0&&!isCancelTx(t,v));
     const blocked=!isQueued&&!isCancel&&i!==firstUnqueued;
     const dv=tx.displayValue||tx.value,dt=tx.displayToken||tx.token;
     // What kind of proposal this is, and what executing it would actually do.
@@ -2571,12 +2859,15 @@ function renderDash(v,mob){
     let progressLine="";
     if(!isCancel&&!isQueued&&!blocked){
       const pct=v.threshold?Math.min(1,acCount/v.threshold):0,done=acCount>=v.threshold;
-      progressLine=`<div class="tx-progress"><span class="plabel">SIGNATURES</span><div class="pbar"><i style="width:${Math.round(pct*100)}%;background:${done?"var(--g)":"var(--y)"}"></i></div><span style="color:${done?"var(--g)":"var(--m)"}">${acCount}/${v.threshold}${done&&acCount>=v.ownerCount?" \u00B7 ALL":""}</span></div>`;
+      progressLine=`<div class="tx-progress"><span class="plabel">SIGNATURES</span><div class="pbar" role="progressbar" aria-label="Signatures collected" aria-valuemin="0" aria-valuemax="${v.threshold}" aria-valuenow="${acCount}"><i style="width:${Math.round(pct*100)}%;background:${done?"var(--g)":"var(--y)"}"></i></div><span style="color:${done?"var(--g)":"var(--m)"}">${acCount}/${v.threshold}${done&&acCount>=v.ownerCount?" \u00B7 ALL":""}</span></div>`;
     }else if(isQueued&&v.delay>0&&fmtEta(tx.eta)!=="READY"){
       const queuedAt=tx.eta-v.delay,pct=Math.min(1,Math.max(0,(NOW()-queuedAt)/v.delay));
-      progressLine=`<div class="tx-progress"><span class="plabel">TIMELOCK</span><div class="pbar"><i data-tl-eta="${tx.eta}" data-tl-delay="${v.delay}" style="width:${Math.round(pct*100)}%;background:var(--a)"></i></div></div>`;
+      progressLine=`<div class="tx-progress"><span class="plabel">TIMELOCK</span><div class="pbar" role="progressbar" aria-label="Timelock elapsed" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(pct*100)}"><i data-tl-eta="${tx.eta}" data-tl-delay="${v.delay}" style="width:${Math.round(pct*100)}%;background:var(--a)"></i></div></div>`;
     }
-    const apHtml=v.owners.map(o=>`<span class="${tx.approvals[o.addr]?"ap-ok":"ap-no"}">${tx.approvals[o.addr]?"\u2713":"\u25CB"} ${esc(ownerIdent(o))}${o.you?"*":""}</span>`).join("");
+    const apHtml=v.owners.map(o=>{
+      const signed=!!tx.approvals[o.addr];
+      return `<span class="${signed?"ap-ok":"ap-no"}" title="${esc(ownerIdent(o))} ${signed?"has signed":"has not signed"}"><span aria-hidden="true">${signed?"\u2713":"\u25CB"}</span><span class="vh">${signed?"signed":"not signed"}</span> ${esc(ownerIdent(o))}${o.you?"*":""}</span>`;
+    }).join("");
     const etaHtml=tx.eta>0&&fmtEta(tx.eta)!=="READY"?`<span class="eta" data-eta="${tx.eta}">${new Date(tx.eta*1000).toLocaleString("en-US",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"})}</span>`:"";
     const signedByYou=you&&tx.approvals[you];
     let actionBtn="";
@@ -2593,7 +2884,7 @@ function renderDash(v,mob){
         + 'Costs gas, is publicly visible, and gives up front-run protection unless a different owner submits the transaction.';
       actionBtn=mob
         ?`<div style="display:flex;gap:8px;flex-direction:column">
-            <button class="btn btn-fill btn-w" onclick="doSign(${S.sel},${tx.nonce})">SIGN <span style="opacity:.5;font-size:9px;margin-left:4px">OFF-CHAIN</span></button>
+            <button class="btn btn-fill btn-w" onclick="doSign(${S.sel},${tx.nonce})">SIGN <span class="btn-qual">OFF-CHAIN</span></button>
             <button class="alt-link" style="width:100%" title="${apTitle}" onclick="doApprove(${S.sel},${tx.nonce})">APPROVE ON-CHAIN INSTEAD</button>
           </div>`
         :`<div style="display:flex;gap:8px;align-items:center">
@@ -2605,7 +2896,7 @@ function renderDash(v,mob){
     }else if(s.queue){
       const ac=Object.values(tx.approvals).filter(Boolean).length;
       const unanimous=ac===v.ownerCount;
-      const unsignLink=signedByYou?`<button style="background:transparent;border:none;color:var(--r);font-size:9px;font-weight:700;letter-spacing:2px;opacity:.5;padding:6px 0;cursor:pointer;font-family:var(--f)" onclick="doUnsign(${S.sel},${tx.nonce})">UNSIGN</button>`:'';
+      const unsignLink=signedByYou?`<button class="unsign-link" onclick="doUnsign(${S.sel},${tx.nonce})">UNSIGN</button>`:'';
       if(s.instant){
         actionBtn=`<div style="display:flex;flex-direction:column;${mob?"width:100%":"align-items:flex-end"}"><button class="btn btn-green" ${mob?"style='width:100%'":""} onclick="doSubmit(${S.sel},${tx.nonce})">EXECUTE</button>${unsignLink}</div>`;
       }else if(isCancel){
@@ -2613,7 +2904,7 @@ function renderDash(v,mob){
       }else if(unanimous&&v.fastPath){
         actionBtn=mob
           ?`<div style="display:flex;gap:8px;flex-direction:column">
-              <button class="btn btn-green btn-w" onclick="doFastExecute(${S.sel},${tx.nonce})">INSTANT EXECUTE <span style="opacity:.5;font-size:9px;margin-left:4px">VIA EXECUTOR</span></button>
+              <button class="btn btn-green btn-w" onclick="doFastExecute(${S.sel},${tx.nonce})">INSTANT EXECUTE <span class="btn-qual">VIA EXECUTOR</span></button>
               <button class="btn btn-outline btn-w" onclick="doSubmit(${S.sel},${tx.nonce})">QUEUE WITH TIMELOCK</button>
               ${unsignLink}
             </div>`
@@ -2631,47 +2922,50 @@ function renderDash(v,mob){
       actionBtn=mob
         ?`<div style="display:flex;gap:8px;flex-direction:column">
             <button class="btn btn-green btn-w" onclick="doExecute(${S.sel},${tx.nonce})">EXECUTE</button>
-            ${s.cancelExec?`<button class="btn btn-danger btn-w" onclick="doCancel(${S.sel},${tx.nonce})">EXECUTE CANCEL <span style="opacity:.5;font-size:9px;margin-left:4px">${s.cancelSigs}/${v.threshold} VIA EXECUTOR</span></button>`:''}
+            ${s.cancelExec?`<button class="btn btn-danger btn-w" onclick="doCancel(${S.sel},${tx.nonce})">EXECUTE CANCEL <span class="btn-qual">${s.cancelSigs}/${v.threshold} VIA EXECUTOR</span></button>`:''}
             ${s.cancel?`<button class="btn btn-danger btn-w" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL${s.cancelSigs?` (${s.cancelSigs}/${v.threshold})`:''}</button>`:''}
             ${!s.cancel&&!s.cancelExec&&s.cancelSigs?`<span style="font-size:10px;color:var(--r);letter-spacing:1px">CANCEL ${s.cancelSigs}/${v.threshold}</span>`:''}
           </div>`
         :`<div style="display:flex;gap:8px">
             <button class="btn btn-green" onclick="doExecute(${S.sel},${tx.nonce})">EXECUTE</button>
-            ${s.cancelExec?`<button class="btn btn-danger" onclick="doCancel(${S.sel},${tx.nonce})">EXECUTE CANCEL <span style="opacity:.5;font-size:9px;margin-left:4px">${s.cancelSigs}/${v.threshold} VIA EXECUTOR</span></button>`:''}
+            ${s.cancelExec?`<button class="btn btn-danger" onclick="doCancel(${S.sel},${tx.nonce})">EXECUTE CANCEL <span class="btn-qual">${s.cancelSigs}/${v.threshold} VIA EXECUTOR</span></button>`:''}
             ${s.cancel?`<button class="btn btn-danger" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL${s.cancelSigs?` (${s.cancelSigs}/${v.threshold})`:''}</button>`:''}
             ${!s.cancel&&!s.cancelExec&&s.cancelSigs?`<span style="font-size:10px;color:var(--r);letter-spacing:1px">CANCEL ${s.cancelSigs}/${v.threshold}</span>`:''}
           </div>`;
     }else if(s.cancel||s.cancelExec||s.accel||s.accelExec){
       actionBtn=mob
         ?`<div style="display:flex;gap:8px;flex-direction:column">
-            ${s.accelExec?`<button class="btn btn-green btn-w" onclick="doAccelerate(${S.sel},${tx.nonce})">INSTANT EXECUTE <span style="opacity:.5;font-size:9px;margin-left:4px">${s.accelSigs}/${v.ownerCount} VIA EXECUTOR</span></button>`:''}
+            ${s.accelExec?`<button class="btn btn-green btn-w" onclick="doAccelerate(${S.sel},${tx.nonce})">INSTANT EXECUTE <span class="btn-qual">${s.accelSigs}/${v.ownerCount} VIA EXECUTOR</span></button>`:''}
             ${s.accel?`<button class="btn btn-outline btn-w" onclick="doAccelerate(${S.sel},${tx.nonce})">ACCELERATE${s.accelSigs?` (${s.accelSigs}/${v.ownerCount})`:''}</button>`:''}
             ${!s.accel&&!s.accelExec&&s.accelSigs?`<span style="font-size:10px;color:var(--d);letter-spacing:1px">ACCELERATE ${s.accelSigs}/${v.ownerCount}</span>`:''}
-            ${s.cancelExec?`<button class="btn btn-danger btn-w" onclick="doCancel(${S.sel},${tx.nonce})">EXECUTE CANCEL <span style="opacity:.5;font-size:9px;margin-left:4px">${s.cancelSigs}/${v.threshold} VIA EXECUTOR</span></button>`:''}
+            ${s.cancelExec?`<button class="btn btn-danger btn-w" onclick="doCancel(${S.sel},${tx.nonce})">EXECUTE CANCEL <span class="btn-qual">${s.cancelSigs}/${v.threshold} VIA EXECUTOR</span></button>`:''}
             ${s.cancel?`<button class="btn btn-danger btn-w" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL${s.cancelSigs?` (${s.cancelSigs}/${v.threshold})`:''}</button>`:''}
           </div>`
         :`<div style="display:flex;gap:8px">
-            ${s.accelExec?`<button class="btn btn-green" onclick="doAccelerate(${S.sel},${tx.nonce})">INSTANT EXECUTE <span style="opacity:.5;font-size:9px;margin-left:4px">${s.accelSigs}/${v.ownerCount} VIA EXECUTOR</span></button>`:''}
+            ${s.accelExec?`<button class="btn btn-green" onclick="doAccelerate(${S.sel},${tx.nonce})">INSTANT EXECUTE <span class="btn-qual">${s.accelSigs}/${v.ownerCount} VIA EXECUTOR</span></button>`:''}
             ${s.accel?`<button class="btn btn-outline" onclick="doAccelerate(${S.sel},${tx.nonce})">ACCELERATE${s.accelSigs?` (${s.accelSigs}/${v.ownerCount})`:''}</button>`:''}
             ${!s.accel&&!s.accelExec&&s.accelSigs?`<span style="font-size:10px;color:var(--d);letter-spacing:1px">ACCELERATE ${s.accelSigs}/${v.ownerCount}</span>`:''}
-            ${s.cancelExec?`<button class="btn btn-danger" onclick="doCancel(${S.sel},${tx.nonce})">EXECUTE CANCEL <span style="opacity:.5;font-size:9px;margin-left:4px">${s.cancelSigs}/${v.threshold} VIA EXECUTOR</span></button>`:''}
+            ${s.cancelExec?`<button class="btn btn-danger" onclick="doCancel(${S.sel},${tx.nonce})">EXECUTE CANCEL <span class="btn-qual">${s.cancelSigs}/${v.threshold} VIA EXECUTOR</span></button>`:''}
             ${s.cancel?`<button class="btn btn-danger" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL${s.cancelSigs?` (${s.cancelSigs}/${v.threshold})`:''}</button>`:''}
           </div>`;
     }
     // Kind badge — what sort of call this is. Suppressed when the headline
     // line already says it (a bare "BATCH (3)" needs no "BATCH" tag beside it).
+    // esc() on the label, not on the note: a note is authored here and carries
+    // deliberate entities (&mdash;, &rarr;), whereas a label can end in a bare
+    // selector read off a proposal row — and rows are anon-writable.
     const kindTag=(kind.label&&kind.label!==display)
-      ?`<span class="tx-kind ${esc(kind.tone||'')}">${kind.icon?`${tokIcon(kind.icon,'sm')} `:''}${kind.label}</span>`
+      ?`<span class="tx-kind ${esc(kind.tone||'')}">${kind.icon?`${tokIcon(kind.icon,'sm')} `:''}${esc(kind.label)}</span>`
       :'';
     const kindNote=kind.note?`<div class="tx-note${kind.warn?' warn':''}">${kind.note}</div>`:'';
     const txLink=!S.demoMode&&v.address&&ethers.isAddress(v.address)?`${location.origin}/#${S.chainId}/${v.address}/tx/${tx.nonce}`:'';
     const isFocus=_focusNonce!==null&&tx.nonce===_focusNonce&&!!v.address&&v.address.toLowerCase()===(_focusVaultAddr||'').toLowerCase();
     return`<div class="tx privg${blocked?" blocked":""}${isFocus?" tx-focus":""}" data-tx-nonce="${tx.nonce}">
-      ${isFocus?`<div style="margin-bottom:10px"><span class="tx-share">SHARED FOR REVIEW${txLink?` <button onclick="event.stopPropagation();navigator.clipboard.writeText('${txLink}');flash('CO-SIGN LINK COPIED')" title="Copy co-sign link">⧉</button>`:''}<button onclick="dismissFocus()" title="Dismiss">&#10005;</button></span></div>`:''}
+      ${isFocus?`<div style="margin-bottom:10px"><span class="tx-share">SHARED FOR REVIEW${txLink?` <button onclick="event.stopPropagation();copyText('${txLink}','CO-SIGN LINK COPIED')" aria-label="Copy co-sign link" title="Copy co-sign link">⧉</button>`:''}<button onclick="dismissFocus()" aria-label="Dismiss shared-for-review banner" title="Dismiss">&#10005;</button></span></div>`:''}
       <div class="tx-top">
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
-            <span class="tx-nonce">#${tx.nonce}${isCancel?" VIA EXECUTOR":i===firstUnqueued&&!isQueued?" NEXT":""}${txLink?` <button class="x-btn" style="font-size:8px;opacity:.4;display:inline-flex;min-width:auto;min-height:auto;padding:2px 4px;vertical-align:middle" onclick="event.stopPropagation();navigator.clipboard.writeText('${txLink}');flash('CO-SIGN LINK COPIED')" title="Copy co-sign link">\u29C9</button>`:""}</span>
+            <span class="tx-nonce">#${tx.nonce}${isCancel?" VIA EXECUTOR":i===firstUnqueued&&!isQueued?" NEXT":""}${txLink?` <button class="x-btn copy-btn icon-btn" onclick="event.stopPropagation();copyText('${txLink}','CO-SIGN LINK COPIED')" aria-label="Copy co-sign link for proposal ${tx.nonce}" title="Copy co-sign link">\u29C9</button>`:""}</span>
             ${kindTag}
           </div>
           <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-top:6px">
@@ -2681,7 +2975,7 @@ function renderDash(v,mob){
           ${kindNote}
         </div>
         ${!blocked?`<span class="tx-status" style="color:${s.c}"${tx.eta>0&&!s.exec?` data-eta-status="${tx.eta}"`:``}>&bull; ${s.l}</span>`:""}
-        ${blocked?'<span style="font-size:10px;color:var(--d);letter-spacing:2px">BLOCKED</span>':""}
+        ${blocked?`<span class="tx-status" style="color:var(--d)" title="Waiting on proposal #${v.queue[firstUnqueued]?v.queue[firstUnqueued].nonce:''} — the vault executes nonces in order">&bull; BLOCKED</span>`:""}
       </div>
       ${blocked?"":progressLine}
       <div class="approvals">${apHtml}${etaHtml}${(()=>{const xl=txExplorerLink(tx,v);return xl?`<span class="eta" style="margin-left:${etaHtml?'12px':'auto'}">${xl}</span>`:'';})()}</div>
@@ -3220,7 +3514,7 @@ function renderTopUp(){
   const pills = toks.map(x => {
     const b = t.bals ? t.bals[x.symbol] : null;
     const owns = b && BigInt(b.raw) > 0n;
-    return `<button class="pill${t.sym===x.symbol?' on':''}" style="${owns?'':'opacity:.55'}" onclick="selectTopUpToken('${esc(x.symbol)}')"><span class="tok-ico">${x.icon||iconForSym(x.symbol)}</span>${esc(x.symbol)}</button>`;
+    return `<button class="pill${t.sym===x.symbol?' on':''}" style="${owns?'':'opacity:.55'}" onclick="selectTopUpToken('${jstr(x.symbol)}')"><span class="tok-ico">${x.icon||iconForSym(x.symbol)}</span>${esc(x.symbol)}</button>`;
   }).join('');
 
   const availRow = t.loading
@@ -3232,25 +3526,25 @@ function renderTopUp(){
   const sending = t.sending;
   const btnLabel = sending ? (t.txHash ? 'CONFIRMING…' : 'CONFIRM IN WALLET…') : `SEND ${esc(sel.symbol)} TO VAULT`;
 
-  return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:300;display:flex;align-items:center;justify-content:center;padding:16px" onclick="if(event.target===this&&!S.topup.sending)closeTopUp()">
-    <div style="width:min(440px,96vw);max-height:92vh;max-height:92dvh;overflow-y:auto;background:var(--bg);border:1px solid var(--a);padding:22px">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:4px">
-        <div style="font-size:12px;font-weight:700;letter-spacing:2px">TOP UP &middot; ${esc(v.name)}</div>
-        <button class="x-btn" style="margin:0;${sending?'opacity:.4':''}" onclick="closeTopUp()" ${sending?'disabled':''}>&#10005;</button>
+  return `<div class="ovl" onclick="if(event.target===this&&!S.topup.sending)closeTopUp()">
+    <div class="ovl-card" role="dialog" aria-modal="true" aria-label="Top up ${esc(v.name)}">
+      <div class="ovl-head">
+        <div class="ovl-title">TOP UP &middot; ${esc(v.name)}</div>
+        <button class="x-btn" style="margin:0;${sending?'opacity:.4':''}" onclick="closeTopUp()" ${sending?'disabled':''} aria-label="Close">&#10005;</button>
       </div>
-      <div style="font-size:10px;color:var(--m);letter-spacing:1px;margin-bottom:18px;word-break:break-all">DEPOSIT FROM YOUR WALLET &rarr; ${shortAddr(v.address)} ON ${esc(chainName())}</div>
+      <div class="ovl-sub" style="margin-bottom:18px">DEPOSIT FROM YOUR WALLET &rarr; ${shortAddr(v.address)} ON ${esc(chainName())}</div>
 
-      <label class="lbl">ASSET</label>
-      <div class="token-pills">${pills}<button class="pill" onclick="S.topup.showCustom=!S.topup.showCustom;render()">+ CUSTOM</button></div>
+      <div class="lbl" id="topup-asset-lbl">ASSET</div>
+      <div class="token-pills" role="group" aria-labelledby="topup-asset-lbl">${pills}<button class="pill" onclick="S.topup.showCustom=!S.topup.showCustom;render()" aria-expanded="${!!t.showCustom}">+ CUSTOM</button></div>
       ${t.showCustom?`<div style="margin:4px 0 12px">
-        <div style="display:flex;gap:8px"><input class="inp" id="topup-custom-addr" style="margin:0;flex:1;min-width:0;font-size:16px" placeholder="0x... TOKEN ADDRESS" onkeydown="if(event.key==='Enter'){event.preventDefault();addTopUpCustom()}"><button class="btn btn-outline btn-sm" onclick="addTopUpCustom()">ADD</button></div>
-        ${(()=>{const cl=customTokensFor(S.chainId,v.address);return cl.length?`<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">${cl.map(x=>`<span class="ctok-chip">${tokIcon(x.symbol,'sm')} ${esc(x.symbol)} <span class="dim">${x.decimals}d</span><button onclick="removeCustomTokenFlow('${x.address}')" title="Remove ${esc(x.symbol)}">&#10005;</button></span>`).join('')}</div>`:''})()}
+        <div style="display:flex;gap:8px"><input class="inp" id="topup-custom-addr" style="margin:0;flex:1;min-width:0;font-size:16px" placeholder="0x... TOKEN ADDRESS" aria-label="Custom token address" onkeydown="if(event.key==='Enter'){event.preventDefault();addTopUpCustom()}"><button class="btn btn-outline btn-sm" onclick="addTopUpCustom()">ADD</button></div>
+        ${(()=>{const cl=customTokensFor(S.chainId,v.address);return cl.length?`<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">${cl.map(x=>`<span class="ctok-chip">${tokIcon(x.symbol,'sm')} ${esc(x.symbol)} <span class="dim">${x.decimals}d</span><button onclick="removeCustomTokenFlow('${x.address}')" aria-label="Remove ${esc(x.symbol)}" title="Remove ${esc(x.symbol)}">&#10005;</button></span>`).join('')}</div>`:''})()}
         <div style="font-size:9px;color:var(--d);letter-spacing:1px;line-height:1.5;margin-top:8px">SAVED TO THIS BROWSER FOR THIS VAULT &mdash; AVAILABLE FOR SENDS TOO</div>
       </div>`:''}
 
       <div class="privg">
-        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-top:16px"><label class="lbl">AMOUNT</label>${availRow}</div>
-        <input class="inp priv" id="topup-amount" inputmode="decimal" style="font-size:16px" placeholder="0.0" ${sending?'disabled':''} oninput="onTopUpAmount(this.value,${dec},${availNum},'${unitLabel}')" onkeydown="if(event.key==='Enter'){event.preventDefault();submitTopUp()}">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-top:16px"><label class="lbl" for="topup-amount">AMOUNT</label>${availRow}</div>
+        <input class="inp priv" id="topup-amount" inputmode="decimal" style="font-size:16px" placeholder="0.0" ${sending?'disabled':''} aria-describedby="topup-units topup-warn" oninput="onTopUpAmount(this.value,${dec},${availNum},'${unitLabel}')" onkeydown="if(event.key==='Enter'){event.preventDefault();submitTopUp()}">
         <div id="topup-units" class="priv" style="font-size:10px;color:var(--d);margin-top:-12px;word-break:break-all"></div>
       </div>
       <div id="topup-warn" style="font-size:10px;color:var(--r);letter-spacing:1px;min-height:12px;margin-bottom:4px"></div>
@@ -3271,7 +3565,7 @@ function renderTxBuilder(v,mob){
   // fall back rather than render an empty builder.
   if(S.txMode==="STAKE"&&!stakeAvailable()) S.txMode="TRANSFER";
   const modes=["TRANSFER",...(stakeAvailable()?["STAKE"]:[]),"CUSTOM","BATCH"];
-  const tabs=modes.map(m=>`<button class="txb-tab${S.txMode===m?" on":""}" onclick="S.txMode='${m}';_builderSim=null;render()">${m}</button>`).join("");
+  const tabs=modes.map(m=>`<button class="txb-tab${S.txMode===m?" on":""}"${S.txMode===m?' aria-current="true"':''} onclick="S.txMode='${m}';_builderSim=null;render()">${m}</button>`).join("");
   let body="";
   if(S.txMode==="TRANSFER"){
     const ct=curTok(v);
@@ -3286,20 +3580,20 @@ function renderTxBuilder(v,mob){
     // why delayed sends aren't on offer here instead of silently omitting them.
     const slowUi=`
       <div class="fset">
-        <div class="fhead"><label class="lbl">DELIVERY</label><span class="fhint">${slowOn?`REVERSIBLE FOR <b>${esc(fmtDelay(S.txSlowDelaySec))}</b>`:`FINAL ON EXECUTION`}</span></div>
-        <div class="seg">
-          <button class="${!S.txSlow?"on":""}" onclick="setTxSlow(false)" title="The vault sends the asset directly — final the moment the proposal executes">INSTANT</button>
+        <div class="fhead"><span class="lbl" id="lbl-delivery">DELIVERY</span><span class="fhint">${slowOn?`REVERSIBLE FOR <b>${esc(fmtDelay(S.txSlowDelaySec))}</b>`:`FINAL ON EXECUTION`}</span></div>
+        <div class="seg" role="group" aria-labelledby="lbl-delivery">
+          <button class="${!S.txSlow?"on":""}" aria-pressed="${!S.txSlow}" onclick="setTxSlow(false)" title="The vault sends the asset directly — final the moment the proposal executes">INSTANT</button>
           ${slowAvailable()
-            ? `<button class="${S.txSlow?"on":""}" onclick="setTxSlow(true)" title="Time-delayed transfer via the SLOW protocol — reversible by the vault until the timer expires">SLOW &middot; DELAYED</button>`
+            ? `<button class="${S.txSlow?"on":""}" aria-pressed="${!!S.txSlow}" onclick="setTxSlow(true)" title="Time-delayed transfer via the SLOW protocol — reversible by the vault until the timer expires">SLOW &middot; DELAYED</button>`
             : `<button class="btn-disabled" style="border:none" onclick="flash('SLOW IS ETHEREUM MAINNET ONLY')" title="Delayed, reversible delivery via the SLOW protocol — available on Ethereum mainnet only">SLOW &middot; MAINNET ONLY</button>`}
         </div>
         ${!slowAvailable()?`<div class="slow-note" style="margin-top:10px">THE VAULT SENDS THE ASSET DIRECTLY. ON ETHEREUM MAINNET YOU CAN INSTEAD SEND VIA SLOW &mdash; THE RECIPIENT CLAIMS AFTER A DELAY YOU SET, AND THE VAULT CAN REVERSE IT UNTIL THEN.</div>`:''}
         ${slowOn?`<div class="slow-box">
           <div class="token-pills" style="margin-bottom:0">${SLOW_PRESETS.map(p=>`<button class="pill${Number(S.txSlowDelaySec)===p.s?" on":""}" onclick="setSlowDelay(${p.s})">${p.l}</button>`).join("")}</div>
           <div class="slow-custom">
-            <span class="slow-custom-l">CUSTOM</span>
+            <label class="slow-custom-l" for="slow-custom-n">CUSTOM</label>
             <input class="inp" id="slow-custom-n" style="flex:1" inputmode="decimal" placeholder="0" onchange="onSlowCustom()" onkeydown="if(event.key==='Enter'){event.preventDefault();onSlowCustom()}">
-            <select class="slow-unit" id="slow-custom-u" onchange="onSlowCustom()">
+            <select class="slow-unit" id="slow-custom-u" aria-label="Delay unit" onchange="onSlowCustom()">
               <option value="h"${S.txSlowUnit==="h"?" selected":""}>HOURS</option>
               <option value="d"${S.txSlowUnit==="d"?" selected":""}>DAYS</option>
             </select>
@@ -3310,16 +3604,16 @@ function renderTxBuilder(v,mob){
     body=`<div class="send-grid">
       <div>
         <div class="fset">
-          <div class="fhead"><label class="lbl">TOKEN</label>${hold?`<span class="fhint privg"${pgAttrs()}>VAULT HOLDS <b><span class="priv">${esc(hold.balance)}</span> ${esc(S.txToken)}</b>${hold.usd?` &middot; <span class="priv">${esc(hold.usd)}</span>`:''}</span>`:`<span class="fhint">NO ${esc(S.txToken)} BALANCE</span>`}</div>
-          <div class="token-pills" style="margin-bottom:0">${tokenObjs.map(t=>`<button class="pill${S.txToken===t.symbol?" on":""}" onclick="selectTxToken('${esc(t.symbol)}')"><span class="tok-ico">${t.icon||iconForSym(t.symbol)}</span>${esc(t.symbol)}</button>`).join("")}${S.demoMode?"":`<button class="pill" onclick="S.showCustomTok=!S.showCustomTok;render()">+ CUSTOM</button>`}</div>
-          ${(!S.demoMode&&S.showCustomTok)?`<div style="margin-top:12px"><div style="display:flex;gap:8px"><input class="inp" id="custom-tok-addr" style="margin:0;flex:1;min-width:0;font-size:13px" placeholder="0x... TOKEN ADDRESS" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomTokenFlow()}"><button class="btn btn-outline btn-sm" onclick="addCustomTokenFlow()">ADD</button></div>${(()=>{const cl=customTokensFor(S.chainId,v.address);return cl.length?`<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">${cl.map(t=>`<span class="ctok-chip">${tokIcon(t.symbol,'sm')} ${esc(t.symbol)} <span class="dim">${t.decimals}d</span><button onclick="removeCustomTokenFlow('${t.address}')" title="Remove ${esc(t.symbol)}">&#10005;</button></span>`).join('')}</div>`:''})()}
+          <div class="fhead"><span class="lbl" id="lbl-token">TOKEN</span>${hold?`<span class="fhint privg"${pgAttrs()}>VAULT HOLDS <b><span class="priv">${esc(hold.balance)}</span> ${esc(S.txToken)}</b>${hold.usd?` &middot; <span class="priv">${esc(hold.usd)}</span>`:''}</span>`:`<span class="fhint">NO ${esc(S.txToken)} BALANCE</span>`}</div>
+          <div class="token-pills" style="margin-bottom:0" role="group" aria-labelledby="lbl-token">${tokenObjs.map(t=>`<button class="pill${S.txToken===t.symbol?" on":""}"${S.txToken===t.symbol?' aria-current="true"':''} onclick="selectTxToken('${jstr(t.symbol)}')"><span class="tok-ico">${t.icon||iconForSym(t.symbol)}</span>${esc(t.symbol)}</button>`).join("")}${S.demoMode?"":`<button class="pill" onclick="S.showCustomTok=!S.showCustomTok;render()">+ CUSTOM</button>`}</div>
+          ${(!S.demoMode&&S.showCustomTok)?`<div style="margin-top:12px"><div style="display:flex;gap:8px"><input class="inp" id="custom-tok-addr" style="margin:0;flex:1;min-width:0;font-size:13px" placeholder="0x... TOKEN ADDRESS" aria-label="Custom token address" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomTokenFlow()}"><button class="btn btn-outline btn-sm" onclick="addCustomTokenFlow()">ADD</button></div>${(()=>{const cl=customTokensFor(S.chainId,v.address);return cl.length?`<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">${cl.map(t=>`<span class="ctok-chip">${tokIcon(t.symbol,'sm')} ${esc(t.symbol)} <span class="dim">${t.decimals}d</span><button onclick="removeCustomTokenFlow('${t.address}')" aria-label="Remove ${esc(t.symbol)}" title="Remove ${esc(t.symbol)}">&#10005;</button></span>`).join('')}</div>`:''})()}
           <div style="font-size:9px;color:var(--d);letter-spacing:1px;line-height:1.5;margin-top:8px">SAVED TO THIS BROWSER FOR THIS VAULT &mdash; AVAILABLE FOR TOP UPS TOO</div></div>`:''}
         </div>
 
         <div class="fset privg">
-          <div class="fhead"><label class="lbl">AMOUNT</label><span class="fhint priv" id="tx-units"></span></div>
+          <div class="fhead"><label class="lbl" for="tx-amount">AMOUNT</label><span class="fhint priv" id="tx-units"></span></div>
           <div class="amt">
-            <input class="amt-in priv" id="tx-amount" inputmode="decimal" placeholder="0.0" value="${esc(S.txAmount)}" oninput="onTxAmount(this.value,${dec},${availNum},'${esc(unitLabel)}')" onkeydown="if(event.key==='Enter'){event.preventDefault();submitTransfer()}">
+            <input class="amt-in priv" id="tx-amount" inputmode="decimal" placeholder="0.0" aria-describedby="tx-units tx-amount-usd tx-amount-warn" value="${esc(S.txAmount)}" oninput="onTxAmount(this.value,${dec},${availNum},'${esc(unitLabel)}')" onkeydown="if(event.key==='Enter'){event.preventDefault();submitTransfer()}">
             <span class="amt-tok">${tokIcon(S.txToken)}${esc(S.txToken)}</span>
           </div>
           <div class="amt-foot">
@@ -3330,8 +3624,8 @@ function renderTxBuilder(v,mob){
         </div>
 
         <div class="fset">
-          <div class="fhead"><label class="lbl">RECIPIENT</label><span class="fhint" id="tx-to-status"></span></div>
-          <input class="inp" id="tx-to" style="margin-bottom:0" placeholder="0x... or name.eth / name.(g)wei" value="${esc(S.txTo)}" oninput="onTxRecipient(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();submitTransfer()}">
+          <div class="fhead"><label class="lbl" for="tx-to">RECIPIENT</label><span class="fhint" id="tx-to-status" role="status"></span></div>
+          <input class="inp" id="tx-to" style="margin-bottom:0" placeholder="0x... or name.eth / name.(g)wei" aria-describedby="tx-to-status" value="${esc(S.txTo)}" oninput="onTxRecipient(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();submitTransfer()}">
         </div>
 
         ${slowUi}
@@ -3370,9 +3664,9 @@ function renderTxBuilder(v,mob){
         </div>
 
         <div class="fset privg">
-          <div class="fhead"><label class="lbl">AMOUNT TO STAKE</label><span class="fhint priv" id="stake-units"></span></div>
+          <div class="fhead"><label class="lbl" for="stake-amount">AMOUNT TO STAKE</label><span class="fhint priv" id="stake-units"></span></div>
           <div class="amt">
-            <input class="amt-in priv" id="stake-amount" inputmode="decimal" placeholder="0.0" value="${esc(S.stakeAmount)}" oninput="onStakeAmount(this.value,${availNum})" onkeydown="if(event.key==='Enter'){event.preventDefault();submitStake()}">
+            <input class="amt-in priv" id="stake-amount" inputmode="decimal" placeholder="0.0" aria-describedby="stake-units stake-amount-usd stake-amount-warn" value="${esc(S.stakeAmount)}" oninput="onStakeAmount(this.value,${availNum})" onkeydown="if(event.key==='Enter'){event.preventDefault();submitStake()}">
             <span class="amt-tok">${tokIcon('ETH')}ETH</span>
           </div>
           <div class="amt-foot">
@@ -3412,16 +3706,16 @@ function renderTxBuilder(v,mob){
     if(hasFns) {
       const dupes = new Set(); const seen = new Set();
       S.cxAbi.forEach(f => { if(seen.has(f.name)) dupes.add(f.name); seen.add(f.name); });
-      fnPills = `<label class="lbl">FUNCTION</label><div class="token-pills" style="margin-bottom:12px;max-height:${mob?'140px':'200px'};overflow-y:auto">${S.cxAbi.map((fn, i) => {
+      fnPills = `<span class="lbl" id="lbl-fn">FUNCTION</span><div class="token-pills" role="group" aria-labelledby="lbl-fn" style="margin-bottom:12px;max-height:${mob?'140px':'200px'};overflow-y:auto">${S.cxAbi.map((fn, i) => {
         const label = dupes.has(fn.name) ? fn.name+'('+fn.inputs.map(p=>p.type).join(',')+')' : fn.name;
-        return`<button class="pill${S.cxFn===i?" on":""}" onclick="selectCxFn(${i})">${esc(label)}</button>`;
+        return`<button class="pill${S.cxFn===i?" on":""}"${S.cxFn===i?' aria-current="true"':''} onclick="selectCxFn(${i})">${esc(label)}</button>`;
       }).join('')}</div>`;
     }
     let rightCol = '';
     if(selFn) {
       const fnSig = selFn.name+'('+selFn.inputs.map(p=>p.type).join(',')+')';
       const params = selFn.inputs.length ? selFn.inputs.map((inp, i) =>
-        `<label class="lbl">${esc(inp.name||'arg'+i)} <span class="dim">${esc(inp.type)}</span></label><input class="inp" placeholder="${esc(inp.type)}" value="${esc(S.cxArgs[i]||'')}" oninput="S.cxArgs[${i}]=this.value">`
+        `<label class="lbl" for="cx-arg-${i}">${esc(inp.name||'arg'+i)} <span class="dim">${esc(inp.type)}</span></label><input class="inp" id="cx-arg-${i}" placeholder="${esc(inp.type)}" value="${esc(S.cxArgs[i]||'')}" oninput="S.cxArgs[${i}]=this.value">`
       ).join('') : '<div style="font-size:10px;color:var(--d);margin:8px 0 12px;letter-spacing:2px">NO PARAMETERS</div>';
       const preview = encoded
         ? `<label class="lbl">CALLDATA <span class="dim">${esc(fnSig)}</span></label><div style="font-size:10px;color:var(--d);word-break:break-all;max-height:48px;overflow-y:auto;line-height:1.6;margin-bottom:12px;padding:8px;border:1px solid var(--ln)">${esc(encoded)}</div>`
@@ -3430,30 +3724,30 @@ function renderTxBuilder(v,mob){
         ? '<div style="font-size:10px;color:var(--r);margin-bottom:12px;letter-spacing:1px">ENCODE ERROR — CHECK PARAMS</div>' : '';
       rightCol = `${params}${selFn.stateMutability==='payable'?'<div style="font-size:10px;color:var(--g);margin:-8px 0 12px;letter-spacing:1px">PAYABLE</div>':''}${preview}${encodeFail}<button class="btn btn-fill btn-w btn-big" style="margin-top:${mob?8:16}px" onclick="submitCustom()">SIGN + SUBMIT</button>`;
     } else {
-      rightCol = `<label class="lbl">CALLDATA</label><textarea class="inp" id="cx-data" placeholder="0x..."></textarea><button class="btn btn-fill btn-w btn-big" style="margin-top:${mob?8:16}px" onclick="submitCustom()">SIGN + SUBMIT</button>`;
+      rightCol = `<label class="lbl" for="cx-data">CALLDATA</label><textarea class="inp" id="cx-data" placeholder="0x..."></textarea><button class="btn btn-fill btn-w btn-big" style="margin-top:${mob?8:16}px" onclick="submitCustom()">SIGN + SUBMIT</button>`;
     }
     body=`<div class="grid2">
       <div>
-        <label class="lbl">TARGET</label><input class="inp" id="cx-target" placeholder="0x... or name.eth / name.(g)wei" value="${esc(shortAddr(S.cxTarget))}" onfocus="this.value=S.cxTarget" onblur="this.value=shortAddr(S.cxTarget)" oninput="onCxTargetChange(this.value)">
-        <div id="cx-target-status" style="font-size:9px;letter-spacing:1px;margin-top:-8px;margin-bottom:8px;min-height:11px"></div>
+        <label class="lbl" for="cx-target">TARGET</label><input class="inp" id="cx-target" aria-describedby="cx-target-status" placeholder="0x... or name.eth / name.(g)wei" value="${esc(shortAddr(S.cxTarget))}" onfocus="this.value=S.cxTarget" onblur="this.value=shortAddr(S.cxTarget)" oninput="onCxTargetChange(this.value)">
+        <div id="cx-target-status" role="status" style="font-size:9px;letter-spacing:1px;margin-top:-8px;margin-bottom:8px;min-height:11px"></div>
         ${abiStatus}${fnPills}
-        <label class="lbl">VALUE (ETH)</label><input class="inp" id="cx-value" placeholder="0" value="${esc(S.cxValue)}" oninput="S.cxValue=this.value;document.getElementById('cx-wei').textContent=this.value?toUnits(this.value,18)+' WEI':''">
+        <label class="lbl" for="cx-value">VALUE (ETH)</label><input class="inp" id="cx-value" aria-describedby="cx-wei" placeholder="0" value="${esc(S.cxValue)}" oninput="S.cxValue=this.value;document.getElementById('cx-wei').textContent=this.value?toUnits(this.value,18)+' WEI':''">
         <div id="cx-wei" style="font-size:10px;color:var(--d);margin-top:-12px;margin-bottom:12px;word-break:break-all">${S.cxValue?toUnits(S.cxValue,18)+' WEI':''}</div>
       </div><div>
         ${rightCol}
       </div></div>`;
   }else{
     body=S.batch.map((c,i)=>`<div class="batch-call">
-      <div class="call-hdr"><span>CALL ${String(i+1).padStart(2,"0")}</span>${S.batch.length>1?`<button class="x-btn" onclick="S.batch.splice(${i},1);render()">&#10005;</button>`:""}</div>
+      <div class="call-hdr"><span>CALL ${String(i+1).padStart(2,"0")}</span>${S.batch.length>1?`<button class="x-btn" onclick="S.batch.splice(${i},1);render()" aria-label="Remove call ${i+1}" title="Remove this call">&#10005;</button>`:""}</div>
       <div class="grid3">
-        <div><label class="lbl">TARGET</label><input class="inp" data-bi="${i}" data-bf="t" placeholder="0x... or .eth/.(g)wei" value="${esc(shortAddr(c.t))}" onfocus="this.value=S.batch[${i}].t" onblur="this.value=shortAddr(S.batch[${i}].t)" oninput="onBatchTarget(${i},this.value)"><div id="batch-t-${i}" style="font-size:9px;letter-spacing:1px;margin-top:-12px;margin-bottom:8px;min-height:11px">${(()=>{const s=_addrState(c.t);return s.txt?`<span style="color:${s.color}">${ethers.isAddress((c.t||'').trim())?'✓':s.txt}</span>`:''})()}</div></div>
-        <div><label class="lbl">VALUE (ETH)</label><input class="inp" data-bi="${i}" data-bf="v" placeholder="0" value="${esc(c.v)}" oninput="S.batch[${i}].v=this.value;this.nextElementSibling.textContent=this.value?toUnits(this.value,18)+' WEI':''"><div style="font-size:10px;color:var(--d);margin-top:-12px;margin-bottom:8px;word-break:break-all">${c.v?toUnits(c.v,18)+' WEI':''}</div></div>
-        <div><label class="lbl">CALLDATA</label><input class="inp" data-bi="${i}" data-bf="d" placeholder="0x..." value="${esc(c.d)}" oninput="onBatchData(${i},this.value)"><div id="batch-d-${i}" style="font-size:9px;letter-spacing:1px;margin-top:-12px;margin-bottom:8px;min-height:11px">${(()=>{const s=_hexState(c.d);return s.txt?`<span style="color:${s.color}">${s.txt}</span>`:''})()}</div></div>
+        <div><label class="lbl" for="batch-t-in-${i}">TARGET</label><input class="inp" id="batch-t-in-${i}" aria-describedby="batch-t-${i}" data-bi="${i}" data-bf="t" placeholder="0x... or .eth/.(g)wei" value="${esc(shortAddr(c.t))}" onfocus="this.value=S.batch[${i}].t" onblur="this.value=shortAddr(S.batch[${i}].t)" oninput="onBatchTarget(${i},this.value)"><div id="batch-t-${i}" style="font-size:9px;letter-spacing:1px;margin-top:-12px;margin-bottom:8px;min-height:11px">${(()=>{const s=_addrState(c.t);return s.txt?`<span style="color:${s.color}">${ethers.isAddress((c.t||'').trim())?'✓':s.txt}</span>`:''})()}</div></div>
+        <div><label class="lbl" for="batch-v-in-${i}">VALUE (ETH)</label><input class="inp" id="batch-v-in-${i}" data-bi="${i}" data-bf="v" placeholder="0" value="${esc(c.v)}" oninput="S.batch[${i}].v=this.value;this.nextElementSibling.textContent=this.value?toUnits(this.value,18)+' WEI':''"><div style="font-size:10px;color:var(--d);margin-top:-12px;margin-bottom:8px;word-break:break-all">${c.v?toUnits(c.v,18)+' WEI':''}</div></div>
+        <div><label class="lbl" for="batch-d-in-${i}">CALLDATA</label><input class="inp" id="batch-d-in-${i}" aria-describedby="batch-d-${i}" data-bi="${i}" data-bf="d" placeholder="0x..." value="${esc(c.d)}" oninput="onBatchData(${i},this.value)"><div id="batch-d-${i}" style="font-size:9px;letter-spacing:1px;margin-top:-12px;margin-bottom:8px;min-height:11px">${(()=>{const s=_hexState(c.d);return s.txt?`<span style="color:${s.color}">${s.txt}</span>`:''})()}</div></div>
       </div></div>`).join("")+
       `<button class="link-btn" onclick="S.batch.push({t:'',v:'',d:''});render()">+ ADD CALL</button>
        <button class="btn btn-fill btn-w btn-big" style="margin-top:16px" onclick="submitBatch()">SIGN + SUBMIT BATCH</button>`;
   }
-  return`<div class="txb"><div class="txb-tabs">${tabs}<button class="x-btn" onclick="closeTxBuilder()" title="Discard this draft">&#10005;</button></div>${body}
+  return`<div class="txb"><div class="txb-tabs">${tabs}<button class="x-btn" onclick="closeTxBuilder()" aria-label="Discard this draft" title="Discard this draft">&#10005;</button></div>${body}
     ${_builderSim
       ? renderSim(_builderSim, { rerun:'simulateBuilder()', dismiss:'dismissBuilderSim()' })
       : `<div class="sim-idle">
@@ -3511,15 +3805,15 @@ function renderCreate(mob){
   <div class="sec"><span>DEPLOY NEW VAULT</span><span class="line"></span></div>
   <div class="grid2" style="gap:${mob?0:48}px">
     <div>
-      <label class="lbl">VAULT NAME</label>
-      <input class="inp" style="margin-bottom:20px" placeholder="MY VAULT" value="${esc(c.name||'')}" oninput="S.cf.name=this.value" onchange="render()">
-      <div class="fhead"><label class="lbl" style="margin:0">OWNERS</label>
-        <button class="pill safe-pill" title="Copy the owners and threshold of an existing Gnosis Safe" onclick="openSafeClone()">${safeIcon()}CLONE</button>
+      <label class="lbl" for="cf-name">VAULT NAME</label>
+      <input class="inp" id="cf-name" style="margin-bottom:20px" placeholder="MY VAULT" value="${esc(c.name||'')}" oninput="S.cf.name=this.value" onchange="render()">
+      <div class="fhead"><span class="lbl" style="margin:0">OWNERS</span>
+        <button class="pill safe-pill" id="safe-clone-btn" aria-haspopup="dialog" title="Copy the owners and threshold of an existing Gnosis Safe" onclick="openSafeClone()">${safeIcon()}CLONE</button>
       </div>
       ${c.safeSrc?(()=>{const sn=CHAINS[c.safeSrc.chainId]?.name||c.safeSrc.chainId,ex=CHAINS[c.safeSrc.chainId]?.explorer||'https://etherscan.io';return`<div class="safe-src">
         ${safeIcon()}<span>CLONED FROM SAFE <a href="${ex}/address/${esc(c.safeSrc.addr)}" target="_blank" rel="noopener" style="color:var(--m);text-decoration:none;border-bottom:1px solid var(--ln)">${esc(shortAddr(c.safeSrc.addr))}</a> &middot; ${esc(String(sn).toUpperCase())}${c.safeSrc.version?' &middot; v'+esc(c.safeSrc.version):''}</span>
         <span style="color:var(--m)">${c.safeSrc.threshold} OF ${c.safeSrc.ownerCount}</span>
-        <button class="x-btn" title="Undo the clone" onclick="undoSafeClone()">&#10005;</button>
+        <button class="x-btn" aria-label="Undo the clone" title="Undo the clone" onclick="undoSafeClone()">&#10005;</button>
       </div>`})():''}
       ${(()=>{const you=window._connectedAddress;if(you&&!S.demoMode&&!c.safeSrc&&c.owners.every(o=>!o.addr.trim())){c.owners[0].addr=you;c.owners[0].label='YOU'}return''})()}${c.owners.map((o,i)=>{
         const st=val.owners[i].state;
@@ -3527,33 +3821,33 @@ function renderCreate(mob){
         const noteColor=st==='name'?'var(--d)':'var(--r)';
         return`<div class="owner-row">
         <span class="o-num" style="color:${_OWNER_STATE_COLOR[st]||'var(--d)'}">${String(i+1).padStart(2,"0")}</span>
-        <input class="inp o-addr" style="${st==='invalid'||st==='dup'?'border-bottom-color:var(--r)':''}" placeholder="0x... or .eth/.(g)wei" value="${esc(shortAddr(o.addr))}" onfocus="this.value=S.cf.owners[${i}].addr" onblur="this.value=shortAddr(S.cf.owners[${i}].addr)" oninput="S.cf.owners[${i}].addr=this.value;const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;if(+S.cf.threshold>fc){S.cf.threshold=String(fc)}" onchange="S.cf.owners[${i}].addr=this.value;render()">
-        <input class="inp o-label" placeholder="LABEL" value="${esc(o.label)}" oninput="S.cf.owners[${i}].label=this.value" onchange="render()">
-        ${c.owners.length>1?`<button class="x-btn red o-del" onclick="S.cf.owners.splice(${i},1);const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;S.cf.threshold=String(Math.min(+S.cf.threshold||1,fc));render()">&#10005;</button>`:""}
+        <input class="inp o-addr" aria-label="Owner ${i+1} address or name" aria-invalid="${st==='invalid'||st==='dup'}" style="${st==='invalid'||st==='dup'?'border-bottom-color:var(--r)':''}" placeholder="0x... or .eth/.(g)wei" value="${esc(shortAddr(o.addr))}" onfocus="this.value=S.cf.owners[${i}].addr" onblur="this.value=shortAddr(S.cf.owners[${i}].addr)" oninput="S.cf.owners[${i}].addr=this.value;const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;if(+S.cf.threshold>fc){S.cf.threshold=String(fc)}" onchange="S.cf.owners[${i}].addr=this.value;render()">
+        <input class="inp o-label" aria-label="Owner ${i+1} label" placeholder="LABEL" value="${esc(o.label)}" oninput="S.cf.owners[${i}].label=this.value" onchange="render()">
+        ${c.owners.length>1?`<button class="x-btn red o-del" aria-label="Remove owner ${i+1}" title="Remove this owner" onclick="S.cf.owners.splice(${i},1);const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;S.cf.threshold=String(Math.min(+S.cf.threshold||1,fc));render()">&#10005;</button>`:""}
       </div>${note?`<div class="owner-note" style="color:${noteColor}">${note}</div>`:''}`}).join("")}
       <button class="link-btn" onclick="S.cf.owners.push({addr:'',label:''});S.cf.threshold=String(Math.min(+S.cf.threshold||1,S.cf.owners.length));render()">+ ADD</button>
       <div class="sep"></div>
       <div class="grid2" style="gap:32px">
         <div>
-          <label class="lbl">THRESHOLD</label>
-          <div class="thresh-btns">${(()=>{const n=Math.max(filled,1);return Array.from({length:n},(_,i)=>i+1).map(k=>{const on=k===+c.threshold;return`<button class="btn btn-outline thresh-btn" style="border-color:${on?'var(--a)':'var(--ln)'};color:${on?'var(--a)':'var(--d)'};background:${on?'color-mix(in srgb,var(--a) 10%,transparent)':'transparent'}" onclick="S.cf.threshold='${k}';render()">${k}</button>`}).join("")})()}</div>
+          <span class="lbl" id="lbl-cf-thresh">THRESHOLD</span>
+          <div class="thresh-btns" role="group" aria-labelledby="lbl-cf-thresh">${(()=>{const n=Math.max(filled,1);return Array.from({length:n},(_,i)=>i+1).map(k=>{const on=k===+c.threshold;return`<button class="btn btn-outline thresh-btn"${on?' aria-current="true"':''} aria-label="Require ${k} of ${Math.max(filled,1)} signatures" style="border-color:${on?'var(--a)':'var(--ln)'};color:${on?'var(--a)':'var(--d)'};background:${on?'color-mix(in srgb,var(--a) 10%,transparent)':'transparent'}" onclick="S.cf.threshold='${k}';render()">${k}</button>`}).join("")})()}</div>
           <div style="font-size:10px;color:var(--d);letter-spacing:1px;margin-top:6px">${c.threshold} OF ${filled||1} SIGNATURES REQUIRED</div>
         </div>
         <div>
-          <label class="lbl">INSTANT EXECUTION</label>
+          <span class="lbl">INSTANT EXECUTION</span>
           ${ds>0
             ? `<div style="display:flex;align-items:center;gap:12px;margin-top:8px;flex-wrap:wrap">
-                 <button class="btn ${c.fastPath?"btn-fill":"btn-outline"}" style="padding:0 16px;font-size:10px" onclick="S.cf.fastPath=!S.cf.fastPath;render()">${c.fastPath?"ENABLED":"DISABLED"}</button>
+                 <button class="btn ${c.fastPath?"btn-fill":"btn-outline"}" aria-pressed="${!!c.fastPath}" style="padding:0 16px;font-size:10px" onclick="S.cf.fastPath=!S.cf.fastPath;render()">${c.fastPath?"ENABLED":"DISABLED"}</button>
                  <span style="font-size:10px;color:var(--d);line-height:1.5">Unanimous (all-owner) signers bypass the timelock</span>
                </div>`
             : `<div style="font-size:10px;color:var(--d);line-height:1.6;margin-top:10px">Set a timelock delay below to let unanimous signers execute instantly.</div>`}
         </div>
       </div>
       <div style="margin-top:26px">
-        <label class="lbl">DELAY</label>
-        <div class="token-pills" style="margin-bottom:12px">${[['0','h','UNLOCKED'],['30','m','30M'],['1','h','1H'],['6','h','6H'],['24','h','24H'],['3','d','3D'],['7','d','1W']].map(([val,unit,lbl])=>`<button class="pill${toSec(val,unit)===ds?" on":""}" onclick="S.cf.delayVal='${val}';S.cf.delayUnit='${unit}';${+val===0?"S.cf.fastPath=false;":""}render()">${lbl}</button>`).join("")}</div>
+        <span class="lbl" id="lbl-cf-delay">DELAY</span>
+        <div class="token-pills" role="group" aria-labelledby="lbl-cf-delay" style="margin-bottom:12px">${[['0','h','UNLOCKED'],['30','m','30M'],['1','h','1H'],['6','h','6H'],['24','h','24H'],['3','d','3D'],['7','d','1W']].map(([val,unit,lbl])=>`<button class="pill${toSec(val,unit)===ds?" on":""}"${toSec(val,unit)===ds?' aria-current="true"':''} onclick="S.cf.delayVal='${val}';S.cf.delayUnit='${unit}';${+val===0?"S.cf.fastPath=false;":""}render()">${lbl}</button>`).join("")}</div>
         <div style="display:flex;align-items:center;gap:10px">
-          <input class="inp" type="number" step="any" min="0" value="${c.delayVal}" style="width:80px;margin:0;text-align:center" onchange="S.cf.delayVal=this.value;if(!parseFloat(this.value))S.cf.fastPath=false;render()" oninput="S.cf.delayVal=this.value">
+          <input class="inp" type="number" step="any" min="0" aria-label="Timelock delay" value="${c.delayVal}" style="width:80px;margin:0;text-align:center" onchange="S.cf.delayVal=this.value;if(!parseFloat(this.value))S.cf.fastPath=false;render()" oninput="S.cf.delayVal=this.value">
           <div style="display:flex;gap:4px">${['m','h','d'].map(u=>`<button class="pill${c.delayUnit===u?" on":""}" style="height:34px;padding:0 10px" onclick="S.cf.delayUnit='${u}';render()">${UNIT_LABEL[u]}</button>`).join("")}</div>
           <span style="font-size:11px;letter-spacing:1px;margin-left:14px;color:${ds>0?'var(--m)':'var(--y)'}">${ds>0?'&rarr; '+fmtD(ds):'&mdash; UNLOCKED, NO TIMELOCK'}</span>
         </div>
@@ -3561,7 +3855,7 @@ function renderCreate(mob){
       </div>
     </div>
     <div style="margin-top:${mob?36:0}px">
-      ${!mob?`<label class="lbl">PREVIEW</label><div class="preview-text">NAME        ${esc(c.name||'UNNAMED')}
+      ${!mob?`<span class="lbl">PREVIEW</span><div class="preview-text">NAME        ${esc(c.name||'UNNAMED')}
 OWNERS      ${c.owners.filter(o=>o.addr.trim()).length||0}${c.owners.some(o=>o.label&&o.addr.trim())?" ("+c.owners.filter(o=>o.label&&o.addr.trim()).map(o=>esc(o.label)).join(", ")+")":""}
 THRESHOLD   ${c.threshold}/${c.owners.filter(o=>o.addr.trim()).length||1}${c.safeSrc?`
 CLONED FROM ${esc(shortAddr(c.safeSrc.addr))} &middot; SAFE${c.safeSrc.version?" v"+esc(c.safeSrc.version):""}`:""}
@@ -3571,19 +3865,19 @@ TOKENS      ${toks.join(", ")}
 FACTORY     <a href="${explorerBase}/address/${FACTORY}" target="_blank" rel="noopener" style="color:var(--a);text-decoration:none;border-bottom:1px solid var(--ln)">${FACTORY.slice(0,10)}...${FACTORY.slice(-4)}</a>
 EXECUTOR    ${ds>0?`<a href="${explorerBase}/address/${TIMELOCK_EXECUTOR}" target="_blank" rel="noopener" style="color:var(--a);text-decoration:none;border-bottom:1px solid var(--ln)">${TIMELOCK_EXECUTOR}</a>`:"NONE &mdash; UNLOCKED VAULT"}
 METHOD      ${c.fastPath&&ds>0?"createWithCalls()":"create()"}</div><div class="sep"></div>`:""}
-      <label class="lbl">NETWORK</label>
-      <div class="net-panel">${NETS.map((n,i)=>{const on=c.net===i,t=DEMO_TOKENS[n.name]||["ETH"];return`<div>
-        <div class="net-row${on?" on":""}" onclick="S.cf.net=${i};S.cf.clone=(S.cf.clone||[]).filter(x=>x!==${i});render()">
-          <span style="font-size:8px">${on?"\u25CF":"\u25CB"}</span>${chainIcon(n.id)}<span>${n.name}</span>
+      <span class="lbl" id="lbl-network">NETWORK</span>
+      <div class="net-panel" role="group" aria-labelledby="lbl-network">${NETS.map((n,i)=>{const on=c.net===i,t=DEMO_TOKENS[n.name]||["ETH"];return`<div>
+        <button type="button" class="net-row${on?" on":""}"${on?' aria-current="true"':''} onclick="S.cf.net=${i};S.cf.clone=(S.cf.clone||[]).filter(x=>x!==${i});render()">
+          <span style="font-size:8px" aria-hidden="true">${on?"\u25CF":"\u25CB"}</span>${chainIcon(n.id)}<span>${esc(n.name)}</span>
           <span class="net-id">${n.id}</span>${n.test?'<span class="net-test">TEST</span>':""}
-        </div>
+        </button>
         ${on?`<div class="net-tokens">${t.map(tk=>`<span>${tk}</span>`).join("")}${n.test?'<span style="opacity:.5">+ CUSTOM</span>':""}</div>`:""}
       </div>`}).join("")}</div>
-      <label class="lbl" style="margin-top:20px">CLONE TO OTHER CHAINS <span class="dim">&middot; SAME ADDRESS</span></label>
-      <div class="token-pills">${NETS.map((n,i)=>i===c.net?'':`<button class="pill${(c.clone||[]).includes(i)?' on':''}" onclick="toggleClone(${i})">${chainIcon(n.id)}${esc(n.name)}${n.test?' <span class="dim" style="font-size:7px">TEST</span>':''}</button>`).filter(Boolean).join('')}</div>
+      <span class="lbl" id="lbl-clone" style="display:block;margin-top:20px">CLONE TO OTHER CHAINS <span class="dim">&middot; SAME ADDRESS</span></span>
+      <div class="token-pills" role="group" aria-labelledby="lbl-clone">${NETS.map((n,i)=>i===c.net?'':`<button class="pill${(c.clone||[]).includes(i)?' on':''}" aria-pressed="${(c.clone||[]).includes(i)}" onclick="toggleClone(${i})">${chainIcon(n.id)}${esc(n.name)}${n.test?' <span class="dim" style="font-size:7px">TEST</span>':''}</button>`).filter(Boolean).join('')}</div>
       ${(()=>{const sel=[c.net,...(c.clone||[])].map(i=>NETS[i]).filter(Boolean);const mixed=sel.some(n=>n.test)&&sel.some(n=>!n.test);return mixed?`<div style="margin-top:12px;font-size:9px;letter-spacing:1px;color:var(--y);line-height:1.5">MIXING MAINNET &amp; TESTNET &mdash; DEPLOYING TO BOTH IN ONE GO. UNCHECK IF UNINTENDED.</div>`:'';})()}
       ${!val.ready?`<div style="margin-top:24px;font-size:10px;letter-spacing:1px;color:var(--y);text-align:center">${esc(val.reason)}</div>`:""}
-      ${(()=>{const nc=1+(c.clone||[]).length;return `<button class="btn ${val.ready?"btn-fill":"btn-disabled"} btn-w btn-big" style="margin-top:${val.ready?28:8}px" ${val.ready?"":'title="'+esc(val.reason)+'"'} onclick="${val.ready?"doDeploy()":""}">${nc>1?`DEPLOY TO ${nc} CHAINS`:"DEPLOY"}</button>${nc>1?`<div style="margin-top:8px;font-size:9px;color:var(--d);letter-spacing:1px;text-align:center">Same vault address on ${net.name}${(c.clone||[]).map(i=>", "+NETS[i].name).join("")}</div>`:""}`;})()}
+      ${(()=>{const nc=1+(c.clone||[]).length;return `<button class="btn ${val.ready?"btn-fill":"btn-disabled"} btn-w btn-big" id="deploy-btn" style="margin-top:${val.ready?28:8}px" ${val.ready?"":'title="'+esc(val.reason)+'"'} onclick="${val.ready?"doDeploy()":""}">${nc>1?`DEPLOY TO ${nc} CHAINS`:"DEPLOY"}</button>${nc>1?`<div style="margin-top:8px;font-size:9px;color:var(--d);letter-spacing:1px;text-align:center">Same vault address on ${net.name}${(c.clone||[]).map(i=>", "+NETS[i].name).join("")}</div>`:""}`;})()}
       <div style="margin-top:12px;font-size:9px;color:var(--d);letter-spacing:1px;text-align:center">VIA <a href="${explorerBase}/address/${FACTORY}" target="_blank" rel="noopener" style="color:var(--d);border-bottom:1px solid var(--ln);text-decoration:none">MULTISIGFACTORY</a></div>
     </div>
   </div>`;
@@ -3596,14 +3890,14 @@ function renderAdmin(v,mob){
   const explorerBase = S.demoMode ? (EXPLORERS[v.chain]||EXPLORERS.ETHEREUM) : (CHAINS[S.chainId]?CHAINS[S.chainId].explorer:'https://etherscan.io');
   return`
   <div class="vtabs"><div class="vtabs-inner" style="min-width:max-content">
-    ${S.vaults.map((vt,i)=>`<button class="vtab${i===S.sel?" on":""}" style="padding:${mob?"12px 14px":"14px 20px"};font-size:11px" onclick="S.sel=${i};S.nt=S.vaults[${i}].threshold;setNd(S.vaults[${i}].delay);render()">${esc(vt.name)}</button>`).join("")}
+    ${S.vaults.map((vt,i)=>`<button class="vtab${i===S.sel?" on":""}"${i===S.sel?' aria-current="true"':''} style="padding:${mob?"12px 14px":"14px 20px"};font-size:11px" onclick="S.sel=${i};S.nt=S.vaults[${i}].threshold;setNd(S.vaults[${i}].delay);render()">${esc(vt.name)}</button>`).join("")}
   </div></div>
   <div class="admin-note">CHANGES REQUIRE MULTISIG APPROVAL</div>
   <div class="admin-tabs">
-    ${["POLICY","OWNERS","HISTORY"].map(t=>`<button class="admin-tab${tab===t?" on":""}" onclick="S.adminTab='${t}';render()">${t}</button>`).join("")}
+    ${["POLICY","OWNERS","HISTORY"].map(t=>`<button class="admin-tab${tab===t?" on":""}"${tab===t?' aria-current="true"':''} onclick="S.adminTab='${t}';render()">${t}</button>`).join("")}
   </div>
   ${tab==="POLICY"?`
-    <label class="lbl">VAULT NAME</label>
+    <label class="lbl" for="admin-vault-name">VAULT NAME</label>
     <div style="display:flex;gap:8px;max-width:520px">
       <input class="inp" id="admin-vault-name" style="margin:0;flex:1" placeholder="${esc(v.name)}" value="${esc(v.name)}" onkeydown="if(event.key==='Enter'){event.preventDefault();renameVault()}">
       <button class="btn btn-outline btn-sm" style="flex-shrink:0" onclick="renameVault()">SAVE</button>
@@ -3611,26 +3905,26 @@ function renderAdmin(v,mob){
     <div class="sep"></div>
     <div class="grid2" style="gap:${mob?32:48}px">
       <div>
-        <label class="lbl"><span class="dim">SET &middot;</span> THRESHOLD</label>
+        <span class="lbl" id="lbl-thresh"><span class="dim">SET &middot;</span> THRESHOLD</span>
         <div style="display:flex;align-items:baseline;gap:8px;margin:8px 0 20px">
           <span class="policy-big">${S.nt}</span>
           <span class="policy-of">/ ${v.ownerCount}</span>
           ${tc?'<span class="changed-tag">CHANGED</span>':""}
         </div>
-        <div class="thresh-btns">${Array.from({length:v.ownerCount},(_,i)=>i+1).map(n=>{const on=n===S.nt;return`<button class="btn btn-outline thresh-btn" style="border-color:${on?'var(--a)':'var(--ln)'};color:${on?'var(--a)':'var(--d)'};background:${on?'color-mix(in srgb,var(--a) 10%,transparent)':'transparent'}" onclick="S.nt=${n};render()">${n}</button>`}).join("")}</div>
+        <div class="thresh-btns" role="group" aria-labelledby="lbl-thresh">${Array.from({length:v.ownerCount},(_,i)=>i+1).map(n=>{const on=n===S.nt;return`<button class="btn btn-outline thresh-btn"${on?' aria-current="true"':''} aria-label="Require ${n} of ${v.ownerCount} signatures" style="border-color:${on?'var(--a)':'var(--ln)'};color:${on?'var(--a)':'var(--d)'};background:${on?'color-mix(in srgb,var(--a) 10%,transparent)':'transparent'}" onclick="S.nt=${n};render()">${n}</button>`}).join("")}</div>
         <div style="font-size:10px;color:var(--d);letter-spacing:1px;margin:-6px 0 14px">${S.nt} OF ${v.ownerCount} SIGNATURES REQUIRED</div>
         <button class="btn ${tc?"btn-fill":"btn-disabled"} btn-w" onclick="${tc?`doAdminPropose('setThreshold',${S.nt})`:""}">${tc?"PROPOSE":"NO CHANGE"}</button>
       </div>
       <div>
-        <label class="lbl"><span class="dim">SET &middot;</span> DELAY</label>
+        <span class="lbl"><span class="dim">SET &middot;</span> DELAY</span>
         <div style="display:flex;align-items:baseline;gap:8px;margin:8px 0 20px">
           <span class="policy-big">${fmtD(v.delay)}</span>
           <span style="font-size:12px;color:var(--d);letter-spacing:1px">CURRENT</span>
         </div>
-        <label class="lbl">NEW DELAY</label>
+        <label class="lbl" for="admin-new-delay">NEW DELAY</label>
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
-          <input class="inp" type="number" step="any" min="0" value="${S.nd}" style="width:80px;margin:0;text-align:center" onchange="S.nd=parseFloat(this.value)||0;render()" oninput="S.nd=parseFloat(this.value)||0">
-          <div style="display:flex;gap:4px">${['m','h','d'].map(u=>`<button class="pill${S.ndUnit===u?" on":""}" style="height:34px;padding:0 10px" onclick="S.ndUnit='${u}';render()">${UNIT_LABEL[u]}</button>`).join("")}</div>
+          <input class="inp" id="admin-new-delay" type="number" step="any" min="0" value="${S.nd}" style="width:80px;margin:0;text-align:center" onchange="S.nd=parseFloat(this.value)||0;render()" oninput="S.nd=parseFloat(this.value)||0">
+          <div style="display:flex;gap:4px" role="group" aria-label="Delay unit">${['m','h','d'].map(u=>`<button class="pill${S.ndUnit===u?" on":""}"${S.ndUnit===u?' aria-current="true"':''} style="height:34px;padding:0 10px" onclick="S.ndUnit='${u}';render()">${UNIT_LABEL[u]}</button>`).join("")}</div>
           <span style="font-size:10px;letter-spacing:1px;margin-left:auto;color:${dc?'var(--y)':'var(--d)'}">${dc?`&rarr; ${ndSec>0?fmtD(ndSec):'UNLOCKED'} (${ndSec.toLocaleString()}s)`:`${ndSec.toLocaleString()}s`}</span>
         </div>
         ${dc&&ndSec>0&&ndSec<SHORT_DELAY_SEC?`<div style="font-size:9px;letter-spacing:1px;color:var(--y);margin:-6px 0 14px">SHORT DELAY &middot; LIMITED PROTECTION</div>`:''}
@@ -3640,14 +3934,14 @@ function renderAdmin(v,mob){
     <div class="sep"></div>
     <div class="grid2" style="gap:${mob?32:48}px">
       <div>
-        <label class="lbl"><span class="dim">SET &middot;</span> EXECUTOR</label>
+        <span class="lbl"><span class="dim">SET &middot;</span> EXECUTOR</span>
         <div style="font-size:12px;font-weight:700;margin:8px 0 4px;word-break:break-all">${S.demoMode?addrLink(v.executor,v.chain):addrLink(v.executor)}${ethers.isAddress(v.executor)?copyBtn(v.executor):""}</div>
         <div style="font-size:10px;color:var(--d);letter-spacing:1px;margin-bottom:14px">${v.executor===TIMELOCK_EXECUTOR?"TIMELOCK EXECUTOR (DEFAULT)":(v.executor===ethers.ZeroAddress||v.executor==="0x0000...0000")?"DISABLED":"CUSTOM EXECUTOR"}</div>
-        <input class="inp" id="admin-executor-input" placeholder="0x... NEW EXECUTOR" onkeydown="if(event.key==='Enter'){event.preventDefault();doAdminPropose('setExecutor')}">
+        <input class="inp" id="admin-executor-input" placeholder="0x... NEW EXECUTOR" aria-label="New executor address" onkeydown="if(event.key==='Enter'){event.preventDefault();doAdminPropose('setExecutor')}">
         <button class="btn btn-outline btn-w" onclick="doAdminPropose('setExecutor')">PROPOSE EXECUTOR</button>
       </div>
       ${v.delay>0&&v.executor!==ethers.ZeroAddress&&v.executor!=="0x0000...0000"?`<div>
-        <label class="lbl"><span class="dim">EXECUTOR &middot;</span> INSTANT PATH</label>
+        <span class="lbl"><span class="dim">EXECUTOR &middot;</span> INSTANT PATH</span>
         <div style="font-size:11px;color:var(--m);margin:8px 0 14px;line-height:1.7">Unanimous (${v.ownerCount}/${v.ownerCount}) signatures bypass the timelock via TimelockExecutor.forward(). The cancel path (${v.threshold}/${v.ownerCount}) is always available.</div>
         <button class="btn ${v.fastPath?"btn-fill":"btn-outline"}" style="font-size:10px;padding:0 20px" onclick="doAdminPropose('enableForward')">${v.fastPath?"ENABLED":"ENABLE"}</button>
       </div>`:""}
@@ -3659,14 +3953,14 @@ function renderAdmin(v,mob){
         <div class="signer-addr">${S.demoMode?addrLink(o.addr,v.chain):addrLink(o.addr)}${ethers.isAddress(o.addr)?copyBtn(o.addr):""}${o.name?` <span class="signer-name">${esc(o.name)}</span>`:""}${o.you?` <span style="font-size:9px;font-weight:700;letter-spacing:1px;color:var(--m);border:1px solid var(--fr);padding:1px 6px;margin-left:6px">YOU</span>`:""}</div>
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-shrink:0${mob?";width:100%":""}">
-          <input class="inp" style="margin:0;${mob?"flex:1":"width:120px"};font-size:11px;letter-spacing:1px;border-bottom-color:var(--ln)" placeholder="LABEL" value="${isYouLbl?"":esc(o.label)}" onchange="updateOwnerLabel(${S.sel},${oi},this.value)">
+          <input class="inp" style="margin:0;${mob?"flex:1":"width:120px"};font-size:11px;letter-spacing:1px;border-bottom-color:var(--ln)" placeholder="LABEL" aria-label="Label for ${esc(shortAddr(o.addr))}" value="${isYouLbl?"":esc(o.label)}" onchange="updateOwnerLabel(${S.sel},${oi},this.value)">
           ${!o.you?`<button class="btn btn-danger btn-sm" onclick="doAdminPropose('removeOwner',${oi})">REMOVE</button>`:""}
         </div>
     </div>`}).join("")}
     <div class="sep"></div>
-    <label class="lbl"><span class="dim">ADD &middot;</span> OWNER</label>
+    <label class="lbl" for="admin-add-owner"><span class="dim">ADD &middot;</span> OWNER</label>
     <input class="inp" id="admin-add-owner" style="margin-top:8px" placeholder="0x... or name.eth / name.(g)wei" onkeydown="if(event.key==='Enter'){event.preventDefault();doAdminPropose('addOwner')}">
-    <input class="inp" id="admin-add-label" style="font-size:11px;letter-spacing:1px" placeholder="LABEL (OPTIONAL)" onkeydown="if(event.key==='Enter'){event.preventDefault();doAdminPropose('addOwner')}">
+    <input class="inp" id="admin-add-label" style="font-size:11px;letter-spacing:1px" placeholder="LABEL (OPTIONAL)" aria-label="Label for the new owner (optional)" onkeydown="if(event.key==='Enter'){event.preventDefault();doAdminPropose('addOwner')}">
     <button class="btn btn-outline btn-w" onclick="doAdminPropose('addOwner')">PROPOSE OWNER</button>
   </div>`:`<div>
     ${(()=>{
@@ -4098,19 +4392,20 @@ function renderSafeCloneModal(){
     <span style="margin-left:auto;color:var(--d);font-weight:400">${f.threshold} OF ${f.owners.length}${f.version?' &middot; v'+esc(f.version):''}</span>
     <span aria-hidden="true">&rarr;</span>
   </button>`).join('');
-  return`<div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200" onclick="closeSafeClone()"></div>
-  <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:min(440px,92vw);max-height:85vh;overflow-y:auto;background:var(--bg);border:1px solid #12FF80;padding:20px;z-index:201">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px">
-      <span style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;letter-spacing:2px">${safeIcon()}CLONE A SAFE</span>
-      <button class="x-btn" style="margin:0" onclick="closeSafeClone()">&#10005;</button>
+  return`<div class="ovl" onclick="if(event.target===this)closeSafeClone()">
+    <div class="ovl-card" style="--ow:440px;padding:20px;border-color:#12FF80" role="dialog" aria-modal="true" aria-label="Clone a Safe">
+      <div class="ovl-head" style="align-items:center;gap:10px;margin-bottom:12px">
+        <span class="ovl-title" style="display:flex;align-items:center;gap:8px">${safeIcon()}CLONE A SAFE</span>
+        <button class="x-btn" style="margin:0" onclick="closeSafeClone()" aria-label="Close">&#10005;</button>
+      </div>
+      <div style="font-size:10px;line-height:1.7;color:var(--d);margin-bottom:16px">Copies the owners and threshold of a Gnosis Safe on <b style="color:var(--m)">${esc(net.name)}</b> into this form. Your timelock, instant execution and chain picks stay as you set them. Nothing leaves the Safe &mdash; this deploys a new vault, so move funds once it is live.</div>
+      <label class="lbl" for="safe-input">SAFE ADDRESS OR NAME</label>
+      <input class="inp" id="safe-input" style="margin-bottom:4px" placeholder="0x... or name.eth / name.(g)wei" value="${esc(sc.input||'')}" aria-describedby="safe-status" oninput="safeCloneInput(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();safeCloneSearch()}">
+      <div id="safe-status" role="status" style="font-size:9px;letter-spacing:1px;min-height:12px;margin-bottom:12px;color:${st.color||''}">${esc(st.txt)}</div>
+      ${sc.err?`<div style="font-size:9px;letter-spacing:1px;color:var(--r);line-height:1.6;margin-bottom:12px">${esc(sc.err)}</div>`:''}
+      ${rows?`<div style="font-size:9px;letter-spacing:1px;color:var(--y);line-height:1.6">NOT ON ${esc(net.name.toUpperCase())} &mdash; FOUND ELSEWHERE. LOADING ONE SWITCHES THIS DEPLOY TO THAT CHAIN.</div>${rows}<div style="height:14px"></div>`:''}
+      <button class="btn ${sc.busy?'btn-disabled':'btn-fill'} btn-w" id="safe-load" onclick="${sc.busy?'':'safeCloneSearch()'}">${sc.busy?'READING SAFE&hellip;':'LOAD SAFE'}</button>
     </div>
-    <div style="font-size:10px;line-height:1.7;color:var(--d);margin-bottom:16px">Copies the owners and threshold of a Gnosis Safe on <b style="color:var(--m)">${esc(net.name)}</b> into this form. Your timelock, instant execution and chain picks stay as you set them. Nothing leaves the Safe &mdash; this deploys a new vault, so move funds once it is live.</div>
-    <label class="lbl">SAFE ADDRESS OR NAME</label>
-    <input class="inp" id="safe-input" style="margin-bottom:4px" placeholder="0x... or name.eth / name.(g)wei" value="${esc(sc.input||'')}" oninput="safeCloneInput(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();safeCloneSearch()}">
-    <div id="safe-status" style="font-size:9px;letter-spacing:1px;min-height:12px;margin-bottom:12px;color:${st.color||''}">${esc(st.txt)}</div>
-    ${sc.err?`<div style="font-size:9px;letter-spacing:1px;color:var(--r);line-height:1.6;margin-bottom:12px">${esc(sc.err)}</div>`:''}
-    ${rows?`<div style="font-size:9px;letter-spacing:1px;color:var(--y);line-height:1.6">NOT ON ${esc(net.name.toUpperCase())} &mdash; FOUND ELSEWHERE. LOADING ONE SWITCHES THIS DEPLOY TO THAT CHAIN.</div>${rows}<div style="height:14px"></div>`:''}
-    <button class="btn ${sc.busy?'btn-disabled':'btn-fill'} btn-w" id="safe-load" onclick="${sc.busy?'':'safeCloneSearch()'}">${sc.busy?'READING SAFE&hellip;':'LOAD SAFE'}</button>
   </div>`;
 }
 function closeDeploy(){ S.deploy = null; S.view = 'DASH'; S.showTx = false; render(); }
@@ -5721,7 +6016,7 @@ async function prodSubmit(vi, nonce) {
     // Check for cancel-via-executor or forward path
     const isCancelCall = v.isTimelockExecutor
       && target.toLowerCase() === v.address.toLowerCase()
-      && data.length >= 10 && data.slice(0, 10) === msIface.getFunction('cancelQueued').selector;
+      && selOf(data) === SEL.cancelQueued;
     const canCancel = isCancelCall && sigs.length >= v.threshold;
     if(!canCancel && sigs.length < v.threshold) {
       flash(`NEED ${v.threshold - sigs.length} MORE VALID SIG${v.threshold - sigs.length > 1 ? 'S' : ''}`);
@@ -5733,8 +6028,12 @@ async function prodSubmit(vi, nonce) {
       const executorAddr = v.executor;
       const tlContract = new ethers.Contract(executorAddr, TIMELOCK_EXECUTOR_ABI, signer);
       // Audit H-01 — a cancel raised as an ordinary proposal reaches the same
-      // forward() route, so it needs the same binding.
-      const bnd = await packSigsBound(sigs.slice(0, v.threshold), connectedAddress, v.address, tx.txHash);
+      // forward() route, so it needs the same binding. Trimmed with pickSigs
+      // rather than a bare slice, exactly as prodCancel does: the bundle has to
+      // come down to `threshold` slots, and a plain slice drops whichever sigs
+      // sort last — which is the submitter's own about (threshold/ownerCount)
+      // of the time, and the submitter's slot is the one carrying the binding.
+      const bnd = await packSigsBound(pickSigs(sigs, v.threshold, connectedAddress), connectedAddress, v.address, tx.txHash);
       if(!bnd.bound) flash(`CANCEL NOT BOUND TO YOU (${bnd.why}) — THESE SIGNATURES CAN BE REPLAYED TO QUEUE THE CANCEL INSTEAD.`);
       flash('CANCELLING VIA EXECUTOR...');
       atx = await tlContract.forward(v.address, target, value, data, bnd.packed);
@@ -6432,8 +6731,12 @@ async function prodSubmitTransfer() {
   const v = S.vaults[S.sel];
   if(!v) return;
 
-  const amt = stripCommas(document.getElementById("tx-amount")?.value || "0");
-  const to = document.getElementById("tx-to")?.value || "";
+  // State first, DOM second — the same order buildSimInput() uses, and for the
+  // same reason: oninput writes every keystroke into S and every render writes
+  // S back into the field, so reading the two in a different order is the one
+  // way this could simulate one transaction and propose another.
+  const amt = stripCommas(S.txAmount || document.getElementById("tx-amount")?.value || "0");
+  const to = (S.txTo || document.getElementById("tx-to")?.value || "").trim();
   if(!to || !amt) { flash('FILL IN AMOUNT AND RECIPIENT'); return; }
 
   try {

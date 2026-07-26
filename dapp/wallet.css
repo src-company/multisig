@@ -34,14 +34,19 @@ body.modal-open{overflow:hidden}
 
 .wallet-modal-body{overflow-y:auto;-webkit-overflow-scrolling:touch}
 
+/* A real <button> per wallet — these were divs with click handlers, so the
+   picker that gates every other action in the app was mouse-only. width/text
+   -align are the only extra declarations a button needs to sit where the div
+   did. */
 .wallet-option{
-  display:flex;align-items:center;gap:12px;
+  display:flex;align-items:center;gap:12px;width:100%;text-align:left;
   padding:14px 12px;background:transparent;
   border:1px solid var(--ln,#FFFFFF2E);border-bottom:none;
   color:var(--a,#F5FBFF);cursor:pointer;
   transition:background .15s,color .15s;
   font-family:var(--f,monospace);
 }
+.wallet-option:focus-visible{outline:2px solid var(--a,#F5FBFF);outline-offset:-2px}
 .wallet-option:last-of-type{border-bottom:1px solid var(--ln,#FFFFFF2E)}
 @media(hover:hover){.wallet-option:hover{background:var(--ln,#FFFFFF2E)}}
 .wallet-option:active{opacity:.7}

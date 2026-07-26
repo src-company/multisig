@@ -82,10 +82,10 @@ function injectWalletModal() {
   overlay.className = 'wallet-modal-overlay';
   overlay.id = 'walletModal';
   overlay.onclick = function(e) { if (e.target === this) closeWalletModal(); };
-  overlay.innerHTML = `<div class="wallet-modal">
+  overlay.innerHTML = `<div class="wallet-modal" role="dialog" aria-modal="true" aria-labelledby="walletModalTitle">
     <div class="wallet-modal-header">
-      <div class="wallet-modal-title">Connect Wallet</div>
-      <button class="wallet-modal-close" onclick="closeWalletModal()">✕</button>
+      <div class="wallet-modal-title" id="walletModalTitle">Connect Wallet</div>
+      <button class="wallet-modal-close" onclick="closeWalletModal()" aria-label="Close">✕</button>
     </div>
     <div class="wallet-modal-body" id="walletOptions"></div>
   </div>`;
@@ -93,24 +93,33 @@ function injectWalletModal() {
 }
 
 // --- Modal ---
+let _walletFocusReturn = null;
 function showWalletModal() {
   injectWalletModal();
+  _walletFocusReturn = document.activeElement;
   document.getElementById('walletModal').classList.add('active');
   document.body.classList.add('modal-open');
   window.dispatchEvent(new Event('eip6963:requestProvider'));
+  const closeBtn = document.querySelector('.wallet-modal-close');
+  if (closeBtn) closeBtn.focus();
+  window.dispatchEvent(new Event('ms:overlay-change'));
   setTimeout(() => {
     const wallets = detectWallets();
     const container = document.getElementById('walletOptions');
     if (_connectedAddress) {
       container.innerHTML = `<div class="wallet-addr-display">${_esc(_connectedAddress)}</div>
-        <div class="wallet-option disconnect" onclick="disconnectWallet()"><span class="wallet-option-name">Disconnect</span></div>`;
+        <button type="button" class="wallet-option disconnect" onclick="disconnectWallet()"><span class="wallet-option-name">Disconnect</span></button>`;
+      const first = container.querySelector('.wallet-option');
+      if (first && document.activeElement === closeBtn) first.focus();
     } else {
       container.innerHTML = wallets.length > 0 ? wallets.map(w =>
-        `<div class="wallet-option" data-wallet-key="${_esc(w.key)}">${w.icon ? `<span class="wallet-option-icon">${w.icon}</span>` : ''}<span class="wallet-option-name">${_esc(w.name)}</span></div>`
+        `<button type="button" class="wallet-option" data-wallet-key="${_esc(w.key)}">${w.icon ? `<span class="wallet-option-icon" aria-hidden="true">${w.icon}</span>` : ''}<span class="wallet-option-name">${_esc(w.name)}</span></button>`
       ).join('') : '<div style="padding:16px;text-align:center;font-size:11px;letter-spacing:2px;color:var(--d)">NO WALLETS DETECTED</div>';
       container.querySelectorAll('[data-wallet-key]').forEach(el => {
         el.addEventListener('click', () => connectWithWallet(el.dataset.walletKey));
       });
+      const firstOpt = container.querySelector('.wallet-option');
+      if (firstOpt && document.activeElement === closeBtn) firstOpt.focus();
     }
   }, 200);
 }
@@ -119,7 +128,20 @@ window.closeWalletModal = function() {
   const modal = document.getElementById('walletModal');
   if (modal) modal.classList.remove('active');
   document.body.classList.remove('modal-open');
+  // The app may still have an overlay of its own underneath; let it restate the
+  // lock rather than assuming this sheet was the only thing holding it.
+  window.dispatchEvent(new Event('ms:overlay-change'));
+  // The app rebuilds its header from innerHTML, so the node that opened this
+  // sheet is often gone by now — fall back to whatever is playing that role.
+  const back = _walletFocusReturn; _walletFocusReturn = null;
+  const target = (back && back.isConnected) ? back : document.querySelector('.wallet-btn');
+  if (target && typeof target.focus === 'function') target.focus();
 };
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  const modal = document.getElementById('walletModal');
+  if (modal && modal.classList.contains('active')) { e.stopPropagation(); window.closeWalletModal(); }
+}, true);
 window.toggleWallet = function() { showWalletModal(); };
 window.showWalletModal = showWalletModal;
 

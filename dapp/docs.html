@@ -14,20 +14,27 @@ html{-webkit-text-size-adjust:100%}
 :root{
   /* Lc:      78.1        —          64.3        73.3   */
   --a:#F5FBFF;--bg:#2D5FE8;--d:#D6E6FF;--m:#EAF4FF;
-  /* Lc:       9.5         16.2        65.7 */
-  --ln:#FFFFFF2E;--fr:#FFFFFF47;--g:#7DFFBA;--gc:#0A0A0A;--on:#0A0A0A;
+  /* Lc:       9.5         16.2        65.7                45.0        57.3 */
+  --ln:#FFFFFF2E;--fr:#FFFFFF47;--g:#7DFFBA;--gc:#0A0A0A;--r:#FFB1AC;--y:#FFD600;
+  --on:#0A0A0A;
   --f:'IBM Plex Mono','Courier New',monospace;
 }
 .light{
   /* Lc:      80.5        —          65.2        73.3   */
   --a:#00677C;--bg:#FDFDFD;--d:#008CA6;--m:#007990;
-  --ln:#0099B326;--fr:#0099B340;--g:#059669;--gc:#fff;--on:#FDFDFD;
+  --ln:#0099B326;--fr:#0099B340;--g:#059669;--gc:#fff;--r:#DC2626;--y:#B45309;
+  --on:#FDFDFD;
 }
 body{font-family:var(--f);background:var(--bg);color:var(--a);min-height:100vh;padding:10px;transition:background .3s,color .3s}
 a{color:var(--a)}
 button{cursor:pointer;font-family:var(--f)}
 button:active{transform:scale(.97)}
 @media(hover:hover){button:hover{opacity:.75}}
+/* Kept in step with index.html: this page had no focus indicator at all, so a
+   keyboard user tabbing between the section tabs had nothing to go on. */
+button:focus-visible,a:focus-visible{outline:2px solid var(--a);outline-offset:2px}
+button:focus:not(:focus-visible){outline:none}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}}
 ::-webkit-scrollbar{width:3px;height:3px}
 ::-webkit-scrollbar-thumb{background:var(--ln)}
 
@@ -60,11 +67,57 @@ pre{font-size:11px;line-height:1.7;color:var(--m);padding:16px;border:1px solid 
 .sig .params{font-weight:400;color:var(--m)}
 .desc{font-size:12px;color:var(--m);padding:4px 0 14px;line-height:1.7}
 .note{font-size:11px;color:var(--m);border-left:2px solid var(--a);padding:8px 0 8px 14px;margin:16px 0;line-height:1.7}
+/* Tables carry two columns of short label + value here, so they get a real
+   column gutter (there was none — cells butted straight into each other) and
+   top alignment, so the first line of every cell in a row shares a baseline
+   instead of the shortest cell floating to the middle of the tallest.
+   Wrapping is opt-in: break-all was applied to every cell, which is right for a
+   40-character address and wrong for prose, where it splits words mid-syllable.
+   .brk marks the cells that hold unbreakable machine strings. */
 table{width:100%;border-collapse:collapse;margin-bottom:16px;font-size:12px}
-th{text-align:left;font-size:10px;font-weight:700;letter-spacing:2px;color:var(--d);padding:10px 0;border-bottom:1px solid var(--ln)}
-td{padding:12px 0;border-bottom:1px solid var(--ln);color:var(--m);word-break:break-all}
+th{text-align:left;font-size:10px;font-weight:700;letter-spacing:2px;color:var(--d);padding:10px 20px 10px 0;border-bottom:1px solid var(--ln);vertical-align:bottom}
+td{padding:12px 20px 12px 0;border-bottom:1px solid var(--ln);color:var(--m);vertical-align:top}
+th:last-child,td:last-child{padding-right:0}
+td.brk{word-break:break-all}
 td a{color:var(--a);text-decoration:none;border-bottom:1px solid var(--ln)}
 td a:hover{border-bottom-color:var(--a)}
+
+/* ── AUDIT LEDGER ──────────────────────────────────────────────────
+   Six reviews, each with a date, an auditor, a scope and a severity
+   breakdown. As a five-column table inside a 780px frame every cell was
+   narrower than its content, so every one of them was hand-broken with <br>
+   until nothing lined up: the date floated to the vertical middle of a
+   three-line neighbour, and break-all split "multi-agent" across lines.
+   One record per review instead. The date and auditor lead on a single line
+   with the report links on the trailing edge; the scope reads as prose because
+   that is what it is; and the finding counts become chips toned by severity
+   class, so the ladder is scannable without being read word by word. */
+/* baseline, not top: the date is 11px and the auditor 13px, so aligning their
+   boxes leaves the date sitting 2px high. Rows 2 and 3 hold a single item each,
+   where baseline alignment is a no-op. */
+.audit{display:grid;grid-template-columns:78px minmax(0,1fr) auto;gap:7px 18px;align-items:baseline;padding:15px 0;border-bottom:1px solid var(--ln)}
+.audit:first-of-type{border-top:1px solid var(--ln)}
+.audit-when{grid-column:1;grid-row:1;font-size:11px;color:var(--d);white-space:nowrap;line-height:1.5}
+.audit-who{grid-column:2;grid-row:1;font-size:13px;font-weight:700;color:var(--a);line-height:1.5}
+/* The qualifier is who/how, not a second auditor — same line where it fits,
+   never competing with the name for weight. */
+.audit-who .q{font-weight:400;color:var(--d);font-size:11px;margin-left:8px}
+.audit-links{grid-column:3;grid-row:1;display:flex;gap:14px;justify-self:end;align-items:baseline;white-space:nowrap}
+.audit-links a{font-size:10px;font-weight:700;letter-spacing:1.5px;color:var(--d);text-decoration:none;border-bottom:1px solid var(--ln)}
+.audit-links a:hover{color:var(--a);border-bottom-color:var(--a)}
+.audit-scope{grid-column:2/-1;font-size:11px;color:var(--m);line-height:1.6}
+.audit-scope .op{color:var(--d)}
+.audit-find{grid-column:2/-1;display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+.audit-meth{font-size:11px;color:var(--d);line-height:1.6}
+/* Severity chip. Tone is the severity CLASS, not a verdict on the project —
+   the same vocabulary every report uses. A zero count keeps its slot (0 high is
+   the most informative cell in the row) but drops its tone, so the eye lands on
+   what was actually found. */
+.sev{font-size:9px;font-weight:700;letter-spacing:1.5px;border:1px solid var(--ln);padding:3px 7px;color:var(--d);white-space:nowrap}
+.sev.crit,.sev.high{color:var(--r);border-color:color-mix(in srgb,var(--r) 45%,transparent);background:color-mix(in srgb,var(--r) 8%,transparent)}
+.sev.med{color:var(--y);border-color:color-mix(in srgb,var(--y) 45%,transparent);background:color-mix(in srgb,var(--y) 8%,transparent)}
+.sev.low{color:var(--m)}
+.sev.zero{color:var(--d);border-color:var(--ln);background:transparent}
 
 .footer{border-top:1px solid var(--ln);padding:12px 0;display:flex;justify-content:space-between;font-size:9px;letter-spacing:2px;color:var(--d)}
 .footer a{color:var(--d);text-decoration:none}
@@ -82,12 +135,30 @@ td a:hover{border-bottom-color:var(--a)}
   h2{font-size:13px;margin:24px 0 10px}
   p{font-size:12px}
   pre{font-size:10px;padding:12px}
+  /* One column: the date leads as its own dim line, the auditor and scope run
+     full width, and the report links drop to the bottom of the record rather
+     than fighting the name for a 320px row. */
+  .audit{grid-template-columns:minmax(0,1fr);gap:6px 0;padding:16px 0}
+  .audit-when{grid-area:1/1}
+  .audit-who{grid-area:2/1;font-size:12px}
+  .audit-scope{grid-area:3/1}
+  .audit-find{grid-area:4/1}
+  .audit-links{grid-area:5/1;justify-self:start;gap:16px;margin-top:3px}
+  .audit-who .q{display:block;margin-left:0;margin-top:2px}
+  th,td{padding-right:14px}
 }
 </style>
 </head>
 <body>
-<div class="scan"></div>
+<div class="scan" aria-hidden="true"></div>
 <div id="app"></div>
+<noscript>
+  <div style="max-width:640px;margin:64px auto;padding:0 20px;font-family:'IBM Plex Mono','Courier New',monospace;color:#F5FBFF;font-size:13px;line-height:1.9;letter-spacing:.3px">
+    <div style="font-size:28px;font-weight:700;letter-spacing:-1px">MULTISIG &middot; DOCUMENTATION</div>
+    <p style="margin-top:16px">These pages are assembled in the browser, so they need JavaScript enabled.</p>
+    <p style="margin-top:12px">The same material is in the repository, which needs nothing: <a href="https://github.com/src-company/multisig" style="color:#F5FBFF">README.md</a> for the contracts and deployment paths, <a href="https://github.com/src-company/multisig/blob/main/SECURITY.md" style="color:#F5FBFF">SECURITY.md</a> for the audits and how each finding is answered.</p>
+  </div>
+</noscript>
 
 <script>
 const asc=n=>"/".repeat(n);
@@ -190,10 +261,12 @@ address executor     // bypass role (typically TimelockExecutor)</pre>
 
 <h2>DEPLOYMENTS</h2>
 <table>
-<tr><th>CONTRACT</th><th>ADDRESS</th></tr>
-<tr><td>MultisigFactory</td><td><a href="https://contractscan.xyz/contract/0x000000000e8CB9ed9DC2114d79d9215eacb9cB07" target="_blank" rel="noopener">0x000000000e8CB9ed9DC2114d79d9215eacb9cB07</a></td></tr>
-<tr><td>Multisig (implementation)</td><td><a href="https://contractscan.xyz/contract/0xD54cb65224410F3Ff97a8E72f363f224419f4FB0" target="_blank" rel="noopener">0xD54cb65224410F3Ff97a8E72f363f224419f4FB0</a></td></tr>
-<tr><td>TimelockExecutor</td><td><a href="https://contractscan.xyz/contract/0x00000000a72A30AdBf38e14d36BCE2610ec3973F" target="_blank" rel="noopener">0x00000000a72A30AdBf38e14d36BCE2610ec3973F</a></td></tr>
+<thead><tr><th scope="col">CONTRACT</th><th scope="col">ADDRESS</th></tr></thead>
+<tbody>
+<tr><td>MultisigFactory</td><td class="brk"><a href="https://contractscan.xyz/contract/0x000000000e8CB9ed9DC2114d79d9215eacb9cB07" target="_blank" rel="noopener">0x000000000e8CB9ed9DC2114d79d9215eacb9cB07</a></td></tr>
+<tr><td>Multisig (implementation)</td><td class="brk"><a href="https://contractscan.xyz/contract/0xD54cb65224410F3Ff97a8E72f363f224419f4FB0" target="_blank" rel="noopener">0xD54cb65224410F3Ff97a8E72f363f224419f4FB0</a></td></tr>
+<tr><td>TimelockExecutor</td><td class="brk"><a href="https://contractscan.xyz/contract/0x00000000a72A30AdBf38e14d36BCE2610ec3973F" target="_blank" rel="noopener">0x00000000a72A30AdBf38e14d36BCE2610ec3973F</a></td></tr>
+</tbody>
 </table>
 <p>Same addresses on all supported chains. Proxy clones deployed via CREATE2 inherit the implementation. View on <a href="https://contractscan.xyz" target="_blank" rel="noopener" style="color:var(--a);border-bottom:1px solid var(--ln);text-decoration:none">contractscan.xyz</a> for multichain verification.</p>
 
@@ -206,45 +279,52 @@ address executor     // bypass role (typically TimelockExecutor)</pre>
 
 AUDITS:`
 <h2>AUDITS</h2>
-<table>
-<tr><th>DATE</th><th>AUDITOR</th><th>SCOPE</th><th>RESULT</th><th>REPORT</th></tr>
-<tr>
-  <td>2026-07-11</td>
-  <td><a href="https://www.shredsecurity.io/" target="_blank" rel="noopener">Shred Security</a><br><span style="color:var(--d);font-size:11px">kenzo &middot; yashar</span></td>
-  <td>Multisig.sol @ 2329339<br>+ stateful invariant fuzzing</td>
-  <td>0 high &middot; 0 medium<br>2 low &middot; 2 info</td>
-  <td><a href="https://audit.multisig.wei.limo" target="_blank" rel="noopener">READ &nearr;</a></td>
-</tr>
-<tr>
-  <td>2026-07-25</td>
-  <td>leftclaw<br><span style="color:var(--d);font-size:11px">multi-agent pipeline<br>via One Dollar Audit</span></td>
-  <td>Multisig.sol +<br>TimelockExecutor.sol<br>+ IMultisig</td>
-  <td>1 critical &middot; 2 high<br>4 medium &middot; 5 low</td>
-  <td><a href="https://github.com/src-company/multisig/blob/main/audit/report-leftclaw.md" target="_blank" rel="noopener">READ &nearr;</a><br><a href="https://leftclaw.services/result/500.html" target="_blank" rel="noopener">ORIGINAL &nearr;</a></td>
-</tr>
-<tr>
-  <td>2026-07-26</td>
-  <td>GPT-5.6 Sol<br><span style="color:var(--d);font-size:11px">Pro, independent</span></td>
-  <td>Multisig.sol +<br>TimelockExecutor.sol<br>composition review</td>
-  <td>1 high &middot; 1 medium<br>4 low &middot; 5 info</td>
-  <td><a href="https://github.com/src-company/multisig/blob/main/audit/report-gpt56-sol.md" target="_blank" rel="noopener">READ &nearr;</a><br><a href="https://chatgpt.com/share/6a650af3-f6bc-83ea-b5f3-f83452e9c744" target="_blank" rel="noopener">TRANSCRIPT &nearr;</a></td>
-</tr>
-<tr>
-  <td>2026-07-26</td>
-  <td>Claude Opus 5<br><span style="color:var(--d);font-size:11px">max effort, adversarial</span></td>
-  <td>Multisig.sol +<br>TimelockExecutor.sol<br>+ 20 PoC tests</td>
-  <td>2 high &middot; 6 medium<br>6 low &middot; 9 info<br><span style="color:var(--d);font-size:11px">all config-dependent</span></td>
-  <td><a href="https://github.com/src-company/multisig/blob/main/audit/report-opus5-max.md" target="_blank" rel="noopener">READ &nearr;</a><br><a href="https://claude.ai/share/c8a3a7d4-962f-4cb3-9fea-5690e9c7c7a2" target="_blank" rel="noopener">TRANSCRIPT &nearr;</a></td>
-</tr>
-<tr>
-  <td>2026-04-03</td>
-  <td>Internal review<br><span style="color:var(--d);font-size:11px">Pashov Skills methodology</span></td>
-  <td>Multisig.sol, modules,<br>TimelockExecutor</td>
-  <td>8-agent parallel review,<br>four passes</td>
-  <td><a href="https://github.com/src-company/multisig/tree/main/audit" target="_blank" rel="noopener">READ &nearr;</a></td>
-</tr>
-</table>
-<div class="note">The Shred Security report is stamped DRAFT on its cover page. Every report is reproduced in full in <code>audit/</code> with the maintainers' response inline against each finding; dispositions are summarised in <code>SECURITY.md</code>. <strong>No finding from either review lets an unauthorised party move funds from a correctly configured vault</strong>, and none warranted redeploying the contracts — they are immutable singletons already live at mined addresses on every supported chain. Each is answered here instead, where the transaction is built.</div>
+<div class="audits">
+<div class="audit">
+  <span class="audit-when">2026-07-11</span>
+  <span class="audit-who"><a href="https://www.shredsecurity.io/" target="_blank" rel="noopener">Shred Security</a><span class="q">kenzo &middot; yashar</span></span>
+  <span class="audit-links"><a href="https://audit.multisig.wei.limo" target="_blank" rel="noopener">READ &nearr;</a></span>
+  <div class="audit-scope">Multisig.sol @ 2329339 <span class="op">+</span> stateful invariant fuzzing</div>
+  <div class="audit-find">
+    <span class="sev zero">0 HIGH</span><span class="sev zero">0 MEDIUM</span><span class="sev low">2 LOW</span><span class="sev">2 INFO</span>
+  </div>
+</div>
+<div class="audit">
+  <span class="audit-when">2026-07-25</span>
+  <span class="audit-who">leftclaw<span class="q">multi-agent pipeline via One Dollar Audit</span></span>
+  <span class="audit-links"><a href="https://github.com/src-company/multisig/blob/main/audit/report-leftclaw.md" target="_blank" rel="noopener">READ &nearr;</a><a href="https://leftclaw.services/result/500.html" target="_blank" rel="noopener">ORIGINAL &nearr;</a></span>
+  <div class="audit-scope">Multisig.sol <span class="op">&middot;</span> TimelockExecutor.sol <span class="op">&middot;</span> IMultisig</div>
+  <div class="audit-find">
+    <span class="sev crit">1 CRITICAL</span><span class="sev high">2 HIGH</span><span class="sev med">4 MEDIUM</span><span class="sev low">5 LOW</span>
+  </div>
+</div>
+<div class="audit">
+  <span class="audit-when">2026-07-26</span>
+  <span class="audit-who">GPT-5.6 Sol<span class="q">Pro, independent</span></span>
+  <span class="audit-links"><a href="https://github.com/src-company/multisig/blob/main/audit/report-gpt56-sol.md" target="_blank" rel="noopener">READ &nearr;</a><a href="https://chatgpt.com/share/6a650af3-f6bc-83ea-b5f3-f83452e9c744" target="_blank" rel="noopener">TRANSCRIPT &nearr;</a></span>
+  <div class="audit-scope">Multisig.sol <span class="op">&middot;</span> TimelockExecutor.sol <span class="op">+</span> composition review</div>
+  <div class="audit-find">
+    <span class="sev high">1 HIGH</span><span class="sev med">1 MEDIUM</span><span class="sev low">4 LOW</span><span class="sev">5 INFO</span>
+  </div>
+</div>
+<div class="audit">
+  <span class="audit-when">2026-07-26</span>
+  <span class="audit-who">Claude Opus 5<span class="q">max effort, adversarial</span></span>
+  <span class="audit-links"><a href="https://github.com/src-company/multisig/blob/main/audit/report-opus5-max.md" target="_blank" rel="noopener">READ &nearr;</a><a href="https://claude.ai/share/c8a3a7d4-962f-4cb3-9fea-5690e9c7c7a2" target="_blank" rel="noopener">TRANSCRIPT &nearr;</a></span>
+  <div class="audit-scope">Multisig.sol <span class="op">&middot;</span> TimelockExecutor.sol <span class="op">+</span> 20 PoC tests</div>
+  <div class="audit-find">
+    <span class="sev high">2 HIGH</span><span class="sev med">6 MEDIUM</span><span class="sev low">6 LOW</span><span class="sev">9 INFO</span><span class="audit-meth">all config-dependent</span>
+  </div>
+</div>
+<div class="audit">
+  <span class="audit-when">2026-04-03</span>
+  <span class="audit-who">Internal review<span class="q">Pashov Skills methodology</span></span>
+  <span class="audit-links"><a href="https://github.com/src-company/multisig/tree/main/audit" target="_blank" rel="noopener">READ &nearr;</a></span>
+  <div class="audit-scope">Multisig.sol <span class="op">&middot;</span> modules <span class="op">&middot;</span> TimelockExecutor</div>
+  <div class="audit-find"><span class="audit-meth">8-agent parallel review <span class="op">&middot;</span> four passes <span class="op">&middot;</span> no separate tally</span></div>
+</div>
+</div>
+<div class="note">The Shred Security report is stamped DRAFT on its cover page. Every report is reproduced in full in <code>audit/</code> with the maintainers' response inline against each finding; dispositions are summarised in <code>SECURITY.md</code>. <strong>No finding from any of the four external reviews lets an unauthorised party move funds from a correctly configured vault</strong>, and none warranted redeploying the contracts — they are immutable singletons already live at mined addresses on every supported chain. Each is answered here instead, where the transaction is built.</div>
 
 <h2>TIMELOCK &amp; THE FAST PATH</h2>
 <p>The clearest thing to understand before configuring a vault, because two reviews raised issues that both live here.</p>
@@ -411,25 +491,25 @@ function render(){
     :"data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%3Crect%20width%3D%2264%22%20height%3D%2264%22%20fill%3D%22%23FDFDFD%22%2F%3E%0A%3Cdefs%3E%0A%3Cpath%20id%3D%22pt%22%20d%3D%22M4%2C4%20H60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pr%22%20d%3D%22M60%2C4%20V60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pb%22%20d%3D%22M60%2C60%20H4%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pl%22%20d%3D%22M4%2C60%20V4%22%20fill%3D%22none%22%2F%3E%0A%3C%2Fdefs%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230099B3%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pt%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230099B3%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pr%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230099B3%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pb%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%230099B3%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pl%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Cpath%20d%3D%22M16%2C48%20V16%20H22%20L32%2C32%20L42%2C16%20H48%20V48%20H42%20V26%20L32%2C42%20L22%2C26%20V48%20Z%22%20fill%3D%22%230099B3%22%2F%3E%0A%3C%2Fsvg%3E";
   document.getElementById("app").innerHTML=`
   <div class="frame">
-    ${m?"":`<div class="rail rail-l">${asc(400)}</div><div class="rail rail-r">${asc(400)}</div>`}
-    <div class="hbar">${asc(200)}</div>
+    ${m?"":`<div class="rail rail-l" aria-hidden="true">${asc(400)}</div><div class="rail rail-r" aria-hidden="true">${asc(400)}</div>`}
+    <div class="hbar" aria-hidden="true">${asc(200)}</div>
     <div class="hdr">
       <div>
-        <div class="logo"><a href="javascript:history.back()">MULTISIG</a></div>
+        <h1 class="logo"><a href="index.html">MULTISIG</a></h1>
         <div class="logo-sub">DOCUMENTATION</div>
       </div>
-      <button class="theme-btn" onclick="dark=!dark;localStorage.setItem('ms_light',dark?'':'1');render()">${dark?"☀":"●"}</button>
+      <button class="theme-btn" onclick="dark=!dark;localStorage.setItem('ms_light',dark?'':'1');render()" aria-label="Switch to ${dark?"light":"dark"} theme" title="Switch to ${dark?"light":"dark"} theme"><span aria-hidden="true">${dark?"☀":"●"}</span></button>
     </div>
-    <div class="tabs">
-      ${TABS.map(t=>`<button class="tab${tab===t?" on":""}" onclick="go('${t}')">${t}</button>`).join("")}
-    </div>
+    <nav class="tabs">
+      ${TABS.map(t=>`<button class="tab${tab===t?" on":""}"${tab===t?' aria-current="page"':''} onclick="go('${t}')">${t}</button>`).join("")}
+    </nav>
     <div class="content">${CONTENT[tab]}</div>
     <div class="footer">
       <span>MULTISIG.SOFTWARE</span>
       <a href="https://github.com/src-company/multisig" target="_blank" rel="noopener">GITHUB</a>
-      <a href="javascript:history.back()">&larr; BACK TO APP</a>
+      <a href="index.html">&larr; BACK TO APP</a>
     </div>
-    <div class="hbar">${asc(200)}</div>
+    <div class="hbar" aria-hidden="true">${asc(200)}</div>
   </div>`;
 }
 
