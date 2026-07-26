@@ -209,9 +209,30 @@ async function connectWithWallet(walletKey) {
         oldWP.removeListener('chainChanged', _walletEventHandlers.chainChanged);
       } catch (e) {}
     }
+    // A wallet-side chain or account change used to reload the page. That resyncs,
+    // and it also throws away whatever the app was in the middle of — most
+    // destructively a multichain deploy, which switches chains *itself*: asking
+    // the wallet for chain 2 fired chainChanged, which reloaded the page out from
+    // under the run, losing the create form, the mined salt and every chain that
+    // had not been signed for yet. Hand the event to the app when it is willing
+    // to absorb one, and reload only as a fallback for a page that is not.
     _walletEventHandlers = {
-      accountsChanged: () => window.location.reload(),
-      chainChanged: () => window.location.reload()
+      accountsChanged: accts => {
+        _onAccountsChanged(accts).catch(e => { console.error('accountsChanged:', e); window.location.reload(); });
+      },
+      chainChanged: hex => {
+        const id = typeof hex === 'string' ? parseInt(hex, 16) : Number(hex);
+        if (!Number.isFinite(id) || id <= 0) { window.location.reload(); return; }
+        // Keep the switch target in step with where the wallet actually is, so a
+        // later auto-reconnect or preflight does not try to drag it back to a
+        // chain it left.
+        _targetChainId = id;
+        _targetChainHex = '0x' + id.toString(16);
+        if (typeof window.onWalletChainChanged === 'function') {
+          try { window.onWalletChainChanged(id); return; } catch (e) { console.error('onWalletChainChanged:', e); }
+        }
+        window.location.reload();
+      }
     };
     walletProvider.on('accountsChanged', _walletEventHandlers.accountsChanged);
     walletProvider.on('chainChanged', _walletEventHandlers.chainChanged);
@@ -301,6 +322,31 @@ function resolveWeiName(addr) {
 }
 window.resolveWeiName = resolveWeiName;
 
+// The selected account changed under us. Re-derive the signer for the new account
+// so the app can resync in place — a reload here is what stopped the deploy loop's
+// own "switch back to <deployer>" guard from ever being reachable, because the
+// page was gone before the next chain could notice the salt no longer matched its
+// signer. An empty list is the wallet locking or revoking this site: a disconnect.
+async function _onAccountsChanged(accts) {
+  const next = Array.isArray(accts) ? accts[0] : null;
+  const canDelegate = typeof window.onWalletAccountsChanged === 'function';
+  if (!next) {
+    if (canDelegate) window.disconnectWallet();
+    else window.location.reload();
+    return;
+  }
+  if (_connectedAddress && next.toLowerCase() === _connectedAddress.toLowerCase()) return;
+  if (!canDelegate || !_connectedWalletProvider) { window.location.reload(); return; }
+  const prev = _connectedAddress;
+  _walletProvider = new ethers.BrowserProvider(_connectedWalletProvider);
+  _signer = await _walletProvider.getSigner();
+  _connectedAddress = await _signer.getAddress();
+  _walletDisplayName = _connectedAddress.slice(0, 6) + '...' + _connectedAddress.slice(-4);
+  resolveWeiName(_connectedAddress);
+  notifyDisplayUpdate();
+  window.onWalletAccountsChanged(_connectedAddress, prev);
+}
+
 function notifyDisplayUpdate() {
   if (typeof window.onWalletDisplayUpdate === 'function') {
     try { window.onWalletDisplayUpdate(); } catch(e) {}
@@ -361,20 +407,55 @@ window.walletInit = function(opts) {
   tryAutoConnect();
 };
 
-// Switch chain at runtime
+// Every code path here used to end in an empty catch, which collapsed three
+// different outcomes — the user declined, the wallet has never heard of this
+// chain, the request worked — into the same silence. A multichain deploy has to
+// tell them apart to say anything useful about a chain it could not reach, so
+// report the outcome instead of throwing or swallowing it.
+function _switchErrCode(e) {
+  return e && (e.code !== undefined ? e.code : (e.data && e.data.originalError && e.data.originalError.code));
+}
+const _rejected = c => c === 4001 || c === 'ACTION_REJECTED';
+
+// Switch chain at runtime. Resolves to { ok, rejected?, unsupported?, code?, error? }.
 window.walletSwitchChain = async function(opts) {
   _targetChainId = opts.chainId;
   _targetChainHex = opts.chainHex || '0x' + opts.chainId.toString(16);
   _targetRpc = opts.rpc || _targetRpc;
   _addChainParams = opts.addChainParams || null;
-  if (_connectedWalletProvider) {
-    try {
-      const current = await _connectedWalletProvider.request({method:'eth_chainId'});
-      if (BigInt(current) !== BigInt(_targetChainId)) {
-        try { await _connectedWalletProvider.request({method:'wallet_switchEthereumChain', params:[{chainId:_targetChainHex}]}); }
-        catch(e) { if (e.code===4902 && _addChainParams) await _connectedWalletProvider.request({method:'wallet_addEthereumChain', params:[_addChainParams]}); }
+  if (!_connectedWalletProvider) return { ok: true, noWallet: true };
+  try {
+    const current = await _connectedWalletProvider.request({method:'eth_chainId'});
+    if (BigInt(current) === BigInt(_targetChainId)) return { ok: true, already: true };
+  } catch (_) { /* chain id unreadable — ask for the switch anyway */ }
+  try {
+    await _connectedWalletProvider.request({method:'wallet_switchEthereumChain', params:[{chainId:_targetChainHex}]});
+    return { ok: true };
+  } catch (e) {
+    const code = _switchErrCode(e);
+    if (_rejected(code)) return { ok: false, rejected: true, code, error: e };
+    // 4902 — the wallet does not know this chain (some wrap it in -32603). Add
+    // it, then ask for the switch *again*: adding leaves some wallets on the
+    // chain they were already on, and assuming otherwise is how a deploy ended
+    // up signing on the previous chain's network.
+    if ((code === 4902 || code === -32603) && _addChainParams) {
+      try {
+        await _connectedWalletProvider.request({method:'wallet_addEthereumChain', params:[_addChainParams]});
+      } catch (addErr) {
+        const ac = _switchErrCode(addErr);
+        if (_rejected(ac)) return { ok: false, rejected: true, code: ac, error: addErr };
+        return { ok: false, unsupported: true, code: ac, error: addErr };
       }
-    } catch(_) {}
+      try {
+        await _connectedWalletProvider.request({method:'wallet_switchEthereumChain', params:[{chainId:_targetChainHex}]});
+        return { ok: true, added: true };
+      } catch (e2) {
+        const c2 = _switchErrCode(e2);
+        return { ok: false, added: true, rejected: _rejected(c2), code: c2, error: e2 };
+      }
+    }
+    if (code === 4902) return { ok: false, unsupported: true, code, error: e };
+    return { ok: false, code, error: e };
   }
 };
 

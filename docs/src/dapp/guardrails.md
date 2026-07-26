@@ -105,3 +105,7 @@ documented rather than blocked.
 - **The delay does not gate signed messages.** Anything expressible as a signed
   order — Permit2, Seaport, intents — is authorised instantly with threshold
   signatures, however long the delay.
+- **A passing [simulation](interface.md#simulation) is not a guarantee.** It is one
+  block's snapshot, and on a timelocked wallet the gap between signing and executing
+  is measured in days. Re-run it before executing, not only before signing — and
+  read the timestamp on the panel rather than the verdict alone.

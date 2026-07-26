@@ -107,6 +107,80 @@ is to be read before signing must not be able to look like a different name.
 **BATCH** — several calls, each with target, value and calldata, added and removed
 dynamically, encoded as a single `batch()` self-call.
 
+## Simulation
+
+Every live proposal, and every transaction the builder is about to propose, can be
+dry-run before anyone signs it. **SIMULATE** replays the call against the latest
+block with `from` set to the wallet.
+
+That `from` is the whole idea. A proposal's on-chain effect is
+`target.call{value}(data)` with `msg.sender` the wallet — see
+[`execute`](../protocol/overview.md) — so setting the sender to the wallet
+reproduces the real call rather than approximating it. The wallet is already a
+contract, so no code has to be injected to make it executable and no signatures have
+to be forged: its own `batch()` and `isValidSignature` run as they will on the day.
+A BATCH proposal simulates as the single `batch()` self-call it will be, in one EVM
+frame, so state carries between its calls exactly as it will on-chain.
+
+Nothing is signed and nothing is sent.
+
+### What it reports
+
+Pass or revert; the decoded revert reason, including the wallet's own custom errors,
+which a bare provider would hand back as an undecoded blob; gas for the inner call;
+and a ledger of everything that moves in or out of the wallet.
+
+The ledger is built from the transaction's logs, and it covers ERC-20 amounts,
+individual ERC-721 token ids, ERC-1155 ids from both `TransferSingle` and
+`TransferBatch`, and native ETH. Each row is netted, so an asset that leaves and
+returns within the same transaction is not reported as movement. Token ids are
+listed individually rather than counted, because *which* NFT leaves a treasury is
+the entire question.
+
+### Guards are replayed
+
+A wallet whose executor address carries the `0x1111` marker calls that executor
+before execution, after it, or both, depending on which end of the address carries
+the marker — see [Modules](../protocol/modules.md). A pre-guard that refuses stops
+the transaction dead, and
+[`AllowlistGuard`](../src/mods/AllowlistGuard.sol/contract.AllowlistGuard.md) on a
+target nobody allowlisted is the shipped case.
+
+Replaying only the inner call would therefore report PASS on a proposal the wallet
+will refuse to run, so the hook calls go into the same simulated frame, in the order
+the wallet makes them. A blocked proposal reads **BLOCKED BY GUARD** with the guard's
+own reason, and names which end refused, so the reader looks at the allowlist rather
+than at their balance. A passing simulation on such a wallet is tagged **GUARD OK**,
+because a check worth running is worth showing when it succeeds.
+
+One limit is inherent: the wallet forwards the real signature bundle to the hook as
+its fourth argument, and at dry-run time that bundle does not exist yet, so empty
+bytes are passed. Both shipped guards ignore the argument. A custom guard that
+inspects signatures is the one case this can misjudge.
+
+### What it cannot tell you
+
+A simulation is one block's snapshot, and the panel stamps each result with the time
+it was produced so a stale one never reads as fresher than it is.
+
+- **State moves.** A proposal that passes now can revert when it is executed days
+  later — the ordinary case for anything sitting in a timelocked queue. Re-run it
+  before executing.
+- **The gas figure is the inner call only.** The signature checks and the nonce
+  write that `execute()` wraps around it are on top, and the panel labels the number
+  accordingly rather than presenting it as the cost of the transaction.
+- **An unfunded wallet reports a revert that is true today.** No balance overrides
+  are applied. For a wallet that will be funded before its ETA, that revert is a
+  timing artefact; for one that will not, it is the answer.
+- **Not every RPC supports `eth_simulateV1`.** Without it the app falls back to
+  `eth_call` plus `estimateGas`, which answers whether the call reverts but traces
+  no assets. That result is labelled **REVERT-CHECK ONLY**, and the "nothing enters
+  or leaves" wording is withheld, because a check that did not look for movement
+  must not be read as having found none.
+
+A simulation that reverts blocks nothing. The proposal can still be created, signed
+and submitted; the panel exists to be read before signing, not to decide.
+
 ## Admin
 
 Three sub-tabs. Every change here is `onlySelf`, so nothing applies directly —

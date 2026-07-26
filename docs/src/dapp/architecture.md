@@ -39,6 +39,19 @@ name is resolved there no matter which chain the app is on, so a wedged mainnet
 provider would take name resolution down everywhere. The app therefore watches for
 that error and rebuilds the provider on the next call.
 
+### One deliberate exception
+
+[Simulation](interface.md#simulation) is the one read that does not go through the
+`FallbackProvider`. `eth_simulateV1` is not part of the standard provider surface, so
+it is sent as a raw `send()` over a single `JsonRpcProvider` built on the chain's
+first RPC and cached per chain.
+
+The trade is accepted rather than overlooked: a chain whose primary RPC does not
+implement the method, or is down, loses the rich simulation and falls back to
+`eth_call` plus `estimateGas` over the resilient provider — degraded to a revert
+check, labelled as such in the panel, never silently wrong. A dry-run is advisory,
+so losing detail is tolerable in a way that losing a balance read would not be.
+
 ## Name resolution
 
 `wallet.js` handles wallet connection and name resolution. Two registries are read,

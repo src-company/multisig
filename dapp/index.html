@@ -1980,6 +1980,10 @@ const S = {
   sel: 0,
   vaults: [],
   demoMode: false,
+  // Where the wallet says it is, when that has drifted from S.chainId. Only the
+  // wallet's chainChanged event writes it; the deploy overlay reads it to name
+  // the chain a stalled chain walk is actually sitting on.
+  walletChain: null,
 
   // tx builder
   showTx: false,
@@ -2775,7 +2779,9 @@ function dismissTop() {
   if (document.getElementById("info-modal").classList.contains("open")) { toggleInfo(false); return true; }
   if (S.topup) { if (!S.topup.sending) closeTopUp(); return true; }
   // Preflight is read-only — no wallet is holding anything yet — so Escape works
-  // there too. It stops being an exit once the chain walk starts.
+  // there too. It stops being an exit once the chain walk starts. A halted run is
+  // dismissable: the mined salt outlives it, so the untried chains are offered
+  // again by the RESUME banner rather than lost with the dialog.
   if (S.deploy) { if (S.deploy.done || S.deploy.phase === "review" || S.deploy.phase === "preflight") closeDeploy(); return true; }
   if (S.safeClone) { closeSafeClone(); return true; }
   if (S.showChains) { S.showChains = false; render(); return true; }
@@ -2957,6 +2963,7 @@ function renderNow(){
     <nav class="nav">
       ${[{k:"DASH",l:"DASHBOARD",m:"DASH"},{k:"ADMIN",l:"ADMIN",m:"ADMIN"},{k:"CREATE",l:"CREATE",m:"CREATE"}].map(i=>`<button class="${S.view===i.k?"on":""}"${S.view===i.k?' aria-current="page"':''} onclick="S.view='${i.k}';S.showTx=false;render()">${mob?i.m:i.l}</button>`).join("")}
     </nav>
+    ${renderResumeBanner()}
     <div class="content">${S.view==="DASH"?renderDash(v,mob):S.view==="CREATE"?renderCreate(mob):renderAdmin(v,mob)}</div>
     <div class="footer">
       <div class="footer-l">
@@ -3000,9 +3007,12 @@ function renderDeployOverlay(){
   const lbl = { pending:'WAITING', switching:'SWITCH IN WALLET…', mining:'MINING ADDRESS…', deploying:'CONFIRM IN WALLET…', done:'DEPLOYED', skipped:'ALREADY DEPLOYED', failed:'FAILED' };
   const anyFail = d.steps.some(s=>s.status==='failed');
   const nch = d.steps.length, plural = nch>1?'S':'';
+  // A halted run is its own outcome, not a variety of DONE: some chains have a
+  // vault and some were never asked, and the difference is what RESUME acts on.
+  const remaining = d.steps.filter(s=>s.status!=='done' && s.status!=='skipped').length;
   const title = phase==='preflight' ? `CHECKING ${nch} CHAIN${plural}…`
     : phase==='review' ? `REVIEW · ${nch} CHAIN${plural}`
-    : `${d.done?(anyFail?'DEPLOY · DONE (WITH ERRORS)':'DEPLOY · DONE'):'DEPLOYING'} · ${nch} CHAIN${plural}`;
+    : `${d.done?(d.halted?`DEPLOY · STOPPED · ${remaining} OF ${nch} LEFT`:anyFail?'DEPLOY · DONE (WITH ERRORS)':'DEPLOY · DONE'):'DEPLOYING'}${d.halted?'':` · ${nch} CHAIN${plural}`}`;
 
   const rows = d.steps.map((s,k)=>{
     let g = glyph[s.status], gc = col[s.status], right;
@@ -3023,12 +3033,20 @@ function renderDeployOverlay(){
       right = `<span style="font-size:9px;letter-spacing:1px;color:${amber?'var(--y)':'var(--g)'}">${w.length?w.join(' · '):unread?'UNCHECKED · NO REPLY':'READY'}</span>`;
     } else {
       const canRetry = s.status==='failed' && d.done;
+      // A chain the run stopped before reaching has not failed and was not
+      // skipped — it was never tried. Saying WAITING under a finished run reads
+      // as still working, which is the stall the halt is meant to replace.
+      const untried = s.status==='pending' && d.done;
       // A deploy that could not be read back is still a deploy — say so, but
-      // never let it borrow the word the verified ones earned.
-      const txt = s.status==='failed'&&s.err ? esc(String(s.err).slice(0,30))
+      // never let it borrow the word the verified ones earned. The reason for a
+      // failure goes on its own line below rather than being truncated into this
+      // slot: "SWITCH TO ARBITRUM ONE REJECT" is not an instruction.
+      const txt = s.status==='failed' ? (s.blocked ? 'STOPPED' : 'FAILED')
+        : untried ? 'NOT ATTEMPTED'
         : s.status==='done' ? (s.verified ? 'DEPLOYED · VERIFIED' : 'DEPLOYED · UNVERIFIED')
         : lbl[s.status];
-      const tc = s.status==='done' && !s.verified ? 'var(--y)' : gc;
+      const tc = s.status==='done' && !s.verified ? 'var(--y)' : s.blocked ? 'var(--y)' : gc;
+      if(untried){ g='○'; }
       right = `<span style="font-size:9px;letter-spacing:1px;color:${tc}">${txt}</span>${canRetry?` <button class="reject-link" style="padding:2px 9px;margin-left:8px" onclick="retryChain(${k})">RETRY</button>`:''}`;
     }
     // Per-chain explorer link: each chain has its own explorer, so build the
@@ -3052,10 +3070,17 @@ function renderDeployOverlay(){
             : 'NAME DID NOT READ BACK FROM WNS &mdash; THE VAULT DEPLOYED, THE CLAIM IS UNCONFIRMED')
             + '. CLAIM ONE FROM THE NAME TAB.' }
         : null;
-    const idLine = idText ? `<div style="font-size:9px;letter-spacing:1.5px;line-height:1.6;color:${idText.color};padding:0 0 10px 24px;border-bottom:1px solid var(--ln)">${idText.html}</div>` : '';
-    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:${idLine?'none':'1px solid var(--ln)'}">
+    // Sub-lines under the row, in the order they matter: why this chain stopped,
+    // then what happened to the name. Full sentences, because the right-hand slot
+    // only has room for a status word and the reason is the actionable half.
+    const subs = [];
+    if(phase!=='preflight' && phase!=='review' && s.status==='failed' && s.err)
+      subs.push({ color:s.blocked?'var(--y)':'var(--r)', html:esc(String(s.err)) });
+    if(idText) subs.push(idText);
+    const subLines = subs.map((t,i)=>`<div style="font-size:9px;letter-spacing:1.5px;line-height:1.6;color:${t.color};padding:0 0 ${i===subs.length-1?'10px':'4px'} 24px;${i===subs.length-1?'border-bottom:1px solid var(--ln)':''}">${t.html}</div>`).join('');
+    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:${subLines?'none':'1px solid var(--ln)'}">
       <span style="color:${gc};font-size:12px;width:14px;text-align:center">${g}</span>
-      ${chainIcon(s.id)}<span style="flex:1;font-size:12px;font-weight:700;letter-spacing:1px">${esc(s.name)}</span>${right}${xlink}</div>${idLine}`;
+      ${chainIcon(s.id)}<span style="flex:1;font-size:12px;font-weight:700;letter-spacing:1px">${esc(s.name)}</span>${right}${xlink}</div>${subLines}`;
   }).join('');
 
   // Every chain in this deploy has its own explorer, and the vault has one
@@ -3114,9 +3139,33 @@ function renderDeployOverlay(){
       <div style="display:flex;gap:8px;margin-top:16px"><button class="btn btn-outline btn-w" onclick="closeDeploy()">CANCEL</button><button class="btn btn-fill btn-w" onclick="proceedDeploy()">${nch>1?`DEPLOY &middot; ${nch} CHAINS`:'DEPLOY'}</button></div>`;
   } else if(d.done){
     const dbWarn = d.steps.some(s=>s.dbWarn);
-    footer = `${dbWarn?`<div style="margin-top:14px;font-size:10px;color:var(--y);letter-spacing:1px;line-height:1.6">Deployed on-chain, but not recorded in history — the vault is live at the address above.</div>`:''}<button class="btn btn-fill btn-w" style="margin-top:20px" onclick="closeDeploy()">${anyFail?'CLOSE':'VIEW VAULT'}</button>`;
+    // The run stopped on something only the wallet can fix. Say which chain it
+    // stopped on, what it was waiting for, how many chains are still owed a vault
+    // — and offer the one button that carries on from there. Without this the
+    // flow's only recovery was RETRY per chain, in the right order, guessed.
+    let haltMsg = '';
+    if(d.halted){
+      const landed = d.steps.filter(s=>s.status==='done'||s.status==='skipped').length;
+      const drift = S.walletChain && S.walletChain !== d.chains[d.halted.at].id
+        ? ` Your wallet is on ${esc(CHAINS[S.walletChain] ? CHAINS[S.walletChain].name : 'chain ' + S.walletChain)}.` : '';
+      // Closing is safe to say here because the salt is now saved outside the run:
+      // the untried chains can still reach this address in a later session.
+      haltMsg = `<div style="margin-top:14px;font-size:10px;color:var(--y);letter-spacing:1px;line-height:1.6">Stopped at ${esc(d.halted.name)} — ${esc(String(d.halted.reason).toLowerCase())}.${drift} ${landed} of ${nch} chain${nch>1?'s':''} ${landed===1?'has':'have'} the vault; the rest were left untried rather than firing the same prompt at each one. Fix it in your wallet and press RESUME.${landed?' Closing is safe too — the mined address is held, and the RESUME banner will offer the remaining chains again.':''}</div>`;
+    }
+    footer = `${haltMsg}${dbWarn?`<div style="margin-top:14px;font-size:10px;color:var(--y);letter-spacing:1px;line-height:1.6">Deployed on-chain, but not recorded in history — the vault is live at the address above.</div>`:''}
+      <div style="display:flex;gap:8px;margin-top:20px">${d.halted?`<button class="btn btn-outline btn-w" onclick="closeDeploy()">CLOSE</button><button class="btn btn-fill btn-w" onclick="resumeDeploy()">RESUME &middot; ${remaining} CHAIN${remaining>1?'S':''}</button>`
+        :`<button class="btn btn-fill btn-w" onclick="closeDeploy()">${anyFail?'CLOSE':'VIEW VAULT'}</button>`}</div>`;
   } else if(phase==='deploying'){
-    footer = `<div style="margin-top:16px;font-size:9px;color:var(--d);letter-spacing:1px;text-align:center">APPROVE EACH WALLET PROMPT TO CONTINUE</div>`;
+    // Which chain, and what it is waiting for. "APPROVE EACH WALLET PROMPT" is
+    // true of the whole run and therefore says nothing about the prompt that is
+    // actually open — on a five-chain walk that is the only thing worth saying.
+    const cur = d.steps.findIndex(s=>s.status==='switching'||s.status==='mining'||s.status==='deploying');
+    const at = cur >= 0 ? d.steps[cur] : null;
+    const what = at && at.status==='switching' ? `SWITCH TO ${esc(String(at.name).toUpperCase())} IN YOUR WALLET`
+      : at && at.status==='deploying' ? `CONFIRM ${esc(String(at.name).toUpperCase())} IN YOUR WALLET`
+      : at && at.status==='mining' ? 'MINING THE VAULT ADDRESS'
+      : 'APPROVE EACH WALLET PROMPT TO CONTINUE';
+    footer = `<div style="margin-top:16px;font-size:9px;color:var(--d);letter-spacing:1px;line-height:1.6;text-align:center">${what}${nch>1&&cur>=0?` &middot; ${cur+1} OF ${nch}`:''}</div>`;
   } else if(phase==='preflight'){
     // Preflight reads N chains and mines the address; a wedged RPC used to leave
     // this dialog with no way out at all, on a step where nothing has been signed
@@ -5150,7 +5199,17 @@ function renderSafeCloneModal(){
 // away from under the operator. Only a run that actually produced a vault leaves
 // the create screen.
 function closeDeploy(){
-  const landed = !!(S.deploy && S.deploy.lastVaultAddr);
+  const d = S.deploy;
+  const landed = !!(d && d.lastVaultAddr);
+  // Cancelling a run that never landed anywhere leaves nothing to finish, so the
+  // mined salt goes with it rather than sitting in storage offering to resume a
+  // deploy that never happened. Judged from the stored record rather than this
+  // run's steps: a resumed run that lands nothing new is still finishing a vault
+  // that does exist, and its record is the only way back to that address.
+  if(d && d.ctx && d.ctx.minedAddr){
+    const rec = _findResume(_readAllResume(), d.ctx.minedAddr);
+    if(!rec || !((rec.doneIds || []).length)) _clearDeployResume(d.ctx.minedAddr);
+  }
   S.deploy = null;
   if(landed){ S.view = 'DASH'; S.showTx = false; }
   render();
@@ -6289,6 +6348,247 @@ async function vaultMatchesCtx(addr, ctx){
 let _deployRun = 0;
 const _deployLive = run => !!S.deploy && S.deploy.run === run;
 
+// ── DEPLOY: RESUMING AN UNFINISHED CHAIN WALK ─────────────────────
+//
+// The CREATE2 address is a function of the salt, and the salt is mined per run.
+// So a multichain deploy that lands on chain 1 and is then interrupted — the
+// wallet declines a switch, the tab is closed, the browser is restarted — cannot
+// reach the same address on the chains it never got to unless the salt outlives
+// the run. It used to live only in S.deploy, which made "close" a silent,
+// irreversible choice to scatter the clones.
+//
+// Written to localStorage the moment the salt is known, so the offer to finish
+// survives everything short of clearing site data. Nothing secret is stored: the
+// salt is public the instant the first chain deploys (it is an argument to
+// create()), and it is useless to anyone else — the factory requires salt >> 96
+// to equal msg.sender, so only this deployer can use it.
+const RESUME_KEY = 'ms_deploy_resume';
+const RESUME_MAX_AGE = 30 * 24 * 3600 * 1000;
+const RESUME_MAX = 5;
+
+// Is this record still worth keeping at all? Deployer identity is checked
+// separately (_myResumes) — another account's unfinished deploy is none of this
+// account's business, but it is not rubbish to be deleted either.
+function _resumeValid(r){
+  if(!r || r.v !== 1 || !Array.isArray(r.chains) || !r.chains.length) return false;
+  if(!Array.isArray(r.owners) || !r.owners.length) return false;
+  if(typeof r.ts !== 'number' || Date.now() - r.ts > RESUME_MAX_AGE) return false;
+  // Shapes, not just presence. These two are fed straight to BigInt() and to a
+  // getCode call when a run is rebuilt, and a record mangled by anything — a
+  // half-written value, a hand-edited store — must fail here rather than throw out
+  // of the RESUME button or send a malformed address to an RPC.
+  if(typeof r.salt !== 'string' || !/^0x[0-9a-fA-F]{1,64}$/.test(r.salt)) return false;
+  if(typeof r.minedAddr !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(r.minedAddr)) return false;
+  if(!Number.isFinite(Number(r.thresh)) || !Number.isFinite(Number(r.del))) return false;
+  if(!r.chains.every(c => c && Number.isFinite(Number(c.id)))) return false;
+  return true;
+}
+const _sameAddr = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
+
+// Every stored record, newest first. More than one can be unfinished at a time,
+// and they have to be kept apart: an operator who ignores the banner and creates
+// a second vault must not thereby strand the first one's clones, which is what a
+// single-slot store did — the new run's salt overwrote the only route back to the
+// previous address.
+function _readAllResume(){
+  let raw = null;
+  try { raw = JSON.parse(localStorage.getItem(RESUME_KEY) || 'null'); } catch(_) { return []; }
+  const list = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+  return list.filter(_resumeValid).sort((a, b) => b.ts - a.ts);
+}
+function _writeAllResume(list){
+  try {
+    const keep = list.filter(_resumeValid).sort((a, b) => b.ts - a.ts).slice(0, RESUME_MAX);
+    if(keep.length) localStorage.setItem(RESUME_KEY, JSON.stringify(keep));
+    else localStorage.removeItem(RESUME_KEY);
+  } catch(_) {}   // storage full or blocked: the run still works, only resume is lost
+}
+// The records this account can actually act on. The salt only works for the
+// account that mined it — the factory requires salt >> 96 to equal msg.sender —
+// so an offer to anyone else is an offer to sign something that reverts.
+function _myResumes(){
+  const me = window._connectedAddress;
+  if(!me) return [];
+  return _readAllResume().filter(r => r.deployer && _sameAddr(r.deployer, me));
+}
+const _findResume = (list, addr) => list.find(r => _sameAddr(r.minedAddr, addr));
+
+function _saveDeployResume(){
+  const d = S.deploy;
+  if(!d || !d.ctx || !d.ctx.salt || !d.ctx.minedAddr) return;
+  const ok = s => s.status === 'done' || s.status === 'skipped';
+  const all = _readAllResume();
+  const prev = _findResume(all, d.ctx.minedAddr);
+  // Merged with what is already stored, never overwritten. A resumed run carries
+  // only the chains it still owes, so writing its view wholesale would drop every
+  // chain the interrupted run already deployed to — and a resumed run that lands
+  // nothing new would drop the record's only evidence that anything ever landed,
+  // taking the offer to finish with it and stranding the vault's clones for good.
+  const chains = [], seen = new Set();
+  for(const c of (prev && Array.isArray(prev.chains) ? prev.chains : []).concat(d.chains.map(n => ({ id:n.id, name:n.name })))){
+    if(seen.has(Number(c.id))) continue;
+    seen.add(Number(c.id));
+    chains.push({ id:Number(c.id), name:c.name });
+  }
+  const doneIds = [...new Set([
+    ...((prev && prev.doneIds) || []).map(Number),
+    ...d.steps.filter(ok).map(s => Number(s.id)),
+  ])];
+  const landedStep = d.steps.find(ok);
+  const rec = {
+    v: 1, ts: Date.now(),
+    deployer: d.ctx.connectedAddress,
+    salt: '0x' + d.ctx.salt.toString(16),
+    minedAddr: d.ctx.minedAddr,
+    owners: d.ctx.resolvedOwners, labels: d.ctx.ownerLabels || null,
+    thresh: d.ctx.thresh, del: d.ctx.del, executor: d.ctx.executor,
+    wantForward: !!d.ctx.wantForward, cfName: d.ctx.cfName || null,
+    // A resume that no longer targets mainnet drops the name from its own context;
+    // that is about this run, not about what the deploy was for, so the record
+    // keeps it.
+    wns: d.ctx.wns || (prev && prev.wns) || null,
+    chains, doneIds,
+    landedId: (prev && prev.landedId) || (landedStep ? Number(landedStep.id) : null),
+  };
+  _writeAllResume([rec, ...all.filter(r => !_sameAddr(r.minedAddr, d.ctx.minedAddr))]);
+}
+
+// Drop one deploy's record. Addressed rather than wholesale: the store holds every
+// unfinished deploy, and finishing or dismissing this one says nothing about them.
+function _clearDeployResume(addr){
+  if(!addr) return;
+  _writeAllResume(_readAllResume().filter(r => !_sameAddr(r.minedAddr, addr)));
+}
+
+// What the record still owes: target chains this vault is not known to be on.
+function _resumeLeft(r){
+  const done = new Set(((r && r.doneIds) || []).map(Number));
+  return (r && r.chains ? r.chains : []).filter(c => CHAINS[c.id] && !done.has(Number(c.id)));
+}
+
+// The newest record worth offering, or null. Skipped: records with nothing
+// deployed yet (a cancelled run has no clones to finish) and records whose every
+// target chain already has the vault.
+function loadDeployResume(){
+  const mine = _myResumes();
+  for(const r of mine){
+    if(!((r.doneIds || []).length)) continue;
+    const left = _resumeLeft(r);
+    if(left.length) return { rec: r, left, others: mine.filter(o => o !== r && (o.doneIds||[]).length && _resumeLeft(o).length).length };
+  }
+  return null;
+}
+
+// Ask the chains themselves which of them already hold this vault, and fold the
+// answer back into the record. The record is written by the running app, so
+// anything that stops the app between a deploy landing and its status being
+// saved — a crash, a killed tab, a reload — leaves it behind: the vault exists
+// and the record says it does not. The address is derived from the salt through
+// the factory, and the factory only accepts a salt whose top 160 bits are the
+// caller, so code sitting there was put there by this deployer through this
+// factory. deployOnChain still re-verifies the config before letting an existing
+// deployment stand in for a pending one.
+async function reconcileDeployResume(){
+  let changed = false;
+  for(const r of _myResumes()){
+    const unknown = _resumeLeft(r);
+    if(!unknown.length) continue;
+    const hits = (await Promise.all(unknown.map(async c => {
+      try { const code = await makeProvider(c.id).getCode(r.minedAddr); return (code && code !== '0x') ? Number(c.id) : null; }
+      catch(_) { return null; }   // a chain that will not answer stays unknown, not done
+    }))).filter(x => x !== null);
+    if(!hits.length) continue;
+    // Re-read rather than writing back the copy taken before the awaits: a deploy
+    // may have started and saved its own progress while these reads were in
+    // flight, and the running deploy is the authority on its own run.
+    const all = _readAllResume();
+    const cur = _findResume(all, r.minedAddr);
+    if(!cur || cur.ts !== r.ts) continue;
+    cur.doneIds = [...new Set([...((cur.doneIds || []).map(Number)), ...hits])];
+    if(!cur.landedId) cur.landedId = hits[0];
+    _writeAllResume(all);
+    changed = true;
+  }
+  if(changed && !S.deploy) render();
+}
+
+// Rebuild a deploy from the saved record and stop at the review screen — the same
+// checkpoint a fresh deploy gets, because this is still N wallet prompts against
+// an immutable owner set. Only the chains that did not deploy are walked; each
+// one still re-reads the address on its own chain before signing, so a chain the
+// record thinks is unfinished but which actually has the vault comes back as
+// ALREADY DEPLOYED rather than being deployed twice.
+function resumeSavedDeploy(){
+  const found = loadDeployResume();
+  if(!found){ flash('NOTHING TO RESUME'); render(); return; }
+  const { rec, left } = found;
+  const chains = left.map(c => ({ id:c.id, name:(NETS.find(n=>n.id===c.id)||c).name }));
+  const run = ++_deployRun;
+  S.deploy = {
+    run, chains,
+    steps: chains.map(n => ({ id:n.id, name:n.name, status:'pending' })),
+    ctx: {
+      resolvedOwners: rec.owners, del: rec.del, thresh: rec.thresh, executor: rec.executor,
+      wantForward: !!rec.wantForward, ownerLabels: rec.labels, connectedAddress: rec.deployer,
+      cfName: rec.cfName, salt: BigInt(rec.salt), minedAddr: rec.minedAddr,
+      deployerIsOwner: rec.owners.some(a => String(a).toLowerCase() === String(rec.deployer).toLowerCase()),
+      fastPathVoid: !!rec.wantForward && rec.thresh === rec.owners.length,
+      // The name is claimed by init calls on one chain only. If that chain is not
+      // among the ones left, carrying the name forward would make the review
+      // screen re-check a name this very vault now holds and report it as taken.
+      wns: (rec.wns && chains.some(n => Number(n.id) === WNS_CHAIN_ID)) ? rec.wns : null,
+    },
+    phase:'preflight', address: rec.minedAddr, done:false, lastVaultAddr:null,
+    wnsAvail:null, resumed:true, landedId: rec.landedId || null,
+  };
+  render();
+  // Same preflight as a fresh deploy — gas and factory can have changed on the
+  // chains that are left, and this run is about to spend on exactly those.
+  _deployPreflight(run, chains, rec.deployer, !!rec.wantForward)
+    .catch(e => { console.error('Resume preflight:', e); if(_deployLive(run)){ S.deploy.phase='review'; render(); } });
+}
+
+function dismissDeployResume(){
+  const found = loadDeployResume();
+  if(found) _clearDeployResume(found.rec.minedAddr);
+  flash('UNFINISHED DEPLOY DISMISSED');
+  render();
+}
+
+// Offered on every view, not just CREATE: the run that left this behind was
+// interrupted by something that moved the operator elsewhere, and a prompt only
+// visible on the screen they were taken off is not an offer.
+function renderResumeBanner(){
+  if(S.deploy || S.demoMode) return '';
+  const found = loadDeployResume();
+  if(!found) return '';
+  const { rec, left, others } = found;
+  const n = left.length, names = left.map(c => c.name).join(', ');
+  const landedN = (rec.doneIds || []).length;
+  // Only the newest is offered, but a second stranded deploy must not be silent —
+  // it surfaces here once this one is resumed or dismissed, and saying so is the
+  // difference between waiting for it and never knowing it was there.
+  const more = others ? `<div style="font-size:9px;letter-spacing:1px;color:var(--d);margin-top:6px">${others} OTHER UNFINISHED DEPLOY${others>1?'S':''} WAITING &middot; OFFERED AFTER THIS ONE.</div>` : '';
+  // Deliberately not wrapped in .content — that class is the page's flex-growing
+  // main column, and a banner that inherits min-height:60vh is a page.
+  return `<div style="padding:8px 0 0">
+    <div style="border:1px solid var(--y);padding:14px 16px;display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+      <div style="flex:1;min-width:220px">
+        <div style="font-size:10px;font-weight:700;letter-spacing:2px;color:var(--y)">UNFINISHED DEPLOY &middot; ${n} CHAIN${n>1?'S':''} LEFT</div>
+        <div style="font-size:9px;letter-spacing:1px;color:var(--d);line-height:1.7;margin-top:5px">
+          ${esc(shortAddr(rec.minedAddr))} deployed on ${landedN} chain${landedN===1?'':'s'}. ${esc(names.toUpperCase())} ${n>1?'were':'was'} not reached.
+          The mined address is still held, so resuming puts the vault at the same address there.
+        </div>
+        ${more}
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="reset-btn" onclick="dismissDeployResume()">DISMISS</button>
+        <button class="btn btn-fill btn-sm" onclick="resumeSavedDeploy()">RESUME</button>
+      </div>
+    </div>
+  </div>`;
+}
+
 async function prodDeploy() {
   const w = requireSigner(); if(!w) return;
   const { signer, addr: connectedAddress } = w;
@@ -6423,10 +6723,17 @@ async function _deployPreflight(run, chains, connectedAddress, wantForward) {
   // shown in the review / deploy overlay before the user approves any wallet
   // prompt. Runs concurrently with preflight; if it fails we fall back to lazy
   // mining inside deployOnChain.
-  const minePromise = (async () => {
+  //
+  // A resumed run arrives with the salt already decided, and mining over it would
+  // defeat the entire point: the whole reason to resume is to reach the *same*
+  // address on the chains that were missed. It would not even mine the same one —
+  // the miner rejects candidates whose address already holds code, and on a
+  // resume that address holds the vault that already deployed.
+  const haveSalt = !!(S.deploy && S.deploy.ctx && S.deploy.ctx.salt && S.deploy.ctx.minedAddr);
+  const minePromise = haveSalt ? Promise.resolve() : (async () => {
     try {
       const mined = await mineVanitySalt(FACTORY, IMPLEMENTATION, connectedAddress, chains.map(n => makeProvider(n.id)));
-      if(_deployLive(run)){ S.deploy.ctx.salt = mined.salt; S.deploy.ctx.minedAddr = mined.address; S.deploy.address = mined.address; render(); }
+      if(_deployLive(run)){ S.deploy.ctx.salt = mined.salt; S.deploy.ctx.minedAddr = mined.address; S.deploy.address = mined.address; _saveDeployResume(); render(); }
     } catch(e){ console.error('Vanity mining (preflight):', e); }
   })();
   // Is the requested name still free? Read alongside the rest of the preflight
@@ -6455,6 +6762,8 @@ async function _deployPreflight(run, chains, connectedAddress, wantForward) {
 
 // Wait for the connected wallet's active chain to match `id`, polling to absorb
 // wallets that switch asynchronously. Resolves true once matched, false on timeout.
+// The default budget is for a wallet that has already agreed; pass a longer one
+// where a human still has to tap approve.
 async function waitForWalletChain(id, tries=8, gap=400){
   const wp = window._connectedWalletProvider; if(!wp) return true;
   for(let i=0;i<tries;i++){
@@ -6465,33 +6774,62 @@ async function waitForWalletChain(id, tries=8, gap=400){
 }
 
 // Deploy the vault on one chain (used by the run loop and per-chain retry).
+// Resolves 'done' | 'failed' | 'blocked'. The third is the one the run loop
+// cares about: it means the wallet, not the chain, said no — so every remaining
+// chain would hit the same wall and walking on would just fire N dead prompts.
 async function deployOnChain(k){
-  const d = S.deploy; if(!d) return false;
+  const d = S.deploy; if(!d) return 'failed';
   const net = d.chains[k], step = d.steps[k], ctx = d.ctx;
+  const NM = String(net.name).toUpperCase();
   try {
     // Cleared alongside the error: a retry re-asks whether the name is free, so
     // last attempt's answer must not still be on screen under this attempt's row.
-    step.status='switching'; step.err=null; step.wnsSkipped=null; step.wnsName=null; render();
-    if(net.id !== S.chainId) await switchChain(net.id, true);
-    // Confirm the wallet landed on this chain before signing. Poll briefly: some
-    // wallets (esp. over WalletConnect) resolve the switch request before the
-    // active chain actually flips, so a single immediate read can false-negative.
-    if(window._connectedWalletProvider && !(await waitForWalletChain(net.id))){
-      step.status='failed'; step.err=`SWITCH TO ${net.name} IN WALLET`; render(); return false;
+    // The transaction hash goes too — a failed attempt can leave one (a receipt
+    // that mined and deployed nothing), and keeping it means a row that later
+    // reads ALREADY DEPLOYED still links out to the attempt that failed.
+    step.status='switching'; step.err=null; step.blocked=false; step.wnsSkipped=null; step.wnsName=null;
+    step.txHash=null; step.verified=undefined; step.dbWarn=false; render();
+    let sw = { ok:true };
+    // Whether to ask is decided by where the *wallet* is, not by where the app
+    // thinks it is. Those come apart: the operator switches by hand mid-run, or a
+    // previous chain's switch never landed. When they do, S.chainId can already
+    // equal this chain while the wallet sits on another — and skipping the request
+    // on that basis meant polling for thirty seconds for a switch nobody asked
+    // for, then blaming the wallet for not making it. One read settles it.
+    const alreadyThere = await waitForWalletChain(net.id, 1, 0);
+    if(!alreadyThere || net.id !== S.chainId) sw = (await switchChain(net.id, true)) || { ok:true };
+    // The wallet is the authority on which chain it is on — not its reply to the
+    // switch request. Some wallets (esp. over WalletConnect) resolve the request
+    // before the active chain flips, and some resolve it having done nothing at
+    // all, so poll either way and only then use the request's own error to say
+    // *why* it never landed.
+    //
+    // How long to wait is the request's answer to decide. A pending switch is a
+    // human reaching for a phone, and the old 3.2s budget failed switches the user
+    // was still approving, then blamed the chain. A switch that came back rejected
+    // or unsupported has already been answered, and waiting half a minute to
+    // report what the wallet said outright is its own kind of stall.
+    const answered = sw.rejected || sw.unsupported;
+    if(window._connectedWalletProvider && !(await waitForWalletChain(net.id, answered ? 4 : 40, answered ? 400 : 750))){
+      step.status='failed'; step.blocked=true;
+      step.err = sw.rejected ? `SWITCH TO ${NM} REJECTED IN WALLET`
+        : sw.unsupported ? `ADD ${NM} TO YOUR WALLET, THEN RESUME`
+        : `WALLET NEVER SWITCHED TO ${NM}`;
+      render(); return 'blocked';
     }
     const w = requireSigner();
-    if(!w || !w.signer){ step.status='failed'; step.err='NO SIGNER'; render(); return false; }
+    if(!w || !w.signer){ step.status='failed'; step.blocked=true; step.err='WALLET DISCONNECTED'; render(); return 'blocked'; }
     // The salt is bound to the deployer: the factory requires salt >> 96 to be
     // msg.sender. Switching accounts mid-deploy would otherwise revert with an
     // opaque SaltDoesNotStartWith after the wallet prompt was already approved.
     if(w.addr && ctx.connectedAddress && w.addr.toLowerCase() !== ctx.connectedAddress.toLowerCase()){
-      step.status='failed'; step.err=`SWITCH BACK TO ${shortAddr(ctx.connectedAddress)}`; render(); return false;
+      step.status='failed'; step.blocked=true; step.err=`SWITCH BACK TO ${shortAddr(ctx.connectedAddress)}`; render(); return 'blocked';
     }
     const signer = w.signer;
     if(!ctx.salt){
       step.status='mining'; render();
       const mined = await mineVanitySalt(FACTORY, IMPLEMENTATION, ctx.connectedAddress, d.chains.map(n => makeProvider(n.id)));
-      ctx.salt = mined.salt; ctx.minedAddr = mined.address; d.address = mined.address; render();
+      ctx.salt = mined.salt; ctx.minedAddr = mined.address; d.address = mined.address; _saveDeployResume(); render();
     }
     const existing = await provider.getCode(ctx.minedAddr);
     if(existing && existing !== '0x'){
@@ -6504,9 +6842,9 @@ async function deployOnChain(k){
       if(same !== true){
         step.status='failed';
         step.err = same === false ? 'ADDRESS HOLDS A DIFFERENT VAULT' : 'CANNOT VERIFY EXISTING VAULT';
-        render(); return false;
+        render(); return 'failed';
       }
-      step.status='skipped'; step.address=ctx.minedAddr; d.lastVaultAddr=ctx.minedAddr; render(); return true;
+      step.status='skipped'; step.address=ctx.minedAddr; d.lastVaultAddr=ctx.minedAddr; _saveDeployResume(); render(); return 'done';
     }
     // Init calls run inside the deploy, from the vault, before the real
     // executor is installed. The fast path is one; the identity claim is two
@@ -6552,17 +6890,17 @@ async function deployOnChain(k){
     // that something is there.
     const kind = await classifyVaultCode(walletAddr);
     if(kind === 'empty'){
-      step.status='failed'; step.err='NO CODE AT ADDRESS — FACTORY MISSING?'; step.txHash=receipt.hash; render(); return false;
+      step.status='failed'; step.err='NO CODE AT ADDRESS — FACTORY MISSING?'; step.txHash=receipt.hash; render(); return 'failed';
     }
     if(kind === 'foreign'){
-      step.status='failed'; step.err='CODE AT ADDRESS IS NOT THE AUDITED BUILD'; step.txHash=receipt.hash; render(); return false;
+      step.status='failed'; step.err='CODE AT ADDRESS IS NOT THE AUDITED BUILD'; step.txHash=receipt.hash; render(); return 'failed';
     }
     // Configuration read back from the wallet itself. init() runs inside the
     // same transaction, so a mismatch here means the vault that exists is not
     // the vault that was ordered — surfaced before any funds are sent to it.
     const configOk = await vaultMatchesCtx(walletAddr, ctx);
     if(configOk === false){
-      step.status='failed'; step.err='DEPLOYED CONFIG DOES NOT MATCH'; step.txHash=receipt.hash; render(); return false;
+      step.status='failed'; step.err='DEPLOYED CONFIG DOES NOT MATCH'; step.txHash=receipt.hash; render(); return 'failed';
     }
     // kind === null / configOk === null: the chain would not answer. The deploy
     // itself succeeded, so record it, but do not claim it was verified.
@@ -6586,56 +6924,123 @@ async function deployOnChain(k){
       const wid = await dbRegisterWallet(walletAddr, ctx.connectedAddress, ctx.salt, ctx.resolvedOwners, ctx.thresh, ctx.del, ctx.executor, Number(receipt.blockNumber), receipt.hash, ctx.cfName, ctx.ownerLabels, onchainNonce);
       if(!wid) step.dbWarn = true;   // deployed on-chain, absent from history
     } catch(e){ console.error('DB register failed:', e); step.dbWarn = true; }
-    step.status='done'; step.address=walletAddr; step.txHash=receipt.hash; render();
-    return true;
+    step.status='done'; step.address=walletAddr; step.txHash=receipt.hash; _saveDeployResume(); render();
+    return 'done';
   } catch(e){
     console.error('deploy on', net.name, e);
-    step.status='failed'; step.err = e.shortMessage || e.message || 'FAILED'; render();
-    return false;
+    // Declining the prompt is a decision about the whole run, not a fault of this
+    // chain: firing the next chain's prompt at someone who just pressed reject
+    // walks the rest of the list into red rows they never chose. Insufficient gas
+    // is chain-specific — the balance is per chain — so that one does not halt.
+    const code = e && (e.code !== undefined ? e.code : (e.info && e.info.error && e.info.error.code));
+    const rejected = code === 'ACTION_REJECTED' || code === 4001;
+    step.status='failed'; step.blocked = rejected;
+    step.err = rejected ? 'REJECTED IN WALLET' : (e.shortMessage || e.message || 'FAILED');
+    render();
+    return rejected ? 'blocked' : 'failed';
   }
 }
 async function _finishDeploy(){
   const d = S.deploy; if(!d) return;
-  d.done = true; render();
-  const addr = d.lastVaultAddr;
+  d.done = true;
+  const ok = i => d.steps[i] && (d.steps[i].status==='done' || d.steps[i].status==='skipped');
+  // Fold this run's results in first, then ask the merged record — not this run's
+  // steps — whether anything is still owed. A resumed run only ever sees the
+  // chains it was asked to finish, so "every step here succeeded" is not the same
+  // question as "this vault is now on every chain it was meant to be on".
+  _saveDeployResume();
+  if(d.ctx && d.ctx.minedAddr){
+    const rec = _findResume(_readAllResume(), d.ctx.minedAddr);
+    // Nothing left to offer: the salt has done its job and should not outlive it.
+    if(!rec || !_resumeLeft(rec).length) _clearDeployResume(d.ctx.minedAddr);
+  }
+  render();
+  const addr = d.lastVaultAddr || (d.resumed ? d.ctx && d.ctx.minedAddr : null);
   if(!addr) return;
   // Land on a chain where the vault actually exists: the primary if it deployed,
   // otherwise the first chain that succeeded. loadSingleVaultData reads the live
   // `provider`, so pointing at a chain without the vault (e.g. after a trailing
   // clone failed) would make the multicall revert and the vault silently vanish.
-  const ok = i => d.steps[i] && (d.steps[i].status==='done' || d.steps[i].status==='skipped');
   let landIdx = ok(0) ? 0 : d.steps.findIndex((_,i)=>ok(i));
-  if(landIdx >= 0){
-    const homeId = d.chains[landIdx].id;
-    if(homeId !== S.chainId){ try { await switchChain(homeId, true); } catch(e){ console.error('Return to home chain:', e); } }
-  }
+  // A resumed run whose remaining chains all failed has no landing chain of its
+  // own, but the vault does exist — on the chain the interrupted run reached.
+  const homeId = landIdx >= 0 ? d.chains[landIdx].id : (d.landedId || null);
+  if(homeId){
+    // When the run halted because the wallet refused something, move only the
+    // app's own reads — the vault has to be read off a chain it exists on, but
+    // the answer to a declined prompt is not another prompt. RESUME asks again.
+    if(homeId !== S.chainId){
+      if(d.halted || landIdx < 0) adoptChain(homeId);
+      else try { await switchChain(homeId, true); } catch(e){ console.error('Return to home chain:', e); }
+    }
+  } else if(landIdx < 0) return;   // nothing deployed anywhere this run can read
   if(!S.vaults.some(v => v.address && v.address.toLowerCase() === addr.toLowerCase())){
     try { const vData = await loadSingleVaultData(addr); if(vData){ S.vaults.push(vData); S.sel = S.vaults.length - 1; render(); } } catch(e){ console.error('Load new vault:', e); }
   }
 }
+// One chain walk at a time. DEPLOY is behind guardSubmit, but RESUME and RETRY are
+// plain buttons on a dialog that is already up, and a double press there used to
+// start a second walk over the same chain list — two wallet prompts racing for the
+// same step, with only the on-chain existence check downstream to stop the loser
+// re-deploying what the winner just did.
+let _deployWalking = false;
 async function runDeploy(){
-  if(!S.deploy) return;
+  if(!S.deploy || _deployWalking) return;
   const run = S.deploy.run;
-  S.deploy.phase = 'deploying'; render();
-  for(let k=0; k<S.deploy.chains.length; k++){
-    // Re-checked every lap: each chain is a wallet round-trip, and the run this
-    // loop belongs to must not keep walking chains into a deploy that replaced it.
+  S.deploy.phase = 'deploying'; S.deploy.halted = null; render();
+  _deployWalking = true;
+  try {
+    for(let k=0; k<S.deploy.chains.length; k++){
+      // Re-checked every lap: each chain is a wallet round-trip, and the run this
+      // loop belongs to must not keep walking chains into a deploy that replaced it.
+      if(!_deployLive(run)) return;
+      const st = S.deploy.steps[k];
+      if(st.status === 'done' || st.status === 'skipped') continue;
+      const r = await deployOnChain(k);
+      if(!_deployLive(run)) return;
+      // A wallet-level refusal is not this chain's problem, so it is not this
+      // chain's failure to absorb either: the remaining chains need the same
+      // wallet, the same account and the same switches, and walking on would fire
+      // a prompt at each one to collect a row of identical errors. Stop with the
+      // untried chains still untried, name what has to be fixed, and offer RESUME.
+      if(r === 'blocked'){
+        S.deploy.halted = { at:k, name:S.deploy.chains[k].name, reason:S.deploy.steps[k].err || 'WALLET DECLINED' };
+        break;
+      }
+    }
     if(!_deployLive(run)) return;
-    const st = S.deploy.steps[k];
-    if(st.status === 'done' || st.status === 'skipped') continue;
-    await deployOnChain(k);
-  }
-  if(!_deployLive(run)) return;
-  await _finishDeploy();
+    await _finishDeploy();
+  } finally { _deployWalking = false; }
 }
 function proceedDeploy(){ if(S.deploy){ S.deploy.phase='deploying'; render(); runDeploy(); } }
 async function retryChain(k){
-  if(!S.deploy) return;
+  if(!S.deploy || _deployWalking) return;
   const run = S.deploy.run;
-  S.deploy.done = false; render();
-  await deployOnChain(k);
-  if(!_deployLive(run)) return;
-  await _finishDeploy();
+  S.deploy.done = false; S.deploy.halted = null; render();
+  _deployWalking = true;
+  try {
+    const r = await deployOnChain(k);
+    if(!_deployLive(run)) return;
+    // Same reasoning as the run loop: a wallet-level refusal is a halt, and it has
+    // to be recorded as one here too — otherwise _finishDeploy reads the run as
+    // merely finished and sends another switch prompt at someone who just declined.
+    if(r === 'blocked') S.deploy.halted = { at:k, name:S.deploy.chains[k].name, reason:S.deploy.steps[k].err || 'WALLET DECLINED' };
+    await _finishDeploy();
+  } finally { _deployWalking = false; }
+}
+// Pick the walk back up where it stopped. A halted run leaves chains it never
+// reached sitting at 'pending', and clearing the failed rows it did reach is what
+// makes one button mean "carry on" — the alternative is retrying each remaining
+// chain by hand, in order, which is the stall this is here to end.
+async function resumeDeploy(){
+  const d = S.deploy;
+  // Checked here as well as in runDeploy: this rewrites the step rows before it
+  // hands over, and doing that against a walk already in flight would clear the
+  // status of a chain that walk is mid-way through.
+  if(!d || _deployWalking) return;
+  d.steps.forEach(s => { if(s.status === 'failed'){ s.status='pending'; s.err=null; s.blocked=false; } });
+  d.done = false;
+  await runDeploy();
 }
 
 // ── PRODUCTION: SIGN ──────────────────────────────────────────────
@@ -7235,6 +7640,19 @@ async function prodReject(vi, nonce) {
 // Preferred: eth_simulateV1 → status + gasUsed + asset deltas from Transfer logs.
 // Fallback: eth_call + estimateGas (revert check) on RPCs without simulateV1.
 const _TRANSFER_TOPIC = ethers.id('Transfer(address,address,uint256)');
+// ERC-721 reuses the ERC-20 event *name* but indexes the token id, so it arrives
+// with four topics and empty data; ERC-1155 uses its own events entirely. A
+// ledger that reads only three-topic Transfers reports an NFT leaving the vault
+// as "nothing enters or leaves it" — the one answer a dry-run must never give.
+const _TRANSFER_SINGLE_TOPIC = ethers.id('TransferSingle(address,address,address,uint256,uint256)');
+const _TRANSFER_BATCH_TOPIC = ethers.id('TransferBatch(address,address,address,uint256[],uint256[])');
+// traceTransfers reports native ETH as a synthetic Transfer emitted by the
+// 0xEeee…EEeE sentinel rather than by any token, so the vault's largest movement
+// arrives looking like an unlisted ERC-20. Fold it onto the zero address, where
+// every chain's token list already files ETH. Left unmapped it prints twice —
+// once unresolved from this log, and again from runSim's value fallback, which
+// only holds back when it can already see a row named ETH.
+const _NATIVE_SENTINEL = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 const _rawRpcCache = {};
 function rawRpc() {
   const id = S.chainId;
@@ -7243,38 +7661,28 @@ function rawRpc() {
 }
 function _simTx(v, tx) {
   return {
-    from: v.address, to: tx.target, data: tx.callData || '0x',
+    from: v.address, to: tx.target, data: tx.callData || '0x', executor: v.executor,
     value: tx.rawValue ? BigInt(tx.rawValue) : (tx.value && tx.value !== '0' ? ethers.parseEther(String(tx.value)) : 0n),
   };
 }
 const _tokenMetaCache = {};  // "chainId:token" -> { symbol, decimals }
 function _shortTok(token){ return token.slice(0,6)+'…'+token.slice(-4); }
-async function _assetsFromLogs(logs, self) {
-  const selfLc = self.toLowerCase();
-  const deltas = {};
-  for(const log of (logs || [])) {
-    const topics = log.topics || [];
-    if(topics[0] !== _TRANSFER_TOPIC || topics.length < 3) continue;
-    const fromA = ('0x' + topics[1].slice(26)).toLowerCase();
-    const toA = ('0x' + topics[2].slice(26)).toLowerCase();
-    if(fromA !== selfLc && toA !== selfLc) continue;
-    let amt; try { amt = BigInt(log.data); } catch(_) { continue; }
-    const token = log.address.toLowerCase();
-    if(fromA === selfLc) deltas[token] = (deltas[token] || 0n) - amt;
-    if(toA === selfLc) deltas[token] = (deltas[token] || 0n) + amt;
-  }
-  const tokens = Object.keys(deltas).filter(t => deltas[t] !== 0n);
-  if(!tokens.length) return [];
-  const allTokens = PROD_TOKENS[S.chainId] || [];
+function _logAddr(topic){ return ('0x' + topic.slice(26)).toLowerCase(); }
+// Resolve symbol()/decimals() for tokens not on the built-in list, in one
+// Multicall3 call. NFT contracts answer symbol() and revert decimals(); their
+// rows are counted in whole units, so the 18 default is never read for them.
+async function _resolveTokenMeta(tokens) {
+  // ETH_ONLY, not []: the testnets carry no token list, and ETH still has to
+  // resolve to a symbol there rather than to its own truncated address.
+  const listed = PROD_TOKENS[S.chainId] || ETH_ONLY;
   const meta = {}, unknown = [];
   for(const token of tokens) {
-    const known = allTokens.find(t => t.address.toLowerCase() === token);
+    const known = listed.find(t => t.address.toLowerCase() === token);
     if(known) { meta[token] = { symbol: known.symbol, decimals: known.decimals }; continue; }
     const ck = S.chainId + ':' + token;
     if(_tokenMetaCache[ck]) { meta[token] = _tokenMetaCache[ck]; continue; }
     unknown.push(token);
   }
-  // Resolve symbol()/decimals() for non-listed tokens in one Multicall3 call.
   if(unknown.length) {
     try {
       const calls = [];
@@ -7296,7 +7704,65 @@ async function _assetsFromLogs(logs, self) {
       unknown.forEach(token => { meta[token] = { symbol: _shortTok(token), decimals: 18 }; });
     }
   }
-  return tokens.map(token => ({ symbol: meta[token].symbol, decimals: meta[token].decimals, delta: deltas[token] }));
+  return meta;
+}
+async function _assetsFromLogs(logs, self) {
+  const selfLc = self.toLowerCase();
+  const deltas = {};   // token -> signed fungible amount
+  const items = {};    // "token:id" -> { token, id, delta } for NFTs and 1155s
+  const bumpItem = (token, id, amt) => {
+    const k = token + ':' + id;
+    (items[k] || (items[k] = { token, id, delta: 0n })).delta += amt;
+  };
+  const abi = ethers.AbiCoder.defaultAbiCoder();
+  for(const log of (logs || [])) {
+    const topics = log.topics || [];
+    let token = (log.address || '').toLowerCase();
+    if(!token) continue;
+    if(token === _NATIVE_SENTINEL) token = ethers.ZeroAddress.toLowerCase();
+    if(topics[0] === _TRANSFER_TOPIC && topics.length >= 3) {
+      const fromA = _logAddr(topics[1]), toA = _logAddr(topics[2]);
+      if(fromA !== selfLc && toA !== selfLc) continue;
+      if(topics.length >= 4) {
+        // ERC-721: the id is the third indexed field, and one unit moves.
+        let id; try { id = BigInt(topics[3]).toString(); } catch(_) { continue; }
+        if(fromA === selfLc) bumpItem(token, id, -1n);
+        if(toA === selfLc) bumpItem(token, id, 1n);
+      } else {
+        let amt; try { amt = BigInt(log.data); } catch(_) { continue; }
+        if(fromA === selfLc) deltas[token] = (deltas[token] || 0n) - amt;
+        if(toA === selfLc) deltas[token] = (deltas[token] || 0n) + amt;
+      }
+      continue;
+    }
+    // ERC-1155 indexes operator/from/to, so the parties sit one topic later
+    // than in a Transfer, and ids and amounts both live in the data.
+    if((topics[0] === _TRANSFER_SINGLE_TOPIC || topics[0] === _TRANSFER_BATCH_TOPIC) && topics.length >= 4) {
+      const fromA = _logAddr(topics[2]), toA = _logAddr(topics[3]);
+      if(fromA !== selfLc && toA !== selfLc) continue;
+      let ids, vals;
+      try {
+        const single = topics[0] === _TRANSFER_SINGLE_TOPIC;
+        const d = abi.decode(single ? ['uint256','uint256'] : ['uint256[]','uint256[]'], log.data);
+        ids = single ? [d[0]] : d[0];
+        vals = single ? [d[1]] : d[1];
+      } catch(_) { continue; }
+      ids.forEach((id, k) => {
+        const amt = BigInt(vals[k] ?? 0n);
+        if(amt === 0n) return;
+        if(fromA === selfLc) bumpItem(token, id.toString(), -amt);
+        if(toA === selfLc) bumpItem(token, id.toString(), amt);
+      });
+    }
+  }
+  const fungible = Object.keys(deltas).filter(t => deltas[t] !== 0n);
+  const moved = Object.values(items).filter(it => it.delta !== 0n);
+  if(!fungible.length && !moved.length) return [];
+  const meta = await _resolveTokenMeta([...new Set([...fungible, ...moved.map(it => it.token)])]);
+  return [
+    ...fungible.map(token => ({ symbol: meta[token].symbol, decimals: meta[token].decimals, delta: deltas[token] })),
+    ...moved.map(it => ({ symbol: meta[it.token].symbol, decimals: 0, delta: it.delta, id: it.id, nft: true })),
+  ];
 }
 function _revertReason(data) {
   if(typeof data === 'string' && data.startsWith('0x08c379a0')) {
@@ -7309,21 +7775,76 @@ function _revertReason(data) {
   if(named) return named;
   return 'execution reverted';
 }
+// The wallet calls a 0x1111-marked executor around every execution — before it
+// when the address leads with the marker, after it when it trails — see
+// Multisig.execute. A pre-guard that refuses (AllowlistGuard on a target nobody
+// allowlisted is the shipped case) stops the transaction dead, so replaying only
+// the inner call would report PASS on a proposal the vault will not run.
+// The wallet forwards the real signature bundle as the hook's fourth argument;
+// both shipped guards ignore it, and a dry-run has no bundle to forward, so this
+// passes empty bytes. A custom guard that inspects signatures is the one case
+// this can misjudge.
+function _guardHooks(s) {
+  const ex = s.executor, pre = [], post = [];
+  if(ex && ethers.isAddress(ex) && ex !== ethers.ZeroAddress) {
+    const n = BigInt(ex);
+    const hook = { from: s.from, to: ex, value: 0n, data: msIface.encodeFunctionData('execute', [s.to, s.value, s.data, '0x']) };
+    if((n >> 144n) === 0x1111n) pre.push(hook);
+    if((n & 0xFFFFn) === 0x1111n) post.push(hook);
+  }
+  return { pre, post };
+}
 async function _simViaSimulateV1(s) {
+  // One blockStateCalls frame executes the sequence with state persisting
+  // between calls, so the guards see exactly the state the wallet gives them.
+  const { pre, post } = _guardHooks(s);
+  const seq = [...pre, s, ...post];
   const res = await rawRpc().send('eth_simulateV1', [{
-    blockStateCalls: [{ calls: [{ from: s.from, to: s.to, value: '0x' + s.value.toString(16), data: s.data }] }],
+    blockStateCalls: [{ calls: seq.map(c => ({ from: c.from, to: c.to, value: '0x' + c.value.toString(16), data: c.data })) }],
     traceTransfers: true, validation: false,
   }, 'latest']);
-  const call = res?.[0]?.calls?.[0];
-  if(!call) throw new Error('no simulateV1 result');
-  if(call.status === '0x0' || call.error) return { status:'revert', reason: _revertReason(call.error?.data ?? call.returnData) };
-  return { status:'pass', gas: call.gasUsed ? BigInt(call.gasUsed).toString() : null, assets: await _assetsFromLogs(call.logs, s.from) };
+  const calls = res?.[0]?.calls;
+  if(!calls || !calls.length) throw new Error('no simulateV1 result');
+  for(let i = 0; i < calls.length; i++) {
+    const c = calls[i];
+    if(c.status === '0x0' || c.error) {
+      return {
+        status: 'revert',
+        guard: i < pre.length ? 'pre' : (i > pre.length ? 'post' : null),
+        reason: _revertReason(c.error?.data ?? c.returnData),
+      };
+    }
+  }
+  const gas = calls.reduce((a, c) => a + (c.gasUsed ? BigInt(c.gasUsed) : 0n), 0n);
+  const logs = calls.flatMap(c => c.logs || []);
+  // Whether the node actually honoured traceTransfers, judged by the emitter
+  // address — the only party that emits from the sentinel or from 0x0 is the
+  // simulator itself. runSim needs this to know whether native ETH is already
+  // accounted for, and asking "is there a row called ETH" cannot answer it: an
+  // ERC-20 that names itself ETH would answer yes, and a call that sends ETH
+  // and gets all of it back nets to zero and answers no.
+  const nativeTraced = logs.some(l => {
+    const a = (l.address || '').toLowerCase();
+    return a === _NATIVE_SENTINEL || a === ethers.ZeroAddress.toLowerCase();
+  });
+  return {
+    status: 'pass', gas: gas > 0n ? gas.toString() : null, hooks: pre.length + post.length,
+    nativeTraced, assets: await _assetsFromLogs(logs, s.from),
+  };
 }
 async function _simViaCall(s) {
+  // Only the pre-guard is probed here: it genuinely runs against pre-transaction
+  // state, so a lone eth_call reproduces it exactly. A post-guard would not —
+  // probing it against stale state could invent a revert that will not happen.
+  const { pre } = _guardHooks(s);
+  for(const h of pre) {
+    try { await provider.call({ from: h.from, to: h.to, value: h.value, data: h.data }); }
+    catch(e) { return { status:'revert', guard:'pre', reason: e.reason || e.shortMessage || _revertReason(e?.data) }; }
+  }
   await provider.call({ from: s.from, to: s.to, value: s.value, data: s.data }); // throws on revert
   let gas = null;
   try { gas = (await provider.estimateGas({ from: s.from, to: s.to, value: s.value, data: s.data })).toString(); } catch(_){}
-  return { status:'pass', gas, assets: [], basic: true };
+  return { status:'pass', gas, assets: [], basic: true, hooks: pre.length };
 }
 // Stamp a result with the wall-clock time it was produced, so a panel left on
 // screen never reads as fresher than it is.
@@ -7343,9 +7864,11 @@ async function runSim(s) {
   // Native ETH leaving the vault only shows up in the log trace when the RPC
   // supports traceTransfers; when it doesn't, derive it from the call value so
   // the ledger never silently omits the largest movement in the transaction.
-  if(r.status === 'pass' && s.value > 0n) {
+  // Only when the trace genuinely lacked it — a traced call has already netted
+  // the ETH, including netting it to zero, and adding to that would double it.
+  if(r.status === 'pass' && s.value > 0n && !r.nativeTraced) {
     r.assets = r.assets || [];
-    if(!r.assets.some(a => a.symbol === 'ETH')) r.assets.unshift({ symbol:'ETH', decimals:18, delta: -s.value });
+    r.assets.unshift({ symbol:'ETH', decimals:18, delta: -s.value });
   }
   return _simStamp(r);
 }
@@ -7423,6 +7946,7 @@ async function simulateBuilder() {
   try { s = await buildSimInput(); }
   catch(e) { _builderSim = null; flash(e.message || 'CHECK INPUTS'); render(); return; }
   if(!s) { _builderSim = null; render(); return; }
+  s.executor = S.vaults[S.sel]?.executor;   // guard hooks apply to a proposal that does not exist yet, too
   _builderSim = await runSim(s);
   render();
 }
@@ -7446,32 +7970,44 @@ function renderSim(sim, opts) {
     <div class="sim-b"><div class="sim-scan"></div><div class="sim-sub">REPLAYING THE CALL FROM THE VAULT AGAINST THE LATEST BLOCK&hellip;</div></div>
   </div>`;
 
+  // A guard refusal is not the same failure as a bad inner call: nothing about
+  // the transaction itself is wrong, the vault's own policy is refusing it. Say
+  // which, so the reader looks at the allowlist rather than at their balance.
   if(sim.status === 'revert') return `<div class="sim revert">
-    <div class="sim-h"><span class="mark">&#10007;</span><span>WOULD REVERT</span>${actions}</div>
+    <div class="sim-h"><span class="mark">&#10007;</span><span>${sim.guard ? 'BLOCKED BY GUARD' : 'WOULD REVERT'}</span>${actions}</div>
     <div class="sim-b">
       ${sim.reason ? `<div class="sim-reason">${esc(sim.reason)}</div>` : ''}
-      <div class="sim-sub" style="margin-top:9px">THIS PROPOSAL CAN STILL BE CREATED AND SIGNED, BUT IT WILL FAIL WHEN EXECUTED. CHECK THE BALANCE, THE RECIPIENT AND ANY ALLOWANCE FIRST.</div>
+      <div class="sim-sub" style="margin-top:9px">${sim.guard
+        ? `THIS VAULT&rsquo;S EXECUTOR RUNS AS A ${sim.guard === 'pre' ? 'PRE' : 'POST'}-TRANSACTION GUARD AND REFUSED THIS CALL. THE PROPOSAL CAN STILL BE CREATED AND SIGNED, BUT IT WILL FAIL WHEN EXECUTED UNTIL THE GUARD ALLOWS IT.`
+        : 'THIS PROPOSAL CAN STILL BE CREATED AND SIGNED, BUT IT WILL FAIL WHEN EXECUTED. CHECK THE BALANCE, THE RECIPIENT AND ANY ALLOWANCE FIRST.'}</div>
     </div>
   </div>`;
 
-  const assets = (sim.assets || []).filter(a => a.delta !== 0n);
+  // Fungible balances first, then individual NFTs / 1155 ids — a long tail of
+  // token ids must never push the ETH line off the top of the ledger.
+  const assets = (sim.assets || []).filter(a => a.delta !== 0n)
+    .sort((a, b) => (a.nft ? 1 : 0) - (b.nft ? 1 : 0));
+  const SHOWN = 10, rows = assets.slice(0, SHOWN), hidden = assets.length - rows.length;
   const ledger = assets.length
-    ? `<div class="sim-led privg"${pgAttrs()}>${assets.map(a => {
+    ? `<div class="sim-led privg"${pgAttrs()}>${rows.map(a => {
         const neg = a.delta < 0n, abs = neg ? -a.delta : a.delta;
+        // A literal ellipsis, not the entity: this string goes through esc()
+        // below, which would turn &hellip; into a visible "&hellip;".
+        const id = a.nft ? (a.id.length > 12 ? a.id.slice(0,6)+'…'+a.id.slice(-4) : a.id) : '';
         return `<div class="sim-row ${neg?'sim-out':'sim-in'}">
           <span class="dir">${neg ? 'OUT' : 'IN'}</span>
-          ${tokIcon(a.symbol,'sm')}<span>${esc(a.symbol)}</span>
-          <span class="val priv">${neg ? '&minus;' : '+'}${esc(groupInt(fmtAmount(abs, a.decimals)))}</span>
+          ${tokIcon(a.symbol,'sm')}<span>${esc(a.symbol)}${a.nft ? ` <span style="color:var(--d);font-weight:400">#${esc(id)}</span>` : ''}</span>
+          <span class="val priv">${neg ? '&minus;' : '+'}${a.nft ? abs : esc(groupInt(fmtAmount(abs, a.decimals)))}</span>
         </div>`;
-      }).join('')}</div>`
+      }).join('')}</div>${hidden > 0 ? `<div class="sim-sub" style="margin-top:8px">AND ${hidden} MORE MOVEMENT${hidden === 1 ? '' : 'S'} NOT SHOWN.</div>` : ''}`
     : `<div class="sim-sub">NO BALANCE CHANGE TO THE VAULT${sim.basic ? '' : ' &mdash; NOTHING ENTERS OR LEAVES IT'}.</div>`;
 
   return `<div class="sim pass">
-    <div class="sim-h"><span class="mark">&#10003;</span><span>SIMULATION PASSED</span>${actions}</div>
+    <div class="sim-h"><span class="mark">&#10003;</span><span>SIMULATION PASSED</span>${sim.hooks ? '<span class="sim-tag" title="This vault&#39;s 0x1111-marked executor runs as a guard around every transaction, and it was replayed too">GUARD OK</span>' : ''}${actions}</div>
     <div class="sim-b">
       ${assets.length ? '<div class="sim-sub" style="margin-bottom:2px">VAULT BALANCE CHANGES</div>' : ''}
       ${ledger}
-      ${sim.gas ? `<div class="sim-foot"><span>ESTIMATED GAS</span><span>~${Number(sim.gas).toLocaleString()}</span></div>` : ''}
+      ${sim.gas ? `<div class="sim-foot"><span title="The vault&#39;s own call only — signature checks and the nonce write in execute() are on top of this">GAS, INNER CALL ONLY</span><span>~${Number(sim.gas).toLocaleString()}</span></div>` : ''}
     </div>
   </div>`;
 }
@@ -8051,34 +8587,52 @@ async function prodAdminPropose(action, val) {
 
 // ── CHAIN SWITCHING ───────────────────────────────────────────────
 
-async function switchChain(id, skipLoad) {
-  if(!CHAINS[id]) return;
+// Point the app's own reads at a chain, without asking the wallet for anything.
+// Split out of switchChain because two callers need exactly this half and must
+// not send a wallet prompt: onWalletChainChanged (the wallet is already there —
+// asking it to go where it is would prompt on every manual switch) and a halted
+// multichain deploy landing on the chain that did deploy (the operator has just
+// declined a prompt; the reply to that is not another prompt).
+function adoptChain(id) {
+  if(!CHAINS[id]) return false;
   S.chainId = id;
-  localStorage.setItem('ms_chain', String(id));
+  try { localStorage.setItem('ms_chain', String(id)); } catch(_) {}
   provider = makeProvider(id);
   S.showChains = false;
   S.latestBlock = 0;
   S.txToken = 'ETH';
   resetCxState();
   fetchBlock();
+  return true;
+}
+
+// Resolves to walletSwitchChain's result ({ ok, rejected?, unsupported?, … }) so
+// callers that are about to sign something can say why the wallet never arrived.
+async function switchChain(id, skipLoad) {
+  if(!CHAINS[id]) return { ok:false, unknown:true };
+  adoptChain(id);
 
   // Ask wallet to switch chain
+  let res = { ok: true };
   if(window._connectedWalletProvider) {
     try {
-      await walletSwitchChain({
+      res = await walletSwitchChain({
         chainId: id,
         chainHex: CHAINS[id].hex,
         rpc: CHAINS[id].rpcs[0],
         addChainParams: ADD_CHAIN_PARAMS[id] || null
-      });
-    } catch(e) { console.error('Chain switch:', e); }
+      }) || { ok: true };
+    } catch(e) { console.error('Chain switch:', e); res = { ok:false, code:e&&e.code, error:e }; }
     // Warn if wallet rejected the switch (browsing still works, signing won't).
     // Suppressed for programmatic switches (skipLoad) — e.g. the multi-chain
     // deploy loop, which surfaces per-chain switch state in its own overlay.
-    if(!skipLoad) try {
-      const wc = await window._connectedWalletProvider.request({method:'eth_chainId'});
-      if(parseInt(wc, 16) !== id) flash('WALLET ON DIFFERENT CHAIN — SWITCH TO SIGN');
-    } catch(_) {}
+    if(!skipLoad){
+      let landed = res.ok;
+      try { landed = parseInt(await window._connectedWalletProvider.request({method:'eth_chainId'}), 16) === id; } catch(_) {}
+      if(!landed) flash(res.rejected ? 'CHAIN SWITCH REJECTED — WALLET STILL ON THE OLD CHAIN'
+        : res.unsupported ? `ADD ${CHAINS[id].name.toUpperCase()} TO YOUR WALLET TO SIGN ON IT`
+        : 'WALLET ON DIFFERENT CHAIN — SWITCH TO SIGN');
+    }
   }
 
   if(!S.demoMode && !skipLoad) {
@@ -8090,7 +8644,62 @@ async function switchChain(id, skipLoad) {
   } else {
     render();
   }
+  return res;
 }
+
+// The wallet moved to another chain. Follow it in place rather than reloading the
+// page: a reload here is what abandoned a multichain deploy at its second chain.
+window.onWalletChainChanged = function(id) {
+  // Recorded unconditionally, including when it matches: this is the app's only
+  // reliable answer to "where is the wallet", and a stale value would let the
+  // deploy overlay name the wrong chain in an error about the wallet.
+  S.walletChain = id;
+  // Our own switch, echoing back — switchChain sets S.chainId before it asks the
+  // wallet, so by the time the event lands the app is already there.
+  if(id === S.chainId){ render(); return; }
+  if(S.deploy && !S.deploy.done){
+    // Mid-deploy, and not where this run put the wallet: the operator switched
+    // by hand. Do not follow — the run owns the chain walk, and its per-chain
+    // poll is what decides whether the wallet arrived.
+    render();
+    return;
+  }
+  if(!CHAINS[id]){
+    // Nothing to point the app at, so leave it where it is and say so rather
+    // than silently reading one chain while the wallet would sign on another.
+    flash('WALLET SWITCHED TO AN UNSUPPORTED CHAIN — SWITCH BACK TO SIGN');
+    render();
+    return;
+  }
+  adoptChain(id);
+  if(S.demoMode){ render(); return; }
+  S.vaults = [];
+  S.sel = 0;
+  // No full-screen loader while a deploy dialog is up. This path is reachable with
+  // a halted run still on screen — the operator is switching chains in the wallet
+  // because that dialog told them to — and covering the RESUME button with a
+  // spinner is the last thing to do at that moment.
+  if(window._connectedAddress && !S.deploy) showLoading('SWITCHING CHAIN');
+  render();
+  loadAllVaults();
+};
+
+// The wallet switched accounts. Same reasoning as the chain: in the middle of a
+// deploy the run has its own guard for this (the CREATE2 salt is bound to the
+// deployer, so signing from another account reverts) and it can only fire if the
+// page is still here to run it.
+window.onWalletAccountsChanged = function(addr, prev) {
+  if(S.deploy && !S.deploy.done){
+    flash(`WALLET SWITCHED TO ${shortAddr(addr)} — THIS DEPLOY IS SIGNED BY ${shortAddr(prev || (S.deploy.ctx && S.deploy.ctx.connectedAddress) || addr)}`);
+    render();
+    return;
+  }
+  S.vaults = [];
+  S.sel = 0;
+  if(window._connectedAddress && !S.deploy) showLoading('SWITCHING ACCOUNT');
+  render();
+  loadAllVaults();
+};
 
 // ── WALLET INTEGRATION ────────────────────────────────────────────
 
@@ -8099,6 +8708,9 @@ function onWalletConnect() {
   const deepLinked = S.vaults.length > 0 ? [...S.vaults] : null;
   S.vaults = [];
   S.sel = 0;
+  // Only now is the deployer's address known, and it is what decides whether an
+  // unfinished deploy belongs to this session at all.
+  reconcileDeployResume().catch(e => console.error('Resume reconcile:', e));
 
   if(window._connectedWalletProvider) {
     (async () => {
@@ -8112,6 +8724,7 @@ function onWalletConnect() {
           S.latestBlock = 0;
           fetchBlock();
         }
+        S.walletChain = walletChain;
       } catch(_) {}
       // Restore deep-linked vaults so they aren't lost on auto-reconnect
       if(deepLinked) { S.vaults = deepLinked; S.sel = 0; }
