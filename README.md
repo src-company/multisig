@@ -135,8 +135,9 @@ The module supports both ECDSA signatures and onchain approvals (`v=0`), mirrori
 
 | Feature | This Multisig | Safe |
 |---|---|---|
-| **Core LOC** | 321 (single file) | ~3,500 (multiple files) |
-| **Runtime bytecode** | ~10 KB | ~23 KB |
+| **Source, code lines** | 275 (single file, wallet + factory) | 702 (16 files) |
+| **Runtime bytecode, wallet** | 10,532 bytes | 23,579 bytes |
+| **Runtime bytecode, feature parity** | 12,881 bytes | 32,680 bytes |
 | **Proxy clone size** | 45 bytes (PUSH0) | 45 bytes (EIP-1167) |
 | **Storage: core state** | 1 slot (packed) | Multiple slots |
 | **SLOAD/SSTORE for state** | 1 / 1 | Multiple |
@@ -152,33 +153,62 @@ The module supports both ECDSA signatures and onchain approvals (`v=0`), mirrori
 | **CREATE2 factory** | Yes (sender-bound salt) | Yes |
 | **Atomic module setup** | `createWithCalls` | `setup` delegatecall |
 
+### Code Size
+
+Measured from compiled runtime bytecode (`forge build --sizes`) and from source with comments and blank lines stripped. Safe figures are the canonical v1.4.1 deployments and the import graph of `Safe.sol`.
+
+| | This Multisig | Safe v1.4.1 | Less |
+|---|---|---|---|
+| Wallet runtime bytecode | 10,532 B | 23,579 B | **55%** |
+| Wallet + factory bytecode | 12,881 B | 26,633 B | **52%** |
+| Feature parity bytecode¹ | 12,881 B | 32,680 B | **61%** |
+| Source, code lines (wallet + factory) | 275 | 702 | **61%** |
+| Source, physical lines | 321 | 1,473 | 78% |
+
+¹ Adds `CompatibilityFallbackHandler` (EIP-1271, ERC-721/1155 receivers) and `MultiSendCallOnly` (batching) to Safe's side, since this multisig has both built in.
+
+The physical-line figure flatters this multisig — Safe carries far heavier NatSpec — so the honest headline is **~55% less bytecode and ~61% fewer lines of code**.
+
 ### Gas Benchmarks
 
-This multisig: `forge test --mc GasTest -vv` (`gasleft()` snapshots, warm storage). Safe: `npm run benchmark` in [safe-smart-account](https://github.com/safe-global/safe-smart-account).
+`forge test --mc SafeComparisonTest -vv` measures both wallets in one harness, so the numbers are directly comparable. Safe runs as its exact canonical mainnet bytecode (codehash-verified), removing any compiler or optimizer difference. Both sides get cold storage with the transaction's `to` account pre-warmed per EIP-2929, a cold delegatecall target, a cold and already-existing recipient, and full transaction accounting — 21,000 intrinsic plus EIP-7623 calldata cost on the identical calldata each wallet would receive on-chain.
 
-| Operation | This Multisig | Safe | Delta |
+All figures below are **total transaction gas**, what a receipt reports.
+
+| Operation | This Multisig | Safe v1.4.1 | Delta |
 |---|---|---|---|
 | **Deploy (proxy + init)** | | | |
-| 1 owner | 142,024 | 166,375 | -15% |
-| 2 owners | 164,796 | 189,886 | -13% |
-| 3 owners | 187,569 | 213,385 | -12% |
-| **ETH transfer** | | | |
-| 1-of-1 | 43,550 | 58,142 | -25% |
-| 2-of-2 | 47,826 | 65,193 | -27% |
-| 2-of-3 | 47,826 | — | — |
-| 3-of-3 | 52,104 | 72,293 | -28% |
-| 3-of-5 | 52,104 | 72,281 | -28% |
-| **Executor (no sigs)** | 40,932 | — | — |
-| **Queue (delay)** | 35,810 | — | — |
-| **Execute queued** | 38,855 | — | — |
-| **Batch 3 ETH transfers** | 65,689 | — | — |
+| 1 owner | 137,060 | 259,400 | **−47%** |
+| 2 owners | 160,116 | 282,882 | **−43%** |
+| 3 owners | 183,171 | 306,366 | **−40%** |
+| 5 owners | 229,282 | 353,332 | **−35%** |
+| **ETH transfer** (steady state) | | | |
+| 1-of-1 | 45,603 | 54,031 | **−16%** |
+| 2-of-2 | 52,917 | 61,113 | **−13%** |
+| 2-of-3 | 52,918 | 61,113 | **−13%** |
+| 3-of-3 | 60,232 | 68,183 | **−12%** |
+| 3-of-5 | 60,233 | 68,195 | **−12%** |
+| **ERC20 transfer** 2-of-3 | 57,828 | 65,934 | **−12%** |
+| **First transaction** 2-of-3 | 55,414 | 78,206 | **−29%** |
+| **Batch 3 transfers** 2-of-3 | 81,318 | 80,946 | +0.5% |
+| **Module / executor path** | 38,004 | 35,874 | +5.9% |
+| **Timelock: queue** 2-of-3 | 68,398 | — | built-in |
+| **Timelock: execute queued** | 42,314 | — | built-in |
 
-- Execution is 25-28% cheaper due to single-slot state packing. Each additional signer adds ~4,300 gas (`ecrecover` + `isOwner` SLOAD).
-- Executor, timelock, and batch are built-in. Safe requires external modules and MultiSend.
-- Deployment is 12-15% cheaper across all owner counts — the sorted linked list requires only one storage write per owner.
-- Safe's overhead pays for guard hooks, gas refunds, EIP-1271 contract signatures, and fallback handler dispatch.
+Where the difference comes from, and where it does not:
 
-Safe composes features as separate contracts (modules, guards, fallback handlers). This multisig ships them as built-in primitives in a single file with all hot-path state in one slot. The executor doubles as a pre/post transaction guard via vanity address encoding — zero additional storage. Point the executor at a router contract to dispatch across multiple sub-modules without per-wallet storage overhead.
+- **Deployment is 35-47% cheaper**, the largest and most durable advantage. Safe writes each owner into a linked list plus separate slots for threshold, owner count, nonce, singleton and fallback handler; this multisig packs `delay`/`nonce`/`threshold`/`ownerCount` into one slot. Stripping Safe's fallback handler entirely still leaves it at 283,921 for 3 owners — a 35% gap — so this is not fallback-handler overhead.
+- **Signature-verified execution is 12-16% cheaper**, from single-slot state packing and smaller calldata (`execute` takes 4 arguments; `execTransaction` takes 10).
+- **The first transaction is 29% cheaper**, because Safe stores `nonce` in a dedicated slot and pays a 20,000 gas zero-to-nonzero SSTORE once. That is a one-time cost, which is why the steady-state rows above are the fair headline.
+- **Per additional signer, Safe is marginally cheaper** — ~7,070 gas against ~7,315 here. The advantage is in fixed overhead, so it narrows as the signer count grows.
+- **Batching is a wash.** `MultiSendCallOnly` is lean, and its packed encoding is denser than the ABI-encoded arrays `batch` takes. The win is that batching needs no second contract.
+- **The executor path costs ~6% more than Safe's module path.** `execute` bumps the nonce and computes the EIP-712 hash even when the caller is the executor. That is deliberate: it makes the nonce a single serialisation point across the signed and executor routes, so a signature cannot be replayed around an executor call.
+
+- **The timelock has no Safe equivalent** without adding the Zodiac Delay Modifier, a separate deployed contract, so it is reported unpaired rather than compared.
+
+Safe's remaining overhead buys gas refunds, `safeTxGas` metering, an arbitrary number of modules, and fallback handler dispatch. This multisig ships timelock, executor, batch and EIP-1271 as built-in primitives in a single file with all hot-path state in one slot. The executor doubles as a pre/post transaction guard via vanity address encoding — zero additional storage. Point the executor at a router contract to dispatch across multiple sub-modules without per-wallet storage overhead.
+
+> `forge test --mc GasTest -vv` reports `gasleft()` deltas with warm storage and no intrinsic or calldata cost. Those numbers are useful for tracking regressions in this repo, but they are not comparable to Safe's published benchmarks, which report `receipt.gasUsed`. Use `SafeComparisonTest` for any comparison.
 
 ## Deployments
 

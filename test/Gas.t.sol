@@ -4,7 +4,15 @@ pragma solidity ^0.8.34;
 import "forge-std/Test.sol";
 import "../src/Multisig.sol";
 
-/// @notice Lean gas benchmarks for common multisig operations.
+/// @notice Lean gas benchmarks for common multisig operations, for tracking regressions
+/// in this repo.
+///
+/// These are `gasleft()` deltas: execution only, warm storage, and an unfunded recipient
+/// that pays the 25,000 gas new-account cost. They exclude the 21,000 intrinsic and the
+/// calldata cost a real transaction pays, so they are NOT comparable to Safe's published
+/// benchmarks, which report `receipt.gasUsed`. For any comparison against Safe, use
+/// `SafeComparison.t.sol`, which measures both wallets under identical conditions.
+///
 /// @dev Run: forge test --mc GasTest -vv
 contract GasTest is Test {
     MultisigFactory factory;
