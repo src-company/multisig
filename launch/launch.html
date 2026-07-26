@@ -22,43 +22,55 @@ html,body{background:#0B1526;min-height:100vh;display:grid;place-items:center}
    nothing can drift off the optical centre line. */
 .el{position:absolute;left:0;right:0;text-align:center;opacity:0}
 
-#mark{top:112px;height:92px}
-#mark svg{width:92px;height:92px;display:inline-block;vertical-align:top}
+#mark{top:98px;height:104px}
+#mark svg{width:104px;height:104px;display:inline-block;vertical-align:top}
 
-#wordmark{top:224px;font-size:64px;font-weight:700;letter-spacing:-2px;line-height:1}
-#sub{top:304px;font-size:17px;font-weight:400;letter-spacing:24px;text-indent:24px;color:var(--m);opacity:0}
+#wordmark{top:220px;font-size:74px;font-weight:700;letter-spacing:-2.5px;line-height:1}
+#sub{top:312px;font-size:18px;font-weight:400;letter-spacing:26px;text-indent:26px;color:var(--m)}
 
 /* The hairline under the lockup. It draws itself open, then charges green for
    the final card — the same green the interface uses for a met threshold. */
-#rule{top:348px;height:1px}
+#rule{top:358px;height:1px}
 #rule i{display:block;height:1px;margin:0 auto;width:0;background:var(--ln)}
-#rulefill{top:348px;height:1px}
+#rulefill{top:358px;height:1px}
 #rulefill i{display:block;height:1px;margin:0 auto;width:0;background:var(--g);opacity:.9}
 
-/* Beat lines — the what. */
-#lines{top:398px}
-#lines div{font-size:19px;font-weight:700;letter-spacing:6px;text-indent:6px;line-height:2.35;color:var(--m);opacity:0}
+/* Beat lines — the what. Typed rather than faded: the advance width of a
+   monospace cell is uniform, so a clip stepped to whole characters reads as
+   typing with no sub-pixel mush, and the cursor is the first green on screen. */
+#lines{top:400px}
+#lines .bl{font-size:20px;font-weight:700;letter-spacing:6px;line-height:2.3;color:var(--m);opacity:0}
+.tw{position:relative;display:inline-block}
+.tw .tx{display:inline-block}
+/* One accent, on the operative word of each line. Nested colour doesn't change
+   any cell's advance, so the typed clip is unaffected. */
+.tw .tx b{font-weight:700;color:var(--g)}
+.tw i{position:absolute;bottom:5px;left:0;width:12px;height:2px;background:var(--g);opacity:0}
 
 /* The delay, drawn — the how. */
-#tl{top:404px}
+#tl{top:398px}
 #tl svg{display:inline-block}
-#cap{top:520px;font-size:13px;font-weight:700;letter-spacing:5px;text-indent:5px;color:var(--d)}
+#cap{top:516px;font-size:13px;font-weight:700;letter-spacing:5px;text-indent:5px;color:var(--d)}
 
 /* The call. */
-#live{top:410px;font-size:30px;font-weight:700;letter-spacing:11px;text-indent:11px;color:var(--g)}
-/* Chain row. Each mark sits in an identical light tile: Base's #0000FF square
-   and OP's red both fall under 2:1 against the card's blue, and tiling them all
-   the same way fixes the contrast and stops five brand palettes from fighting. */
-#chains{top:466px;font-size:12px;font-weight:700;letter-spacing:3px;color:var(--d)}
-.crow{display:inline-flex;align-items:center;gap:22px}
-.chip{display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
-.chip i{width:21px;height:21px;flex:none;background:var(--a);display:inline-flex;align-items:center;justify-content:center}
-.chip i svg{width:15px;height:15px;display:block}
+#live{top:400px;font-size:34px;font-weight:700;letter-spacing:12px;text-indent:12px;color:var(--g)}
 
-/* The colophon, sized and worded exactly as it ships in the interface. */
-#colo{top:588px;font-size:13px;font-weight:700;letter-spacing:4px}
+/* Chain row. The marks are monochrome white rather than brand colour in a light
+   tile: on #2D5FE8 the real colours measure 1.35–2.23:1, so they needed a plate
+   to be legible at all, and five plates is more furniture than the card can
+   carry. White is 5.37:1 and stands alone. Sizes are optical, not equal — see
+   build.js — because a full-bleed square out-weighs a circle at the same box. */
+#chains{top:472px;font-size:12px;font-weight:700;letter-spacing:3px;color:var(--d);opacity:1}
+.crow{display:inline-flex;align-items:center;gap:24px}
+.chip{display:inline-flex;align-items:center;gap:9px;white-space:nowrap;opacity:0}
+.chip i{flex:none;display:inline-flex;align-items:center;justify-content:center}
+.chip i svg{width:var(--s,17px);height:var(--s,17px);display:block}
+
+/* The colophon sits bottom-right, exactly where it ships in the interface —
+   which also stops it stranding in the middle of an empty lower band. */
+#colo{top:594px;text-align:right;padding-right:58px;font-size:12px;font-weight:700;letter-spacing:4px}
 #colo span{display:inline-flex;align-items:center;gap:9px;color:var(--d)}
-#colo svg{width:20px;height:20px;display:block}
+#colo svg{width:19px;height:19px;display:block}
 
 /* Static slash frame — the interface's rails and rules, held still. Only the
    loading mark marches, which is how the dapp itself behaves. */
@@ -82,15 +94,13 @@ html,body{background:#0B1526;min-height:100vh;display:grid;place-items:center}
     </g>
   </svg>
 
-  <!-- The loading mark, exactly as the dapp draws it: slashed border marching
-       clockwise around a solid M. -->
+  <!-- The loading mark, as the dapp draws it: slashed border marching clockwise
+       around a solid M. Each edge path starts three units early, off the visible
+       corner, so the crawling pattern never runs off the end and leaves a gap. -->
   <div class="el" id="mark">
     <svg viewBox="0 0 64 64" aria-hidden="true">
       <rect width="64" height="64" fill="#2D5FE8"/>
       <defs>
-        <!-- Each edge starts three units early, off the visible corner, so the
-             crawling pattern below always covers the border instead of running
-             off the end of the path and leaving a gap. -->
         <path id="mt" d="M1,4 H60" fill="none"/><path id="mr" d="M60,1 V60" fill="none"/>
         <path id="mb" d="M63,60 H4" fill="none"/><path id="ml" d="M4,63 V4" fill="none"/>
       </defs>
@@ -109,29 +119,33 @@ html,body{background:#0B1526;min-height:100vh;display:grid;place-items:center}
   <div class="el" id="rule"><i></i></div>
   <div class="el" id="rulefill"><i></i></div>
 
-  <div class="el" id="lines">
-    <div>MULTISIG + TIMELOCK</div>
-    <div>ONE ADDRESS, EVERY CHAIN</div>
-    <div>CANCEL BEFORE IT LANDS</div>
+  <div class="el" id="lines" style="opacity:1">
+    <div class="bl"><span class="tw"><span class="tx">MULTISIG + <b>TIMELOCK</b></span><i></i></span></div>
+    <div class="bl"><span class="tw"><span class="tx"><b>ONE ADDRESS</b>, EVERY CHAIN</span><i></i></span></div>
+    <div class="bl"><span class="tw"><span class="tx"><b>CANCEL</b> BEFORE IT LANDS</span><i></i></span></div>
   </div>
 
   <div class="el" id="tl">
-    <svg width="620" height="96" viewBox="0 0 620 96" aria-hidden="true">
-      <line x1="60" y1="30" x2="560" y2="30" stroke="#FFFFFF2E" stroke-width="1"/>
-      <line id="sweep" x1="60" y1="30" x2="60" y2="30" stroke="#7DFFBA" stroke-width="2"/>
-      <rect id="n1" x="53" y="23" width="14" height="14" fill="#7DFFBA"/>
-      <rect id="n2" x="553" y="23" width="14" height="14" fill="none" stroke="#FFFFFF47" stroke-width="1"/>
+    <svg width="660" height="96" viewBox="0 0 660 96" aria-hidden="true">
+      <line x1="70" y1="30" x2="580" y2="30" stroke="#FFFFFF22" stroke-width="2" shape-rendering="crispEdges"/>
+      <line id="sweep" x1="70" y1="30" x2="70" y2="30" stroke="#7DFFBA" stroke-width="2" shape-rendering="crispEdges"/>
+      <!-- Leading edge. 28px long against a 17px step, so consecutive frames
+           overlap by 11px and it reads as one moving edge. A 2px tick here
+           travelled 8.5x its own width per frame and strobed. -->
+      <line id="head" x1="70" y1="30" x2="70" y2="30" stroke="#F5FBFF" stroke-width="2" shape-rendering="crispEdges" opacity="0"/>
+      <rect id="n1" x="63" y="23" width="14" height="14" fill="#7DFFBA"/>
+      <rect id="n2" x="573" y="23" width="14" height="14" fill="#7DFFBA" fill-opacity="0" stroke="#FFFFFF47" stroke-width="1"/>
       <g font-family="PlexM,monospace" font-size="12" font-weight="700" letter-spacing="3" fill="#D6E6FF">
-        <text id="tlab" x="310" y="14" text-anchor="middle" fill="#F5FBFF">DELAY</text>
-        <text x="60" y="62" text-anchor="middle">QUEUED</text>
-        <text id="tex" x="560" y="62" text-anchor="middle">EXECUTABLE</text>
+        <text x="325" y="14" text-anchor="middle" fill="#F5FBFF">DELAY</text>
+        <text x="70" y="62" text-anchor="middle">QUEUED</text>
+        <text id="tex" x="580" y="62" text-anchor="middle">EXECUTABLE</text>
       </g>
     </svg>
   </div>
   <div class="el" id="cap">TIME TO CATCH A MISTAKE</div>
 
   <div class="el" id="live">NOW LIVE</div>
-  <div class="el" id="chains">__CHAINROW__</div>
+  <div class="el" id="chains"><span class="crow"><span class="chip"><i style="--s:18px"><svg width="14" height="14" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><polygon fill="#F5FBFF" fill-opacity="0.95" points="7.62,18.83 16.01,30.5 16.01,24.1"/><polygon fill="#F5FBFF" fill-opacity="0.6" points="16.01,30.5 24.38,18.78 16.01,24.1"/><polygon fill="#F5FBFF" fill-opacity="0.95" points="16.01,1.5 7.62,16.23 16.01,12.3"/><polygon fill="#F5FBFF" fill-opacity="0.6" points="24.38,16.18 16.01,1.5 16.01,12.3"/><polygon fill="#F5FBFF" fill-opacity="0.4" points="16.01,21.5 24.38,16.18 16.01,12.3"/><polygon fill="#F5FBFF" fill-opacity="0.78" points="16.01,12.3 7.62,16.23 16.01,21.5"/></svg></i>ETHEREUM</span><span class="chip"><i style="--s:13px"><svg viewBox="0 0 249 249" xmlns="http://www.w3.org/2000/svg"><path d="M0 19.671C0 12.9332 0 9.56425 1.26956 6.97276C2.48511 4.49151 4.49151 2.48511 6.97276 1.26956C9.56425 0 12.9332 0 19.671 0H229.329C236.067 0 239.436 0 242.027 1.26956C244.508 2.48511 246.515 4.49151 247.73 6.97276C249 9.56425 249 12.9332 249 19.671V229.329C249 236.067 249 239.436 247.73 242.027C246.515 244.508 244.508 246.515 242.027 247.73C239.436 249 236.067 249 229.329 249H19.671C12.9332 249 9.56425 249 6.97276 247.73C4.49151 246.515 2.48511 244.508 1.26956 242.027C0 239.436 0 236.067 0 229.329V19.671Z" fill="#F5FBFF"/></svg></i>BASE</span><span class="chip"><i style="--s:17px"><svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg"><circle cx="128" cy="128" r="128" fill="none"/><path d="M153.018 199.027C160.881 199.027 167.23 192.682 167.23 184.855C167.23 177.028 160.881 170.683 153.018 170.683C145.217 170.683 138.867 177.028 138.867 184.855C138.867 192.682 145.217 199.027 153.018 199.027Z" fill="#F5FBFF"/><path d="M102.073 199.448C109.935 199.448 116.225 193.103 116.225 185.276C116.225 177.45 109.935 171.105 102.073 171.105C94.2719 171.105 87.9219 177.45 87.9219 185.276C87.9219 193.103 94.2719 199.448 102.073 199.448Z" fill="#F5FBFF"/><path d="M71.0365 51.3927H104.799C111.152 68.5801 127.731 117.277 128.941 119.991C129.243 118.634 145.943 65.5649 150.662 51.6943H185.756V172.759C181.399 170.346 177.042 167.935 172.323 165.22C169.055 163.563 166.03 161.753 162.703 160.396C162.4 136.877 162.098 113.508 161.372 89.0842C156.652 103.105 140.376 152.557 139.045 153.913H117.323C117.323 153.913 96.2066 93.9085 95.178 91.1949C94.8757 114.262 94.5731 137.329 93.7866 161.15C80.8383 167.783 73.1544 171.553 70.7344 172.457V51.3927H71.0365Z" fill="#F5FBFF"/><path d="M128.03 20.3533C187.265 20.3533 235.67 68.5983 235.67 128C235.67 187.402 187.447 235.647 128.03 235.647C68.6136 235.647 20.3904 187.402 20.3904 128C20.3904 68.5983 68.6136 20.3533 128.03 20.3533ZM128.03 0C57.2991 0 0 57.2911 0 128C0 198.709 57.2991 256 128.03 256C198.701 256 256 198.709 256 128C256 57.2911 198.701 0 128.03 0Z" fill="#F5FBFF"/></svg></i>MEGAETH</span><span class="chip"><i style="--s:17px"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><circle cx="16" cy="16" r="16" fill="none"/><path fill-rule="evenodd" clip-rule="evenodd" d="M24.6648 10.3409C24.5095 10.1923 17.6041 6.172 16.8067 5.7666C16.4554 5.58417 15.8067 5.53687 15.4352 5.66525C15.0027 5.80714 7.69192 10.0706 7.39463 10.3477C7.24598 10.4895 7.06355 10.726 6.98923 10.8747C6.86085 11.1382 6.8541 11.3206 6.83382 16.1923L6.82031 21.2327L7.75274 21.78C8.26624 22.0773 8.72571 22.3273 8.75949 22.3408C8.83381 22.3612 15.4689 11.7936 15.4689 11.6517C15.4689 11.5503 13.9689 11.5707 13.4352 11.6788C12.8811 11.8004 12.3946 12.0436 12.1176 12.3409C12.0027 12.4625 11.077 13.8544 10.0635 15.4355C9.05003 17.0166 8.19868 18.3341 8.1649 18.3679C8.13111 18.4085 8.10408 16.9422 8.10408 14.9355V11.4355L8.29327 11.2666C8.61759 10.9693 15.8 6.85444 15.9892 6.85444C16.1716 6.85444 16.273 6.90848 17.9352 7.86794C18.496 8.19226 19.996 9.05712 21.2797 9.78685C22.5635 10.5233 23.6784 11.199 23.7661 11.2868L23.9148 11.4558V18.7256L20.349 13.2505C20.1866 12.9855 20.0171 12.7225 19.9257 12.6005L19.9128 12.5807L19.9113 12.5816C19.8856 12.5487 19.8679 12.5301 19.8608 12.5301C19.8338 12.5368 19.6513 12.8341 18.8338 14.2125C18.7324 14.3814 18.5837 14.6382 18.5095 14.78L18.3675 15.0368L18.3688 15.039L18.3651 15.0413L18.4676 15.2101L18.5432 15.3408C18.5672 15.382 18.592 15.4204 18.6162 15.4547L18.8528 15.8438C18.8819 15.9079 18.9223 15.9804 18.9689 16.0503C19.077 16.2125 19.2189 16.4422 19.2865 16.5638C19.3035 16.5945 19.3219 16.6223 19.3404 16.6462L22.2631 21.4558L21.9148 21.6584C21.7167 21.7707 21.6219 21.8207 21.5619 21.8236L17.9063 16.1404L17.8135 15.9895L17.4824 16.5301L17.4575 16.5715L16.03 18.8918L16.0261 18.8947L18.8815 23.3831C18.5185 23.6677 16.106 25.3222 15.95 25.3222C15.7744 25.3222 12.6176 23.1517 12.6581 23.0773C12.6725 23.0485 13.6463 21.3965 14.8289 19.3902L14.8307 19.3871C15.8669 17.6291 17.0632 15.5996 17.9148 14.1517C18.9283 12.4355 19.3473 11.672 19.2797 11.6517C19.2324 11.6315 18.5568 11.6247 17.7865 11.6382L16.3811 11.6584L13.1378 17.003C11.9437 18.9751 10.8647 20.7534 10.2575 21.7541L10.2561 21.7565C9.9571 22.2492 9.77272 22.5531 9.74597 22.5976L9.59732 22.8408L12.1108 24.2868C13.496 25.084 14.8136 25.8341 15.05 25.9624C15.5433 26.226 16.1108 26.3139 16.5095 26.1787C16.773 26.0976 24.1986 21.8206 24.5703 21.5436C24.6851 21.4557 24.881 21.1923 24.9959 20.9557L25.1986 20.5368L25.1851 15.8408L25.1648 11.1449L25.0026 10.8274C24.9148 10.6517 24.7594 10.4287 24.6648 10.3409ZM23.909 18.8188L23.9148 18.8273V18.815L23.909 18.8188Z" fill="#F5FBFF"/><path d="M24.0516 18.918L19.8649 12.4966L18.2969 15.0132L22.3452 21.6942L24.1198 20.841L24.0516 18.918Z" fill="#F5FBFF" fill-opacity="0.55"/><path d="M22.0116 22.4215L17.8248 16L16.0234 18.8729L19.3839 24.2527L21.5326 23.3803L22.0116 22.4215Z" fill="#F5FBFF" fill-opacity="0.55"/><path fill-rule="evenodd" clip-rule="evenodd" d="M8.17569 11.494L16.0015 6.98539L23.8273 11.494V20.5058L16.0015 25.0144L10.2566 21.7046L9.49122 22.9541L15.7865 26.5809C15.9195 26.6576 16.0834 26.6576 16.2165 26.5809L25.0763 21.4766C25.2098 21.3997 25.2921 21.2574 25.2921 21.1034V10.8964C25.2921 10.7424 25.2098 10.6 25.0763 10.5231L16.2165 5.41884C16.0834 5.34216 15.9195 5.34216 15.7865 5.41884L6.92669 10.5231C6.7932 10.6 6.71094 10.7424 6.71094 10.8964V21.1034C6.71094 21.2574 6.7932 21.3997 6.92669 21.4766L8.69757 22.4969L9.48646 21.2609L8.17569 20.5058V11.494Z" fill="#F5FBFF" fill-opacity="0.75"/><path d="M19.4032 11.5938L16.3802 11.6368L9.48828 22.9593L11.9198 24.3671L19.4032 11.5938Z" fill="#F5FBFF"/><path d="M11.898 12.6265C12.5884 11.4972 14.5651 11.5019 15.4673 11.6454L8.6947 22.4957C8.46471 22.3633 7.89434 22.0353 7.45276 21.7821C6.86927 21.4477 6.77289 21.4388 6.71094 21.1292V20.5286C8.15235 18.3651 11.2078 13.7557 11.898 12.6265Z" fill="#F5FBFF"/></svg></i>ARBITRUM</span><span class="chip"><i style="--s:17px"><svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path fill="none" d="M0 0h1024v1024H0z"/><path fill="#F5FBFF" d="M512.337 60c196.772 0 356.337 159.564 356.337 356.336 0 196.774-159.565 356.34-356.337 356.34v191.296C315.563 963.972 156 804.406 156 607.635c0-196.774 159.563-356.337 356.337-356.337V60Zm-1.651 275.693c-38.71 77.719-96.924 135.931-174.643 174.641v3.303c77.719 38.709 135.933 96.921 174.643 174.64h3.302c38.707-77.719 96.922-135.931 174.641-174.64v-3.303c-77.719-38.71-135.934-96.922-174.641-174.641h-3.302Z"/></svg></i>OP MAINNET</span></span></div>
 
   <div class="el" id="colo"><span>A PUBLIC GOOD BY SRC_CO<svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" fill="#7DFFBA"/><defs><path id="sct" d="M4,4 H60" fill="none"/><path id="scr" d="M60,4 V60" fill="none"/><path id="scb" d="M60,60 H4" fill="none"/><path id="scl" d="M4,60 V4" fill="none"/></defs><g fill="#0A0A0A" fill-opacity="0.6" font-family="Helvetica,Arial,sans-serif" font-size="4" letter-spacing="-0.2"><text><textPath href="#sct">//////////////////////////////</textPath></text><text><textPath href="#scr">//////////////////////////////</textPath></text><text><textPath href="#scb">//////////////////////////////</textPath></text><text><textPath href="#scl">//////////////////////////////</textPath></text></g><text x="32" y="29" font-family="Helvetica,Arial,sans-serif" font-size="19" font-weight="bold" fill="#0A0A0A" text-anchor="middle" letter-spacing="-1">SRC</text><text x="32" y="48" font-family="Helvetica,Arial,sans-serif" font-size="19" font-weight="bold" fill="#0A0A0A" text-anchor="middle" letter-spacing="-1">CO</text></svg></span></div>
 </div>
@@ -139,88 +153,125 @@ html,body{background:#0B1526;min-height:100vh;display:grid;place-items:center}
 <script>
 // Every value on screen is a pure function of one clock, so a frame grabber and
 // a live browser produce byte-identical output and the loop can be seamless.
-const D = 12000;                                   // 12s, an exact multiple of
-const MARCH = 240;                                 // the mark's crawl cycle and
-const BREATH = 3000;                               // its breath — so the loop
-const ADV = 2.22;                                  // is seamless at both.
-
-// One glyph advance of the border slashes: 4.2px Plex Mono is 0.6em wide, less
-// the -0.3 tracking. Crawling by exactly one advance per cycle means the border
-// reads as marching while staying unbroken — the dapp sweeps 0→100% instead,
-// which is right for a spinner but leaves a gap in a still frame.
+//
+// 9600ms is divisible by the 40ms frame at 25fps (240 frames), by the mark's
+// 240ms crawl (40 cycles) and by its 2400ms breath (4 cycles) — every periodic
+// motion closes exactly on the loop point. Anything not a common multiple of
+// all three would visibly jump when the GIF wraps.
+const D = 9600;
+const MARCH = 240, ADV = 2.22;   // one glyph advance of the border slashes
+const BREATH = 2400;
 
 const $ = s => document.querySelector(s);
 const clamp01 = v => v < 0 ? 0 : v > 1 ? 1 : v;
 const seg = (t, a, b) => clamp01((t - a) / (b - a));
 const ease = p => 1 - Math.pow(1 - p, 3);          // the interface's ease-out
-const IN = 420, OUT = 380;
+const IN = 380, OUT = 340;
+// Chosen so END+OUT lands exactly on the final frame (9600 - 40ms): the last
+// frame is empty and matches the first, but the frame before it is still fading,
+// so no two frames are identical and the wrap has no dead beat.
+const END = D - 40 - OUT;
 
-// Opacity for a block that enters at `a` and leaves at `b`.
 const win = (t, a, b) => seg(t, a, a + IN) * (1 - seg(t, b, b + OUT));
+const mix = (c1, c2, k) =>
+  'rgb(' + c1.map((v, i) => Math.round(v + (c2[i] - v) * k)).join(',') + ')';
 
-// A block rises 10px as it fades in — the only motion any text makes.
-function place(el, t, a, b) {
-  const o = win(t, a, b);
-  el.style.opacity = o;
-  el.style.transform = `translateY(${((1 - ease(seg(t, a, a + IN))) * 10).toFixed(2)}px)`;
-  return o;
+// A block rises as it fades in — the only motion any text makes.
+function place(el, t, a, b, rise = 10) {
+  el.style.opacity = win(t, a, b);
+  // No transform at all when there's no rise — translateY(0) still promotes a
+  // compositing layer, which can resample hairlines off the pixel grid.
+  el.style.transform = rise ? `translateY(${((1 - ease(seg(t, a, a + IN))) * rise).toFixed(2)}px)` : '';
+}
+
+// ── typed beat lines ───────────────────────────────────────────────
+// Measured once, after the font is real: a monospace cell's advance is uniform,
+// so width/length gives an exact per-character step to clip to.
+const TYPE = 460;
+const beats = [...document.querySelectorAll('#lines .bl')].map((bl, i) => ({
+  bl, tx: bl.querySelector('.tx'), cur: bl.querySelector('i'),
+  len: bl.querySelector('.tx').textContent.length,
+  at: [1250, 1680, 2110][i], w: 0, adv: 0,
+}));
+const BEATS_OUT = 3700;
+
+function measure() {
+  for (const b of beats) { b.w = b.tx.getBoundingClientRect().width; b.adv = b.w / b.len; }
 }
 
 const marchPaths = document.querySelectorAll('.mp');
+const chips = [...document.querySelectorAll('#chains .chip')];
 
 function frame(t) {
   t = ((t % D) + D) % D;
-  const END = 11560;                               // everything clears here so
-                                                   // the last frame == the first
 
   // ── the lockup, present for the whole film ─────────────────────────
-  // Starts at zero, not at 100ms: at 25fps a 100ms lead-in is two frames that
-  // are pixel-identical to the first, which reads as a freeze at the loop point.
-  const mo = place($('#mark'), t, 0, END);
+  place($('#mark'), t, 0, END, 0);
   const grow = ease(seg(t, 0, IN));
   const breathe = 1 + 0.012 * Math.sin(2 * Math.PI * t / BREATH);
   $('#mark').style.transform = `scale(${((0.92 + 0.08 * grow) * breathe).toFixed(4)})`;
-  $('#mark').style.opacity = mo;
 
   // The march, at the loading overlay's speed (~18 units/s) but seamless.
   const crawl = (t % MARCH) / MARCH * ADV;
   marchPaths.forEach(p => p.setAttribute('startOffset', crawl.toFixed(3)));
 
-  place($('#wordmark'), t, 560, END);
-  $('#wordmark').style.letterSpacing = (-2 + 10 * (1 - ease(seg(t, 560, 560 + 560)))).toFixed(2) + 'px';
-  place($('#sub'), t, 940, END);
+  place($('#wordmark'), t, 300, END);
+  $('#wordmark').style.letterSpacing = (-2.5 + 11 * (1 - ease(seg(t, 300, 300 + 520)))).toFixed(2) + 'px';
+  place($('#sub'), t, 620, END);
 
   // ── the hairline, drawing open then charging green ─────────────────
-  $('#rule').style.opacity = win(t, 1400, END);
-  $('#rule').querySelector('i').style.width = (620 * ease(seg(t, 1400, 2100))).toFixed(1) + 'px';
-  $('#rulefill').style.opacity = win(t, 8900, END);
-  $('#rulefill').querySelector('i').style.width = (620 * ease(seg(t, 8900, 9700))).toFixed(1) + 'px';
+  $('#rule').style.opacity = win(t, 900, END);
+  $('#rule').firstChild.style.width = (660 * ease(seg(t, 900, 1500))).toFixed(1) + 'px';
+  $('#rulefill').style.opacity = win(t, 6950, END);
+  $('#rulefill').firstChild.style.width = (660 * ease(seg(t, 6950, 7700))).toFixed(1) + 'px';
 
-  // ── beat lines, one at a time ─────────────────────────────────────
-  const beats = $('#lines').children;
-  const OUT_BEATS = 5000;
-  $('#lines').style.opacity = 1;
-  [1900, 2320, 2740].forEach((a, i) => {
-    beats[i].style.opacity = win(t, a, OUT_BEATS);
-    beats[i].style.transform = `translateY(${((1 - ease(seg(t, a, a + IN))) * 8).toFixed(2)}px)`;
+  // ── beats, typed one character at a time ──────────────────────────
+  for (const b of beats) {
+    const p = seg(t, b.at, b.at + TYPE);
+    const n = Math.floor(p * b.len + 1e-9);
+    const vis = n * b.adv;
+    b.bl.style.opacity = (t >= b.at ? 1 : 0) * (1 - seg(t, BEATS_OUT, BEATS_OUT + OUT));
+    b.tx.style.clipPath = `inset(0 ${Math.max(0, b.w - vis).toFixed(2)}px 0 0)`;
+    b.cur.style.left = vis.toFixed(2) + 'px';
+    b.cur.style.opacity = (p > 0 && p < 1) ? 1 : 0;
+  }
+
+  // ── the delay, painted ────────────────────────────────────────────
+  place($('#tl'), t, 3880, 5900, 0);   // no rise: a fractional translateY
+                                       // would drag the hairlines off the
+                                       // pixel grid while the paint runs
+  const ARRIVE = 5480;   // both ends land on the 40ms frame grid
+  // Linear, not eased: a delay elapses at a constant rate, and an ease-out spends
+  // its last frames barely moving — which reads as the bar stalling just short of
+  // the node. Constant speed also means equal pixel steps per frame, the
+  // smoothest thing a fixed-delay GIF can show.
+  const s = seg(t, 4280, ARRIVE);
+  // 510px across exactly 30 frames (4280→5480ms at 25fps) is 17px per frame,
+  // whole pixels every time. Both ends sit on the frame grid on purpose: start
+  // the paint at 4300 and the first step is a half-frame stub of 9px. A fractional endpoint would re-antialias the 2px tip on
+  // every frame, and those blends land on different palette entries once
+  // quantised — the head visibly shimmers as it travels.
+  const tip = Math.round(70 + 510 * s);
+  $('#sweep').setAttribute('x2', tip);
+  const head = $('#head');
+  head.setAttribute('x1', Math.max(70, tip - 28));
+  head.setAttribute('x2', tip);
+  head.setAttribute('opacity', (s <= 0 ? 0 : 1 - seg(t, ARRIVE, ARRIVE + 160)).toFixed(3));
+  // Arrival resolves over four frames instead of switching in one: the node
+  // fills, and the label crosses from quiet blue to the accent.
+  const arrive = ease(seg(t, ARRIVE, ARRIVE + 160));
+  $('#n2').setAttribute('fill-opacity', arrive.toFixed(3));
+  $('#tex').setAttribute('fill', mix([214, 230, 255], [125, 255, 186], arrive));
+  place($('#cap'), t, 4520, 5900);
+
+  // ── the call, the chains, the credit ──────────────────────────────
+  place($('#live'), t, 6250, END);
+  chips.forEach((c, i) => {                        // staggered, left to right
+    const a = 6550 + i * 70;
+    c.style.opacity = win(t, a, END);
+    c.style.transform = `translateY(${((1 - ease(seg(t, a, a + IN))) * 6).toFixed(2)}px)`;
   });
-
-  // ── the delay, drawn ──────────────────────────────────────────────
-  place($('#tl'), t, 5400, 8000);
-  const s = ease(seg(t, 5900, 7500));
-  $('#sweep').setAttribute('x2', (60 + 500 * s).toFixed(1));
-  const done = s > 0.999;
-  $('#n2').setAttribute('fill', done ? '#7DFFBA' : 'none');
-  $('#n2').setAttribute('stroke', done ? '#7DFFBA' : '#FFFFFF47');
-  $('#tex').setAttribute('fill', done ? '#7DFFBA' : '#D6E6FF');
-  place($('#cap'), t, 6100, 8000);
-
-  // ── the call, and the credit ──────────────────────────────────────
-  place($('#live'), t, 8400, END);
-  place($('#chains'), t, 8860, END);
-  place($('#colo'), t, 9500, END);                 // every block clears by
-                                                   // END+OUT, so the last frame
-                                                   // is the first frame exactly
+  place($('#colo'), t, 7250, END, 6);
 }
 
 // Live playback for viewing; __seek for deterministic capture.
@@ -228,7 +279,7 @@ let raf = null, t0 = null;
 function loop(now) { if (t0 === null) t0 = now; frame(now - t0); raf = requestAnimationFrame(loop); }
 window.__seek = t => { if (raf) { cancelAnimationFrame(raf); raf = null; } frame(t); };
 window.__DURATION = D;
-document.fonts.ready.then(() => { frame(0); raf = requestAnimationFrame(loop); });
+document.fonts.ready.then(() => { measure(); frame(0); raf = requestAnimationFrame(loop); });
 </script>
 </body>
 </html>
