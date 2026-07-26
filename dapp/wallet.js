@@ -210,7 +210,16 @@ async function connectWithWallet(walletKey) {
       }
     }
 
-    _walletProvider = new ethers.BrowserProvider(walletProvider);
+    // 'any' is load-bearing, not a default spelled out. Without it ethers detects
+    // the chain on first use and pins the provider to it, then throws
+    // NETWORK_ERROR "network changed: 1 => 8453" at everything that touches it
+    // once the wallet moves. This app switches chains as a matter of course, and a
+    // multichain deploy switches *mid-run*: the vault landed on Base, the receipt
+    // was mined, and tx.wait() threw on the way back because the provider had
+    // decided its network was a constant. The row went red over a deployed vault,
+    // the run walked on to the next chain and did the same again, and neither
+    // clone was ever recorded — the DB write sits after the throw.
+    _walletProvider = new ethers.BrowserProvider(walletProvider, 'any');
     _signer = await _walletProvider.getSigner();
     _connectedAddress = await _signer.getAddress();
     _walletDisplayName = _connectedAddress.slice(0,6) + '...' + _connectedAddress.slice(-4);
@@ -353,7 +362,7 @@ async function _onAccountsChanged(accts) {
   if (_connectedAddress && next.toLowerCase() === _connectedAddress.toLowerCase()) return;
   if (!canDelegate || !_connectedWalletProvider) { window.location.reload(); return; }
   const prev = _connectedAddress;
-  _walletProvider = new ethers.BrowserProvider(_connectedWalletProvider);
+  _walletProvider = new ethers.BrowserProvider(_connectedWalletProvider, 'any');
   _signer = await _walletProvider.getSigner();
   _connectedAddress = await _signer.getAddress();
   _walletDisplayName = _connectedAddress.slice(0, 6) + '...' + _connectedAddress.slice(-4);
@@ -431,6 +440,48 @@ function _switchErrCode(e) {
   return e && (e.code !== undefined ? e.code : (e.data && e.data.originalError && e.data.originalError.code));
 }
 const _rejected = c => c === 4001 || c === 'ACTION_REJECTED';
+
+// Re-derive the provider and signer against the wallet's chain as it stands now.
+// 'any' above is what keeps a moved chain from throwing, but it does not undo a
+// signer that is already mid-flight against the old one, and the deploy loop
+// needs a definite answer at a definite moment rather than a provider that will
+// notice on its own eventually. So this is the awaited version of that: cheap
+// (two provider calls, no wallet prompt), and it hands back the signer it built
+// so the caller cannot pick up the previous one by mistake.
+//
+// The account is named rather than taken as whichever one the wallet is offering,
+// and _connectedAddress is read but never written. Both halves of that are the
+// same point: this function's job is the chain, not the identity. A bare
+// getSigner() returns the *selected* account, so an account switched under us
+// mid-run would be adopted here silently — and the deploy loop's guard against
+// exactly that compares against _connectedAddress, which has not been updated
+// yet either, so it would wave through a signer for someone else and the factory
+// would revert on a salt bound to the original deployer, after the prompt was
+// approved. Naming the address makes ethers refuse instead: the previous signer
+// stays, and accountsChanged — whose business this is — gets to report the swap
+// where the operator can see it.
+// Resolves { signer } on success, { moved: true } when the wallet no longer offers
+// the account this session belongs to, or null when there is no wallet to ask.
+// "Moved" is reported rather than absorbed: the caller is about to sign something
+// bound to a particular account, and it is the only layer that knows what to say
+// about that. Nothing is installed in that case — the previous signer stays, and
+// stale is safer than confidently wrong.
+window.walletRebindSigner = async function() {
+  if (!_connectedWalletProvider) return null;
+  const p = new ethers.BrowserProvider(_connectedWalletProvider, 'any');
+  let s;
+  if (_connectedAddress) {
+    // getSigner(address) checks the address against the wallet's accounts and
+    // throws if it is not among them, which is the signal wanted here.
+    try { s = await p.getSigner(_connectedAddress); }
+    catch (e) { return { moved: true }; }
+  } else {
+    s = await p.getSigner();
+  }
+  _walletProvider = p;
+  _signer = s;
+  return { signer: s };
+};
 
 // Switch chain at runtime. Resolves to { ok, rejected?, unsupported?, code?, error? }.
 window.walletSwitchChain = async function(opts) {
