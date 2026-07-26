@@ -1969,6 +1969,34 @@ const sb = {
   }
 };
 
+// ── SCHEMA DRIFT ──────────────────────────────────────────────────
+// The coordination database is migrated by hand (see render.yaml), and this app
+// is deployed by pushing a static file. Nothing keeps the two in step, and when
+// they drift the symptoms surface far from the cause: a failed migration once
+// left production serving a previous schema for weeks, and what an operator saw
+// was a proposal refused as "NONCE IN USE" — a message about a nonce, for a
+// problem that had nothing to do with one.
+//
+// So say it plainly, once, the first time anything notices. Every db* helper
+// already degrades to empty rather than throwing, which is what made this quiet
+// in the first place; this is the one thing that is allowed to be loud.
+let _schemaStale = null;
+function markSchemaStale(why){
+  if(_schemaStale) return;
+  _schemaStale = why || 'unknown';
+  console.error('Coordination database schema is behind this app:', _schemaStale, '— re-apply db/schema.sql');
+  flash('THE COORDINATION DATABASE IS RUNNING AN OLDER SCHEMA THAN THIS APP — PROPOSALS AND HISTORY MAY FAIL. RE-APPLY db/schema.sql.', 9000);
+  render();
+}
+// One read that only the current schema can answer. sort_ts arrived with the
+// migration that also fixed propose_tx, so a database that cannot serve this
+// column cannot serve a proposal either — and finding that out on page load is
+// worth one request that returns at most a single row.
+async function checkSchemaFresh(){
+  const { error } = await sb.from('tx_history').select('sort_ts').limit(1);
+  if(error) markSchemaStale('tx_history.sort_ts: ' + (error.message || error.status));
+}
+
 // ── EIP-712 ───────────────────────────────────────────────────────
 const EIP712_DOMAIN = { name:'Multisig', version:'1' };
 const EIP712_TYPES = { Execute: [
@@ -6072,10 +6100,18 @@ async function dbProposeTx(wId, nonce, target, value, callData, txHash, thresh, 
     p_description: desc
   });
   if(error) { console.error('DB propose:', error); throw dbError('PROPOSAL NOT SAVED', error); }
-  // A null id with no error means the row exists but under a different hash at
-  // this nonce (nonce collision) — the caller's signature would be dropped
-  // silently, so treat it as a hard failure the user can act on.
-  if(!data) throw dbError('PROPOSAL NOT SAVED — NONCE IN USE', null);
+  // The current propose_tx cannot return nothing: it either hands back an id or
+  // raises, and a nonce that already holds a proposal is fine — a nonce is
+  // contested, not owned, which is why UNIQUE (wallet_id, nonce) was dropped.
+  //
+  // So a null id with no error does not mean what it used to say. It means the
+  // deployed function is older than this client: the previous one ended in a
+  // bare ON CONFLICT DO NOTHING, which swallowed that unique violation and
+  // returned nothing, and the message it produced — "NONCE IN USE" — sent
+  // everyone hunting for a nonce collision that was not the problem. Name the
+  // real cause, because the fix is to re-apply db/schema.sql and nothing the
+  // operator does in this interface will help.
+  if(!data) { markSchemaStale('propose_tx returned no id'); throw dbError('PROPOSAL NOT SAVED — THE COORDINATION DATABASE IS RUNNING AN OLDER SCHEMA THAN THIS APP. RE-APPLY db/schema.sql.', null); }
   return data;
 }
 
@@ -9902,6 +9938,10 @@ setInterval(tickSlowCountdowns, 1000);
   });
 
   fetchBlock();
+
+  // Fire and forget: it only ever reports, and reporting late is still better
+  // than a proposal failing with a message about the wrong thing.
+  checkSchemaFresh().catch(() => {});
 
   const hasDeepLink = handleDeepLink();
   render();

@@ -166,9 +166,33 @@ CREATE INDEX IF NOT EXISTS idx_config_wallet ON config_log (wallet_id, created_a
 
 -- ── VIEWS ────────────────────────────────────────────────────────
 
+-- Dropped, not replaced. CREATE OR REPLACE VIEW only accepts a new definition
+-- whose column list *starts with* the existing one — same names, same order,
+-- same types, new columns appended at the end. Anything else is an error.
+--
+-- tx_history was missing from this block, and its column list had changed:
+-- queue_tx was inserted between execution_tx and cancelled_at, and sort_ts added.
+-- So on any database that already had the old view, that one statement failed —
+-- and because this file is applied as a single transaction, it took the whole
+-- migration with it. Everything below this point silently never ran: the RLS
+-- policies, and every function. The database went on serving the previous
+-- schema's propose_tx (a bare ON CONFLICT DO NOTHING that returns NULL instead
+-- of resolving or raising), a four-argument mark_queued the client no longer
+-- calls, no prune_tx at all, and a transactions table still carrying the
+-- UNIQUE (wallet_id, nonce) the ALTER above exists to remove.
+--
+-- What that looked like from the app: every proposal raised at a nonce that
+-- already held a companion row — which is every REJECT, and every CANCEL or
+-- ACCELERATE with an ordinary proposal beside it — came back "NONCE IN USE",
+-- because the old propose_tx swallowed the unique violation and returned
+-- nothing. The brake could not be pulled at the moment it was needed.
+--
+-- So: every view is dropped before it is created. A view's shape is not stable
+-- across releases and CREATE OR REPLACE is not a migration.
 DROP VIEW IF EXISTS pending_txs; -- legacy, removed
 DROP VIEW IF EXISTS tx_summary;
 DROP VIEW IF EXISTS my_wallets;
+DROP VIEW IF EXISTS tx_history;
 
 CREATE OR REPLACE VIEW my_wallets AS
   SELECT
