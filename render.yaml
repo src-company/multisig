@@ -68,10 +68,32 @@ services:
     runtime: static
     staticPublishPath: ./dapp
     buildCommand: "echo no build step"
-    # Optional: serve the CSP/security headers from here instead of the
-    # <meta> tag in index.html. Remember to point connect-src at the
-    # PostgREST service URL (https://multisig-postgrest.onrender.com).
-    # headers:
-    #   - path: /*
-    #     name: Content-Security-Policy
-    #     value: "default-src 'self'; ..."
+    headers:
+      # frame-ancestors is the one CSP directive a <meta> tag cannot carry —
+      # browsers ignore it there — so the pages' own policies cannot express it
+      # and it has to be served. Without it any site can put this dapp in an
+      # iframe and lay its own UI over the buttons that sign and execute. Both
+      # spellings, because the older header is what some proxies still act on.
+      - path: /*
+        name: Content-Security-Policy
+        value: "frame-ancestors 'none'"
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      # A vault address and a proposal nonce live in the URL fragment, and a
+      # fragment is not sent in a Referer — but the path is, and a full CSP or
+      # font request would otherwise carry it off-site. Nothing here needs it.
+      - path: /*
+        name: Referrer-Policy
+        value: no-referrer
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      # Nothing in the dapp asks for any of these; saying so stops an embedded
+      # or injected frame asking on its behalf.
+      - path: /*
+        name: Permissions-Policy
+        value: "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+    # The full CSP is served from the <meta> tag in each page instead of here,
+    # so it stays next to the code whose origins it lists. If you move it, point
+    # connect-src at the PostgREST service URL above.

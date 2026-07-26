@@ -26,8 +26,21 @@ function loadWalletConnect() {
   return _wcLoadPromise;
 }
 
-const _escMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;' };
-function _esc(s) { return String(s).replace(/[&<>]/g, m => _escMap[m]); }
+// Quotes are escaped as well as markup: every _esc() below lands in an HTML
+// *attribute* at least once (data-wallet-key, src, aria-label), and an EIP-6963
+// announcement is whatever an installed extension chose to broadcast — a uuid or
+// a name carrying a bare quote would close the attribute and open a tag.
+const _escMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+function _esc(s) { return String(s).replace(/[&<>"']/g, m => _escMap[m]); }
+
+// localStorage is not always there to be read. Safari in private mode, a
+// third-party iframe with storage partitioned off, and a browser with cookies
+// blocked all throw on the *getter*, not just the setter — and every read below
+// sits on a path (auto-reconnect, wallet lookup) that must degrade to "no saved
+// wallet" rather than throw out of it.
+function _lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function _lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+function _lsDel(k) { try { localStorage.removeItem(k); } catch (e) {} }
 
 // --- State (globals for app to read) ---
 window._walletProvider = null;
@@ -64,8 +77,12 @@ function detectWallets() {
   for (const [uuid, { info, provider }] of eip6963Providers.entries()) {
     const name = info?.name || 'Unknown';
     if (seenNames.has(name.toLowerCase())) continue;
-    const iconUrl = info.icon && (info.icon.startsWith('data:image/') || info.icon.startsWith('https://')) ? info.icon : null;
-    const safeIcon = iconUrl ? `<img src="${_esc(iconUrl).replace(/"/g, '&quot;').replace(/'/g, '&#39;')}" style="width:1.5rem;height:1.5rem;">` : '';
+    // data: only. The page's CSP is `img-src 'self' data:`, so an https icon is
+    // blocked by the browser and renders as a broken image rather than as the
+    // wallet's mark — and allowing a remote URL here would also let any installed
+    // extension turn opening this sheet into a request to a host of its choosing.
+    const iconUrl = info.icon && info.icon.startsWith('data:image/') ? info.icon : null;
+    const safeIcon = iconUrl ? `<img src="${_esc(iconUrl)}" alt="" style="width:1.5rem;height:1.5rem;">` : '';
     detected.push({ key: `eip6963_${uuid}`, name, icon: safeIcon, getProvider: () => provider });
     seenNames.add(name.toLowerCase());
   }
@@ -167,7 +184,7 @@ async function connectWithWallet(walletKey) {
       const uuid = walletKey.replace('eip6963_', '');
       walletProvider = eip6963Providers.get(uuid)?.provider;
       if (!walletProvider) {
-        const savedName = localStorage.getItem('ms_wallet_name')?.toLowerCase();
+        const savedName = _lsGet('ms_wallet_name')?.toLowerCase();
         if (savedName) {
           for (const [, { info, provider }] of eip6963Providers) {
             if (info?.name?.toLowerCase() === savedName) { walletProvider = provider; break; }
@@ -237,14 +254,12 @@ async function connectWithWallet(walletKey) {
     walletProvider.on('accountsChanged', _walletEventHandlers.accountsChanged);
     walletProvider.on('chainChanged', _walletEventHandlers.chainChanged);
 
-    try {
-      localStorage.setItem('ms_wallet', walletKey);
-      if (walletKey.startsWith('eip6963_')) {
-        const uuid = walletKey.replace('eip6963_', '');
-        const name = eip6963Providers.get(uuid)?.info?.name;
-        if (name) localStorage.setItem('ms_wallet_name', name);
-      }
-    } catch (e) {}
+    _lsSet('ms_wallet', walletKey);
+    if (walletKey.startsWith('eip6963_')) {
+      const uuid = walletKey.replace('eip6963_', '');
+      const name = eip6963Providers.get(uuid)?.info?.name;
+      if (name) _lsSet('ms_wallet_name', name);
+    }
     notifyDisplayUpdate();
     for (const fn of _onConnectCallbacks) { try { fn(); } catch (e) { console.error('onConnect error:', e); } }
   } catch (error) {
@@ -277,7 +292,7 @@ window.disconnectWallet = function() {
   _walletConnecting = false;
 
   closeWalletModal();
-  try { localStorage.removeItem('ms_wallet'); localStorage.removeItem('ms_wallet_name'); } catch (e) {}
+  _lsDel('ms_wallet'); _lsDel('ms_wallet_name');
   for (const fn of _onDisconnectCallbacks) { try { fn(); } catch (e) {} }
 };
 
@@ -355,7 +370,7 @@ function notifyDisplayUpdate() {
 
 // --- Auto-reconnect ---
 async function tryAutoConnect() {
-  const savedWallet = localStorage.getItem('ms_wallet');
+  const savedWallet = _lsGet('ms_wallet');
   if (!savedWallet) return;
   _walletConnecting = true;
   notifyDisplayUpdate();
@@ -368,7 +383,7 @@ async function tryAutoConnect() {
       const uuid = savedWallet.replace('eip6963_', '');
       probe = eip6963Providers.get(uuid)?.provider;
       if (!probe) {
-        const savedName = localStorage.getItem('ms_wallet_name')?.toLowerCase();
+        const savedName = _lsGet('ms_wallet_name')?.toLowerCase();
         if (savedName) {
           for (const [, { info, provider }] of eip6963Providers) {
             if (info?.name?.toLowerCase() === savedName) { probe = provider; break; }
