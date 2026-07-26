@@ -900,7 +900,15 @@ function executorRisk(next, vaultAddr) {
 // hands on either route. Costs nothing: the slot replaces that owner's own
 // signature, and they are the one submitting anyway.
 function senderSlot(owner) {
-  return ethers.zeroPadValue(ethers.getAddress(owner), 32).slice(2) + '0'.repeat(64) + '00';
+  // Lowercased before getAddress, which validates the checksum and throws when a
+  // mixed-case address fails it. The contract reads these 32 bytes as an address
+  // and does not care how the string was cased, but the signer reaching here can
+  // come from the `signatures` table — an anon-writable column that stores
+  // whatever string it was handed. Rejecting one for its capitalisation would
+  // fail the packing rather than the row, taking the whole bundle with it.
+  // Anything that is not an address still throws, which is the check worth
+  // keeping.
+  return ethers.zeroPadValue(ethers.getAddress(String(owner).toLowerCase()), 32).slice(2) + '0'.repeat(64) + '00';
 }
 // forward() demands exactly `required * 65` bytes, so a bundle carrying more
 // signatures than the route asks for reverts. Trim to `n`, keeping the
@@ -3202,6 +3210,23 @@ function renderNow(){
   }
 }
 
+// A gas shortfall in native units, short enough for a status slot. Deploy costs
+// land anywhere between a few hundred wei of an L2's ETH and a meaningful
+// fraction of one on mainnet, so the precision follows the size rather than
+// being fixed — 0.0000 ETH is not a number anyone can act on.
+function fmtGasShort(wei){
+  if(!wei || wei <= 0n) return '0 ETH';
+  const n = Number(ethers.formatEther(wei));
+  if(!isFinite(n) || n <= 0) return '0 ETH';
+  // Significant figures, not decimal places. A fixed precision either drowns an
+  // L2 shortfall in zeros or rounds it away entirely — 0.00000123 ETH reported
+  // as 0.000001 is no longer the number to top up by.
+  let s = n >= 1 ? n.toFixed(4) : n.toPrecision(4);
+  if(s.indexOf('e') >= 0) s = n.toFixed(18);          // smaller than toPrecision will spell out
+  if(s.indexOf('.') >= 0) s = s.replace(/0+$/, '').replace(/\.$/, '');
+  return s + ' ETH';
+}
+
 function renderDeployOverlay(){
   const d = S.deploy, phase = d.phase;
   const glyph = { pending:'○', switching:'◐', mining:'◐', deploying:'◐', done:'●', skipped:'●', failed:'✕' };
@@ -3223,12 +3248,16 @@ function renderDeployOverlay(){
       const bad = s.pf && (s.pf.gasOk===false || s.pf.executorOk===false || s.pf.factoryOk===false || s.pf.implOk===false);
       // null means the chain would not answer, which is not the same as ready.
       // Now that every deploy stops here, a green READY has to have been earned
-      // by a reply — otherwise a dead RPC reads as a cleared preflight.
-      const unread = s.pf && (s.pf.factoryOk===null || s.pf.gasOk===null);
+      // by a reply — otherwise a dead RPC reads as a cleared preflight. The
+      // executor only counts when this vault will carry one; unasked is not
+      // unanswered.
+      const unread = s.pf && (s.pf.factoryOk===null || s.pf.gasOk===null || (s.pf.needExec && s.pf.executorOk===null));
       const w=[];
       if(s.pf&&s.pf.factoryOk===false)w.push('NO FACTORY');
       if(s.pf&&s.pf.implOk===false)w.push('UNKNOWN FACTORY');
-      if(s.pf&&s.pf.gasOk===false)w.push('NO GAS');
+      // Naming the shortfall turns "NO GAS" from a verdict into an instruction:
+      // the operator can top the wallet up by that much and press RESUME.
+      if(s.pf&&s.pf.gasOk===false)w.push(s.pf.gasShort!=null?`NEEDS ~${esc(fmtGasShort(s.pf.gasShort))} MORE`:'NO GAS');
       if(s.pf&&s.pf.executorOk===false)w.push('NO EXECUTOR');
       const amber = bad || (!w.length && unread);
       g = bad?'✕':unread?'◐':'●'; gc = amber?'var(--y)':'var(--g)';
@@ -3255,10 +3284,14 @@ function renderDeployOverlay(){
     // base from the step's chain id (not the connected chain) — links stay
     // correct across a multichain deploy.
     let xlink = '';
-    if((s.status==='done'||s.status==='skipped') && (s.txHash||s.address)){
+    // A failed step links out too, whenever it left a transaction behind. That is
+    // the case the link matters most in — a deploy that reverted, or whose wait()
+    // lost the RPC, is exactly the one whose transaction has to be read, and the
+    // row was the only thing that ever knew its hash.
+    if((s.status==='done'||s.status==='skipped'||s.status==='failed') && (s.txHash||s.address)){
       const eb = CHAINS[s.id] ? CHAINS[s.id].explorer : 'https://etherscan.io';
       const href = s.txHash ? `${eb}/tx/${s.txHash}` : `${eb}/address/${s.address}`;
-      xlink = `<a class="tx-explorer" href="${href}" target="_blank" rel="noopener" title="${s.txHash?'View deploy transaction':'View vault on explorer'} · ${esc(s.name)}">↗</a>`;
+      xlink = `<a class="tx-explorer" href="${href}" target="_blank" rel="noopener" title="${s.txHash?(s.status==='failed'?'View the transaction that failed':'View deploy transaction'):'View vault on explorer'} · ${esc(s.name)}">↗</a>`;
     }
     // A name that was asked for and did not land is reported on the chain it
     // was asked for on. The deploy still succeeded, so this is a second line
@@ -3323,8 +3356,10 @@ function renderDeployOverlay(){
 
   let footer;
   if(phase==='review'){
-    const noExec = d.ctx && d.ctx.wantForward && d.steps.some(s=>s.pf&&s.pf.executorOk===false);
+    const noExec = d.steps.some(s=>s.pf&&s.pf.executorOk===false);
     const noGas = d.steps.some(s=>s.pf&&s.pf.gasOk===false);
+    // How much the worst-off chain is short, so the warning can be acted on.
+    const shortfall = d.steps.reduce((m,s)=>(s.pf&&s.pf.gasShort!=null&&s.pf.gasShort>m)?s.pf.gasShort:m, 0n);
     const noFac = d.steps.some(s=>s.pf&&s.pf.factoryOk===false);
     const badImpl = d.steps.some(s=>s.pf&&s.pf.implOk===false);
     const notOwner = d.ctx && d.ctx.deployerIsOwner === false;
@@ -3334,7 +3369,7 @@ function renderDeployOverlay(){
     // included, so the warning block only appears when there is something to
     // warn about — and "proceed anyway and those chains may fail" is not
     // something to tell someone whose preflight came back green.
-    const warnText = `${fpVoid?`At ${d.ctx.thresh}-of-${d.ctx.resolvedOwners.length} every quorum is already unanimous, so instant execution makes the timelock advisory rather than enforced — the same signatures can queue or execute, whichever the submitter picks. Lower the threshold, or leave instant execution off, to keep the delay enforced. `:''}${noFac?'No factory on some chains — the vault cannot be deployed there. ':''}${badImpl?'On some chains the factory address holds code that does not name the audited implementation — a vault deployed there would not be the reviewed contract. ':''}${noExec?'No TimelockExecutor on some chains — fast path can’t be enabled there. ':''}${noGas?'No gas in the connected wallet on some chains. ':''}${notOwner?'You are not one of the owners — the vault will deploy, but it will not appear in your history. ':''}${d.ctx&&d.ctx.wns&&d.wnsAvail!==true?`${d.ctx.wns.full} ${d.wnsAvail===false?'has been claimed by someone else since you picked it':'could not be confirmed free — mainnet did not answer'}. The vault deploys either way; the name is dropped rather than reverting the deploy, and you can claim another one from the NAME tab afterwards. `:''}`;
+    const warnText = `${fpVoid?`At ${d.ctx.thresh}-of-${d.ctx.resolvedOwners.length} every quorum is already unanimous, so instant execution makes the timelock advisory rather than enforced — the same signatures can queue or execute, whichever the submitter picks. Lower the threshold, or leave instant execution off, to keep the delay enforced. `:''}${noFac?'No factory on some chains — the vault cannot be deployed there. ':''}${badImpl?'On some chains the factory address holds code that does not name the audited implementation — a vault deployed there would not be the reviewed contract. ':''}${noExec?`No TimelockExecutor on some chains${d.ctx&&d.ctx.wantForward?' — instant execution cannot be enabled there, and there':' — there'} is no way to cancel a queued proposal inside its ${d.ctx?esc(fmtD(d.ctx.del)):''} window: a cancel raised as an ordinary proposal is itself queued for the full delay. `:''}${noGas?`Not enough gas in the connected wallet on some chains${shortfall>0n?` — up to ${esc(fmtGasShort(shortfall))} short`:''}. `:''}${notOwner?'You are not one of the owners — the vault will deploy, but it will not appear in your history. ':''}${d.ctx&&d.ctx.wns&&d.wnsAvail!==true?`${d.ctx.wns.full} ${d.wnsAvail===false?'has been claimed by someone else since you picked it':'could not be confirmed free — mainnet did not answer'}. The vault deploys either way; the name is dropped rather than reverting the deploy, and you can claim another one from the NAME tab afterwards. `:''}`;
     const anyWarn = !!warnText;
     footer = `${anyWarn?`<div style="margin-top:14px;font-size:10px;color:var(--y);letter-spacing:1px;line-height:1.6">${warnText}Proceed anyway and those chains may fail.</div>`
       :`<div style="margin-top:14px;font-size:9px;color:var(--d);letter-spacing:1px;line-height:1.6">${unread?'Some chains would not answer the preflight — they are listed as unchecked, not as ready. ':''}${nch>1?`Deploys run one chain at a time and each one needs a network switch plus a signature in your wallet — ${nch} in total.`:'Needs one signature in your wallet.'}</div>`}
@@ -6936,7 +6971,18 @@ function _readAllResume(){
 }
 function _writeAllResume(list){
   try {
-    const keep = list.filter(_resumeValid).sort((a, b) => b.ts - a.ts).slice(0, RESUME_MAX);
+    // Newest-first is the display order, but it is the wrong eviction order. The
+    // store holds five, and a record is only worth keeping because it still owes
+    // a chain a vault — so evicting purely by age let a sixth deploy drop the one
+    // record that had clones outstanding, in favour of four that had nothing left
+    // to finish. That is the failure the multi-record store exists to prevent,
+    // and it happened silently: the RESUME banner reads the store, and what is
+    // not in it was never offered. Rank by whether anything is still owed, then
+    // by age.
+    const owed = r => ((r.doneIds || []).length && _resumeLeft(r).length) ? 1 : 0;
+    const keep = list.filter(_resumeValid)
+      .sort((a, b) => (owed(b) - owed(a)) || (b.ts - a.ts))
+      .slice(0, RESUME_MAX);
     if(keep.length) localStorage.setItem(RESUME_KEY, JSON.stringify(keep));
     else localStorage.removeItem(RESUME_KEY);
   } catch(_) {}   // storage full or blocked: the run still works, only resume is lost
@@ -7078,11 +7124,12 @@ function resumeSavedDeploy(){
     },
     phase:'preflight', address: rec.minedAddr, done:false, lastVaultAddr:null,
     wnsAvail:null, resumed:true, landedId: rec.landedId || null,
+    startChainId: S.chainId,
   };
   render();
   // Same preflight as a fresh deploy — gas and factory can have changed on the
   // chains that are left, and this run is about to spend on exactly those.
-  _deployPreflight(run, chains, rec.deployer, !!rec.wantForward)
+  _deployPreflight(run, chains, rec.deployer)
     .catch(e => { console.error('Resume preflight:', e); if(_deployLive(run)){ S.deploy.phase='review'; render(); } });
 }
 
@@ -7198,8 +7245,13 @@ async function prodDeploy() {
   // Deploy chains: primary first, then clone targets. The CREATE2 address is
   // identical on every chain (same factory + salt + init code), so the vault
   // clones to the same address everywhere.
+  // The null guard is not decoration: these are indexes into NETS held in form
+  // state, and this line sits outside the try below — an index that no longer
+  // names a network (a stale saved form, a shortened NETS) threw a TypeError
+  // straight out of prodDeploy, past guardSubmit, into an unhandled rejection.
+  // The operator pressed DEPLOY and nothing happened, with nothing said.
   const chainIdxs = [c.net, ...(c.clone || [])].filter((v,i,a)=>a.indexOf(v)===i);
-  const chains = chainIdxs.map(i => NETS[i]).filter(n => CHAINS[n.id]);
+  const chains = chainIdxs.map(i => NETS[i]).filter(n => n && CHAINS[n.id]);
   if(!chains.length) { flash('SELECT A NETWORK'); return; }
 
   // Optional on-chain identity, carried as two extra init calls on the mainnet
@@ -7220,6 +7272,8 @@ async function prodDeploy() {
     steps: chains.map(n => ({ id:n.id, name:n.name, status:'pending' })),
     ctx: { resolvedOwners, del, thresh, executor, wantForward, ownerLabels, connectedAddress, cfName: c.name || null, salt:null, minedAddr:null, deployerIsOwner, fastPathVoid, wns },
     phase:'preflight', address:null, done:false, lastVaultAddr:null, wnsAvail:null,
+    // Where the app was pointed when this run began — see _finishDeploy.
+    startChainId: S.chainId,
   };
   render();
   // Handed off rather than awaited, so guardSubmit's lock is released the moment
@@ -7227,20 +7281,77 @@ async function prodDeploy() {
   // CANCEL and pressing DEPLOY again did nothing at all until the RPC that caused
   // the cancelling finally answered. From here the run token and S.deploy are
   // what keep a second deploy from interleaving with this one.
-  _deployPreflight(run, chains, connectedAddress, wantForward)
+  _deployPreflight(run, chains, connectedAddress)
     .catch(e => { console.error('Deploy preflight:', e); if(_deployLive(run)){ S.deploy.phase = 'review'; render(); } });
 }
 
-async function _deployPreflight(run, chains, connectedAddress, wantForward) {
+// What this deploy will cost in gas, near enough to tell "cannot pay" from
+// "can". The measured range is 156k for a 1-of-1 through ~330k for a
+// createWithCalls with several init calls (.gas-snapshot), and each extra owner
+// is another cold SSTORE into the linked list. Rounded up rather than fitted:
+// the answer this feeds is a yes/no about affordability, and an estimate that
+// runs under the truth is the one that lets a deploy fail after the operator has
+// already approved it.
+function deployGasEstimate(ctx) {
+  const owners = (ctx && ctx.resolvedOwners ? ctx.resolvedOwners.length : 1);
+  const initCalls = (ctx && ctx.wantForward ? 1 : 0) + (ctx && ctx.wns ? 2 : 0);
+  return 150000n + BigInt(owners) * 30000n + BigInt(initCalls) * 70000n;
+}
+
+async function _deployPreflight(run, chains, connectedAddress) {
+  const ctx = (S.deploy && S.deploy.ctx) || {};
+  // The executor is installed on the vault whenever there is a delay to enforce,
+  // not only when the fast path is on — so its presence is checked on the same
+  // condition. It used to be gated on wantForward, which meant a timelocked
+  // vault cloned to a chain where the singleton is absent deployed pointing at a
+  // codeless address: no cancel, no accelerate, no warning. The vault still
+  // works and still queues, but the only brake that can act inside the delay
+  // window is not there, and nothing said so until an owner needed it.
+  const needExecutor = Number(ctx.del) > 0;
+  const gasNeeded = deployGasEstimate(ctx);
   // Preflight (read-only, no chain switch): is the factory deployed on each
-  // chain, does the wallet have gas there, and — when fast-path is on — is the
-  // TimelockExecutor present? The factory check is the one that cannot be
-  // skipped: a create() sent to a chain without it is a plain transfer to a
-  // codeless address, which mines successfully and deploys nothing.
+  // chain, can the wallet actually pay for the deploy there, and — where the
+  // vault will carry one — is the TimelockExecutor present? The factory check is
+  // the one that cannot be skipped: a create() sent to a chain without it is a
+  // plain transfer to a codeless address, which mines successfully and deploys
+  // nothing.
+  //
+  // Two rounds of reads, not four. These were sequential awaits — factory code,
+  // then the factory's implementation, then balance and fees, then the executor —
+  // against N chains at once, and the operator sits watching CHECKING… for the
+  // sum of them. Only implementation() and forwardEnabled() depend on anything;
+  // the rest are independent and now go together.
   const pfPromise = Promise.all(chains.map(async net => {
     const rp = makeProvider(net.id);
-    let gasOk = null, executorOk = null, factoryOk = null, implOk = null;
-    try { const fc = await rp.getCode(FACTORY); factoryOk = !!fc && fc !== '0x'; } catch(_){}
+    let gasOk = null, executorOk = null, factoryOk = null, implOk = null, gasShort = null;
+    const settled = p => p.then(v => ({ ok:true, v }), e => ({ ok:false, e }));
+    const [fcR, balR, feeR, exCodeR] = await Promise.all([
+      settled(rp.getCode(FACTORY)),
+      settled(rp.getBalance(connectedAddress)),
+      settled(rp.getFeeData()),
+      needExecutor ? settled(rp.getCode(TIMELOCK_EXECUTOR)) : Promise.resolve(null),
+    ]);
+    if(fcR.ok) factoryOk = !!fcR.v && fcR.v !== '0x';
+    // "Has a balance" is not "can pay". This was `balance > 0n`, so a wallet
+    // holding a single wei cleared the preflight green and then failed at the
+    // wallet prompt, or after it — on the chain the operator was least likely to
+    // be funded on, which is the whole reason to check. Price the transaction
+    // and compare against it, and keep the shortfall so the row can say how much
+    // is missing rather than just that something is.
+    if(balR.ok && feeR.ok){
+      const price = feeR.v.maxFeePerGas || feeR.v.gasPrice;
+      if(price == null){
+        // No fee data to price it with — fall back to the old question rather
+        // than reporting a shortfall this could not have measured.
+        gasOk = balR.v > 0n;
+      } else {
+        const need = gasNeeded * BigInt(price);
+        gasOk = balR.v >= need;
+        if(!gasOk) gasShort = need - balR.v;
+      }
+    } else if(balR.ok){
+      gasOk = balR.v > 0n;
+    }
     // Code at the factory address is not proof it is *this* factory. The audit's
     // deployment checklist asks for the audited build to be confirmed on-chain
     // rather than assumed, and the cheapest confirmation is the factory naming
@@ -7252,9 +7363,27 @@ async function _deployPreflight(run, chains, connectedAddress, wantForward) {
         implOk = String(impl).toLowerCase() === IMPLEMENTATION.toLowerCase();
       } catch(_){}
     }
-    try { gasOk = (await rp.getBalance(connectedAddress)) > 0n; } catch(_){}
-    if(wantForward){ try { const code = await rp.getCode(TIMELOCK_EXECUTOR); executorOk = !!code && code !== '0x'; } catch(_){} }
-    return { gasOk, executorOk, factoryOk, implOk };
+    if(needExecutor){
+      try {
+        if(!exCodeR.ok) throw exCodeR.e;
+        const code = exCodeR.v;
+        // Code alone is the same weak claim the factory check stopped accepting:
+        // on a chain where that address holds something else, a vault would be
+        // deployed pointing its cancel route at a stranger. Ask it the one
+        // question a TimelockExecutor can answer.
+        if(!code || code === '0x') executorOk = false;
+        else {
+          await new ethers.Contract(TIMELOCK_EXECUTOR, TIMELOCK_EXECUTOR_ABI, rp).forwardEnabled(ethers.ZeroAddress);
+          executorOk = true;
+        }
+      } catch(e){
+        const answered = e && (e.code === 'CALL_EXCEPTION' || e.code === 'BAD_DATA');
+        executorOk = answered ? false : null;   // silence is not an answer
+      }
+    }
+    // needExec travels with the result so the review screen can tell "not asked"
+    // from "asked and got no reply" — both leave executorOk null.
+    return { gasOk, gasShort, executorOk, factoryOk, implOk, needExec: needExecutor };
   }));
   // Mine the CREATE2 salt up front (chain-independent), dedup-checked against
   // every chain this deploy targets, so the actual vault address is known and
@@ -7298,6 +7427,33 @@ async function _deployPreflight(run, chains, connectedAddress, wantForward) {
   render();
 }
 
+// Ask the wallet where it is, and record the answer.
+//
+// S.walletChain used to be written only by the chainChanged event, and
+// requireSigner() refuses to sign whenever it disagrees with S.chainId. Not every
+// wallet emits that event for every switch — WalletConnect sessions in
+// particular resolve wallet_switchEthereumChain and go quiet — so the app could
+// be holding a chain the wallet left minutes ago.
+//
+// Mid-deploy that was a dead end rather than a stale label. deployOnChain polls
+// eth_chainId directly, confirms the wallet really did arrive, and then calls
+// requireSigner() — which compared the *event's* view, found it stale, and
+// refused. The step failed as 'WALLET DISCONNECTED', which it was not, the run
+// halted, and RESUME walked into the same wall every time, because nothing on
+// that path ever updated the value it was tripping over.
+//
+// So every direct read now writes it back. A poll is a stronger observation
+// than an event that may never come.
+async function readWalletChain(){
+  const wp = window._connectedWalletProvider;
+  if(!wp) return null;
+  try {
+    const id = parseInt(await wp.request({method:'eth_chainId'}), 16);
+    if(Number.isFinite(id) && id > 0){ S.walletChain = id; return id; }
+  } catch(_){}
+  return null;
+}
+
 // Wait for the connected wallet's active chain to match `id`, polling to absorb
 // wallets that switch asynchronously. Resolves true once matched, false on timeout.
 // The default budget is for a wallet that has already agreed; pass a longer one
@@ -7305,7 +7461,7 @@ async function _deployPreflight(run, chains, connectedAddress, wantForward) {
 async function waitForWalletChain(id, tries=8, gap=400){
   const wp = window._connectedWalletProvider; if(!wp) return true;
   for(let i=0;i<tries;i++){
-    try { const wc = await wp.request({method:'eth_chainId'}); if(parseInt(wc,16)===id) return true; } catch(_){}
+    if(await readWalletChain() === id) return true;
     if(i<tries-1) await new Promise(r=>setTimeout(r,gap));
   }
   return false;
@@ -7355,8 +7511,18 @@ async function deployOnChain(k){
         : `WALLET NEVER SWITCHED TO ${NM}`;
       render(); return 'blocked';
     }
+    // Both halves named separately. They used to share one message — 'WALLET
+    // DISCONNECTED' — which was the wrong half of the time and pointed at the
+    // wrong remedy: a wallet that has drifted onto another chain is connected,
+    // and reconnecting it does nothing.
+    if(!window._signer){ step.status='failed'; step.blocked=true; step.err='WALLET DISCONNECTED'; render(); return 'blocked'; }
     const w = requireSigner();
-    if(!w || !w.signer){ step.status='failed'; step.blocked=true; step.err='WALLET DISCONNECTED'; render(); return 'blocked'; }
+    if(!w){
+      const where = CHAINS[S.walletChain] ? String(CHAINS[S.walletChain].name).toUpperCase() : `CHAIN ${S.walletChain}`;
+      step.status='failed'; step.blocked=true;
+      step.err=`WALLET IS ON ${where}, NOT ${NM} — SWITCH IT AND RESUME`;
+      render(); return 'blocked';
+    }
     // The salt is bound to the deployer: the factory requires salt >> 96 to be
     // msg.sender. Switching accounts mid-deploy would otherwise revert with an
     // opaque SaltDoesNotStartWith after the wallet prompt was already approved.
@@ -7474,6 +7640,14 @@ async function deployOnChain(k){
     const rejected = code === 'ACTION_REJECTED' || code === 4001;
     step.status='failed'; step.blocked = rejected;
     step.err = rejected ? 'REJECTED IN WALLET' : (e.shortMessage || e.message || 'FAILED');
+    // A failure after the transaction was broadcast still leaves a transaction —
+    // reverted, dropped, or merely un-awaited because the RPC went away mid-wait.
+    // It is the first thing the operator needs and the row was throwing it away,
+    // so the only route back to it was the wallet's own history. ethers carries
+    // it in a different place depending on where the failure happened.
+    const failedHash = e && (e.receipt?.hash || e.transaction?.hash || e.transactionHash ||
+      (typeof e.hash === 'string' ? e.hash : null));
+    if(typeof failedHash === 'string' && /^0x[0-9a-fA-F]{64}$/.test(failedHash)) step.txHash = failedHash;
     render();
     return rejected ? 'blocked' : 'failed';
   }
@@ -7512,21 +7686,48 @@ async function _finishDeploy(){
       else try { await switchChain(homeId, true); } catch(e){ console.error('Return to home chain:', e); }
     }
   } else if(landIdx < 0) return;   // nothing deployed anywhere this run can read
+  // The walk moves the app's own chain, and every switch it makes is skipLoad —
+  // so the vault list on screen is still the one loaded for the chain the
+  // operator was browsing when they opened CREATE. Deploying to a chain they
+  // were not on therefore left that list sitting under a new chain id: cards for
+  // vaults that do not exist here, reading their balances and queues against
+  // this chain's copy of their addresses, and building EIP-712 domains with this
+  // chain's id if anyone signed on one. Drop it and reload for where we landed.
+  const moved = d.startChainId != null && S.chainId !== d.startChainId;
+  if(moved){ S.vaults = []; S.sel = 0; }
   if(!S.vaults.some(v => v.address && v.address.toLowerCase() === addr.toLowerCase())){
     try { const vData = await loadSingleVaultData(addr); if(vData){ S.vaults.push(vData); S.sel = S.vaults.length - 1; render(); } } catch(e){ console.error('Load new vault:', e); }
   }
+  // The new vault is on screen and selected; the rest of this chain's vaults are
+  // fetched behind it, and the selection is restored by address afterwards
+  // because loadAllVaults rebuilds the list and resets the index.
+  if(moved){
+    loadAllVaults().then(() => {
+      const i = S.vaults.findIndex(v => v.address && v.address.toLowerCase() === addr.toLowerCase());
+      if(i >= 0){ S.sel = i; render(); }
+    }).catch(e => console.error('Reload after deploy:', e));
+  }
 }
-// One chain walk at a time. DEPLOY is behind guardSubmit, but RESUME and RETRY are
-// plain buttons on a dialog that is already up, and a double press there used to
-// start a second walk over the same chain list — two wallet prompts racing for the
-// same step, with only the on-chain existence check downstream to stop the loser
-// re-deploying what the winner just did.
-let _deployWalking = false;
+// One chain walk at a time, per run. DEPLOY is behind guardSubmit, but RESUME and
+// RETRY are plain buttons on a dialog that is already up, and a double press there
+// used to start a second walk over the same chain list — two wallet prompts racing
+// for the same step, with only the on-chain existence check downstream to stop the
+// loser re-deploying what the winner just did.
+//
+// Held as the run number rather than a boolean, because a boolean outlived the run
+// it belonged to. _finishDeploy sets done and then awaits a chain switch and a
+// vault load, and the dialog is closable the moment done is set — so CLOSE during
+// that window left the flag raised with no run behind it. The next deploy then
+// walked its preflight, reached its review screen, and DEPLOY did nothing at all:
+// no prompt, no error, no way forward. A walk over a run that has been closed or
+// superseded exits at its own next liveness check and has no claim on the flag.
+let _deployWalkingRun = 0;
+const _deployWalkBusy = () => !!S.deploy && _deployWalkingRun === S.deploy.run;
 async function runDeploy(){
-  if(!S.deploy || _deployWalking) return;
+  if(!S.deploy || _deployWalkBusy()) return;
   const run = S.deploy.run;
   S.deploy.phase = 'deploying'; S.deploy.halted = null; render();
-  _deployWalking = true;
+  _deployWalkingRun = run;
   try {
     for(let k=0; k<S.deploy.chains.length; k++){
       // Re-checked every lap: each chain is a wallet round-trip, and the run this
@@ -7548,14 +7749,14 @@ async function runDeploy(){
     }
     if(!_deployLive(run)) return;
     await _finishDeploy();
-  } finally { _deployWalking = false; }
+  } finally { if(_deployWalkingRun === run) _deployWalkingRun = 0; }
 }
 function proceedDeploy(){ if(S.deploy){ S.deploy.phase='deploying'; render(); runDeploy(); } }
 async function retryChain(k){
-  if(!S.deploy || _deployWalking) return;
+  if(!S.deploy || _deployWalkBusy()) return;
   const run = S.deploy.run;
   S.deploy.done = false; S.deploy.halted = null; render();
-  _deployWalking = true;
+  _deployWalkingRun = run;
   try {
     const r = await deployOnChain(k);
     if(!_deployLive(run)) return;
@@ -7564,7 +7765,7 @@ async function retryChain(k){
     // merely finished and sends another switch prompt at someone who just declined.
     if(r === 'blocked') S.deploy.halted = { at:k, name:S.deploy.chains[k].name, reason:S.deploy.steps[k].err || 'WALLET DECLINED' };
     await _finishDeploy();
-  } finally { _deployWalking = false; }
+  } finally { if(_deployWalkingRun === run) _deployWalkingRun = 0; }
 }
 // Pick the walk back up where it stopped. A halted run leaves chains it never
 // reached sitting at 'pending', and clearing the failed rows it did reach is what
@@ -7575,7 +7776,7 @@ async function resumeDeploy(){
   // Checked here as well as in runDeploy: this rewrites the step rows before it
   // hands over, and doing that against a walk already in flight would clear the
   // status of a chain that walk is mid-way through.
-  if(!d || _deployWalking) return;
+  if(!d || _deployWalkBusy()) return;
   d.steps.forEach(s => { if(s.status === 'failed'){ s.status='pending'; s.err=null; s.blocked=false; } });
   d.done = false;
   await runDeploy();
@@ -9278,8 +9479,12 @@ async function switchChain(id, skipLoad) {
     // Suppressed for programmatic switches (skipLoad) — e.g. the multi-chain
     // deploy loop, which surfaces per-chain switch state in its own overlay.
     if(!skipLoad){
+      // readWalletChain rather than a bare request: this is the app's most direct
+      // observation of where the wallet is, and recording it keeps requireSigner
+      // from refusing on a chainChanged event that never arrived.
       let landed = res.ok;
-      try { landed = parseInt(await window._connectedWalletProvider.request({method:'eth_chainId'}), 16) === id; } catch(_) {}
+      const at = await readWalletChain();
+      if(at !== null) landed = at === id;
       if(!landed) flash(res.rejected ? 'CHAIN SWITCH REJECTED — WALLET STILL ON THE OLD CHAIN'
         : res.unsupported ? `ADD ${CHAINS[id].name.toUpperCase()} TO YOUR WALLET TO SIGN ON IT`
         : 'WALLET ON DIFFERENT CHAIN — SWITCH TO SIGN');
