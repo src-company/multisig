@@ -1862,6 +1862,15 @@ class PgQuery {
   constructor(table) { this._table = table; this._params = new URLSearchParams(); this._single = false; }
   select(cols) { this._params.set('select', cols || '*'); return this; }
   eq(col, val) { this._params.append(col, `eq.${val}`); return this; }
+  // Case-insensitive equality, for the columns that hold addresses. An address
+  // is a 160-bit number; the case of its hex is a checksum, not part of the
+  // value, and the same vault legitimately arrives here checksummed from
+  // getOwners(), lowercased from a URL somebody's chat client normalised, and
+  // mixed from a paste. The SQL side already knew this — is_wallet_owner()
+  // compares with lower() on both sides — but the queries did not, so a lookup
+  // could miss a row that was plainly there. No wildcard is passed: these
+  // values are hex, and ilike without % or _ is just a case-blind =.
+  ilike(col, val) { this._params.append(col, `ilike.${val}`); return this; }
   in(col, arr) { this._params.append(col, `in.(${arr.join(',')})`); return this; }
   order(col, opts) { this._params.append('order', `${col}.${opts && opts.ascending === false ? 'desc' : 'asc'}`); return this; }
   limit(n) { this._params.set('limit', String(n)); return this; }
@@ -5845,18 +5854,41 @@ async function dbRegisterWallet(addr, deployer, salt, ownerList, thresh, del, ex
   return data;
 }
 
+// Matched case-insensitively on the address. A miss here is not harmless: the
+// caller treats "no row" as "this vault has never been registered" and creates
+// one, and `wallets` is unique on (chain_id, address) as a string — so the same
+// vault reached by a differently-cased address got a second row, with its own
+// id, its own queue and its own signatures. Two owners could then be looking at
+// the same vault and coordinating in different places.
+// Ordered oldest-first, because a database that already collected a duplicate
+// pair still has to hand every owner the same one of them. maybeSingle() takes
+// the first row, and unordered that is whatever the planner returned.
 async function dbFindWallet(addr) {
   const { data } = await sb.from('wallets')
     .select('id, name, threshold, delay, nonce, executor, owner_count')
-    .eq('chain_id', S.chainId).eq('address', addr).maybeSingle();
+    .eq('chain_id', S.chainId).ilike('address', addr)
+    .order('created_at', { ascending: true }).maybeSingle();
   return data;
 }
 
+// Likewise: this answers "which vaults am I an owner of", and an owner whose
+// address is stored in a different case than their wallet reports would have
+// been told they have none.
 async function dbMyWallets(ownerAddr) {
   const { data } = await sb.from('my_wallets')
     .select('id, chain_id, address, name, threshold, owner_count')
-    .eq('owner', ownerAddr).eq('chain_id', S.chainId);
-  return data || [];
+    .ilike('owner', ownerAddr).eq('chain_id', S.chainId);
+  // One vault, one entry. A database that collected a duplicate pair before the
+  // lookup above was case-blind would otherwise put the same vault on screen
+  // twice, under two names, each with its own queue — which is a worse way to
+  // find out about it than quietly showing the older of the two.
+  const seen = new Set();
+  return (data || []).filter(w => {
+    const k = String(w.address || '').toLowerCase();
+    if(seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
 }
 
 async function dbProposeTx(wId, nonce, target, value, callData, txHash, thresh, proposedBy, desc) {
@@ -9171,6 +9203,22 @@ window.onWalletDisplayUpdate = function() {
 
 // ── DEEP LINKING ──────────────────────────────────────────────────
 
+// What became of a proposal somebody was linked to that is no longer pending.
+// History is already in hand at every call site, and it distinguishes the three
+// endings that matter to a co-signer who arrived a few minutes late: it ran, it
+// was stopped, or it was overtaken and never ran at all.
+function deepLinkOutcome(v, nonce) {
+  const past = (v.history || []).find(h => h.nonce === nonce);
+  const ago = past && past.age ? ` ${past.age} AGO` : '';
+  if(past && past.status === 'executed') return `TX #${nonce} WAS EXECUTED${ago} — NOTHING LEFT TO SIGN`;
+  if(past && past.status === 'cancelled') return `TX #${nonce} WAS CANCELLED${ago} — IT CANNOT EXECUTE`;
+  if(past && past.status === 'stale') return `TX #${nonce} NEVER RAN — ANOTHER PROPOSAL TOOK ITS NONCE`;
+  // Not in the last 50 terminal rows either. The vault's own nonce still says
+  // whether this one is behind it, which is the part worth being sure about.
+  if(typeof v.nonce === 'number' && nonce < v.nonce) return `TX #${nonce} IS NO LONGER PENDING — THE VAULT IS PAST NONCE ${nonce}`;
+  return `TX #${nonce} IS NOT IN THIS VAULT'S QUEUE`;
+}
+
 function handleDeepLink() {
   const hash = location.hash.slice(1);
   const matchTx = hash.match(/^(\d+)\/(0x[0-9a-fA-F]{40})\/tx\/(\d+)$/);
@@ -9189,8 +9237,17 @@ function handleDeepLink() {
         rpc: CHAINS[linkChain].rpcs[0],
         addChainParams: ADD_CHAIN_PARAMS[linkChain] || null
       }).catch(_=>{});
-      // Load this specific vault
-      const addr = match[2];
+      // Load this specific vault, at its canonical spelling. A fragment is the
+      // one part of a URL that gets retyped, wrapped and case-folded on its way
+      // between owners, and it arrives here as whatever survived that. Every
+      // other entry point already normalises — resolveName() ends in
+      // getAddress(), getOwners() decodes checksummed — so this was the one
+      // route by which a vault could be read under an address that did not
+      // match its own. Lowercased before checksumming so a link that lost its
+      // case still opens: EIP-55 is there to catch a typo, and a typo'd address
+      // is caught better downstream, where the code at it is read and reported
+      // as not being a Multisig clone.
+      const addr = ethers.getAddress(match[2].toLowerCase());
       if(matchTx){ _focusNonce = parseInt(match[3]); _focusVaultAddr = addr; _focusScroll = true; }
       showLoading('LOADING VAULT');
       (async () => {
@@ -9205,10 +9262,12 @@ function handleDeepLink() {
             render();
             await Promise.all([loadVaultQueue(0), loadVaultHistory(0)]);
             render();
-            // If the linked tx isn't in the queue (already executed or cancelled),
-            // tell the co-signer instead of silently doing nothing.
+            // If the linked proposal isn't in the queue, say what became of it.
+            // Someone followed this link to co-sign; "may be executed or
+            // cancelled" leaves them to work out which, and the answer is
+            // already loaded — loadVaultHistory ran in the same breath above.
             if(_focusNonce !== null && !S.vaults[0].queue.some(t => t.nonce === _focusNonce)) {
-              flash(`TX #${_focusNonce} NOT IN QUEUE — MAY BE EXECUTED OR CANCELLED`);
+              flash(deepLinkOutcome(S.vaults[0], _focusNonce));
               _focusNonce = null; _focusVaultAddr = null; _focusScroll = false;
             }
           } else {
