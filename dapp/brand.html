@@ -268,7 +268,7 @@ const QUOTES=[
   ["One line","Multisig is a k-of-n multisig wallet with a built-in timelock, in a single file of Solidity."],
   ["Standfirst","Multisig is an open-source wallet that requires several people to approve before money moves, with a delay built in so a bad transaction can be cancelled before it lands."],
   ["Short","Multisig is an open-source smart contract wallet where a set number of owners must approve before funds move. Unlike most multisigs, the timelock is built into the wallet itself rather than bolted on, so a queued transaction is visible — and cancellable — before it executes. It is free, unowned, immutable and live on five chains."],
-  ["Long","Multisig is an open-source smart contract wallet for groups who hold money together: treasuries, protocol admins, funds, families. A transaction only executes once k of n owners have approved it, and an optional delay holds approved transactions in a public queue where anyone can see them coming and the owners can still cancel. Both the threshold and the timelock live in the wallet contract itself — 275 lines in one file, with every piece of mutable state packed into a single storage slot, which makes it roughly half the bytecode and a third to a half cheaper to deploy than the incumbent. It is MIT-licensed, immutable, and charges nothing."],
+  ["Long","Multisig is an open-source smart contract wallet for groups who hold money together: treasuries, protocol admins, funds, families. A transaction only executes once k of n owners have approved it, and an optional delay holds approved transactions in a public queue where anyone can see them coming and the owners can still cancel. Both the threshold and the timelock live in the wallet contract itself — 275 lines of code in one file, with every piece of mutable state packed into a single storage slot, which makes it roughly half the bytecode and a third to a half cheaper to deploy than the incumbent. It is MIT-licensed, immutable, and charges nothing."],
 ];
 const quote=([name,text])=>`
 <div class="quote">
@@ -335,7 +335,7 @@ EXPLAINER:`
 <h2>WHAT MAKES IT DIFFERENT</h2>
 <table>
 <tr><td><strong>The timelock is part of the wallet</strong></td><td>Most multisigs need a second contract wired in front to get a delay. Here <code>delay</code> is a field on the wallet. Fewer moving parts, one thing to audit.</td></tr>
-<tr><td><strong>One file</strong></td><td>The wallet and its factory are 275 lines of Solidity in a single file. You can read the whole thing in an afternoon, which is the only real way to trust it.</td></tr>
+<tr><td><strong>One file</strong></td><td>The wallet and its factory are 275 lines of Solidity in a single file, comments aside. You can read the whole thing in an afternoon, which is the only real way to trust it.</td></tr>
 <tr><td><strong>One storage slot</strong></td><td>Delay, nonce, threshold, owner count and executor are packed together. That is where most of the gas saving comes from.</td></tr>
 <tr><td><strong>Same address everywhere</strong></td><td>Deployed with CREATE2, so a wallet has one address across Ethereum, Base, MegaETH, Arbitrum and OP Mainnet.</td></tr>
 <tr><td><strong>Works on a normal wallet</strong></td><td>Under EIP-7702 an existing EOA can take on multisig behaviour without moving funds, while its owner keeps the original key.</td></tr>
@@ -479,7 +479,7 @@ FACTS:`
 <tr><td>First commit</td><td>2026-03-31</td></tr>
 <tr><td>Mainnets</td><td>Ethereum, Base, MegaETH, Arbitrum, OP Mainnet</td></tr>
 <tr><td>Testnets</td><td>Sepolia, Base Sepolia</td></tr>
-<tr><td>Source size</td><td>275 lines, one file (wallet + factory)</td></tr>
+<tr><td>Source size</td><td>275 lines of code, one file (wallet + factory)</td></tr>
 <tr><td>Test coverage</td><td>100%</td></tr>
 <tr><td>Security reviews</td><td>5, all published — one external human audit, three external agent reviews, one internal</td></tr>
 <tr><td>Token</td><td>None</td></tr>

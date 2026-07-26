@@ -31,8 +31,8 @@ a{color:var(--a)}
 button{cursor:pointer;font-family:var(--f)}
 button:active{transform:scale(.97)}
 @media(hover:hover){button:hover{opacity:.75}}
-/* Kept in step with index.html: this page had no focus indicator at all, so a
-   keyboard user tabbing between the section tabs had nothing to go on. */
+/* Kept in step with index.html: focus indicator for keyboard users tabbing
+   between the section tabs. */
 button:focus-visible,a:focus-visible{outline:2px solid var(--a);outline-offset:2px}
 button:focus:not(:focus-visible){outline:none}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}}
@@ -68,13 +68,10 @@ pre{font-size:11px;line-height:1.7;color:var(--m);padding:16px;border:1px solid 
 .sig .params{font-weight:400;color:var(--m)}
 .desc{font-size:12px;color:var(--m);padding:4px 0 14px;line-height:1.7}
 .note{font-size:11px;color:var(--m);border-left:2px solid var(--a);padding:8px 0 8px 14px;margin:16px 0;line-height:1.7}
-/* Tables carry two columns of short label + value here, so they get a real
-   column gutter (there was none — cells butted straight into each other) and
-   top alignment, so the first line of every cell in a row shares a baseline
-   instead of the shortest cell floating to the middle of the tallest.
-   Wrapping is opt-in: break-all was applied to every cell, which is right for a
-   40-character address and wrong for prose, where it splits words mid-syllable.
-   .brk marks the cells that hold unbreakable machine strings. */
+/* Two columns of short label + value: a column gutter, and top alignment so
+   every cell in a row shares a first-line baseline. Wrapping is opt-in. .brk
+   marks cells holding unbreakable machine strings like a 40-character address;
+   break-all on prose splits words mid-syllable. */
 table{width:100%;border-collapse:collapse;margin-bottom:16px;font-size:12px}
 th{text-align:left;font-size:10px;font-weight:700;letter-spacing:2px;color:var(--d);padding:10px 20px 10px 0;border-bottom:1px solid var(--ln);vertical-align:bottom}
 td{padding:12px 20px 12px 0;border-bottom:1px solid var(--ln);color:var(--m);vertical-align:top}
@@ -84,15 +81,10 @@ td a{color:var(--a);text-decoration:none;border-bottom:1px solid var(--ln)}
 td a:hover{border-bottom-color:var(--a)}
 
 /* ── AUDIT LEDGER ──────────────────────────────────────────────────
-   Six reviews, each with a date, an auditor, a scope and a severity
-   breakdown. As a five-column table inside a 780px frame every cell was
-   narrower than its content, so every one of them was hand-broken with <br>
-   until nothing lined up: the date floated to the vertical middle of a
-   three-line neighbour, and break-all split "multi-agent" across lines.
-   One record per review instead. The date and auditor lead on a single line
-   with the report links on the trailing edge; the scope reads as prose because
-   that is what it is; and the finding counts become chips toned by severity
-   class, so the ladder is scannable without being read word by word. */
+   One record per review rather than a table: five columns inside a 780px frame
+   left every cell narrower than its content. Date and auditor lead on one line
+   with the report links trailing, the scope runs as prose, and the finding
+   counts are chips toned by severity class. */
 /* baseline, not top: the date is 11px and the auditor 13px, so aligning their
    boxes leaves the date sitting 2px high. Rows 2 and 3 hold a single item each,
    where baseline alignment is a no-op. */
@@ -100,7 +92,7 @@ td a:hover{border-bottom-color:var(--a)}
 .audit:first-of-type{border-top:1px solid var(--ln)}
 .audit-when{grid-column:1;grid-row:1;font-size:11px;color:var(--d);white-space:nowrap;line-height:1.5}
 .audit-who{grid-column:2;grid-row:1;font-size:13px;font-weight:700;color:var(--a);line-height:1.5}
-/* The qualifier is who/how, not a second auditor — same line where it fits,
+/* The qualifier is who/how, not a second auditor: same line where it fits,
    never competing with the name for weight. */
 .audit-who .q{font-weight:400;color:var(--d);font-size:11px;margin-left:8px}
 .audit-links{grid-column:3;grid-row:1;display:flex;gap:14px;justify-self:end;align-items:baseline;white-space:nowrap}
@@ -109,14 +101,13 @@ td a:hover{border-bottom-color:var(--a)}
 .audit-scope{grid-column:2/-1;font-size:11px;color:var(--m);line-height:1.6}
 .audit-scope .op{color:var(--d)}
 .audit-find{grid-column:2/-1;display:flex;flex-wrap:wrap;gap:5px;align-items:center}
-/* Method is how the review was run, not what it covered — dimmer than the scope,
-   and placed explicitly like its siblings so a record that omits one row does not
-   shuffle the rest into column 1. */
+/* Method is how the review was run, not what it covered, so it sits dimmer than
+   the scope. Placed explicitly like its siblings, so a record that omits one row
+   does not shuffle the rest into column 1. */
 .audit-meth{grid-column:2/-1;font-size:11px;color:var(--d);line-height:1.6}
-/* Severity chip. Tone is the severity CLASS, not a verdict on the project —
-   the same vocabulary every report uses. A zero count keeps its slot (0 high is
-   the most informative cell in the row) but drops its tone, so the eye lands on
-   what was actually found. */
+/* Severity chip. Tone marks the severity class, not a verdict on the project.
+   A zero count keeps its slot, since 0 high is the most informative cell in the
+   row, but drops its tone so the eye lands on what was actually found. */
 .sev{font-size:9px;font-weight:700;letter-spacing:1.5px;border:1px solid var(--ln);padding:3px 7px;color:var(--d);white-space:nowrap}
 .sev.crit,.sev.high{color:var(--r);border-color:color-mix(in srgb,var(--r) 45%,transparent);background:color-mix(in srgb,var(--r) 8%,transparent)}
 .sev.med{color:var(--y);border-color:color-mix(in srgb,var(--y) 45%,transparent);background:color-mix(in srgb,var(--y) 8%,transparent)}
@@ -140,7 +131,7 @@ td a:hover{border-bottom-color:var(--a)}
   p{font-size:12px}
   pre{font-size:10px;padding:12px}
   /* One column: the date leads as its own dim line, the auditor and scope run
-     full width, and the report links drop to the bottom of the record rather
+     full width, and the report links sit at the bottom of the record rather
      than fighting the name for a 320px row. */
   .audit{grid-template-columns:minmax(0,1fr);gap:6px 0;padding:16px 0}
   .audit-when{grid-area:1/1}
@@ -218,7 +209,7 @@ OVERVIEW:`
 
 CONTRACT:`
 <h2>MULTISIG.SOL</h2>
-<p>One file, 321 lines, holding the wallet and its factory. Owners stored as a linked list (sentinel pattern). Sequential nonce. EIP-712 signatures. ERC-1271 support via <code>isValidSignature</code>.</p>
+<p>One file, 275 lines of code, holding the wallet and its factory. Owners stored as a linked list (sentinel pattern). Sequential nonce. EIP-712 signatures. ERC-1271 support via <code>isValidSignature</code>.</p>
 
 <h2>STATE</h2>
 <pre>uint32  delay        // timelock in seconds (0 = unlocked)
