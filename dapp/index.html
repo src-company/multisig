@@ -2259,9 +2259,21 @@ function txKind(tx, v) {
     const d = dec('register', wnsRegIface);
     if(!d || BigInt(d[0]) !== BigInt(WNS_ID_PARENT)) return { label:'CLAIM NAME · UNKNOWN NAMESPACE', tone:'code', warn:true,
       note:`MINTS A SUBDOMAIN UNDER A PARENT NODE THIS INTERFACE DOES NOT RECOGNISE — NOT UNDER id.wei. THE NAME THIS PRODUCES IS NOT THE NAME THE LABEL READS AS. CHECK THE PARENT ID BEFORE SIGNING.` };
-    const full = wnsFullName(d[1]).toUpperCase();
-    return { label:`CLAIM NAME · ${full}`, tone:'policy',
-      note:`REGISTERS ${full} TO THE VAULT, FREE — THE NAME IS AN NFT THE VAULT THEN HOLDS, SO MOVING IT LATER TAKES A FULL MULTISIG ROUND LIKE ANY OTHER ASSET. IT MAKES ${full} RESOLVE TO THIS ADDRESS. IT DOES NOT MAKE THIS ADDRESS ANSWER WITH ${full} — THAT IS setPrimaryName, AND IT IS NOT IN THIS PROPOSAL.` };
+    // The label is a free-form string out of a proposal row, and rows are
+    // anon-writable. `label` is escaped at its sink; `note` is emitted as
+    // trusted HTML because every other note here is built from entities and
+    // shaped values — so the one untrusted thing in it is escaped here, where
+    // it enters, rather than relying on a sink that does not escape.
+    const raw = wnsFullName(d[1]);
+    const full = esc(raw.toUpperCase());
+    // A label this interface would refuse to claim is one worth flagging when
+    // it arrives from somewhere else: the registrar accepts zero-width spaces
+    // and mixed scripts, and this is the screen where a name that is drawn to
+    // look like another name gets signed for.
+    const odd = !wnsLabelValid(asciiLower(d[1]));
+    return { label:`CLAIM NAME · ${raw.toUpperCase()}`, tone:'policy', warn:odd,
+      note:`REGISTERS ${full} TO THE VAULT, FREE — THE NAME IS AN NFT THE VAULT THEN HOLDS, SO MOVING IT LATER TAKES A FULL MULTISIG ROUND LIKE ANY OTHER ASSET. IT MAKES ${full} RESOLVE TO THIS ADDRESS. IT DOES NOT MAKE THIS ADDRESS ANSWER WITH ${full} — THAT IS setPrimaryName, AND IT IS NOT IN THIS PROPOSAL.`
+        + (odd ? ` THIS LABEL USES CHARACTERS THIS INTERFACE WOULD NOT CLAIM — IT MAY CONTAIN INVISIBLE OR MIXED-SCRIPT CHARACTERS AND MAY NOT BE THE NAME IT APPEARS TO BE. READ THE CALLDATA BEFORE SIGNING.` : '') };
   }
   if(is('wnsSetPrimary') && tx.target && tx.target.toLowerCase() === WEINS.toLowerCase()) {
     // The id is a one-way hash, so which name this points at cannot be read off
@@ -2285,8 +2297,15 @@ function txKind(tx, v) {
       // proposal — and a queue row reading "BATCH · 2 CALLS" would bury the
       // only thing a co-signer needs to check, which is the name itself.
       const ident = wnsIdentityBatch(targets, values, datas);
-      if(ident) return { label:`ON-CHAIN IDENTITY · ${ident.full.toUpperCase()}`, tone:'policy',
-        note:`CLAIMS ${ident.full.toUpperCase()} FOR THIS VAULT AND POINTS REVERSE RESOLUTION AT IT, ATOMICALLY — AFTER THIS THE NAME RESOLVES TO THIS ADDRESS AND THIS ADDRESS ANSWERS WITH THE NAME. THE SUBDOMAIN IS FREE; THE ONLY COST IS THE GAS TO EXECUTE. THE NAME BECOMES AN NFT THE VAULT HOLDS. IT GRANTS NOBODY ANY POWER OVER THE VAULT AND MOVES NOTHING OUT OF IT.` };
+      if(ident) {
+        // Same rule as the single-call branch above: escaped into the note,
+        // raw into the label, which its own sink escapes.
+        const full = esc(ident.full.toUpperCase());
+        const odd = !wnsLabelValid(ident.label);
+        return { label:`ON-CHAIN IDENTITY · ${ident.full.toUpperCase()}`, tone:'policy', warn:odd,
+          note:`CLAIMS ${full} FOR THIS VAULT AND POINTS REVERSE RESOLUTION AT IT, ATOMICALLY — AFTER THIS THE NAME RESOLVES TO THIS ADDRESS AND THIS ADDRESS ANSWERS WITH THE NAME. THE SUBDOMAIN IS FREE; THE ONLY COST IS THE GAS TO EXECUTE. THE NAME BECOMES AN NFT THE VAULT HOLDS. IT GRANTS NOBODY ANY POWER OVER THE VAULT AND MOVES NOTHING OUT OF IT.`
+            + (odd ? ` THIS LABEL USES CHARACTERS THIS INTERFACE WOULD NOT CLAIM — IT MAY CONTAIN INVISIBLE OR MIXED-SCRIPT CHARACTERS AND MAY NOT BE THE NAME IT APPEARS TO BE. READ THE CALLDATA BEFORE SIGNING.` : '') };
+      }
       const parts = datas.map((cd, i) => (!cd || cd === '0x') && BigInt(values[i]) > 0n ? 'ETH TRANSFER' : selectorToLabel(cd));
       return { label:`BATCH · ${targets.length} CALLS`, tone:'code',
         note:`${parts.join(' + ')} — EXECUTED ATOMICALLY, SO EITHER EVERY CALL LANDS OR THE WHOLE PROPOSAL REVERTS AND NOTHING DOES.` };
@@ -4438,7 +4457,13 @@ function renderCreateWns(c){
   // Not in the demo. Every other control on this form is pretend there; a live
   // registry lookup against a name someone could really lose is not, and the
   // demo deploy has no transaction to carry the claim in anyway.
-  if(S.demoMode || !c.name || !c.name.trim()) return '';
+  //
+  // The claim is cancelled on the way out, not just hidden. There is no name to
+  // fold when the field is empty, so a tick left standing would survive as a
+  // claim for the empty label — an IDENTITY line in the preview reading
+  // ".id.wei", and a chain still added to the deploy for a name that no longer
+  // exists. Every path that stops offering the claim has to withdraw it.
+  if(S.demoMode || !c.name || !c.name.trim()){ cancelCreateWns(c); return ''; }
   const slug = wnsSlug(c.name);
   const mainIdx = NETS.findIndex(n => n.id === WNS_CHAIN_ID);
   const onMainnet = c.net === mainIdx || (c.clone || []).includes(mainIdx);
@@ -4469,6 +4494,9 @@ function renderCreateWns(c){
     av === 'taken'    ? `<span class="wns-st" style="color:var(--y)">ALREADY CLAIMED</span>` :
     av === 'invalid'  ? `<span class="wns-st" style="color:var(--r)">NOT A VALID LABEL</span>` :
     `<span class="wns-st" style="color:var(--y)">COULD NOT CHECK <button class="reject-link" style="padding:1px 8px;margin-left:6px" onclick="retryWnsAv('${jstr(slug)}','${jstr(asker)}')">RETRY</button></span>`;
+  // Ticked stays clickable even while a renamed vault's new label is still
+  // being checked: the box is disabled to stop a claim being made on an unknown
+  // name, never to stop one being withdrawn.
   const on = !!c.wns;
   // Stated before the tick, not after it, and again in the review screen.
   const why = on && c.wnsAddedNet
@@ -4477,7 +4505,7 @@ function renderCreateWns(c){
       ? `<div class="wns-why">CLAIMING ALSO DEPLOYS ON ETHEREUM &mdash; ONE MORE TRANSACTION, AT MAINNET GAS.</div>`
       : '';
   return `<div class="wns-opt${on?' on':''}">
-    <button type="button" class="wns-box" role="checkbox" aria-checked="${on}" aria-label="Claim ${esc(slug)}${WNS_ID_SUFFIX} for this vault, free" ${free?'':'disabled'} onclick="toggleCreateWns()">${on?'&#10003;':''}</button>
+    <button type="button" class="wns-box" role="checkbox" aria-checked="${on}" aria-label="Claim ${esc(slug)}${WNS_ID_SUFFIX} for this vault, free" ${free||on?'':'disabled'} onclick="toggleCreateWns()">${on?'&#10003;':''}</button>
     <span>CLAIM <b>${esc(slug)}${WNS_ID_SUFFIX}</b> &middot; FREE</span>
     ${status}
     <span class="wns-q" tabindex="0" role="note" aria-label="${esc(tip)}" title="${esc(tip)}">?</span>
@@ -4769,16 +4797,13 @@ function submitBatch() {
   }
 }
 
+// No demo branch, the way submitStake has none: the tab is offered only on
+// mainnet outside the demo, so a demo path here would be unreachable code
+// pretending to be a fallback. If the chain moved underneath the open builder,
+// say so rather than queue a proposal that cannot be built.
 function submitName() {
-  // The NAME tab is gated on mainnet and the demo runs off no chain at all, so
-  // this branch exists only for the seeded vaults, where it produces a row that
-  // reads like the real one and touches nothing.
-  if (S.demoMode) {
-    const v = S.vaults[S.sel];
-    addTxDemo({ value: "0", token: "", target: v.address, dataLabel: `IDENTITY ${wnsFullName(S.wnsLabel)}` });
-  } else {
-    guardSubmit(prodSubmitName)();
-  }
+  if(!wnsAvailableChain()){ flash('WNS NAMES ARE ETHEREUM MAINNET ONLY'); return; }
+  guardSubmit(prodSubmitName)();
 }
 
 function doSign(vi, nonce) {
@@ -5370,6 +5395,12 @@ function assertPreviewed(raw, resolved, chainId){
 // Fallback: ENS reverse for any still-unnamed owners (best-effort, parallel).
 // Returns a lowercased-address → name map; never throws.
 const _ownerNameCache = {};
+// Drop one address's cached answer. An owner's name is theirs and changes on
+// their schedule, but a vault's name changes on *this app's* — the NAME tab
+// claims one, and a confirmed "no name" cached before that claim would outlive
+// it for the rest of the session, leaving the vault showing as an address in
+// the one interface that just gave it a name.
+function forgetOwnerName(addr){ if(addr) delete _ownerNameCache[String(addr).toLowerCase()]; }
 async function resolveOwnerNames(addrs) {
   const out = {};
   if(!addrs || !addrs.length) return out;
@@ -5778,6 +5809,12 @@ async function loadAllVaults() {
 }
 
 async function loadSingleVaultData(addr, dbWallet) {
+  // Re-read the vault's own name every time its data is loaded. This runs on
+  // explicit loads — page load, chain switch, deep link, a deploy landing —
+  // not on a poll, and the vault is already in the reverse-resolution batch
+  // below, so it costs no extra round trip and it is the only thing that makes
+  // a name claimed during this session show up without a reload.
+  forgetOwnerName(addr);
   // Phase 1: RPC + DB lookup in parallel
   const [s, dbWFromQuery] = await Promise.all([
     multicallLoad(addr),
@@ -7639,8 +7676,12 @@ async function prodSubmitName() {
     // burns that nonce with a no-op.
     const label = asciiLower(String(S.wnsLabel || '').trim());
     if(!wnsLabelValid(label)) { flash('ENTER A VALID NAME'); return; }
-    retryWnsAv(label, v.address);
     const fresh = await wnsLookup(label, v.address);
+    // The form's cached answer is now the stale one; replace it rather than
+    // just dropping it, so a re-render does not fire a third lookup for a
+    // question this call already answered.
+    S.wnsAv[wnsAvKey(label, v.address)] = {
+      state: fresh.free === true ? 'free' : fresh.free === false ? 'taken' : 'unknown', holder: fresh.holder };
     const ownedNow = fresh.free === false && fresh.holder
       && fresh.holder.toLowerCase() === v.address.toLowerCase();
     if(fresh.free === null) { flash('COULD NOT CHECK THE NAME ON MAINNET — TRY AGAIN'); return; }
