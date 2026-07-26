@@ -6075,10 +6075,20 @@ async function dbFindWallet(addr) {
 // Likewise: this answers "which vaults am I an owner of", and an owner whose
 // address is stored in a different case than their wallet reports would have
 // been told they have none.
+// Returns null — not [] — when the question could not be asked.
+//
+// The error was discarded here, so a cold-starting PostgREST, a 502, or four
+// timed-out retries all came back as an empty list, and loadAllVaults cannot
+// tell that apart from "this account owns no vaults". What the operator saw was
+// a dashboard with nothing on it: not an error, not a spinner, just the absence
+// of everything they came to look at, with no way to tell whether their vaults
+// were gone or merely unreachable. An empty answer has to mean the service
+// answered.
 async function dbMyWallets(ownerAddr) {
-  const { data } = await sb.from('my_wallets')
+  const { data, error } = await sb.from('my_wallets')
     .select('id, chain_id, address, name, threshold, owner_count')
     .ilike('owner', ownerAddr).eq('chain_id', S.chainId);
+  if(error) { console.error('DB my wallets:', error); return null; }
   // One vault, one entry. A database that collected a duplicate pair before the
   // lookup above was case-blind would otherwise put the same vault on screen
   // twice, under two names, each with its own queue — which is a worse way to
@@ -6291,6 +6301,15 @@ async function loadAllVaults() {
   if(!hadVaults) showLoading('LOADING VAULTS');
   try {
     const wallets = await dbMyWallets(addr);
+    // Unreachable, not empty — see dbMyWallets. Leave whatever is on screen
+    // exactly as it is and say what happened, rather than replacing it with the
+    // one thing that looks like an answer and is not.
+    if(wallets === null) {
+      hideLoading();
+      flash('COULD NOT REACH THE COORDINATION SERVICE — YOUR VAULTS ARE NOT LOST. RETRYING ON THE NEXT REFRESH.', 6000);
+      render();
+      return;
+    }
     // Preserve vaults loaded via deep link that aren't in the user's DB set
     const existing = S.vaults.filter(v => v.address && !wallets.some(w => w.address.toLowerCase() === v.address.toLowerCase()));
     if(!wallets.length) {
