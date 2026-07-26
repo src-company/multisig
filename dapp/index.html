@@ -960,6 +960,30 @@ function fastPathVoidsTimelock(v) {
   return !!v && v.delay > 0 && v.ownerCount > 0 && v.ownerCount === v.threshold;
 }
 
+// Can this vault be cancelled inside its timelock window at all?
+//
+// Cancelling runs through TimelockExecutor.forward(), and only a
+// TimelockExecutor answers that call. The accelerate path was already gated on
+// this (v.fastPath is false without one) and prodSubmit's cancel-via-executor
+// branch checks it — the cancel button did not, so a vault with no executor
+// offered a CANCEL that could never work. With executor == address(0) the
+// failure was silent and worse than useless: a contract call to an address with
+// no code does not revert, it is an ordinary transaction to an empty account.
+// It mined successfully, the interface said CANCELLED, and the proposal was
+// recorded cancelled in the coordination database — while on chain it was still
+// queued, still maturing, and executable by anyone once it did.
+//
+// Without an executor there is no in-window brake at all: cancelQueued is
+// onlySelf, so a cancel raised as an ordinary proposal is itself queued for the
+// full delay and matures no earlier than what it means to stop. Saying so is
+// the honest answer; offering a button is not.
+function canForwardCancel(v) {
+  if(S.demoMode) return true;
+  if(!v || !v.isTimelockExecutor) return false;
+  const ex = v.executor;
+  return !!ex && ex !== ethers.ZeroAddress && ex !== '0x0000...0000';
+}
+
 // L-2 (second review). The wallet's fallback answers the three ERC-721/1155
 // receiver selectors and returns empty success for everything else instead of
 // reverting. A self-call carrying a mistyped selector therefore "succeeds":
@@ -2338,10 +2362,32 @@ function txKind(tx, v) {
   }
 
   // ── queue control ──
-  if(is('cancelQueued')) return { label:'CANCEL QUEUED', tone:'danger',
-    note:`DROPS A PROPOSAL THAT IS ALREADY QUEUED, BEFORE ITS TIMELOCK ELAPSES. THE CANCELLED PROPOSAL CANNOT THEN EXECUTE.` };
-  if(is('executeQueued')) return { label:'ACCELERATE', tone:'danger',
-    note:`EXECUTES A QUEUED PROPOSAL IMMEDIATELY, SKIPPING WHATEVER IS LEFT OF ITS TIMELOCK. THIS IS THE STEP THE DELAY EXISTS TO PREVENT, SO IT TAKES EVERY OWNER'S SIGNATURE.` };
+  // Both name the proposal they act on wherever it can be identified. A cancel
+  // carries only a hash, and a co-signer asked to approve one raised elsewhere
+  // has no way to read which proposal that is — but every queued entry's digest
+  // is derived here already, so the hash can simply be looked up. Says nothing
+  // rather than guessing when there is no match: an unrecognised hash may be a
+  // proposal this queue has not loaded, and naming the wrong one is worse than
+  // naming none.
+  const queuedAt = h => {
+    const hit = (v.queue || []).find(q => q.txHash && String(q.txHash).toLowerCase() === String(h).toLowerCase());
+    return hit ? `#${hit.nonce}` : null;
+  };
+  if(is('cancelQueued')) {
+    const d = dec('cancelQueued');
+    const which = d ? queuedAt(d[0]) : null;
+    return { label: which ? `CANCEL QUEUED · ${which}` : 'CANCEL QUEUED', tone:'danger',
+      note:(which
+        ? `DROPS QUEUED PROPOSAL ${which} BEFORE ITS TIMELOCK ELAPSES, SO IT CAN NEVER EXECUTE.`
+        : `DROPS A PROPOSAL THAT IS ALREADY QUEUED, BEFORE ITS TIMELOCK ELAPSES. THE CANCELLED PROPOSAL CANNOT THEN EXECUTE.`)
+        + (which ? '' : ` IT NAMES THAT PROPOSAL BY HASH, AND NO PROPOSAL IN THIS QUEUE HAS THAT HASH — CHECK WHAT IT CANCELS BEFORE SIGNING.`) };
+  }
+  if(is('executeQueued')) {
+    const d = dec('executeQueued');   // (target, value, data, nonce)
+    const which = d ? `#${Number(d[3])}` : null;
+    return { label: which ? `ACCELERATE · ${which}` : 'ACCELERATE', tone:'danger',
+      note:`EXECUTES ${which ? `QUEUED PROPOSAL ${which}` : 'A QUEUED PROPOSAL'} IMMEDIATELY, SKIPPING WHATEVER IS LEFT OF ITS TIMELOCK. THIS IS THE STEP THE DELAY EXISTS TO PREVENT, SO IT TAKES EVERY OWNER'S SIGNATURE.` };
+  }
 
   // ── composite / raw ──
   if(is('batch')) {
@@ -2415,21 +2461,26 @@ function txSt(tx, v) {
   const ac = Object.values(tx.approvals).filter(Boolean).length;
 
   if (tx.eta > 0) {
-    const csc = tx.cancelSigners ? tx.cancelSigners.size : 0;
-    const cancelReady = csc >= v.threshold;
-    const youCancel = you && tx.cancelSigners && tx.cancelSigners.has(you.toLowerCase());
+    // Cancelling runs through the executor's forward(). Without one there is no
+    // route at all, and offering the button anyway produced a cancel that
+    // reported success and cancelled nothing — see canForwardCancel. `noCancel`
+    // says so on the card rather than leaving a silent gap where the brake was.
+    const cancellable = canForwardCancel(v);
+    const csc = cancellable && tx.cancelSigners ? tx.cancelSigners.size : 0;
+    const cancelReady = cancellable && csc >= v.threshold;
+    const youCancel = cancellable && you && tx.cancelSigners && tx.cancelSigners.has(you.toLowerCase());
 
     if (fmtEta(tx.eta) === "READY") {
-      return { l: "READY", c: "var(--g)", exec: true,
-        cancel: !cancelReady && !youCancel, cancelExec: cancelReady, cancelSigs: csc };
+      return { l: "READY", c: "var(--g)", exec: true, noCancel: !cancellable,
+        cancel: cancellable && !cancelReady && !youCancel, cancelExec: cancelReady, cancelSigs: csc };
     }
 
     const accelSigCount = tx.accelSigners ? tx.accelSigners.size : 0;
     const accelReady = v.fastPath && accelSigCount >= v.ownerCount;
     const youAccel = you && tx.accelSigners && tx.accelSigners.has(you.toLowerCase());
 
-    return { l: fmtEta(tx.eta), c: "var(--d)",
-      cancel: !cancelReady && !youCancel, cancelExec: cancelReady, cancelSigs: csc,
+    return { l: fmtEta(tx.eta), c: "var(--d)", noCancel: !cancellable,
+      cancel: cancellable && !cancelReady && !youCancel, cancelExec: cancelReady, cancelSigs: csc,
       accel: v.fastPath && !accelReady && !youAccel, accelExec: accelReady, accelSigs: accelSigCount };
   }
 
@@ -2699,10 +2750,26 @@ function resetCxState() {
   clearTimeout(_cxDebounce);
 }
 
+// Every signing and sending path starts here, so the chain check lives here.
+// A vault is a CREATE2 clone at the same address on every chain, and the app's
+// selected chain is what builds the EIP-712 domain and what every read comes
+// from — but the transaction goes wherever the WALLET is. Left unchecked, a
+// wallet sitting on another chain sends execute() to whatever occupies that
+// address there: a different vault, with different owners, or nothing at all.
+// The domain's chainId makes the signature useless there, so this is a wasted
+// fee rather than a loss — but approve() would register real authorisation on
+// the wrong vault, and the clearer failure is the one that never leaves.
+// S.walletChain is written on connect and on every chainChanged; null means the
+// app has not been told, and an unknown chain is not grounds to refuse.
 function requireSigner() {
   const signer = window._signer;
   const addr = window._connectedAddress;
   if(!signer) { flash('CONNECT WALLET FIRST'); return null; }
+  if(S.walletChain && S.walletChain !== S.chainId) {
+    const where = CHAINS[S.walletChain] ? CHAINS[S.walletChain].name.toUpperCase() : `CHAIN ${S.walletChain}`;
+    flash(`WALLET IS ON ${where}, THIS VAULT IS ON ${chainName()} — SWITCH TO SIGN`);
+    return null;
+  }
   return { signer, addr };
 }
 
@@ -3443,19 +3510,22 @@ function renderDash(v,mob){
             ${s.cancelExec?`<button class="btn btn-danger btn-w" onclick="doCancel(${S.sel},${tx.nonce})">EXECUTE CANCEL <span class="btn-qual">${s.cancelSigs}/${v.threshold} VIA EXECUTOR</span></button>`:''}
             ${s.cancel?`<button class="btn btn-danger btn-w" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL${s.cancelSigs?` (${s.cancelSigs}/${v.threshold})`:''}</button>`:''}
             ${!s.cancel&&!s.cancelExec&&s.cancelSigs?`<span style="font-size:10px;color:var(--r);letter-spacing:1px">CANCEL ${s.cancelSigs}/${v.threshold}</span>`:''}
+            ${s.noCancel?`<span style="font-size:10px;color:var(--d);letter-spacing:1px" title="Cancelling inside the timelock window goes through the executor's forward(). This vault has no TimelockExecutor, so there is no route: a cancel raised as an ordinary proposal is itself queued for the full delay and matures no earlier than what it would stop.">NO EXECUTOR &middot; CANNOT CANCEL</span>`:''}
           </div>`
         :`<div style="display:flex;gap:8px">
             <button class="btn btn-green" onclick="doExecute(${S.sel},${tx.nonce})">EXECUTE</button>
             ${s.cancelExec?`<button class="btn btn-danger" onclick="doCancel(${S.sel},${tx.nonce})">EXECUTE CANCEL <span class="btn-qual">${s.cancelSigs}/${v.threshold} VIA EXECUTOR</span></button>`:''}
             ${s.cancel?`<button class="btn btn-danger" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL${s.cancelSigs?` (${s.cancelSigs}/${v.threshold})`:''}</button>`:''}
             ${!s.cancel&&!s.cancelExec&&s.cancelSigs?`<span style="font-size:10px;color:var(--r);letter-spacing:1px">CANCEL ${s.cancelSigs}/${v.threshold}</span>`:''}
+            ${s.noCancel?`<span style="font-size:10px;color:var(--d);letter-spacing:1px" title="Cancelling inside the timelock window goes through the executor's forward(). This vault has no TimelockExecutor, so there is no route: a cancel raised as an ordinary proposal is itself queued for the full delay and matures no earlier than what it would stop.">NO EXECUTOR &middot; CANNOT CANCEL</span>`:''}
           </div>`;
-    }else if(s.cancel||s.cancelExec||s.accel||s.accelExec){
+    }else if(s.cancel||s.cancelExec||s.accel||s.accelExec||s.noCancel){
       actionBtn=mob
         ?`<div style="display:flex;gap:8px;flex-direction:column">
             ${s.accelExec?`<button class="btn btn-green btn-w" onclick="doAccelerate(${S.sel},${tx.nonce})">INSTANT EXECUTE <span class="btn-qual">${s.accelSigs}/${v.ownerCount} VIA EXECUTOR</span></button>`:''}
             ${s.accel?`<button class="btn btn-outline btn-w" onclick="doAccelerate(${S.sel},${tx.nonce})">ACCELERATE${s.accelSigs?` (${s.accelSigs}/${v.ownerCount})`:''}</button>`:''}
             ${!s.accel&&!s.accelExec&&s.accelSigs?`<span style="font-size:10px;color:var(--d);letter-spacing:1px">ACCELERATE ${s.accelSigs}/${v.ownerCount}</span>`:''}
+            ${s.noCancel?`<span style="font-size:10px;color:var(--d);letter-spacing:1px" title="Cancelling inside the timelock window goes through the executor's forward(). This vault has no TimelockExecutor, so there is no route: a cancel raised as an ordinary proposal is itself queued for the full delay and matures no earlier than what it would stop.">NO EXECUTOR &middot; CANNOT CANCEL</span>`:''}
             ${s.cancelExec?`<button class="btn btn-danger btn-w" onclick="doCancel(${S.sel},${tx.nonce})">EXECUTE CANCEL <span class="btn-qual">${s.cancelSigs}/${v.threshold} VIA EXECUTOR</span></button>`:''}
             ${s.cancel?`<button class="btn btn-danger btn-w" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL${s.cancelSigs?` (${s.cancelSigs}/${v.threshold})`:''}</button>`:''}
           </div>`
@@ -3463,6 +3533,7 @@ function renderDash(v,mob){
             ${s.accelExec?`<button class="btn btn-green" onclick="doAccelerate(${S.sel},${tx.nonce})">INSTANT EXECUTE <span class="btn-qual">${s.accelSigs}/${v.ownerCount} VIA EXECUTOR</span></button>`:''}
             ${s.accel?`<button class="btn btn-outline" onclick="doAccelerate(${S.sel},${tx.nonce})">ACCELERATE${s.accelSigs?` (${s.accelSigs}/${v.ownerCount})`:''}</button>`:''}
             ${!s.accel&&!s.accelExec&&s.accelSigs?`<span style="font-size:10px;color:var(--d);letter-spacing:1px">ACCELERATE ${s.accelSigs}/${v.ownerCount}</span>`:''}
+            ${s.noCancel?`<span style="font-size:10px;color:var(--d);letter-spacing:1px" title="Cancelling inside the timelock window goes through the executor's forward(). This vault has no TimelockExecutor, so there is no route: a cancel raised as an ordinary proposal is itself queued for the full delay and matures no earlier than what it would stop.">NO EXECUTOR &middot; CANNOT CANCEL</span>`:''}
             ${s.cancelExec?`<button class="btn btn-danger" onclick="doCancel(${S.sel},${tx.nonce})">EXECUTE CANCEL <span class="btn-qual">${s.cancelSigs}/${v.threshold} VIA EXECUTOR</span></button>`:''}
             ${s.cancel?`<button class="btn btn-danger" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL${s.cancelSigs?` (${s.cancelSigs}/${v.threshold})`:''}</button>`:''}
           </div>`;
@@ -3493,7 +3564,17 @@ function renderDash(v,mob){
           ${kindNote}
         </div>
         ${!blocked?`<span class="tx-status" style="color:${s.c}"${tx.eta>0&&!s.exec?` data-eta-status="${tx.eta}"`:``}>&bull; ${s.l}</span>`:""}
-        ${blocked?`<span class="tx-status" style="color:var(--d)" title="Waiting on proposal #${v.queue[firstUnqueued]?v.queue[firstUnqueued].nonce:''} — the vault executes nonces in order">&bull; BLOCKED</span>`:""}
+        ${blocked?(()=>{
+          // Two proposals can now sit at the same nonce — a nonce is contested,
+          // not owned, and the companion flows have to build at the live one.
+          // Only one of a contested set can ever execute, and "waiting on #4"
+          // reads as nonsense on a proposal that is itself #4.
+          const head=v.queue[firstUnqueued];
+          const same=head&&head.nonce===tx.nonce;
+          return `<span class="tx-status" style="color:var(--d)" title="${same
+            ?`Another proposal is already claiming nonce ${tx.nonce}. Only one of them can execute; the other is dropped once the vault moves past it.`
+            :`Waiting on proposal #${head?head.nonce:''} — the vault executes nonces in order`}">&bull; ${same?"CONTESTED":"BLOCKED"}</span>`;
+        })():""}
       </div>
       ${blocked?"":progressLine}
       <div class="approvals">${apHtml}${etaHtml}${(()=>{const xl=txExplorerLink(tx,v);return xl?`<span class="eta" style="margin-left:${etaHtml?'12px':'auto'}">${xl}</span>`:'';})()}</div>
@@ -4839,8 +4920,13 @@ function renderAdmin(v,mob){
         <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
           <span style="font-size:10px;color:var(--m)">${esc(tx.age)}</span>
           ${tx.status==='executed'
-            ?'<span style="color:var(--g);font-size:11px">\u2713</span>'
-            :'<span style="color:var(--r);font-size:11px">\u2717</span>'}
+            ?'<span style="color:var(--g);font-size:11px" title="Executed on chain">\u2713</span>'
+            :tx.status==='stale'
+            // Neither executed nor cancelled: superseded. Its nonce was consumed
+            // by something else, or it left the on-chain queue by a route this
+            // interface did not witness. It used to be filed under the tick.
+            ?'<span style="color:var(--d);font-size:11px" title="Never executed \u2014 superseded before it could run, or it left the queue by a route this interface did not observe">\u2013</span>'
+            :'<span style="color:var(--r);font-size:11px" title="Cancelled">\u2717</span>'}
           ${!S.demoMode&&tx.executionTx?explorerTxLink(tx.executionTx):''}
         </div>
       </div>`).join("");
@@ -5861,6 +5947,17 @@ async function dbCancelTx(txId, cancelledBy) {
   await sb.rpc('cancel_tx', { p_tx_id: txId, p_cancelled_by: cancelledBy });
 }
 
+// Retire a proposal that never ran — its nonce was consumed by something else,
+// or it left the on-chain queue by a route this client did not observe. NOT
+// mark_executed with block 0, which is what this used to be: that wrote status
+// 'executed', and the history ledger then showed a proposal that never happened
+// under the same green tick as one that did. A queued row leaving the chain is
+// the sharpest case — executed and cancelled are indistinguishable from here,
+// and calling both "executed" picks the flattering one.
+async function dbPruneTx(txId) {
+  await sb.rpc('prune_tx', { p_tx_id: txId, p_caller: window._connectedAddress });
+}
+
 async function dbSyncWalletState(vaultAddr, dbId) {
   if(!dbId || !vaultAddr || !window._connectedAddress) return;
   try {
@@ -6152,26 +6249,61 @@ async function loadVaultQueue(vi) {
     const staleTxIds = [];
 
     // Build accelerate/cancel/reject sig counts: map original nonce → set of signers.
-    // Counted the same way dbGetSigs collects them, so the "CANCEL 2/3" a row
-    // advertises is the count the cancel flow will actually be able to pack —
-    // an approval row on an off-chain-signed companion is not a signature it can
-    // use, and showing it here would promise a quorum that reverts.
-    const companionSigners = t => new Set((sigMap.get(t.id) || [])
-      .filter(s => { const st = s.sig_type || s.sigType; return st !== 'approval' && st !== 'sender'; })
-      .map(s => String(s.signer).toLowerCase()));
+    //
+    // Every one of these signatures is VERIFIED against the companion row's own
+    // digest before it is counted, exactly as an ordinary proposal's are below.
+    // They used to be counted by presence alone — a row in `signatures` naming
+    // an owner was a signature — and add_signature() runs as anon and checks
+    // only that the named address is an owner. So anyone at all could post rows
+    // naming every owner on a `Cancel #N` companion. The count is what drives
+    // the buttons: a forged "signed by you" HIDES the CANCEL button from the
+    // owner it names (txSt suppresses it once you have signed), and a forged
+    // quorum shows a brake that is ready to pull and reverts when pulled.
+    // Anyone can still create a companion row; nobody can put a signature in it
+    // that this does not check.
+    //
+    // The row also has to be one the flow could actually submit. All three run
+    // through executor.forward(), which hashes against the LIVE nonce — so a
+    // companion at any other nonce is unusable however many valid signatures it
+    // carries, and advertising it would promise a quorum that cannot be packed.
+    // Same for its shape: a self-call carrying the selector its kind implies.
+    const companionShape = {
+      'Accelerate #': SEL.executeQueued,
+      'Cancel #':     SEL.cancelQueued,
+      'Reject #':     '',                  // a bare no-op self-call: no calldata
+    };
+    const cOwners = v.loadedOwners || v.owners.map(o => o.addr);
+    const cDomain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address };
+    const companionSigners = (t, kind) => {
+      if(t.nonce !== v.nonce) return null;
+      if(!t.target || !v.address || t.target.toLowerCase() !== v.address.toLowerCase()) return null;
+      if(weiStr(t.value) !== '0') return null;
+      const want = companionShape[kind];
+      const data = t.call_data || '0x';
+      if(want === '' ? data !== '0x' : selOf(data) !== want) return null;
+      const usable = (sigMap.get(t.id) || [])
+        .filter(s => { const st = s.sig_type || s.sigType; return st !== 'approval' && st !== 'sender'; });
+      const msg = { target: t.target, value: 0n, data, nonce: t.nonce };
+      return new Set(
+        verifySigs(usable, cDomain, EIP712_TYPES, msg, cOwners).map(s => String(s.signer).toLowerCase())
+      );
+    };
     const accelSigs = {}, cancelSigs = {}, rejectSigs = {};
+    const companionInto = { 'Accelerate #': accelSigs, 'Cancel #': cancelSigs, 'Reject #': rejectSigs };
     for(let ti = 0; ti < txs.length; ti++) {
       const t = txs[ti];
-      if(t.description && t.description.startsWith('Accelerate #')) {
-        const origNonce = parseInt(t.description.replace('Accelerate #', ''));
-        if(!isNaN(origNonce)) accelSigs[origNonce] = companionSigners(t);
-      } else if(t.description && t.description.startsWith('Cancel #')) {
-        const origNonce = parseInt(t.description.replace('Cancel #', ''));
-        if(!isNaN(origNonce)) cancelSigs[origNonce] = companionSigners(t);
-      } else if(t.description && t.description.startsWith('Reject #')) {
-        const origNonce = parseInt(t.description.replace('Reject #', ''));
-        if(!isNaN(origNonce)) rejectSigs[origNonce] = companionSigners(t);
-      }
+      const kind = t.description && Object.keys(companionShape).find(k => t.description.startsWith(k));
+      if(!kind) continue;
+      const origNonce = parseInt(t.description.slice(kind.length));
+      if(isNaN(origNonce)) continue;
+      const signers = companionSigners(t, kind);
+      // Several rows can now claim the same kind and nonce — the unique
+      // constraint that made a nonce exclusive is gone, because it was what
+      // stopped a companion coexisting with the proposal it acts on. Keep the
+      // strongest verified set rather than whichever row was read last, so a
+      // planted empty row cannot mask a real one behind it.
+      if(signers && signers.size >= ((companionInto[kind][origNonce] || new Set()).size))
+        companionInto[kind][origNonce] = signers;
     }
 
     for(let ti = 0; ti < txs.length; ti++) {
@@ -6203,6 +6335,17 @@ async function loadVaultQueue(vi) {
       // and take every other proposal in the queue with it.
       const rawValue = weiStr(t.value);
       if(rawValue === null) { console.warn('Skipping proposal with an unusable value:', t.id, t.value); continue; }
+
+      // Same treatment for a row whose fields cannot produce a digest at all —
+      // an unparseable target, calldata that is not hex. This used to fall back
+      // to the tx_hash column (`digests.get(t.id) || t.tx_hash`), which handed
+      // the row back the one thing proposalDigest exists to stop it asserting:
+      // tx_hash is written by the same anon-callable propose_tx as the rest of
+      // the row and is never checked against it, and it is what a cancel is
+      // built around. A row that cannot be hashed cannot be executed either, so
+      // there is nothing to show.
+      const digest = digests.get(t.id);
+      if(!digest) { console.warn('Skipping proposal with no derivable digest:', t.id, t.target); continue; }
 
       // Drop approval/sender rows the vault does not actually confirm — see
       // fetchOnchainApprovals. Done here rather than inside verifySigs so the
@@ -6283,7 +6426,7 @@ async function loadVaultQueue(vi) {
         eta: t.eta || 0,
         approvals: approvals,
         dbId: t.id,
-        txHash: digests.get(t.id) || t.tx_hash,
+        txHash: digest,
         queueTx: t.queue_tx || null,
         callData: t.call_data,
         rawValue: rawValue,
@@ -6295,10 +6438,12 @@ async function loadVaultQueue(vi) {
     }
     v.queue = queue;
 
-    // Background: mark stale txs in DB so they don't reappear
-    if(staleTxIds.length) {
+    // Background: retire superseded rows so they don't reappear. Recorded as
+    // 'stale' rather than executed — see dbPruneTx. Owner-gated server-side, so
+    // this is a no-op for someone merely viewing a vault they are not part of.
+    if(staleTxIds.length && window._connectedAddress) {
       for(const id of staleTxIds) {
-        dbMarkExecuted(id, 0, '').catch(e => console.error('Prune stale tx:', e));
+        dbPruneTx(id).catch(e => console.error('Prune stale tx:', e));
       }
     }
   } catch(e) {
@@ -7345,6 +7490,10 @@ async function prodUnsign(vi, nonce) {
   const mySig = tx.signatures?.find(s => s.signer.toLowerCase() === connectedAddress.toLowerCase());
   const wasOnchainApproval = mySig && (mySig.sigType === 'approval' || mySig.sigType === 'sender');
   if(wasOnchainApproval && signer) {
+    // This branch sends a transaction, so it needs the same chain check every
+    // other sending path gets from requireSigner — a revoke aimed at whatever
+    // occupies this address on the wallet's chain is not a revoke.
+    if(!requireSigner()) return;
     try {
       const target = tx.target;
       const value = tx.rawValue ? BigInt(tx.rawValue) : ethers.parseEther(tx.value || '0');
@@ -7439,6 +7588,44 @@ async function fetchLiveNonce(vAddr) {
   return Number(await ms.nonce());
 }
 
+// What the VAULT said happened, as opposed to what was in the receipt.
+//
+// ethers matches a log to an ABI event on topic0 alone, and these loops used to
+// run over every log a transaction produced. Any contract the vault calls can
+// emit `Queued(bytes32,uint256,uint256)` with a hash of its choosing, and a
+// `Queued(h, _, 0)` is how a cancellation announces itself — so a hostile call
+// target could name another live proposal and have this interface record it
+// cancelled in the coordination database while it sat on chain, maturing, gone
+// from every owner's queue. Filtering on the emitting address closes that, and
+// gives the confirmations below something real to check against: every status
+// write that follows is driven by an event the vault itself emitted.
+function vaultLogs(receipt, vAddr) {
+  const self = String(vAddr || '').toLowerCase();
+  const out = [];
+  for(const log of (receipt && receipt.logs) || []) {
+    if(!log || !log.address || log.address.toLowerCase() !== self) continue;
+    try { const p = msIface.parseLog(log); if(p) out.push(p); } catch(_) {}
+  }
+  return out;
+}
+const _sameHash = (a, b) => !!a && !!b && String(a).toLowerCase() === String(b).toLowerCase();
+// cancelQueued emits Queued(hash, 0, 0) — the eta of zero is what distinguishes
+// a cancellation from a queueing.
+function sawCancelled(receipt, vAddr, hash) {
+  return vaultLogs(receipt, vAddr).some(p =>
+    p.name === 'Queued' && Number(p.args[2]) === 0 && _sameHash(p.args[0], hash));
+}
+function sawExecuted(receipt, vAddr, hash) {
+  return vaultLogs(receipt, vAddr).some(p =>
+    p.name === 'ExecutionSuccess' && _sameHash(p.args[0], hash));
+}
+// The eta a Queued(hash, nonce, eta) carries for this hash, or 0 for none.
+function sawQueuedEta(receipt, vAddr, hash) {
+  const hit = vaultLogs(receipt, vAddr).find(p =>
+    p.name === 'Queued' && Number(p.args[2]) > 0 && _sameHash(p.args[0], hash));
+  return hit ? Number(hit.args[2]) : 0;
+}
+
 async function prodSubmit(vi, nonce) {
   const w = requireSigner(); if(!w) return;
   const { signer, addr: connectedAddress } = w;
@@ -7498,30 +7685,32 @@ async function prodSubmit(vi, nonce) {
     flash('TX SENT, WAITING...');
     const receipt = await atx.wait();
 
-    // Parse events
-    for(const log of receipt.logs) {
-      try {
-        let parsed = msIface.parseLog(log);
-        if(!parsed) parsed = tlIface.parseLog(log);
-        if(parsed?.name === 'ExecutionSuccess') {
-          flash(`EXECUTED #${nonce}`);
-          if(tx.dbId) await dbMarkExecuted(tx.dbId, Number(receipt.blockNumber), receipt.hash);
-        }
-        if(parsed?.name === 'Queued') {
-          const eta = Number(parsed.args[2]);
-          if(eta === 0) {
+    // Parse events \u2014 only the vault's own, and only for this proposal's digest.
+    // See vaultLogs: matching on topic0 across every log in the receipt let a
+    // call target forge these.
+    for(const parsed of vaultLogs(receipt, v.address)) {
+      if(parsed.name === 'ExecutionSuccess' && _sameHash(parsed.args[0], tx.txHash)) {
+        flash(`EXECUTED #${nonce}`);
+        if(tx.dbId) await dbMarkExecuted(tx.dbId, Number(receipt.blockNumber), receipt.hash);
+      }
+      if(parsed.name === 'Queued') {
+        const eta = Number(parsed.args[2]);
+        if(eta === 0) {
+          // A cancellation, naming the hash it removed. The row it points at is
+          // looked up by that hash, so it is only acted on when the vault itself
+          // announced it \u2014 and only for a proposal on this vault.
+          const cancelledDbTx = await dbGetTxByHash(parsed.args[0]);
+          if(cancelledDbTx && cancelledDbTx.wallet_id === v.dbId) {
             flash('CANCELLED QUEUED TX');
-            const cancelledHash = parsed.args[0];
-            const cancelledDbTx = await dbGetTxByHash(cancelledHash);
-            if(cancelledDbTx) await dbCancelTx(cancelledDbTx.id, connectedAddress);
-          } else {
-            tx.eta = eta;
-            tx.queueTx = receipt.hash;
-            flash(`QUEUED #${nonce} \u2014 ETA: ${new Date(eta*1000).toLocaleString()}`);
-            if(tx.dbId) await dbMarkQueued(tx.dbId, eta, Number(receipt.blockNumber), receipt.hash);
+            await dbCancelTx(cancelledDbTx.id, connectedAddress);
           }
+        } else if(_sameHash(parsed.args[0], tx.txHash)) {
+          tx.eta = eta;
+          tx.queueTx = receipt.hash;
+          flash(`QUEUED #${nonce} \u2014 ETA: ${new Date(eta*1000).toLocaleString()}`);
+          if(tx.dbId) await dbMarkQueued(tx.dbId, eta, Number(receipt.blockNumber), receipt.hash);
         }
-      } catch(_){}
+      }
     }
 
     await reloadVault(vi);
@@ -7551,19 +7740,14 @@ async function prodExecute(vi, nonce) {
 
     if(tx.dbId) await dbMarkExecuted(tx.dbId, Number(receipt.blockNumber), receipt.hash);
 
-    // Parse events — detect if this was a cancel that emits Queued(hash, 0, 0)
-    for(const log of receipt.logs) {
-      try {
-        const parsed = msIface.parseLog(log);
-        if(parsed?.name === 'Queued') {
-          const eta = Number(parsed.args[2]);
-          if(eta === 0) {
-            const cancelledHash = parsed.args[0];
-            const cancelledDbTx = await dbGetTxByHash(cancelledHash);
-            if(cancelledDbTx) await dbCancelTx(cancelledDbTx.id, connectedAddress);
-          }
-        }
-      } catch(_){}
+    // Detect a cancel, which announces itself as Queued(hash, 0, 0). Read from
+    // the vault's own logs only — see vaultLogs — and acted on only when the row
+    // it names belongs to this vault.
+    for(const parsed of vaultLogs(receipt, v.address)) {
+      if(parsed.name === 'Queued' && Number(parsed.args[2]) === 0) {
+        const cancelledDbTx = await dbGetTxByHash(parsed.args[0]);
+        if(cancelledDbTx && cancelledDbTx.wallet_id === v.dbId) await dbCancelTx(cancelledDbTx.id, connectedAddress);
+      }
     }
 
     flash(`EXECUTED #${nonce}`);
@@ -7610,6 +7794,15 @@ async function prodFastExecute(vi, nonce) {
     flash('TX SENT, WAITING...');
     const receipt = await atx.wait();
 
+    // Record what the vault reported, not what the route was meant to do. A
+    // mined transaction is not evidence on its own: `v.executor` is read off
+    // chain but the call to it is not, and an executor that is not a
+    // TimelockExecutor can absorb forward() without doing anything.
+    if(!sawExecuted(receipt, v.address, tx.txHash)) {
+      flash(`THE VAULT DID NOT REPORT #${nonce} AS EXECUTED — NOTHING RECORDED. RELOADING.`);
+      await reloadVault(vi);
+      return;
+    }
     if(tx.dbId) await dbMarkExecuted(tx.dbId, Number(receipt.blockNumber), receipt.hash);
     flash(`INSTANT EXECUTED #${nonce} VIA EXECUTOR`);
     await reloadVault(vi);
@@ -7626,43 +7819,61 @@ async function prodCancel(vi, nonce) {
   const tx = v.queue.find(t => t.nonce === nonce);
   if(!tx) return;
 
+  // No executor, no in-window brake — see canForwardCancel. Refused here as well
+  // as hidden in the UI, because this is reachable by deep link and by a stale
+  // render, and the failure it prevents is the one that reports success.
+  if(!canForwardCancel(v)) {
+    flash('NO TIMELOCK EXECUTOR ON THIS VAULT — A CANCEL CANNOT BE FORWARDED, AND ONE RAISED AS AN ORDINARY PROPOSAL WOULD ITSELF BE QUEUED FOR THE FULL DELAY');
+    return;
+  }
+
   // Cancel via executor.forward() — only needs threshold sigs, no forwardEnabled required
   // This bypasses the nonce queue entirely
   const target = tx.target;
   const value = tx.rawValue ? BigInt(tx.rawValue) : ethers.parseEther(tx.value || '0');
   const data = tx.callData || '0x';
   const domain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address };
+  // tx.txHash is the digest loadVaultQueue derived from the row's own fields —
+  // never the tx_hash column beside them, which nothing checks against the row.
+  // Recomputed here only for a queue entry built somewhere other than that path.
   const origTxHash = tx.txHash || ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, { target, value, data, nonce });
   const cancelData = msIface.encodeFunctionData('cancelQueued', [origTxHash]);
   const ownerAddrs = v.loadedOwners || v.owners.map(o => o.addr);
 
   try {
-    // Check DB for an existing cancel proposal (first signer sets the nonce)
-    let cancelNonce = v.nonce;
+    // The nonce is not negotiable and is never read from a row: forward() hashes
+    // against the vault's LIVE nonce, so that is the only nonce a cancel can be
+    // signed over. This used to adopt whatever nonce the stored companion
+    // carried — and `description` is an anon-writable column, so a single
+    // planted row reading `Cancel #N` pinned every owner's signature to a nonce
+    // the executor would never hash, permanently. (The self-heal did not fire:
+    // it required the row to hold signatures, and a planted row holds none.)
+    // An existing companion is reused only if it is at that same live nonce.
+    const cancelNonce = v.nonce;
+    const msg = { target: v.address, value: 0n, data: cancelData, nonce: cancelNonce };
+    const cancelTxHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg);
+
+    // Found by digest, not by description. The digest is derived here from the
+    // cancel this flow is about to build, so the row it matches can only be the
+    // companion for exactly that cancel — where `description` is free text any
+    // anonymous caller can write, and matching on it is what let a planted row
+    // be adopted in the first place. Description is still written, for the queue
+    // to attribute the companion to the proposal it acts on; it is no longer
+    // trusted to identify one.
     let existingSigs = [];
     let existingTxId = null;
     if(v.dbId) {
       const { data: rows } = await sb.from('transactions')
-        .select('id, nonce, tx_hash')
+        .select('id')
         .eq('wallet_id', v.dbId)
-        .eq('description', `Cancel #${nonce}`)
+        .eq('tx_hash', cancelTxHash)
         .in('status', ['proposed', 'executing'])
         .limit(1);
       if(rows?.length) {
         existingTxId = rows[0].id;
-        cancelNonce = rows[0].nonce;
-        const dbSigs = await dbGetSigs(existingTxId);
-        const msg = { target: v.address, value: 0n, data: cancelData, nonce: cancelNonce };
-        existingSigs = verifySigs(dbSigs, domain, EIP712_TYPES, msg, ownerAddrs);
-        if(existingSigs.length === 0 && dbSigs.length > 0) {
-          cancelNonce = v.nonce;
-          existingTxId = null;
-        }
+        existingSigs = verifySigs(await dbGetSigs(existingTxId), domain, EIP712_TYPES, msg, ownerAddrs);
       }
     }
-
-    const msg = { target: v.address, value: 0n, data: cancelData, nonce: cancelNonce };
-    const cancelTxHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg);
 
     // Add caller's sig
     let sigs = [...existingSigs];
@@ -7712,6 +7923,17 @@ async function prodCancel(vi, nonce) {
     flash('TX SENT, WAITING...');
     const receipt = await atx.wait();
 
+    // The vault has to say it dropped this exact hash before anything is written
+    // down. Nothing else here proves it: a transaction that mines is not a
+    // cancellation, and recording one that did not happen is the single most
+    // damaging thing this interface can get wrong — the proposal leaves every
+    // owner's queue while it goes on maturing on chain, executable by anyone.
+    if(!sawCancelled(receipt, v.address, origTxHash)) {
+      flash(`THE VAULT DID NOT REPORT #${nonce} AS CANCELLED — IT IS STILL QUEUED. NOTHING RECORDED.`);
+      await reloadVault(vi);
+      return;
+    }
+
     if(v.dbId) {
       if(existingTxId) await dbMarkExecuted(existingTxId, Number(receipt.blockNumber), receipt.hash);
       if(tx.dbId) {
@@ -7744,28 +7966,25 @@ async function prodReject(vi, nonce) {
   const ownerAddrs = v.loadedOwners || v.owners.map(o => o.addr);
 
   try {
-    // Aggregate any existing "Reject #N" companion signatures from the DB.
+    const msg = { target: v.address, value: 0n, data: rejectData, nonce: rejectNonce };
+    const rejectTxHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg);
+
+    // Aggregate any existing companion, found by its digest rather than by the
+    // anon-writable description — same reasoning as prodCancel.
     let existingSigs = [];
     let existingTxId = null;
     if(v.dbId) {
       const { data: rows } = await sb.from('transactions')
-        .select('id, nonce, tx_hash')
+        .select('id')
         .eq('wallet_id', v.dbId)
-        .eq('description', `Reject #${nonce}`)
+        .eq('tx_hash', rejectTxHash)
         .in('status', ['proposed', 'executing'])
         .limit(1);
       if(rows?.length) {
         existingTxId = rows[0].id;
-        const dbSigs = await dbGetSigs(existingTxId);
-        const msg = { target: v.address, value: 0n, data: rejectData, nonce: rejectNonce };
-        existingSigs = verifySigs(dbSigs, domain, EIP712_TYPES, msg, ownerAddrs);
-        // Companion exists but all its sigs are stale (e.g. nonce moved) — start fresh.
-        if(existingSigs.length === 0 && dbSigs.length > 0) existingTxId = null;
+        existingSigs = verifySigs(await dbGetSigs(existingTxId), domain, EIP712_TYPES, msg, ownerAddrs);
       }
     }
-
-    const msg = { target: v.address, value: 0n, data: rejectData, nonce: rejectNonce };
-    const rejectTxHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg);
 
     let sigs = [...existingSigs];
     const callerIsOwner = ownerAddrs.some(o => o.toLowerCase() === connectedAddress.toLowerCase());
@@ -7804,11 +8023,21 @@ async function prodReject(vi, nonce) {
     flash('TX SENT, WAITING...');
     const receipt = await atx.wait();
 
-    if(v.dbId) {
-      if(existingTxId) await dbMarkExecuted(existingTxId, Number(receipt.blockNumber), receipt.hash);
-      if(tx.dbId) await dbCancelTx(tx.dbId, connectedAddress);   // retire the skipped proposal
+    // The nonce is consumed either way — execute() increments it before it does
+    // anything else — so the queue is unblocked whichever branch the vault took.
+    // But on a timelocked vault this route QUEUES the no-op rather than running
+    // it, and recording that as executed would put a live queued entry in the
+    // history ledger and out of the queue. Record what actually happened.
+    const rejEta = sawQueuedEta(receipt, v.address, rejectTxHash);
+    if(v.dbId && existingTxId) {
+      if(rejEta) await dbMarkQueued(existingTxId, rejEta, Number(receipt.blockNumber), receipt.hash);
+      else if(sawExecuted(receipt, v.address, rejectTxHash)) await dbMarkExecuted(existingTxId, Number(receipt.blockNumber), receipt.hash);
     }
-    flash(`REJECTED #${nonce} — NONCE SKIPPED`);
+    // Retire the skipped proposal. cancel_tx used to no-op on anything that was
+    // not already queued — which is every proposal this path ever retires — so
+    // the row lingered until the queue loader swept it up.
+    if(v.dbId && tx.dbId) await dbCancelTx(tx.dbId, connectedAddress);
+    flash(rejEta ? `REJECTED #${nonce} — NONCE SKIPPED (THE NO-OP IS QUEUED)` : `REJECTED #${nonce} — NONCE SKIPPED`);
     await reloadVault(vi);
   } catch(e) {
     console.error(e);
@@ -8222,34 +8451,28 @@ async function prodAccelerate(vi, nonce) {
   const ownerAddrs = v.loadedOwners || v.owners.map(o => o.addr);
 
   try {
-    // Check DB for an existing accelerate proposal (first signer sets the nonce)
-    let accelNonce = v.nonce;
+    // Live nonce only, and the companion is found by its digest — same reasoning
+    // as prodCancel: forward() hashes against the live nonce, so no other nonce
+    // can produce a usable signature, and `description` is an anon-writable
+    // column that must not decide which row a signature lands in.
+    const accelNonce = v.nonce;
+    const msg = { target: v.address, value: 0n, data: accelData, nonce: accelNonce };
+    const accelTxHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg);
+
     let existingSigs = [];
     let existingTxId = null;
     if(v.dbId) {
-      // Look for an existing accelerate entry for this original tx nonce
       const { data: rows } = await sb.from('transactions')
-        .select('id, nonce, tx_hash')
+        .select('id')
         .eq('wallet_id', v.dbId)
-        .eq('description', `Accelerate #${nonce}`)
+        .eq('tx_hash', accelTxHash)
         .in('status', ['proposed', 'executing'])
         .limit(1);
       if(rows?.length) {
         existingTxId = rows[0].id;
-        accelNonce = rows[0].nonce;
-        const dbSigs = await dbGetSigs(existingTxId);
-        const msg = { target: v.address, value: 0n, data: accelData, nonce: accelNonce };
-        existingSigs = verifySigs(dbSigs, domain, EIP712_TYPES, msg, ownerAddrs);
-        // If nonce changed on-chain and existing sigs are invalid, start fresh
-        if(existingSigs.length === 0 && dbSigs.length > 0) {
-          accelNonce = v.nonce;
-          existingTxId = null;
-        }
+        existingSigs = verifySigs(await dbGetSigs(existingTxId), domain, EIP712_TYPES, msg, ownerAddrs);
       }
     }
-
-    const msg = { target: v.address, value: 0n, data: accelData, nonce: accelNonce };
-    const accelTxHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg);
 
     // Add caller's sig
     let sigs = [...existingSigs];
@@ -8297,6 +8520,15 @@ async function prodAccelerate(vi, nonce) {
     const atx = await tlContract.forward(v.address, v.address, 0n, accelData, bnd.packed);
     flash('TX SENT, WAITING...');
     const receipt = await atx.wait();
+
+    // executeQueued emits ExecutionSuccess for the ACCELERATED proposal's own
+    // digest — that is the confirmation, not the outer call's. Without it the
+    // queued proposal would be recorded executed while it is still waiting.
+    if(!sawExecuted(receipt, v.address, tx.txHash)) {
+      flash(`THE VAULT DID NOT REPORT #${nonce} AS EXECUTED — IT IS STILL QUEUED. NOTHING RECORDED.`);
+      await reloadVault(vi);
+      return;
+    }
 
     if(v.dbId) {
       if(existingTxId) await dbMarkExecuted(existingTxId, Number(receipt.blockNumber), receipt.hash);

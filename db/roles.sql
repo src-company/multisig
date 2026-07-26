@@ -64,8 +64,14 @@ GRANT EXECUTE ON FUNCTION
   propose_tx(uuid, int, int, text, numeric, text, text, smallint, text, text),
   add_signature(uuid, text, text, sig_type),
   mark_executed(uuid, bigint, text, text),
-  mark_queued(uuid, bigint, bigint, text),
+  -- Five arguments, matching schema.sql. This read `mark_queued(uuid, bigint,
+  -- bigint, text)` — the signature schema.sql drops — so on a fresh database
+  -- this single GRANT statement aborted on that line and NONE of the write
+  -- functions below or above it were granted to anon. The dapp could read
+  -- everything and write nothing.
+  mark_queued(uuid, bigint, bigint, text, text),
   cancel_tx(uuid, text),
+  prune_tx(uuid, text),
   remove_signature(uuid, text),
   update_wallet_name(uuid, text, text),
   update_owner_label(uuid, text, text, text),
