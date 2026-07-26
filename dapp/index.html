@@ -214,7 +214,11 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 .vtabs{overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
 .vtabs::-webkit-scrollbar{display:none}
 .vtabs-inner{display:flex;border-bottom:1px solid var(--ln);min-width:max-content}
-.vtab{padding:16px 24px;text-align:left;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--d);position:relative;flex:1 0 140px;transition:color .15s}
+/* Top-aligned, not centre-aligned. A <button> centres its content by default,
+   which was invisible while every tab carried a name AND an info line; now that
+   the selected tab gives its balance back to the hero it can be one line tall,
+   and centring dropped its name to a different baseline from its neighbours'. */
+.vtab{padding:16px 24px;text-align:left;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--d);position:relative;flex:1 0 140px;transition:color .15s;display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-start}
 .vtab.on{color:var(--a)}
 .vtab-name{font-size:14px;font-weight:700;display:flex;align-items:center;gap:6px}
 .vtab-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;animation:pulse 2s infinite}
@@ -265,7 +269,7 @@ body.priv-on .privg:hover .priv,body.priv-on .privg:focus-within .priv,
 body.priv-on .priv:hover,body.priv-on .priv:focus{filter:none;transition-duration:.1s}
 body.priv-on .privg,body.priv-on .priv{outline:none}
 body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px solid var(--a);outline-offset:3px}
-.priv-btn svg{display:block}
+.theme-btn svg{display:block}
 @media(prefers-reduced-motion:reduce){
   body.priv-on .priv{transition:none}
 }
@@ -341,11 +345,24 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
 .batch-call{margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--ln)}
 .call-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-size:10px;font-weight:700;color:var(--d);letter-spacing:2px}
 
-/* signers */
-.signer-addr{font-size:14px;font-weight:700;word-break:break-all}
-.signer-label{font-size:10px;color:var(--m);letter-spacing:2px;margin-top:2px}
-.signer-name{font-size:11px;font-weight:700;color:var(--a);letter-spacing:1px}
-.signer-you{font-size:9px;font-weight:700;color:var(--a);letter-spacing:2px}
+/* signers — the same ordering the header commits to for the vault's own pair:
+   whatever identifies the owner leads, and the machine half recedes behind it.
+   It was the other way round here (addr 14/700, name 11), which put the weight
+   on the one string nobody reads.
+   Which element is which is decided per owner, not per column: .signer-id is
+   the name when there is one and the ADDRESS when there is not, because an
+   unnamed owner's address is the only identity in the row and has no business
+   being styled as the recessive half of a pair that does not exist. .signer-addr
+   is then the address in its second role only — the copy a name displaced.
+   --d at 12px stays a text ink, not a whisper: Lc 64 dark / 65 light, above the
+   ladder's floor. */
+.signer-id{font-size:14px;font-weight:700;color:var(--a);letter-spacing:1px;word-break:break-all}
+.signer-addr{font-size:12px;font-weight:400;color:var(--d);word-break:break-all}
+/* A bare "R" floating after a name reads as a typo. Both of these are chips
+   because they are annotations ON the signer, not more of the signer's name —
+   the same bordered treatment the admin roster already gives YOU. */
+.signer-label{font-size:9px;color:var(--m);letter-spacing:2px;border:1px solid var(--ln);padding:1px 6px}
+.signer-you{font-size:9px;font-weight:700;color:var(--m);letter-spacing:1px;border:1px solid var(--fr);padding:1px 6px}
 
 /* footer */
 .footer{border-top:1px solid var(--ln);padding:12px 0;display:flex;justify-content:space-between;align-items:center;font-size:9px;letter-spacing:2px;color:var(--m);flex-wrap:wrap;gap:8px}
@@ -504,7 +521,16 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
   .admin-tab{font-size:11px}
   .policy-big{font-size:32px}
   .link-btn{padding:12px 0;min-height:44px}
-  .x-btn{min-width:44px;min-height:44px}
+  /* Tertiary controls are 9px text in a 6px box — ~23px tall, well under the
+     44px every other control here is held to. */
+  .alt-link,.reject-link,.sim-btn{min-height:44px}
+  /* :not(.icon-btn) is load-bearing. .icon-btn resets these to auto above so an
+     inline glyph does not disturb the line box it sits in, and it wins there
+     only on source order at equal specificity — which this rule, being later in
+     the file, would otherwise take back at exactly the breakpoint .icon-btn was
+     written for. The 44px touch box is not lost: .icon-btn::after supplies it
+     without occupying layout. */
+  .x-btn:not(.icon-btn){min-width:44px;min-height:44px}
   .net-row{padding:14px 8px;min-height:44px}
   .addr{font-size:9px;letter-spacing:1px}
 }
@@ -2629,6 +2655,21 @@ function ownerIdent(o){
   return o.label || o.name || (o.addr && ethers.isAddress(o.addr) ? o.addr.slice(0,6)+'…'+o.addr.slice(-4) : (o.addr || ''));
 }
 
+// The marked-up version of the above, for the two places that list owners as
+// rows rather than name them in a sentence: the dashboard roster and the admin
+// one. Stated once because they had drifted into opposite orders — name then
+// address on one, address then name on the other — each having spelled it out
+// inline. Precedence matches ownerIdent's: the identity leads, the address
+// follows only when a name displaced it, and the copy affordance stays against
+// the address it copies wherever that lands.
+function signerIdentHtml(o, chain){
+  const link = S.demoMode ? addrLink(o.addr, chain) : addrLink(o.addr);
+  const copy = ethers.isAddress(o.addr) ? copyBtn(o.addr) : '';
+  return o.name
+    ? `<span class="signer-id">${esc(o.name)}</span><span class="signer-addr">${link}</span>${copy}`
+    : `<span class="signer-id">${link}</span>${copy}`;
+}
+
 function addrLink(addr, chain) {
   const safe = esc(addr);
   const base = S.demoMode
@@ -2732,6 +2773,18 @@ const SRC_URL = 'https://source.wei.domains';
 const _EYE = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="square" aria-hidden="true"><path d="M1.8 12S5.6 5.2 12 5.2 22.2 12 22.2 12 18.4 18.8 12 18.8 1.8 12 1.8 12Z"/><circle cx="12" cy="12" r="3.1"/>`;
 const EYE_ON = _EYE + `</svg>`;
 const EYE_OFF = _EYE + `<path d="M4 20 20 4"/></svg>`;
+
+// The theme toggle, drawn for the same reason the eye is, and now for a second
+// one. ☀ happens to be in the family; its counterpart was a typed ●, and a
+// solid disc is already this app's status mark — the connection dot sits 40px
+// to the right of this button and another leads the footer's chain line — so a
+// third solid disc, meaning "theme", read as a status it was not reporting.
+// Every geometric alternative (◐ ◑ ☾) is the fall-through the comment above
+// describes. Both halves are drawn so the pair stays one object.
+// Like ☀ before it, this shows the ACTION, not the state: the title agrees.
+const _ICO = (d) => `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="square" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const SUN_ICON = _ICO(`<circle cx="12" cy="12" r="4.2"/><path d="M12 1.6v2.5M12 19.9v2.5M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M1.6 12h2.5M19.9 12h2.5M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/>`);
+const MOON_ICON = _ICO(`<path d="M20.4 14.9A8.9 8.9 0 0 1 9.1 3.6 8.9 8.9 0 1 0 20.4 14.9Z"/>`);
 
 function togglePriv(){
   S.priv = !S.priv;
@@ -3304,7 +3357,7 @@ function renderNow(){
       </div>
       <div class="hdr-r">
         <button class="theme-btn priv-btn" onclick="togglePriv()" aria-pressed="${S.priv}" aria-label="${S.priv?'Balances veiled. Show them.':'Balances visible. Veil them.'}" title="${S.priv?'Balances veiled \u00B7 hover or tap a figure to read it. Click to show them.':'Balances visible. Click to veil them.'}">${S.priv?EYE_OFF:EYE_ON}</button>
-        <button class="theme-btn" onclick="S.dark=!S.dark;lsSet('ms_light',S.dark?'':'1');render()" aria-label="Switch to ${S.dark?"light":"dark"} theme" title="Switch to ${S.dark?"light":"dark"} theme"><span aria-hidden="true">${S.dark?"\u2600":"\u25CF"}</span></button>
+        <button class="theme-btn" onclick="S.dark=!S.dark;lsSet('ms_light',S.dark?'':'1');render()" aria-label="Switch to ${S.dark?"light":"dark"} theme" title="Switch to ${S.dark?"light":"dark"} theme">${S.dark?SUN_ICON:MOON_ICON}</button>
         <button class="wallet-btn" id="wallet-btn" onclick="${walletOnclick}" ${S.demoMode?'':'aria-haspopup="dialog"'}>${walletDot}${esc(walletLabel)}</button>
       </div>
     </div>
@@ -3327,7 +3380,10 @@ function renderNow(){
         ${S.vaults.length===0&&!S.demoMode?`<button class="reset-btn" onclick="S.demoMode=true;S.vaults=seed();S.sel=0;flash('DEMO LOADED');render()">DEMO</button>`:""}
         ${S.demoMode?`<button class="reset-btn" onclick="S.demoMode=false;S.vaults=[];S.sel=0;S.view='DASH';S.showTx=false;S.batch=[{t:'',v:'',d:''},{t:'',v:'',d:''}];S.adminTab='POLICY';flash('DEMO CLEARED');render()">RESET</button>`:""}
         ${!S.demoMode&&S.vaults.length>0?`<button class="reset-btn" onclick="loadAllVaults()">RELOAD</button>`:""}
-        <span>${_todayStr}</span>
+        ${/* The date is the only thing in this row that is not a control. Without
+             the rule the left half already uses it sat flush against RELOAD at
+             8px and read as a fifth link. */''}
+        <span style="color:var(--ln)">&middot;</span><span>${_todayStr}</span>
       </div>
     </div>
     <div class="hbar" aria-hidden="true">${ASC200}</div>
@@ -3636,10 +3692,13 @@ function renderDash(v,mob){
       const {rdy,needsYou}=vaultFlags[i];
       const dot=rdy?'<span class="vtab-dot" style="background:var(--g)" title="Ready to execute" aria-hidden="true"></span>':needsYou?'<span class="vtab-dot" style="background:var(--y)" title="Needs your signature" aria-hidden="true"></span>':"";
       const pending=vt.queue.length>0?`${vt.queue.length} PENDING`:"";
-      // The balance summary is a comparison aid for choosing between vaults; with a
-      // single vault it only echoes the hero stat below, so drop it and keep pending.
+      // The balance summary is a comparison aid for choosing between vaults, so it
+      // belongs on the ones you might switch TO. On the selected tab it only
+      // echoes the hero stat a few pixels below — true whether there is one vault
+      // or ten — so the rule is per-tab, not per-list: the active tab keeps its
+      // pending count and gives the balance back to the hero.
       const bal=vt.holdings.length?tokIcon(vt.holdings[0].token,'sm')+' <span class="priv">'+esc(vt.holdings[0].balance)+'</span> '+esc(vt.holdings[0].token)+(vt.holdings.length>1?" +"+(vt.holdings.length-1)+" MORE":""):"EMPTY";
-      const info=S.vaults.length===1?pending:bal+(pending?` &middot; ${pending}`:"");
+      const info=on?pending:bal+(pending?` &middot; ${pending}`:"");
       return`<button class="vtab${on?" on":""}"${on?' aria-current="true"':''} onclick="S.sel=${i};S.nt=S.vaults[${i}].threshold;setNd(S.vaults[${i}].delay);S.showTx=false;render()">
       <div class="vtab-name">${esc(vt.name)}${dot}</div>
       ${info?`<div class="vtab-info">${info}</div>`:""}
@@ -3658,7 +3717,6 @@ function renderDash(v,mob){
       <span class="stat-token">ETH</span>
     </div>
     <div style="font-size:11px;color:var(--d);letter-spacing:2px;margin-top:8px">NO BALANCES</div>`}
-    ${!S.demoMode&&v.address&&ethers.isAddress(v.address)?`<div style="margin-top:16px"><button class="btn btn-outline btn-sm" id="topup-btn" style="display:inline-flex;align-items:center;gap:6px" onclick="openTopUp()"><span style="font-size:13px;line-height:1" aria-hidden="true">&#8595;</span> TOP UP</button></div>`:""}
     <div class="meta">
       <span>${v.threshold}/${v.ownerCount} SIG</span>
       ${v.delay>0
@@ -3675,13 +3733,24 @@ ${/* The name used to sit here too. It moved up to the header, beside the
       ${v.codeKind==='7702'?'<span style="color:var(--m)" title="An EOA delegating to the Multisig implementation under EIP-7702. The key behind the address can revoke that delegation at any time.">EIP-7702</span>':""}
       ${v.fastPath?'<span style="color:var(--g)" title="Unanimous owner signatures can bypass the timelock — instant execution via the executor">INSTANT &middot; ALL OWNERS</span>':""}
     </div>
+${/* Topping up is the one action here that needs no signature, no quorum and no
+       proposal — anyone can send to the address. It sits below the facts rather
+       than between them and the balance, so balance → policy → chain → address
+       stays one unbroken statement of what this vault IS, and it takes the
+       tertiary treatment rather than .btn-outline: at full accent it was the
+       heaviest box above the fold and read as the peer of + NEW, which is the
+       action that actually moves the vault's money. */''}
+    ${!S.demoMode&&v.address&&ethers.isAddress(v.address)?`<div style="margin-top:14px"><button class="alt-link" id="topup-btn" style="display:inline-flex;align-items:center;gap:6px" onclick="openTopUp()"><span style="font-size:11px;line-height:1" aria-hidden="true">&#8595;</span> TOP UP</button></div>`:""}
   </div>
   ${renderSlowOutbound(v,mob)}
   <div class="sec"><span>QUEUE</span><span class="line"></span>
     ${S.showTx?"":`<button class="btn btn-outline btn-sm" onclick="openTxBuilder()">+ NEW</button>`}
   </div>
   ${S.showTx?renderTxBuilder(v,mob):""}
-  ${v.queue.length===0&&!S.showTx?`<div style="padding:48px 0;text-align:center;font-size:13px;color:var(--d);letter-spacing:2px">NO PENDING TRANSACTIONS</div>`:v.queue.map((tx,i)=>{
+  ${/* An empty queue is the common resting state, not an event. On a phone the
+       desktop padding spent 113px of an 844px viewport saying nothing and pushed
+       SIGNERS — the only content on the screen — to the bottom edge. */''}
+  ${v.queue.length===0&&!S.showTx?`<div style="padding:${mob?"26px 0":"48px 0"};text-align:center;font-size:13px;color:var(--d);letter-spacing:2px">NO PENDING TRANSACTIONS</div>`:v.queue.map((tx,i)=>{
     const s=txSt(tx,v),isCancel=isCancelTx(tx,v);
     const isQueued=tx.eta>0;
     const blocked=!isQueued&&!isCancel&&i!==firstUnqueued;
@@ -3853,11 +3922,14 @@ ${/* The name used to sit here too. It moved up to the header, beside the
       ${tx._sim?renderSim(tx._sim,{ rerun:`simulateProposal(${S.sel},${tx.nonce})`, dismiss:`dismissProposalSim(${S.sel},${tx.nonce})` }):''}
     </div>`}).join("")}
   <div class="sec"><span>SIGNERS</span><span class="line"></span></div>
+${/* Name first, then the address it stands for, then the annotations. YOU sits
+     inside the group rather than being pushed to the far edge by .row's
+     space-between: on a phone that left ~250px between a signer and the label
+     that belongs to them, which reads as a column heading, not an annotation. */''}
   ${v.owners.map(o=>`<div class="row">
     <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;min-width:0">
-      <span class="signer-addr">${S.demoMode?addrLink(o.addr,v.chain):addrLink(o.addr)}</span>${ethers.isAddress(o.addr)?copyBtn(o.addr):""}${o.name?`<span class="signer-name">${esc(o.name)}</span>`:""}${o.label&&o.label.trim().toUpperCase()!=='YOU'?`<span class="signer-label">${esc(o.label)}</span>`:""}
+      ${signerIdentHtml(o,v.chain)}${o.label&&o.label.trim().toUpperCase()!=='YOU'?`<span class="signer-label">${esc(o.label)}</span>`:""}${o.you?'<span class="signer-you">YOU</span>':""}
     </div>
-    ${o.you?'<span class="signer-you">YOU</span>':""}
   </div>`).join("")}`;
 }
 
@@ -5147,7 +5219,7 @@ function renderAdmin(v,mob){
     ${(()=>{const pc=pendingPolicyChanges(v);return pc.length?`<div class="policy-warn">${pc.length} OWNER/THRESHOLD CHANGE${pc.length>1?"S":""} PENDING (#${pc.map(p=>p.nonce).join(", #")}) &middot; changes execute in order, so a new one here may need re-creating if the owner set shifts first</div>`:''})()}
     ${v.owners.map((o,oi)=>{const isYouLbl=o.label&&o.label.trim().toUpperCase()==='YOU';return`<div class="row" style="${mob?"flex-direction:column;align-items:stretch;gap:10px":""}">
       <div style="min-width:0">
-        <div class="signer-addr">${S.demoMode?addrLink(o.addr,v.chain):addrLink(o.addr)}${ethers.isAddress(o.addr)?copyBtn(o.addr):""}${o.name?` <span class="signer-name">${esc(o.name)}</span>`:""}${o.you?` <span style="font-size:9px;font-weight:700;letter-spacing:1px;color:var(--m);border:1px solid var(--fr);padding:1px 6px;margin-left:6px">YOU</span>`:""}</div>
+        <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;min-width:0">${signerIdentHtml(o,v.chain)}${o.you?'<span class="signer-you">YOU</span>':""}</div>
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-shrink:0${mob?";width:100%":""}">
           <input class="inp" style="margin:0;${mob?"flex:1":"width:120px"};font-size:11px;letter-spacing:1px;border-bottom-color:var(--ln)" placeholder="LABEL" aria-label="Label for ${esc(shortAddr(o.addr))}" value="${isYouLbl?"":esc(o.label)}" onchange="updateOwnerLabel(${S.sel},${oi},this.value)">
