@@ -20,6 +20,10 @@
 - [Guardrails](dapp/guardrails.md)
 - [Architecture](dapp/architecture.md)
 
+# Press
+
+- [Brand & Press](brand.md)
+
 # Reference
 
 - [Contract Reference](reference.md)

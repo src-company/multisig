@@ -17,6 +17,8 @@ mdbook build docs      # static site into docs/book/ (gitignored)
 | `src/SUMMARY.md` | hand-written | Table of contents — mdBook builds nothing that is not listed here |
 | `src/protocol/*.md` | hand-written | The contracts |
 | `src/dapp/*.md` | hand-written | The interface |
+| `src/brand.md` | hand-written | The press kit — boilerplate, explainers, fact sheet |
+| `src/brand/*.svg` | **generated** by `brand/build.py` | Logo copies, so the press chapter renders |
 | `src/reference.md` | hand-written | Index for the generated section |
 | `src/src/**` | **generated** by `forge doc` | Per-contract API pages |
 | `src/*.svg` | copies | Kept in step with the repository root, so the home page renders |
@@ -54,6 +56,7 @@ When `src/` changes, the chapters most likely to go stale are:
 | Gas figures — from `forge test --mc GasTest -vv` | `protocol/comparison.md` |
 | A new review, or a finding's disposition changing | `protocol/security.md`, `SECURITY.md` |
 | Chains, tokens, guardrails, or screens in `dapp/` | `dapp/*.md`, and `dapp/docs.html` |
+| A gas figure, a chain, a review, or the logo | `brand.md` — the press kit quotes all four |
 
 `dapp/docs.html` is the *user-facing* documentation shipped with the app and is
 maintained separately. It answers questions someone has while operating a wallet;
