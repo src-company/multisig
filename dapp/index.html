@@ -3424,9 +3424,13 @@ function fmtGasShort(wei){
 
 function renderDeployOverlay(){
   const d = S.deploy, phase = d.phase;
-  const glyph = { pending:'○', switching:'◐', mining:'◐', deploying:'◐', done:'●', skipped:'●', failed:'✕' };
-  const col = { pending:'var(--d)', switching:'var(--y)', mining:'var(--y)', deploying:'var(--y)', done:'var(--g)', skipped:'var(--m)', failed:'var(--r)' };
-  const lbl = { pending:'WAITING', switching:'SWITCH IN WALLET…', mining:'MINING ADDRESS…', deploying:'CONFIRM IN WALLET…', done:'DEPLOYED', skipped:'ALREADY DEPLOYED', failed:'FAILED' };
+  // 'checking' is the reconciliation after something threw with a transaction
+  // already broadcast: the wallet is not being asked for anything and the deploy
+  // may well have worked, so the row waits on the chain rather than going red on
+  // the strength of an error that arrived after the transaction did.
+  const glyph = { pending:'○', switching:'◐', mining:'◐', deploying:'◐', checking:'◐', done:'●', skipped:'●', failed:'✕' };
+  const col = { pending:'var(--d)', switching:'var(--y)', mining:'var(--y)', deploying:'var(--y)', checking:'var(--y)', done:'var(--g)', skipped:'var(--m)', failed:'var(--r)' };
+  const lbl = { pending:'WAITING', switching:'SWITCH IN WALLET…', mining:'MINING ADDRESS…', deploying:'CONFIRM IN WALLET…', checking:'CONFIRMING ON CHAIN…', done:'DEPLOYED', skipped:'ALREADY DEPLOYED', failed:'FAILED' };
   const anyFail = d.steps.some(s=>s.status==='failed');
   const nch = d.steps.length, plural = nch>1?'S':'';
   // A halted run is its own outcome, not a variety of DONE: some chains have a
@@ -3591,11 +3595,15 @@ function renderDeployOverlay(){
     // Which chain, and what it is waiting for. "APPROVE EACH WALLET PROMPT" is
     // true of the whole run and therefore says nothing about the prompt that is
     // actually open — on a five-chain walk that is the only thing worth saying.
-    const cur = d.steps.findIndex(s=>s.status==='switching'||s.status==='mining'||s.status==='deploying');
+    const cur = d.steps.findIndex(s=>s.status==='switching'||s.status==='mining'||s.status==='deploying'||s.status==='checking');
     const at = cur >= 0 ? d.steps[cur] : null;
+    // 'checking' is the one line here that asks for nothing. Leaving it to fall
+    // through to "APPROVE EACH WALLET PROMPT" would send the operator to look for
+    // a prompt that does not exist, when the truth is better news than that.
     const what = at && at.status==='switching' ? `SWITCH TO ${esc(String(at.name).toUpperCase())} IN YOUR WALLET`
       : at && at.status==='deploying' ? `CONFIRM ${esc(String(at.name).toUpperCase())} IN YOUR WALLET`
       : at && at.status==='mining' ? 'MINING THE VAULT ADDRESS'
+      : at && at.status==='checking' ? `WAITING FOR ${esc(String(at.name).toUpperCase())} TO CONFIRM THE TRANSACTION &middot; NOTHING TO APPROVE`
       : 'APPROVE EACH WALLET PROMPT TO CONTINUE';
     footer = `<div style="margin-top:16px;font-size:9px;color:var(--d);letter-spacing:1px;line-height:1.6;text-align:center">${what}${nch>1&&cur>=0?` &middot; ${cur+1} OF ${nch}`:''}</div>`;
   } else if(phase==='preflight'){
@@ -6162,9 +6170,13 @@ function dbError(label, err) {
   return Object.assign(new Error(label), { shortMessage: label, dbDetail: detail });
 }
 
-async function dbRegisterWallet(addr, deployer, salt, ownerList, thresh, del, exec, block, txHash, name, labels, nonce) {
+// `chainId` is optional and defaults to the chain the app is pointed at, which is
+// what every caller that registers a vault it is looking at wants. A deploy walk
+// passes it explicitly: it is registering a vault on a chain it named, and the
+// selected chain is a side effect of that walk rather than the fact being recorded.
+async function dbRegisterWallet(addr, deployer, salt, ownerList, thresh, del, exec, block, txHash, name, labels, nonce, chainId) {
   const { data, error } = await sb.rpc('register_wallet', {
-    p_chain_id: S.chainId, p_address: addr, p_deployer: deployer,
+    p_chain_id: chainId || S.chainId, p_address: addr, p_deployer: deployer,
     p_salt: salt.toString(), p_owners: ownerList, p_threshold: thresh,
     p_delay: del, p_executor: exec, p_block: block, p_tx: txHash,
     p_name: name || null, p_labels: labels || null,
@@ -7212,9 +7224,15 @@ async function mineVanitySalt(factory, impl, caller, rps) {
 // true = the same vault (a retry landing on work already done), false = someone
 // else's, null = the chain could not be read. Called before a pre-existing
 // deployment is allowed to stand in for this one.
-async function vaultMatchesCtx(addr, ctx){
+//
+// `rp` names the chain to ask, for callers that cannot rely on the ambient
+// `provider` still pointing where they mean — the same reason classifyVaultCode
+// takes one. Answering this question against the wrong chain is worse than not
+// answering it: "false" there condemns a good vault, and "true" blesses an
+// address on a chain nobody asked about.
+async function vaultMatchesCtx(addr, ctx, rp){
   try {
-    const ms = new ethers.Contract(addr, MULTISIG_ABI, provider);
+    const ms = new ethers.Contract(addr, MULTISIG_ABI, rp || provider);
     const [th, dl, ex, ow] = await Promise.all([ms.threshold(), ms.delay(), ms.executor(), ms.getOwners()]);
     if(Number(th) !== Number(ctx.thresh)) return false;
     if(Number(dl) !== Number(ctx.del)) return false;
@@ -7782,6 +7800,63 @@ async function waitForWalletChain(id, tries=8, gap=400){
   return false;
 }
 
+// Record a vault that exists on one chain — named, not inferred.
+//
+// `chainId` and `rp` are the chain this vault was found on. They used to be the
+// ambient ones: the module-level `provider` for the nonce read, and S.chainId
+// inside dbRegisterWallet for the row's own chain. That is true of every caller
+// today and is exactly the kind of thing that stops being true quietly — a
+// recovery path runs in a catch block, after an await, and the chain the app is
+// pointed at is not a fact it controls. A row filed under the wrong chain is not
+// a cosmetic error: my_wallets is keyed on it, so the vault would appear on a
+// chain it does not exist on and be missing from the one it does.
+//
+// Every route that ends in "this vault is on this chain" has to come through
+// here, because the coordination row is not bookkeeping — my_wallets is what puts
+// a vault on its owners' dashboards, so a chain with no row is a chain where the
+// vault cannot be found. Only the freshly-mined path used to write one. The
+// already-deployed path did not, and that is the path RETRY takes: the overlay
+// went green on all three chains, said ALREADY DEPLOYED, and left two of them
+// absent from every owner's dashboard with nothing to indicate it.
+//
+// block/txHash are what this chain can attest to and are allowed to be unknown —
+// a vault found sitting at the address by getCode carries no receipt to read them
+// from. They are written blank in that case, and blank is where they stay: the
+// INSERT only supplies created_block/created_tx on the row's first registration,
+// and the ON CONFLICT branch does not touch them, so a later registration that
+// does know the block cannot fill them in. That is a deliberate trade and not a
+// silent one — nothing in this app reads either column, and the alternative is
+// hunting a Created event across an unknown block range to complete a record no
+// screen shows. What must not be blank is the row itself, which is the only thing
+// standing between an owner and a vault they cannot find.
+async function _recordDeployedVault(step, addr, ctx, block, txHash, chainId, rp){
+  try {
+    const ms = new ethers.Contract(addr, MULTISIG_ABI, rp || provider);
+    const onchainNonce = Number(await ms.nonce());
+    const wid = await dbRegisterWallet(addr, ctx.connectedAddress, ctx.salt, ctx.resolvedOwners,
+      ctx.thresh, ctx.del, ctx.executor, Number(block) || 0, txHash || '',
+      ctx.cfName, ctx.ownerLabels, onchainNonce, chainId);
+    if(!wid) step.dbWarn = true;   // deployed on-chain, absent from history
+  } catch(e){ console.error('DB register failed:', e); step.dbWarn = true; }
+}
+
+// Wait for a broadcast transaction to produce a receipt. Polled rather than
+// subscribed to, and read off this chain's own RPC rather than the wallet's:
+// every caller is on a recovery path, and the thing that put them there may well
+// be the wallet provider itself.
+//
+// Resolves the receipt, or null when the chain has not produced one inside the
+// budget — which is "cannot be read yet", not "it failed". The caller must not
+// turn the second into the first: a transaction still in the mempool at the end
+// of a minute is one whose vault will exist a block later, and RETRY finds it.
+async function _waitForReceipt(rp, hash, tries=20, gap=3000){
+  for(let i=0;i<tries;i++){
+    try { const rec = await rp.getTransactionReceipt(hash); if(rec) return rec; } catch(_){}
+    if(i<tries-1) await new Promise(r=>setTimeout(r,gap));
+  }
+  return null;
+}
+
 // Deploy the vault on one chain (used by the run loop and per-chain retry).
 // Resolves 'done' | 'failed' | 'blocked'. The third is the one the run loop
 // cares about: it means the wallet, not the chain, said no — so every remaining
@@ -7789,6 +7864,20 @@ async function waitForWalletChain(id, tries=8, gap=400){
 async function deployOnChain(k){
   const d = S.deploy; if(!d) return 'failed';
   const net = d.chains[k], step = d.steps[k], ctx = d.ctx;
+  // A reader pinned to the chain this step is about, so every question asked below
+  // is asked of that chain by name. The ambient `provider` is the same thing today
+  // — switchChain repoints it before any of this runs — but only for as long as
+  // nothing else moves it, and the reads here are separated from that switch by a
+  // wallet round trip and, in the catch, by a failure. makeProvider caches per
+  // chain, so this costs a map lookup.
+  //
+  // The CHAINS guard is belt-and-braces, not a live case: every route that fills
+  // d.chains has already dropped ids CHAINS does not carry — prodDeploy filters on
+  // it directly, and a resumed run gets its list from _resumeLeft, which filters on
+  // it too. It is here because makeProvider dereferences that entry without
+  // checking, so the cost of the assumption ever going stale is a TypeError thrown
+  // from whichever caller happens to be first rather than a chain quietly missing.
+  const rp = (CHAINS[net.id] && makeProvider(net.id)) || provider;
   const NM = String(net.name).toUpperCase();
   try {
     // Cleared alongside the error: a retry re-asks whether the name is free, so
@@ -7831,6 +7920,30 @@ async function deployOnChain(k){
     // wrong remedy: a wallet that has drifted onto another chain is connected,
     // and reconnecting it does nothing.
     if(!window._signer){ step.status='failed'; step.blocked=true; step.err='WALLET DISCONNECTED'; render(); return 'blocked'; }
+    // The wallet is on this chain now, so bind a signer to it here rather than
+    // reusing the one built when the wallet connected. Nothing is asked of the
+    // wallet; this is two local provider calls. It exists because the alternative
+    // failed in the one place it mattered: a signer carried over from the previous
+    // chain deployed onto this one and then threw on the way back, which is a red
+    // row and an unrecorded vault over a deploy that worked.
+    // A rebind that reports the account gone is the earliest and clearest place
+    // this is knowable: the salt below is bound to the deployer, so the run cannot
+    // continue as someone else, and saying so here costs no wallet prompt. Left to
+    // be discovered at eth_sendTransaction instead, it arrives as the wallet
+    // complaining that `from` is not the selected account — a true statement about
+    // the wrong subject, after the operator has already been asked to approve.
+    if(typeof window.walletRebindSigner === 'function'){
+      try {
+        const rb = await window.walletRebindSigner();
+        if(rb && rb.moved){
+          step.status='failed'; step.blocked=true;
+          step.err=`SWITCH BACK TO ${shortAddr(ctx.connectedAddress)}`;
+          render(); return 'blocked';
+        }
+      }
+      catch(e){ console.error('Rebind signer:', e); }
+    }
+    if(!window._signer){ step.status='failed'; step.blocked=true; step.err='WALLET DISCONNECTED'; render(); return 'blocked'; }
     const w = requireSigner();
     if(!w){
       const where = CHAINS[S.walletChain] ? String(CHAINS[S.walletChain].name).toUpperCase() : `CHAIN ${S.walletChain}`;
@@ -7841,29 +7954,44 @@ async function deployOnChain(k){
     // The salt is bound to the deployer: the factory requires salt >> 96 to be
     // msg.sender. Switching accounts mid-deploy would otherwise revert with an
     // opaque SaltDoesNotStartWith after the wallet prompt was already approved.
-    if(w.addr && ctx.connectedAddress && w.addr.toLowerCase() !== ctx.connectedAddress.toLowerCase()){
+    //
+    // Asked of the signer that will actually sign, falling back to the app's
+    // record of the account only when the signer cannot say. The rebind above binds
+    // to the known account or reports it gone, so this should never be the thing
+    // that catches a switch — which is exactly why it is worth keeping: it is the
+    // last check standing between a stale signer and a prompt, it reads the one
+    // object whose identity cannot be out of date, and window._connectedAddress is
+    // deliberately left for accountsChanged to update, so comparing that instead
+    // would trust the value most likely to still be wrong.
+    const signer = w.signer;
+    const signAs = (signer && signer.address) || w.addr;
+    if(signAs && ctx.connectedAddress && signAs.toLowerCase() !== ctx.connectedAddress.toLowerCase()){
       step.status='failed'; step.blocked=true; step.err=`SWITCH BACK TO ${shortAddr(ctx.connectedAddress)}`; render(); return 'blocked';
     }
-    const signer = w.signer;
     if(!ctx.salt){
       step.status='mining'; render();
       const mined = await mineVanitySalt(FACTORY, IMPLEMENTATION, ctx.connectedAddress, d.chains.map(n => makeProvider(n.id)));
       ctx.salt = mined.salt; ctx.minedAddr = mined.address; d.address = mined.address; _saveDeployResume(); render();
     }
-    const existing = await provider.getCode(ctx.minedAddr);
+    const existing = await rp.getCode(ctx.minedAddr);
     if(existing && existing !== '0x'){
       // Something already holds this address. On a retry that is this vault, so
       // skipping is right. But an earlier deploy from the same EOA can occupy
       // the same salt on a chain the mining pass never saw, and that vault has
       // a different signer set — reporting it as "already deployed" would hand
       // back a stranger's wallet as though the clone had succeeded.
-      const same = await vaultMatchesCtx(ctx.minedAddr, ctx);
+      const same = await vaultMatchesCtx(ctx.minedAddr, ctx, rp);
       if(same !== true){
         step.status='failed';
         step.err = same === false ? 'ADDRESS HOLDS A DIFFERENT VAULT' : 'CANNOT VERIFY EXISTING VAULT';
         render(); return 'failed';
       }
-      step.status='skipped'; step.address=ctx.minedAddr; d.lastVaultAddr=ctx.minedAddr; _saveDeployResume(); render(); return 'done';
+      // Registered, not just reported. This branch is the one a RETRY lands in
+      // after a step that deployed and was called failed, so it is the last chance
+      // this run has to get the vault onto its owners' dashboards for this chain.
+      step.status='skipped'; step.address=ctx.minedAddr; d.lastVaultAddr=ctx.minedAddr;
+      await _recordDeployedVault(step, ctx.minedAddr, ctx, 0, '', net.id, rp);
+      _saveDeployResume(); render(); return 'done';
     }
     // Init calls run inside the deploy, from the vault, before the real
     // executor is installed. The fast path is one; the identity claim is two
@@ -7907,7 +8035,7 @@ async function deployOnChain(k){
     // this step, and asks that it check the code is the audited build and that
     // the vault came up holding the configuration that was asked for, not just
     // that something is there.
-    const kind = await classifyVaultCode(walletAddr);
+    const kind = await classifyVaultCode(walletAddr, rp);
     if(kind === 'empty'){
       step.status='failed'; step.err='NO CODE AT ADDRESS — FACTORY MISSING?'; step.txHash=receipt.hash; render(); return 'failed';
     }
@@ -7917,7 +8045,7 @@ async function deployOnChain(k){
     // Configuration read back from the wallet itself. init() runs inside the
     // same transaction, so a mismatch here means the vault that exists is not
     // the vault that was ordered — surfaced before any funds are sent to it.
-    const configOk = await vaultMatchesCtx(walletAddr, ctx);
+    const configOk = await vaultMatchesCtx(walletAddr, ctx, rp);
     if(configOk === false){
       step.status='failed'; step.err='DEPLOYED CONFIG DOES NOT MATCH'; step.txHash=receipt.hash; render(); return 'failed';
     }
@@ -7937,12 +8065,7 @@ async function deployOnChain(k){
       } catch(e){ console.error('WNS read-back:', e); step.wnsSkipped = 'unconfirmed'; }
     }
     d.lastVaultAddr = walletAddr;
-    try {
-      const ms = new ethers.Contract(walletAddr, MULTISIG_ABI, provider);
-      const onchainNonce = Number(await ms.nonce());
-      const wid = await dbRegisterWallet(walletAddr, ctx.connectedAddress, ctx.salt, ctx.resolvedOwners, ctx.thresh, ctx.del, ctx.executor, Number(receipt.blockNumber), receipt.hash, ctx.cfName, ctx.ownerLabels, onchainNonce);
-      if(!wid) step.dbWarn = true;   // deployed on-chain, absent from history
-    } catch(e){ console.error('DB register failed:', e); step.dbWarn = true; }
+    await _recordDeployedVault(step, walletAddr, ctx, receipt.blockNumber, receipt.hash, net.id, rp);
     step.status='done'; step.address=walletAddr; step.txHash=receipt.hash; _saveDeployResume(); render();
     return 'done';
   } catch(e){
@@ -7960,9 +8083,79 @@ async function deployOnChain(k){
     // It is the first thing the operator needs and the row was throwing it away,
     // so the only route back to it was the wallet's own history. ethers carries
     // it in a different place depending on where the failure happened.
+    //
+    // info.sendTransactionHash is the one that matters most and was the one
+    // missing. It is where ethers puts the hash when eth_sendTransaction has
+    // already returned and the read that followed threw — no receipt to hang it
+    // on, no transaction object ever built, so the error carries it instead. That
+    // is precisely the failure whose row needs a link: a deploy that succeeded.
     const failedHash = e && (e.receipt?.hash || e.transaction?.hash || e.transactionHash ||
-      (typeof e.hash === 'string' ? e.hash : null));
+      e.info?.sendTransactionHash || (typeof e.hash === 'string' ? e.hash : null));
     if(typeof failedHash === 'string' && /^0x[0-9a-fA-F]{64}$/.test(failedHash)) step.txHash = failedHash;
+    // Ask the chain before reporting a failure, because not every throw on this
+    // path means nothing happened. Some of them land *after* the transaction was
+    // broadcast — an RPC that went away mid-wait, a provider that decided its
+    // network had changed under it — and the vault is then sitting at the mined
+    // address while this row says FAILED. That is the worst of the three possible
+    // answers: the operator is told to retry a deploy that already succeeded, and
+    // nothing has recorded it.
+    //
+    // A vault that is there but not the one that was ordered fails vaultMatchesCtx
+    // and falls through to the red row — an address holding a stranger's wallet
+    // must never be reported as this run's clone.
+    //
+    // Not asked after a refusal, though the answer would often be 'done': a
+    // declined prompt broadcast nothing, so anything at that address predates this
+    // attempt, and turning the step green would release the halt and fire the next
+    // chain's prompt at someone who has just said no. The halt stands, and RESUME
+    // comes back through the already-deployed branch above, which records it.
+    if(!rejected && ctx && ctx.minedAddr){
+      // `rp` is the step's own reader, built once at the top of this function —
+      // this chain by name, which is the whole point in a catch block reading a
+      // chain the app may already have been moved off. Deliberately not rebuilt
+      // here: one reader per step is what makes "which chain did this step ask"
+      // answerable in one place, and a second construction sitting outside the try
+      // below is a statement that could throw its way out of the error handler,
+      // taking the real error with it.
+      let blk = Number(e?.receipt?.blockNumber) || 0;
+      try {
+        // A transaction that has been broadcast is usually still in the mempool at
+        // the moment the error arrives — that is the exact shape of the failure
+        // this reconciliation is for, where the throw came from the read *after*
+        // eth_sendTransaction returned a hash. Asking for code straight away would
+        // find none and paint the row red over a deploy that was seconds from
+        // landing, so wait for the receipt first. Only when a hash exists: with
+        // nothing broadcast there is nothing to wait for, and a genuine failure
+        // must not be made to sit through a minute of polling before it is named.
+        if(step.txHash && !blk){
+          step.status='checking'; render();
+          const rec = await _waitForReceipt(rp, step.txHash);
+          if(rec) blk = Number(rec.blockNumber) || 0;
+          // Mined and reverted is a real failure and is worth saying plainly. The
+          // thrown error describes whatever broke on the way back, which for a
+          // revert observed through a dead RPC is not the revert.
+          if(rec && Number(rec.status) === 0){
+            step.status='failed'; step.err='TRANSACTION REVERTED ON CHAIN'; render(); return 'failed';
+          }
+          // Restored before the question below is asked, so that a row rendered
+          // mid-check never sits at CONFIRMING with no answer coming.
+          step.status='failed';
+        }
+        const kind = await classifyVaultCode(ctx.minedAddr, rp);
+        if((kind === 'clone' || kind === '7702') && await vaultMatchesCtx(ctx.minedAddr, ctx, rp) === true){
+          step.status='done'; step.err=null; step.blocked=false; step.verified=true;
+          step.address=ctx.minedAddr; d.lastVaultAddr=ctx.minedAddr;
+          await _recordDeployedVault(step, ctx.minedAddr, ctx, blk, step.txHash || '', net.id, rp);
+          _saveDeployResume(); render();
+          return 'done';
+        }
+      } catch(e2){
+        console.error('Post-failure vault check:', e2);
+        // The check itself broke. It has no verdict to offer, so the original one
+        // stands — including the status, which the wait above may have moved.
+        step.status='failed'; step.blocked = rejected;
+      }
+    }
     render();
     return rejected ? 'blocked' : 'failed';
   }
