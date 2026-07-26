@@ -333,6 +333,25 @@ wallets as ineligible for `forwardEnabled`.
 > storage until the nonce moves past it. This dapp exposes that approval path
 > directly. It is the same collapse with the access requirement removed.
 >
+> Two qualifications, since on-chain approval is a deliberate mechanism rather
+> than an oversight. It exists because a **contract owner cannot sign** — a DAO
+> or nested multisig has no other route — and because it removes every off-chain
+> dependency: a vault whose owners approve on-chain keeps working with no
+> coordination service at all, if this dapp or its database disappear. That is a
+> liveness property worth having, and it is why the option stays.
+>
+> The exposure is also narrower than "permanent public authorisation" suggests.
+> The approved hash commits to a specific nonce and both routes compute against
+> the live one, so an approval is permanently unreachable the moment the nonce
+> advances past it. The window is one nonce wide, which also bounds the
+> reactivation-on-re-add issue filed as L-3.
+>
+> And the two goals reconcile: every owner **but one** approves on-chain, and the
+> remaining owner submits *without* approving. Their slot stays sender-only, a
+> copier is left one signature short, and no coordination service was needed to
+> assemble the quorum. That is the pattern this dapp now recommends when an
+> approval lands.
+>
 > **A second missed property:** `forwardEnabled` is keyed by wallet address in
 > the module and never cleared, so it survives executor rotation. A wallet that
 > enables the fast path, rotates its executor away, and later returns to the

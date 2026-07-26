@@ -59,6 +59,13 @@ button:active{transform:scale(.97)}
 .tx-share{display:inline-flex;align-items:center;gap:8px;font-size:8px;font-weight:700;letter-spacing:1px;color:var(--a);border:1px solid var(--a);padding:3px 4px 3px 8px;text-transform:uppercase}
 .tx-share button{background:none;border:none;color:var(--a);cursor:pointer;font-size:11px;line-height:1;padding:0 2px;opacity:.6}
 .tx-share button:hover{opacity:1}
+/* Quiet peer of .reject-link for a non-destructive fallback action. On-chain
+   approval is a real capability — the only route a DAO or nested multisig has,
+   and the one that needs no coordination service at all — but for an ordinary
+   signer it costs gas, publishes the authorization, and gives up the
+   front-run binding. Offered, not recommended. */
+.alt-link{background:transparent;border:1px solid var(--ln);color:var(--d);font-size:9px;font-weight:700;letter-spacing:2px;padding:6px 12px;cursor:pointer;font-family:var(--f);text-transform:uppercase;transition:border-color .15s,color .15s}
+.alt-link:hover{border-color:var(--a);color:var(--a)}
 .reject-link{background:transparent;border:1px solid var(--ln);color:var(--d);font-size:9px;font-weight:700;letter-spacing:2px;padding:6px 12px;cursor:pointer;font-family:var(--f);text-transform:uppercase;transition:border-color .15s,color .15s}
 .reject-link:hover{border-color:var(--r);color:var(--r)}
 .reject-link.armed{border-color:var(--r);color:var(--r);background:color-mix(in srgb,var(--r) 8%,transparent)}
@@ -2574,14 +2581,24 @@ function renderDash(v,mob){
     const signedByYou=you&&tx.approvals[you];
     let actionBtn="";
     if(s.sign&&!signedByYou){
+      // Signing is the path almost everyone wants: free, private, and it keeps
+      // the submitter binding that stops a collected bundle being replayed down
+      // the queueing route. On-chain approval is demoted to a fallback rather
+      // than removed — a DAO or nested multisig owner has no other way to
+      // authorise, and it is the only route that works with no coordination
+      // service at all. The tooltip carries the tradeoff so the choice is not
+      // made on the label alone.
+      const apTitle = 'Registers approval in the vault itself instead of signing a message. '
+        + 'Use it if you cannot sign — a DAO or contract owner — or if you want this vault to work with no coordination service. '
+        + 'Costs gas, is publicly visible, and gives up front-run protection unless a different owner submits the transaction.';
       actionBtn=mob
         ?`<div style="display:flex;gap:8px;flex-direction:column">
             <button class="btn btn-fill btn-w" onclick="doSign(${S.sel},${tx.nonce})">SIGN <span style="opacity:.5;font-size:9px;margin-left:4px">OFF-CHAIN</span></button>
-            <button class="btn btn-outline btn-w" onclick="doApprove(${S.sel},${tx.nonce})">APPROVE <span style="opacity:.5;font-size:9px;margin-left:4px">ON-CHAIN</span></button>
+            <button class="alt-link" style="width:100%" title="${apTitle}" onclick="doApprove(${S.sel},${tx.nonce})">APPROVE ON-CHAIN INSTEAD</button>
           </div>`
-        :`<div style="display:flex;gap:8px">
+        :`<div style="display:flex;gap:8px;align-items:center">
             <button class="btn btn-fill" onclick="doSign(${S.sel},${tx.nonce})">SIGN</button>
-            <button class="btn btn-outline" onclick="doApprove(${S.sel},${tx.nonce})">APPROVE</button>
+            <button class="alt-link" title="${apTitle}" onclick="doApprove(${S.sel},${tx.nonce})">OR APPROVE ON-CHAIN</button>
           </div>`;
     }else if(s.sign&&signedByYou){
       actionBtn=`<button class="btn btn-outline" ${mob?"style='width:100%'":""} onclick="doUnsign(${S.sel},${tx.nonce})">UNSIGN</button>`;
@@ -5555,7 +5572,14 @@ async function prodApprove(vi, nonce) {
     if(v.dbId) await dbRecordApproval(v.dbId, S.chainId, connectedAddress, hash, true, Number(receipt.blockNumber), receipt.hash);
 
     tx.approvals[connectedAddress] = true;
-    flash(`APPROVED #${nonce} (ON-CHAIN)`);
+    // An on-chain approval is readable by anyone, so the slot it fills is no
+    // longer bound to whoever submits — the protection that stops a collected
+    // bundle being replayed into execute() and queued. It survives if the
+    // owner who finally submits has *not* approved on-chain: their slot stays
+    // sender-only, and a copier is left one signature short. So a vault can run
+    // with no coordination service at all and keep the binding, as long as the
+    // last owner submits rather than approving.
+    flash(`APPROVED #${nonce} (ON-CHAIN) — LET AN OWNER WHO HAS NOT APPROVED SUBMIT IT, SO THE BUNDLE STAYS BOUND TO THEM`);
     render();
   } catch(e) {
     console.error(e);

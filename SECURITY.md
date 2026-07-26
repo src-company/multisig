@@ -57,6 +57,127 @@ manual review. Do not cite Appendix B as coverage for any of the above.
 
 ---
 
+## V1 Posture — where four reviews leave the live deployment
+
+**Verdict: the deployed contracts are sound for their intended use. No
+redeployment is indicated by any of the four reviews.**
+
+All four independently concluded that **no unauthorised party can move funds
+from a correctly configured wallet**. The signature scheme, nonce discipline,
+owner linked list, replay protection and clone bytecode were each verified sound
+by three or four of them. Every surviving finding is one of:
+
+- a **configuration trap** — a one-way door an owner quorum has to deliberately
+  sign its way into, all now blocked in the dapp before the transaction is built;
+- an **executor composition defect** — denial of *timeliness*, never theft,
+  partially mitigated client-side and fully closable by a swappable module.
+
+### The one open residual
+
+**A hostile co-signer can delay an urgent action. They cannot block it and
+cannot steal.** Signatures collected for one route are valid on the other, so
+anyone holding a threshold-sized subset can replay it into `execute()`, queueing
+what should have run now and consuming the nonce.
+
+Scope, stated precisely — the sender-slot binding closes this against a party
+who only sees the submitted transaction, not against one who holds the
+signatures:
+
+| Attacker | Cancel path | Fast path |
+|---|---|---|
+| Anonymous mempool observer | **Closed** by the binding | Open (`n−1 ≥ k`) |
+| Co-signer, or anyone reading the signature store | Open | Open |
+
+The insider case is not incidental — **the design requires** every co-signer to
+hold every signature, because that is what makes accrual work. Private
+submission (Flashbots, or an L2 sequencer) removes the anonymous observer and
+does nothing about the insider.
+
+Relative to baseline multisig the marginal harm is small: a defecting co-signer
+could always refuse to sign. What they gain here is the ability to impose `delay`
+on something that already reached quorum.
+
+### Where V1 is not the right answer
+
+1. **A wallet whose timelock is a public promise to third parties.** Do not
+   enable the fast path at n-of-n; the promise becomes unenforceable.
+2. **Incident response that depends on the fast path.** It is deniable by anyone
+   holding the signatures. Cancellation is the reliable primitive — threshold
+   signatures, immediate, no `forwardEnabled` required.
+3. **High-value treasury where a delayed emergency response is itself the
+   catastrophe.** Ship the V2 executor first.
+
+### Why this is not a lock-in
+
+`executor` is per-wallet mutable storage. A `TimelockExecutorV2` can be deployed
+alongside v1 and adopted through **one threshold-signed `setExecutor`** — no
+migration, no new wallet addresses, no funds moving, no cross-user coordination.
+That asymmetry is what makes shipping v1 now a decision rather than a compromise.
+
+### V2 keeps the accrual property — it does not trade it away
+
+Route-binding and accrual look mutually exclusive: if one signature works on both
+routes, whoever holds it picks. But **accrual only has value when the route is
+still undecided**, and for the actions that matter it never is:
+
+| Action | Route known at signing? | V2 treatment |
+|---|---|---|
+| Ordinary proposal | **No** — collect `threshold`, an nth signer may arrive later | Keep the accruing `Execute` digest |
+| Cancel | **Yes** — you sign a cancel *because* you are cancelling | Bind |
+| Accelerate | **Yes** — you sign it *because* it is already queued | Bind |
+
+Nobody collects signatures and later discovers the action was a cancel — a cancel
+is already its own proposal with its own digest. So binding cancel and accelerate
+to a `ForwardExecute(mode, …, deadline)` struct costs **zero** convenience and
+closes the insider vector on the path that matters, including against a defecting
+co-signer. Ordinary proposals keep accruing exactly as today.
+
+**Bind where intent is already explicit; accrue where it is not.**
+
+### On-chain approval — a defensible mechanism with a real cost
+
+`approve(hash, bool)` plus the `v=0` slot is justified twice over, and the second
+reason is the stronger one:
+
+1. **Contract owners cannot sign.** Without it, a DAO or nested multisig can
+   never be an owner. The alternative — ERC-1271 calls inside the verification
+   loop — puts external calls on the hottest path in the contract, with gas,
+   failure modes and a reentrancy surface that does not exist today.
+2. **It removes every off-chain dependency.** Signature collection needs a store
+   and a distribution path; approvals need only the chain. A vault whose owners
+   approve on-chain keeps working if this dapp, its database, or its operator
+   disappear. That is a liveness property, not a convenience.
+
+So approvals and signatures are **not** substitutes competing on convenience —
+they trade confidentiality and gas for availability and independence.
+
+The costs are real: an approval is world-readable and permanent until the nonce
+advances, and it **voids the sender-slot binding**, because a slot backed by a
+public approval is usable by anyone rather than only by the submitter.
+
+They are reconcilable. Have every owner **but one** approve on-chain, and let the
+remaining owner submit without approving: their slot stays sender-only, a copier
+is one signature short, and no coordination service was needed. This is the
+pattern the dapp now recommends when an approval lands.
+
+**Scope worth knowing:** an approval commits to a specific nonce, and both
+execution routes compute against the live one, so it becomes permanently
+unreachable once the nonce advances past it. Stale approvals for consumed nonces
+are inert; only approvals made for a not-yet-reached nonce are worth revoking.
+That bounds the exposure window to a single nonce and makes L-3's
+reactivation-on-re-add far narrower than filed.
+
+### Standing gaps
+
+Not blocking, but open: no CI, no fork tests, no monitoring or alerting for role
+changes, no incident runbook. `TimelockExecutor` is unverified on mainnet
+explorers (source was recovered from byte-identical Base/Arbitrum deployments).
+The regression suite for the route-substitution class now exists
+(`test/RouteSubstitution.t.sol`, `test/ThresholdOverflow.t.sol`) — no reviewer
+delivered proof-of-concept code with their report.
+
+---
+
 ## Fourth Review (leftclaw, 2026-07-25) — Disposition
 
 **Full report with our responses inline:**
