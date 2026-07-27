@@ -8,6 +8,43 @@ const GWEINS = '0x9D51D507BC7264d4fE8Ad1cf7Fe191933A0a81d6';
 const WEINS_ABI = ['function reverseResolve(address) view returns (string)'];
 const WC_PROJECT_ID = '1e8390ef1c1d8a185e035912a1409749';
 
+// Coinbase Smart Wallet — a passkey account with no extension and no app to
+// install, which is the one Coinbase product the two paths below cannot reach.
+// An installed Coinbase extension announces itself over EIP-6963 and the mobile
+// app pairs over WalletConnect; the smart wallet lives behind a popup at
+// keys.coinbase.com and is only reachable through Coinbase's SDK.
+//
+// It matters here more than it would elsewhere: a Basename usually resolves to
+// one of these accounts rather than to an EOA, so the owner a Base user is most
+// likely to name is an account this app could not previously connect at all.
+//
+// Vendored rather than loaded from a CDN, because script-src is 'self'. The SDK
+// ships no browser build, so the file beside this one is produced from the
+// published package with:
+//
+//   npm pack @coinbase/wallet-sdk@4.3.7      # sha512 z6e5XDw6EF06Rqke...
+//   echo "export { createCoinbaseWalletSDK } from '@coinbase/wallet-sdk';" > entry.js
+//   esbuild entry.js --bundle --format=iife --minify \
+//     --global-name=CoinbaseWalletSDKBundle --define:process.env.NODE_ENV='"production"' \
+//     --outfile=coinbase.min.js
+//
+// 116 KB, against WalletConnect's 635 KB, and loaded on the same terms: only if
+// someone picks it.
+let _cbLoadPromise = null;
+function loadCoinbase() {
+  if (globalThis.CoinbaseWalletSDKBundle) return Promise.resolve();
+  if (_cbLoadPromise) return _cbLoadPromise;
+  _cbLoadPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = './coinbase.min.js';
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => { _cbLoadPromise = null; reject(new Error('Failed to load Coinbase Wallet SDK')); };
+    document.head.appendChild(s);
+  });
+  return _cbLoadPromise;
+}
+
 // WalletConnect (~635KB) is only needed if the user actually picks it, so it is
 // not shipped in the initial page load. Inject it on demand, once, and cache
 // the promise so concurrent/repeat callers share a single download.
@@ -62,6 +99,49 @@ function _wcSessionConfig() {
   // The one required chain has to be one a wallet can be relied on to know.
   const required = rpcMap[1] ? 1 : _targetChainId;
   return { chains: [required], optionalChains, rpcMap };
+}
+
+// The smart wallet's provider. One per page — the SDK holds the popup and the
+// session behind it, so a second instance would be a second session competing
+// for the same account.
+//
+// `smartWalletOnly` deliberately: the SDK can also drive the extension and the
+// mobile QR flow, and both of those are already offered above by routes that do
+// not cost a 116 KB download. Asking for only the account this exists to reach
+// keeps that promise, and keeps the WalletLink hosts out of the CSP entirely.
+//
+// Every chain the app offers is declared, not just the current one, for the same
+// reason WalletConnect's session is: this app moves between chains as a matter
+// of course and a multichain deploy moves mid-run. Chains the smart wallet does
+// not support — MegaETH among them today — simply fail the switch, which the
+// deploy loop already reports per chain rather than treating as fatal.
+let _coinbaseProvider = null;
+let _cbProviderPromise = null;
+function getCoinbaseProvider() {
+  if (_coinbaseProvider) return Promise.resolve(_coinbaseProvider);
+  // The promise is cached, not just the result. Two callers can arrive before
+  // either has finished — the connect button and auto-reconnect race on a
+  // returning visitor, and a double-click races with itself — and awaiting the
+  // download separately would build a second SDK, which is the second session
+  // this is supposed to prevent. A failure clears the slot so a retry is a
+  // retry rather than the same rejection handed out forever.
+  if (_cbProviderPromise) return _cbProviderPromise;
+  _cbProviderPromise = (async () => {
+    await loadCoinbase();
+    const make = globalThis.CoinbaseWalletSDKBundle?.createCoinbaseWalletSDK;
+    if (!make) throw new Error('Coinbase Wallet SDK not available');
+    const sdk = make({
+      appName: _appName,
+      appChainIds: (_wcChains || [{ id: _targetChainId }]).map(c => Number(c.id)),
+      preference: { options: 'smartWalletOnly' },
+    });
+    const p = sdk.getProvider();
+    if (!p) throw new Error('Coinbase Wallet SDK returned no provider');
+    _coinbaseProvider = p;
+    return p;
+  })();
+  _cbProviderPromise.catch(() => { _cbProviderPromise = null; });
+  return _cbProviderPromise;
 }
 
 // One provider per page, kept rather than rebuilt. Rebuilding it used to be the
@@ -174,6 +254,14 @@ function detectWallets() {
     seenNames.add(name.toLowerCase());
   }
   if (!detected.length && window.ethereum) detected.push({ key: 'injected', name: 'Browser Wallet', icon: '', getProvider: () => window.ethereum });
+  // Named for the account, not the company, because an installed Coinbase
+  // extension is listed separately just above under its own EIP-6963 name. They
+  // are different accounts — an EOA the extension holds, and a passkey smart
+  // account — and offering both under one label would make picking the wrong one
+  // the easiest mistake on this sheet. Drawn inline: img-src admits no remote
+  // host, and a mark is the one part of a wallet row that has to render.
+  const CB_ICON = '<svg width="24" height="24" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#0052FF"/><rect x="11" y="11" width="10" height="10" rx="2" fill="#fff"/></svg>';
+  detected.push({ key: 'coinbase', name: 'Coinbase Smart Wallet', icon: CB_ICON });
   const WC_ICON = '<svg width="24" height="16" viewBox="0 0 480 332" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="m126.613 93.9842c62.622-61.3123 164.152-61.3123 226.775 0l7.536 7.3788c3.131 3.066 3.131 8.036 0 11.102l-25.781 25.242c-1.566 1.533-4.104 1.533-5.67 0l-10.371-10.154c-43.687-42.7734-114.517-42.7734-158.204 0l-11.107 10.874c-1.565 1.533-4.103 1.533-5.669 0l-25.781-25.242c-3.132-3.066-3.132-8.036 0-11.102zm280.093 52.2038 22.946 22.465c3.131 3.066 3.131 8.036 0 11.102l-103.463 101.301c-3.131 3.065-8.208 3.065-11.339 0l-73.432-71.896c-.783-.767-2.052-.767-2.835 0l-73.43 71.896c-3.131 3.065-8.208 3.065-11.339 0l-103.4657-101.302c-3.1311-3.066-3.1311-8.036 0-11.102l22.9456-22.466c3.1311-3.065 8.2077-3.065 11.3388 0l73.4333 71.897c.782.767 2.051.767 2.834 0l73.429-71.897c3.131-3.065 8.208-3.065 11.339 0l73.433 71.897c.783.767 2.052.767 2.835 0l73.431-71.895c3.132-3.066 8.208-3.066 11.339 0z" fill="#3396ff"/></svg>';
   detected.push({ key: 'walletconnect', name: 'WalletConnect', icon: WC_ICON });
   return detected;
@@ -261,6 +349,10 @@ async function connectWithWallet(walletKey) {
     if (walletKey === 'walletconnect') {
       walletProvider = await getWalletConnectProvider();
       await walletProvider.enable();
+    } else if (walletKey === 'coinbase') {
+      // No enable() of its own — eth_requestAccounts below is what opens the
+      // passkey popup, the same call every injected wallet answers.
+      walletProvider = await getCoinbaseProvider();
     } else if (walletKey.startsWith('eip6963_')) {
       const uuid = walletKey.replace('eip6963_', '');
       walletProvider = eip6963Providers.get(uuid)?.provider;
@@ -291,12 +383,15 @@ async function connectWithWallet(walletKey) {
       } catch (switchErr) {
         if (switchErr.code === 4902 && _addChainParams) {
           await walletProvider.request({ method: 'wallet_addEthereumChain', params: [_addChainParams] });
-        } else if (walletKey === 'walletconnect') {
-          // Not fatal here. A session holds an account per chain the wallet
-          // approved, and a chain it declined cannot be switched to at all — but
-          // that is a reason to connect and say so, not to refuse the connection
-          // over a chain the operator may not be about to sign on.
-          console.warn('WalletConnect chain switch:', switchErr);
+        } else if (walletKey === 'walletconnect' || walletKey === 'coinbase') {
+          // Not fatal here. A WalletConnect session holds an account per chain
+          // the wallet approved, and a chain it declined cannot be switched to
+          // at all; the smart wallet supports a fixed list and will refuse a
+          // chain outside it, MegaETH among them today. Either way that is a
+          // reason to connect and say so, not to refuse the connection over a
+          // chain the operator may not be about to sign on. The app already
+          // tells a wallet sitting on the wrong chain to switch before signing.
+          console.warn('chain switch declined by wallet:', switchErr);
         } else throw switchErr;
       }
       // ...and the switch reporting success is not the same as the session having
@@ -398,6 +493,17 @@ window.disconnectWallet = function() {
     try { _walletConnectProvider.disconnect(); } catch (e) {}
     _walletConnectProvider = null;
   }
+  // The smart wallet's session outlives this page unless it is ended here.
+  // Dropping the saved choice stops auto-reconnect, but it would not stop the
+  // next Connect from coming back authorised with no passkey prompt — so
+  // disconnecting would have logged the operator out of the interface and not
+  // out of the account. On a shared machine that is the whole point of the
+  // button. The provider goes with it, so the next connect builds a new one.
+  if (_coinbaseProvider) {
+    try { _coinbaseProvider.disconnect(); } catch (e) {}
+    _coinbaseProvider = null;
+  }
+  _cbProviderPromise = null;
 
   _walletProvider = null;
   _signer = null;
@@ -585,6 +691,13 @@ async function tryAutoConnect() {
         notifyDisplayUpdate();
         return;
       }
+    } else if (savedWallet === 'coinbase') {
+      // The SDK keeps its own session, so a returning visitor whose passkey
+      // session is still live reconnects with no popup — and one whose session
+      // has gone answers an empty eth_accounts below and is left disconnected
+      // rather than having a popup opened at them on page load, which is the
+      // same rule the injected branch follows.
+      probe = await getCoinbaseProvider();
     } else {
       probe = window.ethereum;
     }
