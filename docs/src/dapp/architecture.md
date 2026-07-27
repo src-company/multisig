@@ -25,12 +25,33 @@ appears in `connect-src` and in `img-src`, which otherwise allows only `'self'` 
 `data:`), `relay.walletconnect.com` / `.org` for the session socket, and
 `verify.walletconnect.com` / `.org` in `frame-src` for the iframe that vouches for
 this origin. Its RPC fallback, `rpc.walletconnect.com`, is deliberately not
-allowed: the provider is given an `rpcMap` for the chain it is initialised with, so
+allowed: the session is given an `rpcMap` covering every chain the app offers, so
 chain reads stay on the RPC hosts above.
 
 `render.yaml` notes the alternative of serving the same policy as a real response
 header instead of a meta tag, which is stricter; the meta form is what ships so the
 file is self-contained.
+
+## The WalletConnect session
+
+Two details of the session decide whether anything can be signed over it, and
+neither is a default worth accepting.
+
+The **methods**: WalletConnect's required set is `eth_sendTransaction` and
+`personal_sign`. Every signature in this app is EIP-712, and a method the session
+did not ask for is not refused by the wallet — it is routed to the chain's RPC node,
+which answers "method not found". So the optional set is requested too, which is
+what puts `eth_signTypedData_v4` and `wallet_switchEthereumChain` in the session.
+
+The **chains**: a required namespace is all-or-nothing, so requiring the chain the
+page happens to be on means a wallet that has never heard of MegaETH refuses the
+whole session, and a session pinned to one chain can never follow the app to
+another. Mainnet is the single required chain — the one every wallet knows — and all
+seven are offered as optional, each with its RPC.
+
+A chain id read back from a wallet is normalised rather than parsed as hex: an
+injected wallet answers `eth_chainId` with a hex string as EIP-1193 says, and
+WalletConnect answers out of its own session state with a decimal number.
 
 ## RPC resilience
 

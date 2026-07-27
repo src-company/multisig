@@ -4925,7 +4925,7 @@ async function submitTopUp(){
   // funds would land at the same address on the wrong chain.
   if(window._connectedWalletProvider){
     let wc = null;
-    try { wc = parseInt(await window._connectedWalletProvider.request({method:'eth_chainId'}), 16); } catch(_){}
+    try { wc = normChainId(await window._connectedWalletProvider.request({method:'eth_chainId'})); } catch(_){}
     if(wc !== S.chainId){
       try { await walletSwitchChain({ chainId:S.chainId, chainHex:CHAINS[S.chainId].hex, rpc:CHAINS[S.chainId].rpcs[0], addChainParams:ADD_CHAIN_PARAMS[S.chainId]||null }); } catch(_){}
       if(!(await waitForWalletChain(S.chainId))){ t.sending=false; t.err = 'SWITCH WALLET TO ' + (CHAINS[S.chainId]?.name||'CHAIN').toUpperCase(); render(); return; }
@@ -8283,11 +8283,32 @@ async function _deployPreflight(run, chains, connectedAddress) {
 //
 // So every direct read now writes it back. A poll is a stronger observation
 // than an event that may never come.
+// A chain id off a wallet is not reliably a hex string. EIP-1193 says it is and
+// every injected wallet obliges, but WalletConnect answers eth_chainId out of its
+// own session state and answers with a *number* — so `parseInt(id, 16)` re-read
+// 8453 as 0x8453 and reported Base as chain 33875, OP Mainnet as 16, MegaETH as
+// 17190. Mainnet was the one chain where the two spellings agree, which is what
+// hid it.
+//
+// Nothing about that is cosmetic. S.walletChain is what requireSigner() compares
+// against S.chainId, so every WalletConnect signature outside mainnet was refused
+// with "WALLET IS ON CHAIN 33875 — SWITCH TO SIGN"; it is what waitForWalletChain
+// polls, so a multichain deploy gave up on a wallet that had already arrived; and
+// it is what the transfer path checks before sending funds. Take the id in
+// whichever shape it comes.
+function normChainId(raw){
+  if(typeof raw === 'number') return raw;
+  if(typeof raw === 'bigint') return Number(raw);
+  if(typeof raw !== 'string') return NaN;
+  const s = raw.trim();
+  return /^0x/i.test(s) ? parseInt(s, 16) : parseInt(s, 10);
+}
+
 async function readWalletChain(){
   const wp = window._connectedWalletProvider;
   if(!wp) return null;
   try {
-    const id = parseInt(await wp.request({method:'eth_chainId'}), 16);
+    const id = normChainId(await wp.request({method:'eth_chainId'}));
     if(Number.isFinite(id) && id > 0){ S.walletChain = id; return id; }
   } catch(_){}
   return null;
@@ -10602,7 +10623,7 @@ async function _onWalletConnect() {
   if(window._connectedWalletProvider) {
     try {
       const wc = await window._connectedWalletProvider.request({method:'eth_chainId'});
-      const walletChain = parseInt(wc, 16);
+      const walletChain = normChainId(wc);
       // A link names its chain; a wallet merely happens to be on one. Following
       // the wallet here moved a link opened from a second tab onto whatever
       // network that tab had left selected — and for a WNS name, which resolves
@@ -10919,6 +10940,11 @@ setInterval(tickSlowCountdowns, 1000);
     chainId: S.chainId,
     chainHex: CHAINS[S.chainId].hex,
     rpc: CHAINS[S.chainId].rpcs[0],
+    // Every chain, not just the one the page opened on. A WalletConnect session
+    // can only be switched to a chain it asked about at pairing time, and this app
+    // moves between them as a matter of course — a multichain deploy moves
+    // mid-run. Each carries its RPC so the session's reads stay on our own hosts.
+    chains: Object.keys(CHAINS).map(id => ({ id: Number(id), rpc: CHAINS[id].rpcs[0] })),
     addChainParams: ADD_CHAIN_PARAMS[S.chainId] || null,
     onConnect: [onWalletConnect],
     onDisconnect: [onWalletDisconnect],

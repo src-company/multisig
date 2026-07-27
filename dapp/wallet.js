@@ -26,6 +26,75 @@ function loadWalletConnect() {
   return _wcLoadPromise;
 }
 
+// What the session asks the wallet for. Every chain the app supports is offered as
+// *optional*, and exactly one — mainnet, or the target if the app is not offering
+// mainnet at all — is required.
+//
+// Both halves were wrong before, and each broke the connection in its own way.
+//
+// The chains: a required namespace is all-or-nothing, so naming the chain the app
+// happened to be on meant a wallet that has never heard of MegaETH refused the
+// whole session rather than pairing without it. And only the approved chains can
+// be switched to afterwards, so a session pinned to one chain could never follow
+// the app to another — which this app does constantly, and a multichain deploy
+// does mid-run.
+//
+// The methods: the required set is `eth_sendTransaction` and `personal_sign`, and
+// nothing else. Everything in this app is signed with EIP-712 — `signTypedData`,
+// i.e. `eth_signTypedData_v4` — and a method outside the session is not refused by
+// the wallet, it is quietly routed to the chain's *RPC node* instead, which
+// answers "method not found". So WalletConnect could connect and then sign
+// nothing. Asking for the optional set is what puts typed-data signing (and
+// `wallet_switchEthereumChain`) in the session where the wallet will see it.
+//
+// Every chain is given its RPC here as well, and that is load-bearing twice over:
+// the provider sends reads (`eth_call`, `eth_estimateGas`) to whatever URL it has
+// for the current chain, and a chain with no entry gets WalletConnect's own RPC
+// host — which is not in the page's CSP, by choice, so those reads would be
+// blocked rather than merely routed off-site.
+function _wcSessionConfig() {
+  const rpcMap = {};
+  for (const c of (_wcChains || [])) {
+    if (c && c.id && c.rpc) rpcMap[Number(c.id)] = c.rpc;
+  }
+  if (!rpcMap[_targetChainId]) rpcMap[_targetChainId] = _targetRpc;
+  const optionalChains = Object.keys(rpcMap).map(Number);
+  // The one required chain has to be one a wallet can be relied on to know.
+  const required = rpcMap[1] ? 1 : _targetChainId;
+  return { chains: [required], optionalChains, rpcMap };
+}
+
+// One provider per page, kept rather than rebuilt. Rebuilding it used to be the
+// first thing a second connect attempt did — `disconnect()` then `init()` again —
+// which is fine for a stale attempt the user is retrying and destroys the one
+// thing worth keeping: a session restored from storage, which is what auto-connect
+// hands to this function. `enable()` below is safe to call either way; it only
+// opens the QR modal when there is no session to use.
+async function getWalletConnectProvider() {
+  await loadWalletConnect();
+  const WCProvider = globalThis['@walletconnect/ethereum-provider']?.EthereumProvider;
+  if (!WCProvider?.init) throw new Error('WalletConnect not available');
+  if (_walletConnectProvider) return _walletConnectProvider;
+  const { chains, optionalChains, rpcMap } = _wcSessionConfig();
+  const p = await WCProvider.init({
+    projectId: WC_PROJECT_ID,
+    chains, optionalChains, rpcMap,
+    showQrModal: true,
+    metadata: { name: _appName, description: _appName, url: window.location.origin, icons: [] }
+  });
+  // A session can also end from the other side — disconnected in the wallet, or
+  // simply expired — and nothing here would have noticed: the provider stayed
+  // installed, the header still said connected, and the next signature went to a
+  // session that was gone. Registered on the instance, once, so the listener
+  // cannot stack up across reconnects.
+  p.on('disconnect', () => {
+    if (_connectedWalletProvider === p) window.disconnectWallet();
+    else if (_walletConnectProvider === p) _walletConnectProvider = null;
+  });
+  _walletConnectProvider = p;
+  return p;
+}
+
 // Quotes are escaped as well as markup: every _esc() below lands in an HTML
 // *attribute* at least once (data-wallet-key, src, aria-label), and an EIP-6963
 // announcement is whatever an installed extension chose to broadcast — a uuid or
@@ -61,6 +130,10 @@ let _targetChainId = 1;
 let _targetChainHex = '0x1';
 let _targetRpc = 'https://ethereum.publicnode.com';
 let _addChainParams = null;
+// [{ id, rpc }] — every chain the app offers, for the WalletConnect session to ask
+// about. The app owns this list; without it a session is built for the one chain
+// the page is currently on.
+let _wcChains = null;
 
 // --- EIP-6963 ---
 window.addEventListener('eip6963:announceProvider', (event) => {
@@ -173,14 +246,8 @@ async function connectWithWallet(walletKey) {
     closeWalletModal();
     let walletProvider;
     if (walletKey === 'walletconnect') {
-      await loadWalletConnect();
-      const wcModule = globalThis['@walletconnect/ethereum-provider'];
-      const WCProvider = wcModule?.EthereumProvider;
-      if (!WCProvider?.init) throw new Error('WalletConnect not available');
-      if (_walletConnectProvider) { try { await _walletConnectProvider.disconnect?.(); } catch (e) {} _walletConnectProvider = null; }
-      _walletConnectProvider = await WCProvider.init({ projectId: WC_PROJECT_ID, chains: [_targetChainId], showQrModal: true, rpcMap: { [_targetChainId]: _targetRpc }, metadata: { name: _appName, description: _appName, url: window.location.origin, icons: [] } });
-      await _walletConnectProvider.enable();
-      walletProvider = _walletConnectProvider;
+      walletProvider = await getWalletConnectProvider();
+      await walletProvider.enable();
     } else if (walletKey.startsWith('eip6963_')) {
       const uuid = walletKey.replace('eip6963_', '');
       walletProvider = eip6963Providers.get(uuid)?.provider;
@@ -199,15 +266,39 @@ async function connectWithWallet(walletKey) {
 
     if (walletKey !== 'walletconnect') await walletProvider.request({ method: 'eth_requestAccounts' });
 
-    // Switch to target chain
+    // Switch to target chain. BigInt rather than a parse: WalletConnect answers
+    // eth_chainId with a number and an injected wallet with a hex string, and
+    // BigInt is the one reading that is right for both.
     const chainId = await walletProvider.request({ method: 'eth_chainId' });
     if (BigInt(chainId) !== BigInt(_targetChainId)) {
+      const cameFrom = typeof chainId === 'string' && /^0x/i.test(chainId)
+        ? chainId : '0x' + Number(chainId).toString(16);
       try {
         await walletProvider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: _targetChainHex }] });
       } catch (switchErr) {
         if (switchErr.code === 4902 && _addChainParams) {
           await walletProvider.request({ method: 'wallet_addEthereumChain', params: [_addChainParams] });
+        } else if (walletKey === 'walletconnect') {
+          // Not fatal here. A session holds an account per chain the wallet
+          // approved, and a chain it declined cannot be switched to at all — but
+          // that is a reason to connect and say so, not to refuse the connection
+          // over a chain the operator may not be about to sign on.
+          console.warn('WalletConnect chain switch:', switchErr);
         } else throw switchErr;
+      }
+      // ...and the switch reporting success is not the same as the session having
+      // an account there. WalletConnect will happily point itself at a chain the
+      // wallet never approved, and on that chain eth_accounts is empty and ethers
+      // cannot build a signer at all — so the whole connect would fail, silently,
+      // for a chain switch. Point it back at the chain it answered on and let the
+      // app say what it says about any wallet sitting elsewhere: switch to sign.
+      if (walletKey === 'walletconnect') {
+        try {
+          const accts = await walletProvider.request({ method: 'eth_accounts' });
+          if (!accts || !accts.length) {
+            await walletProvider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: cameFrom }] });
+          }
+        } catch (e) { console.warn('WalletConnect account check:', e); }
       }
     }
 
@@ -400,7 +491,24 @@ async function tryAutoConnect() {
           }
         }
       }
-    } else if (savedWallet !== 'walletconnect') {
+    } else if (savedWallet === 'walletconnect') {
+      // A saved WalletConnect choice is not a live session. The pairing can be
+      // dropped from the phone or expire on its own, and `init()` reports that by
+      // handing back a provider with no session rather than by failing — so
+      // `enable()` would go straight on to open the QR modal, and a returning
+      // visitor would be asked to scan a code on page load, having asked for
+      // nothing. Restore the provider, and treat "no session came back with it"
+      // the way the injected branch treats an empty `eth_accounts`. The saved
+      // choice goes too: an expired session is not something a later load can
+      // pick up, so keeping it would only buy the same 635 KB every visit.
+      const wc = await getWalletConnectProvider();
+      if (!wc.session) {
+        _lsDel('ms_wallet');
+        _walletConnecting = false;
+        notifyDisplayUpdate();
+        return;
+      }
+    } else {
       probe = window.ethereum;
     }
     if (probe) {
@@ -426,6 +534,7 @@ window.walletInit = function(opts) {
   _targetChainHex = opts.chainHex || '0x' + _targetChainId.toString(16);
   _targetRpc = opts.rpc || 'https://ethereum.publicnode.com';
   _addChainParams = opts.addChainParams || null;
+  _wcChains = Array.isArray(opts.chains) && opts.chains.length ? opts.chains.slice() : null;
   _onConnectCallbacks = Array.isArray(opts.onConnect) ? opts.onConnect : (opts.onConnect ? [opts.onConnect] : []);
   _onDisconnectCallbacks = Array.isArray(opts.onDisconnect) ? opts.onDisconnect : (opts.onDisconnect ? [opts.onDisconnect] : []);
   injectWalletModal();
