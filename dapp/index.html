@@ -4135,11 +4135,56 @@ ${/* Topping up is the one action here that needs no signature, no quorum and no
       progressLine=`<div class="tx-progress"><span class="plabel">TIMELOCK</span><div class="pbar" role="progressbar" aria-label="Timelock elapsed" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(pct*100)}"><i data-tl-eta="${tx.eta}" data-tl-delay="${v.delay}" style="width:${Math.round(pct*100)}%;background:var(--a)"></i></div>${etaHtml}</div>`;
       etaRow="";
     }
+    // The asterisk on your own chip is the compact form of the YOU badge the
+    // roster below spells out \u2014 this row has to fit every owner on one line, so
+    // it gets a mark rather than a word. A bare * against a name is not
+    // decodable on its own though, and the tooltip was the obvious place to say
+    // which owner is being talked about and did not: it read "DEPLOYER has
+    // signed" whether that was you or not.
     const apHtml=v.owners.map(o=>{
       const signed=!!tx.approvals[o.addr];
-      return `<span class="${signed?"ap-ok":"ap-no"}" title="${esc(ownerIdent(o))} ${signed?"has signed":"has not signed"}"><span aria-hidden="true">${signed?"\u2713":"\u25CB"}</span><span class="vh">${signed?"signed":"not signed"}</span> ${esc(ownerIdent(o))}${o.you?"*":""}</span>`;
+      const who=ownerIdent(o)+(o.you?' (you)':'');
+      return `<span class="${signed?"ap-ok":"ap-no"}" title="${esc(who)} ${signed?"has signed":"has not signed"}"><span aria-hidden="true">${signed?"\u2713":"\u25CB"}</span><span class="vh">${signed?"signed":"not signed"}</span> ${esc(ownerIdent(o))}${o.you?"*":""}</span>`;
     }).join("");
     const signedByYou=you&&tx.approvals[you];
+    // ── CONTROLS ON A QUEUED CARD ────────────────────────────────────
+    // One definition each, then one wrapper per breakpoint. The two branches
+    // below used to carry four near-identical copies of these six controls —
+    // mob and desktop, twice over — including four copies of one 300-character
+    // tooltip. That is how CANCEL came to print its tally in some copies and not
+    // others: a label corrected in one place has three places left to drift
+    // from. The only thing that actually differed by breakpoint was btn-w and
+    // the flex direction, which is all `bw` and `actWrap` now carry.
+    //
+    // Two substantive changes ride along, both about what these buttons do
+    // versus what they say. CANCEL and ACCELERATE do not do the thing: they
+    // COLLECT authorisation — threshold signatures through the executor for one,
+    // every owner for the other — and only fire once they have enough. The tally
+    // was suppressed while it read zero, which is precisely when a bare verb
+    // misleads, because the first signer had no way to tell they were opening a
+    // round rather than closing one. It is always shown now.
+    // And every one of these carries a title. Before this, SIMULATE — the one
+    // control on the card that cannot change anything — was the only one that
+    // explained itself, while EXECUTE, CANCEL and ACCELERATE said nothing.
+    const bw = mob ? ' btn-w' : '';
+    const T_EXEC = "The timelock has elapsed. Runs the proposal now — anyone can send this, owner or not.";
+    const T_CANCEL = `Adds your signature to cancelling this queued proposal. Takes ${v.threshold} of ${v.ownerCount} owners, routed through the executor, and drops the proposal before its timelock elapses so it can never run.`;
+    const T_CANCEL_EX = `Enough owners (${s.cancelSigs}/${v.threshold}) have signed the cancel. This sends it through the executor and drops the proposal permanently.`;
+    const T_ACCEL = `Adds your signature to bypassing the remaining timelock. Takes all ${v.ownerCount} owners — anything short of unanimous leaves the proposal waiting out its delay.`;
+    const T_ACCEL_EX = `Every owner (${s.accelSigs}/${v.ownerCount}) has signed. This executes the proposal now, through the executor, without waiting out the rest of the timelock.`;
+    const T_NOCANCEL = "Cancelling inside the timelock window goes through the executor's forward(). This vault has no TimelockExecutor, so there is no route: a cancel raised as an ordinary proposal is itself queued for the full delay and matures no earlier than what it would stop.";
+    const B_EXEC = `<button class="btn btn-green${bw}" title="${T_EXEC}" onclick="doExecute(${S.sel},${tx.nonce})">EXECUTE</button>`;
+    const B_CANCEL = s.cancel?`<button class="btn btn-danger${bw}" title="${T_CANCEL}" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL (${s.cancelSigs||0}/${v.threshold})</button>`:'';
+    const B_CANCEL_EX = s.cancelExec?`<button class="btn btn-danger${bw}" title="${T_CANCEL_EX}" onclick="doCancel(${S.sel},${tx.nonce})">EXECUTE CANCEL <span class="btn-qual">${s.cancelSigs}/${v.threshold} VIA EXECUTOR</span></button>`:'';
+    const B_ACCEL = s.accel?`<button class="btn btn-outline${bw}" title="${T_ACCEL}" onclick="doAccelerate(${S.sel},${tx.nonce})">ACCELERATE (${s.accelSigs||0}/${v.ownerCount})</button>`:'';
+    const B_ACCEL_EX = s.accelExec?`<button class="btn btn-green${bw}" title="${T_ACCEL_EX}" onclick="doAccelerate(${S.sel},${tx.nonce})">INSTANT EXECUTE <span class="btn-qual">${s.accelSigs}/${v.ownerCount} VIA EXECUTOR</span></button>`:'';
+    // Signatures collected toward a route this signer cannot advance — they have
+    // already signed it. A tally with no button, so it carries the same
+    // explanation the button would have.
+    const S_CANCEL = (!s.cancel&&!s.cancelExec&&s.cancelSigs)?`<span style="font-size:10px;color:var(--r);letter-spacing:1px" title="${T_CANCEL}">CANCEL ${s.cancelSigs}/${v.threshold}</span>`:'';
+    const S_ACCEL = (!s.accel&&!s.accelExec&&s.accelSigs)?`<span style="font-size:10px;color:var(--d);letter-spacing:1px" title="${T_ACCEL}">ACCELERATE ${s.accelSigs}/${v.ownerCount}</span>`:'';
+    const S_NOCANCEL = s.noCancel?`<span style="font-size:10px;color:var(--d);letter-spacing:1px" title="${T_NOCANCEL}">NO EXECUTOR &middot; CANNOT CANCEL</span>`:'';
+    const actWrap = inner => `<div style="display:flex;gap:8px${mob?';flex-direction:column':''}">${inner}</div>`;
     let actionBtn="";
     if(s.sign&&!signedByYou){
       // Signing is the path almost everyone wants: free, private, and it keeps
@@ -4197,39 +4242,16 @@ ${/* Topping up is the one action here that needs no signature, no quorum and no
         actionBtn=`<div style="display:flex;flex-direction:column;${mob?"width:100%":"align-items:flex-end"}"><button class="btn btn-fill" ${mob?"style='width:100%'":""} onclick="doSubmit(${S.sel},${tx.nonce})">SUBMIT</button>${unsignLink}</div>`;
       }
     }else if(s.exec){
-      actionBtn=mob
-        ?`<div style="display:flex;gap:8px;flex-direction:column">
-            <button class="btn btn-green btn-w" onclick="doExecute(${S.sel},${tx.nonce})">EXECUTE</button>
-            ${s.cancelExec?`<button class="btn btn-danger btn-w" onclick="doCancel(${S.sel},${tx.nonce})">EXECUTE CANCEL <span class="btn-qual">${s.cancelSigs}/${v.threshold} VIA EXECUTOR</span></button>`:''}
-            ${s.cancel?`<button class="btn btn-danger btn-w" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL${s.cancelSigs?` (${s.cancelSigs}/${v.threshold})`:''}</button>`:''}
-            ${!s.cancel&&!s.cancelExec&&s.cancelSigs?`<span style="font-size:10px;color:var(--r);letter-spacing:1px">CANCEL ${s.cancelSigs}/${v.threshold}</span>`:''}
-            ${s.noCancel?`<span style="font-size:10px;color:var(--d);letter-spacing:1px" title="Cancelling inside the timelock window goes through the executor's forward(). This vault has no TimelockExecutor, so there is no route: a cancel raised as an ordinary proposal is itself queued for the full delay and matures no earlier than what it would stop.">NO EXECUTOR &middot; CANNOT CANCEL</span>`:''}
-          </div>`
-        :`<div style="display:flex;gap:8px">
-            <button class="btn btn-green" onclick="doExecute(${S.sel},${tx.nonce})">EXECUTE</button>
-            ${s.cancelExec?`<button class="btn btn-danger" onclick="doCancel(${S.sel},${tx.nonce})">EXECUTE CANCEL <span class="btn-qual">${s.cancelSigs}/${v.threshold} VIA EXECUTOR</span></button>`:''}
-            ${s.cancel?`<button class="btn btn-danger" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL${s.cancelSigs?` (${s.cancelSigs}/${v.threshold})`:''}</button>`:''}
-            ${!s.cancel&&!s.cancelExec&&s.cancelSigs?`<span style="font-size:10px;color:var(--r);letter-spacing:1px">CANCEL ${s.cancelSigs}/${v.threshold}</span>`:''}
-            ${s.noCancel?`<span style="font-size:10px;color:var(--d);letter-spacing:1px" title="Cancelling inside the timelock window goes through the executor's forward(). This vault has no TimelockExecutor, so there is no route: a cancel raised as an ordinary proposal is itself queued for the full delay and matures no earlier than what it would stop.">NO EXECUTOR &middot; CANNOT CANCEL</span>`:''}
-          </div>`;
+      actionBtn=actWrap(`${B_EXEC}${B_CANCEL_EX}${B_CANCEL}${S_CANCEL}${S_NOCANCEL}`);
     }else if(s.cancel||s.cancelExec||s.accel||s.accelExec||s.noCancel){
-      actionBtn=mob
-        ?`<div style="display:flex;gap:8px;flex-direction:column">
-            ${s.accelExec?`<button class="btn btn-green btn-w" onclick="doAccelerate(${S.sel},${tx.nonce})">INSTANT EXECUTE <span class="btn-qual">${s.accelSigs}/${v.ownerCount} VIA EXECUTOR</span></button>`:''}
-            ${s.accel?`<button class="btn btn-outline btn-w" onclick="doAccelerate(${S.sel},${tx.nonce})">ACCELERATE${s.accelSigs?` (${s.accelSigs}/${v.ownerCount})`:''}</button>`:''}
-            ${!s.accel&&!s.accelExec&&s.accelSigs?`<span style="font-size:10px;color:var(--d);letter-spacing:1px">ACCELERATE ${s.accelSigs}/${v.ownerCount}</span>`:''}
-            ${s.noCancel?`<span style="font-size:10px;color:var(--d);letter-spacing:1px" title="Cancelling inside the timelock window goes through the executor's forward(). This vault has no TimelockExecutor, so there is no route: a cancel raised as an ordinary proposal is itself queued for the full delay and matures no earlier than what it would stop.">NO EXECUTOR &middot; CANNOT CANCEL</span>`:''}
-            ${s.cancelExec?`<button class="btn btn-danger btn-w" onclick="doCancel(${S.sel},${tx.nonce})">EXECUTE CANCEL <span class="btn-qual">${s.cancelSigs}/${v.threshold} VIA EXECUTOR</span></button>`:''}
-            ${s.cancel?`<button class="btn btn-danger btn-w" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL${s.cancelSigs?` (${s.cancelSigs}/${v.threshold})`:''}</button>`:''}
-          </div>`
-        :`<div style="display:flex;gap:8px">
-            ${s.accelExec?`<button class="btn btn-green" onclick="doAccelerate(${S.sel},${tx.nonce})">INSTANT EXECUTE <span class="btn-qual">${s.accelSigs}/${v.ownerCount} VIA EXECUTOR</span></button>`:''}
-            ${s.accel?`<button class="btn btn-outline" onclick="doAccelerate(${S.sel},${tx.nonce})">ACCELERATE${s.accelSigs?` (${s.accelSigs}/${v.ownerCount})`:''}</button>`:''}
-            ${!s.accel&&!s.accelExec&&s.accelSigs?`<span style="font-size:10px;color:var(--d);letter-spacing:1px">ACCELERATE ${s.accelSigs}/${v.ownerCount}</span>`:''}
-            ${s.noCancel?`<span style="font-size:10px;color:var(--d);letter-spacing:1px" title="Cancelling inside the timelock window goes through the executor's forward(). This vault has no TimelockExecutor, so there is no route: a cancel raised as an ordinary proposal is itself queued for the full delay and matures no earlier than what it would stop.">NO EXECUTOR &middot; CANNOT CANCEL</span>`:''}
-            ${s.cancelExec?`<button class="btn btn-danger" onclick="doCancel(${S.sel},${tx.nonce})">EXECUTE CANCEL <span class="btn-qual">${s.cancelSigs}/${v.threshold} VIA EXECUTOR</span></button>`:''}
-            ${s.cancel?`<button class="btn btn-danger" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL${s.cancelSigs?` (${s.cancelSigs}/${v.threshold})`:''}</button>`:''}
-          </div>`;
+      // S_CANCEL is new here and was already in the branch above. An owner who
+      // signs a cancel on a proposal that is still maturing takes the button
+      // away from themselves — s.cancel goes false once youCancel is true — and
+      // this branch had nothing to put in its place, so the tally they had just
+      // contributed to disappeared off the card entirely. The matured branch
+      // handled exactly that case; these two only ever differed because the
+      // markup was written out twice.
+      actionBtn=actWrap(`${B_ACCEL_EX}${B_ACCEL}${S_ACCEL}${S_NOCANCEL}${B_CANCEL_EX}${B_CANCEL}${S_CANCEL}`);
     }
     // Kind badge — what sort of call this is. Suppressed when the headline
     // line already says it (a bare "BATCH (3)" needs no "BATCH" tag beside it).
