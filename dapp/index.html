@@ -276,6 +276,31 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 /* vault tabs */
 .vtabs{overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
 .vtabs::-webkit-scrollbar{display:none}
+/* A vault past the right edge was simply not there. This strip scrolls whenever
+   the names outrun the row — 457px of it is off-screen on a 390px phone with
+   four vaults, and it still loses 72px at 900px — and the scrollbar that would
+   have said so is hidden two lines above, deliberately. So more than half the
+   vault list was unreachable-looking on a phone, on the one control the whole
+   app routes through: the attention bar sends you to another vault, and this is
+   what you arrive at to switch.
+   Drawn by the container's own background rather than by a mask, because a mask
+   is unconditional and this must not claim there is more when there is not. The
+   two gradients set `local` scroll WITH the content and sit over the two set
+   `scroll`, which are pinned to the box: at either end the cover lands on the
+   shadow and it vanishes, in between both edges show, and with nothing to
+   scroll the covers sit on both shadows permanently. No JS, and it cannot fall
+   out of step with the scroll position the way a measured flag would.
+   The tabs are transparent, so this reads through them as a soft edge on the
+   strip. It stays under --a's 22% rather than going to a hard rule: the row
+   already has a hairline under it and a second hard edge crossing that one at
+   right angles would read as a border, not as a horizon. */
+.vtabs{
+  background:
+    linear-gradient(to right, var(--bg) 55%, transparent) left center / 26px 100% no-repeat local,
+    linear-gradient(to left,  var(--bg) 55%, transparent) right center / 26px 100% no-repeat local,
+    linear-gradient(to right, color-mix(in srgb,var(--a) 22%,transparent), transparent) left center / 16px 100% no-repeat scroll,
+    linear-gradient(to left,  color-mix(in srgb,var(--a) 22%,transparent), transparent) right center / 16px 100% no-repeat scroll;
+}
 /* max-content is what makes the strip scroll instead of fitting, and it belongs
    only to the breakpoint that wants scrolling. Above it the tabs share the row,
    and leaving it on would hand a long holdings summary — now that .vtab-info is
