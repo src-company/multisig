@@ -653,14 +653,77 @@ function notifyDisplayUpdate() {
 }
 
 // --- Auto-reconnect ---
+
+// Is the wallet this visitor last used here yet?
+//
+// Only an EIP-6963 choice has to be waited for: that provider arrives by
+// announcement, and the announcement is the extension's to make. A legacy
+// injected choice is `window.ethereum` and either there or not, and a saved
+// WalletConnect choice needs no extension at all — its SDK is fetched on demand.
+function _savedProviderReady(savedWallet) {
+  if (savedWallet === 'walletconnect') return true;
+  if (!savedWallet.startsWith('eip6963_')) return !!window.ethereum;
+  const uuid = savedWallet.slice('eip6963_'.length);
+  if (eip6963Providers.has(uuid)) return true;
+  // Same fallback the connect path uses: an extension that reinstalled has a new
+  // uuid and the same name, and the name is what the visitor recognises.
+  const savedName = _lsGet('ms_wallet_name')?.toLowerCase();
+  if (!savedName) return false;
+  for (const [, { info }] of eip6963Providers) {
+    if (info?.name?.toLowerCase() === savedName) return true;
+  }
+  return false;
+}
+
+// Wait for it to announce itself — for as long as that actually takes, and no
+// longer.
+//
+// This was two fixed sleeps, 400ms before the request went out and 300ms after,
+// and every returning visitor paid all 700ms of it on every single load. Nothing
+// can start without it: the saved wallet decides the account, the account
+// decides which vaults are loaded, and the vaults are the page. Measured with an
+// extension that announces as promptly as a real one, it was 464ms of dead time
+// after DOMContentLoaded before the wallet was asked for anything at all.
+//
+// A fixed wait is the wrong shape for this. An extension announces in response
+// to the request event, and it registers that listener when its content script
+// runs — usually before this page's scripts, occasionally after — so the request
+// cannot be made once and trusted, and it cannot be waited on for a fixed period
+// either. Ask immediately, keep asking on a short cadence, and stop the moment
+// the saved wallet answers. The 700ms survives as the deadline rather than as
+// the price: an extension slow to inject is given exactly as long as it had
+// before, and one that is ready — the ordinary case — costs a few milliseconds.
+const ANNOUNCE_DEADLINE_MS = 700;
+const ANNOUNCE_RETRY_MS = 40;
+function _awaitSavedProvider(savedWallet) {
+  const ask = () => window.dispatchEvent(new Event('eip6963:requestProvider'));
+  ask();
+  if (_savedProviderReady(savedWallet)) return Promise.resolve();
+  return new Promise(resolve => {
+    const started = Date.now();
+    let timer = null;
+    const stop = () => {
+      window.removeEventListener('eip6963:announceProvider', onAnnounce);
+      if (timer) clearInterval(timer);
+      resolve();
+    };
+    // Registered after the listener at the top of this file, so the provider map
+    // has already been updated by the time this runs.
+    const onAnnounce = () => { if (_savedProviderReady(savedWallet)) stop(); };
+    window.addEventListener('eip6963:announceProvider', onAnnounce);
+    timer = setInterval(() => {
+      if (_savedProviderReady(savedWallet) || Date.now() - started >= ANNOUNCE_DEADLINE_MS) return stop();
+      ask();
+    }, ANNOUNCE_RETRY_MS);
+  });
+}
+
 async function tryAutoConnect() {
   const savedWallet = _lsGet('ms_wallet');
   if (!savedWallet) return;
   _walletConnecting = true;
   notifyDisplayUpdate();
-  await new Promise(r => setTimeout(r, 400));
-  window.dispatchEvent(new Event('eip6963:requestProvider'));
-  await new Promise(r => setTimeout(r, 300));
+  await _awaitSavedProvider(savedWallet);
   try {
     let probe;
     if (savedWallet.startsWith('eip6963_')) {
