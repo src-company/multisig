@@ -89,6 +89,15 @@ services:
       - path: /*
         name: X-Content-Type-Options
         value: nosniff
+      # The CSP already carries upgrade-insecure-requests, but that only rewrites
+      # subresource URLs on a page the browser has ALREADY fetched — it does
+      # nothing about the first navigation, which is the one a network attacker
+      # gets to answer. HSTS is what removes that request, and this is a site
+      # whose whole purpose is showing an operator which address they are about
+      # to send funds to. Two years, subdomains included, and preload-eligible.
+      - path: /*
+        name: Strict-Transport-Security
+        value: "max-age=63072000; includeSubDomains; preload"
       # Nothing in the dapp asks for any of these; saying so stops an embedded
       # or injected frame asking on its behalf.
       - path: /*
