@@ -444,6 +444,15 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
 .token-pills{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
 .pill{height:34px;padding:0 14px;font-size:10px;font-weight:700;letter-spacing:2px;display:inline-flex;align-items:center;background:transparent;color:var(--d);border:1px solid var(--ln);text-transform:uppercase;transition:border-color .15s,color .15s}
 .pill.on{color:var(--a);border-color:var(--a);background:color-mix(in srgb,var(--a) 10%,transparent)}
+/* The TEST marker inside a chain pill. It needs a class for two reasons, and the
+   pill read "SEPOLIATEST" because of the first: .pill is a flex container, so
+   the literal space authored between the chain name and this span is an
+   anonymous flex item whose whitespace collapses to nothing. The separation has
+   to be a margin — the same way .tok-ico's is, and the same reason .net-row gets
+   away with a bare space (it has a flex gap). Second, this was carrying
+   class="dim", which is only ever declared as a descendant of .lbl, so the
+   marker was not actually being held back at all. */
+.pill-test{margin-left:5px;font-size:7px;opacity:.5}
 .link-btn{background:transparent;border:none;color:var(--a);font-size:11px;font-weight:700;letter-spacing:2px;padding:8px 0;display:flex;align-items:center}
 .batch-call{margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--ln)}
 .call-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-size:10px;font-weight:700;color:var(--d);letter-spacing:2px}
@@ -573,14 +582,15 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
    ladder, at the weight of the note it always was. */
 .owner-cap{margin:0;font-size:10px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:var(--m);text-align:right}
 .owner-cap .dim{opacity:.5}
-/* The roster's label fields are 11px by design, but every .inp is forced to
-   16px on a phone so iOS does not zoom the page on focus — which left three
-   stacked "LABEL" placeholders set larger than the owner names they belong to,
-   the loudest type on the tab. The zoom trigger is the INPUT's computed size,
-   not the placeholder's, so the field can keep its 16px and the prompt can go
-   back to the size of the label it is standing in for. Typed text stays 16px,
-   which is right: that half is read. */
-.owner-lbl-in::placeholder{font-size:11px;letter-spacing:2px}
+/* Both owner-label fields in the app — the admin roster's and the create form's
+   — are 11px by design, but every .inp is forced to 16px on a phone so iOS does
+   not zoom the page on focus. That left a column of "LABEL" placeholders set
+   larger than the owner names they annotate on one screen and as large as the
+   required address field they are optional beside on the other. The zoom trigger
+   is the INPUT's computed size, not the placeholder's, so the field keeps its
+   16px and the prompt goes back to the size of the label it stands in for.
+   Typed text stays 16px, which is right: that half is read. */
+.owner-lbl-in::placeholder,.owner-row .o-label::placeholder{font-size:11px;letter-spacing:2px}
 .owner-row{display:grid;grid-template-columns:22px minmax(0,1fr) 120px 40px;grid-template-areas:"num addr label del";gap:12px;align-items:center;margin-bottom:2px}
 .owner-row .o-num{grid-area:num;font-size:10px;font-weight:700}
 .owner-row .o-addr{grid-area:addr;margin:0}
@@ -2878,7 +2888,10 @@ function delayNote(sec, v){
   if(sec <= 0) return { warn:true, text:`UNLOCKED &mdash; A PROPOSAL AT QUORUM EXECUTES THE MOMENT IT IS SUBMITTED. NO WINDOW TO STOP A BAD ONE.` };
   if(!canForwardCancel(v)) return { warn:true, text:`${fmtD(sec)} BEFORE A SUBMITTED PROPOSAL CAN RUN &mdash; BUT WITH NO EXECUTOR THERE IS NO ROUTE TO CANCEL INSIDE THAT WINDOW.` };
   if(sec < SHORT_DELAY_SEC) return { warn:true, text:`SHORT DELAY &middot; LIMITED PROTECTION &mdash; ${fmtD(sec)} IS THE WHOLE WINDOW TO NOTICE A BAD PROPOSAL AND CANCEL IT.` };
-  return { warn:false, text:`${fmtD(sec)} BETWEEN SUBMISSION AND EXECUTION &mdash; THE WINDOW IN WHICH ${v.threshold} OWNERS CAN STILL CANCEL.` };
+  // A 1-of-n vault reads "1 OWNERS" if the count is dropped in unchecked, and
+  // this line is shown for every threshold the pickers offer, 1 included.
+  const who = v.threshold > 1 ? `${v.threshold} OWNERS` : `ANY ONE OWNER`;
+  return { warn:false, text:`${fmtD(sec)} BETWEEN SUBMISSION AND EXECUTION &mdash; THE WINDOW IN WHICH ${who} CAN STILL CANCEL.` };
 }
 
 // Best short identity for an owner: custom label, else resolved
@@ -5463,7 +5476,17 @@ function renderCreate(mob){
         <div>
           <span class="lbl" id="lbl-cf-thresh">THRESHOLD</span>
           <div class="thresh-btns" role="group" aria-labelledby="lbl-cf-thresh">${(()=>{const n=Math.max(filled,1);return Array.from({length:n},(_,i)=>i+1).map(k=>{const on=k===+c.threshold;return`<button class="btn btn-outline thresh-btn"${on?' aria-current="true"':''} aria-label="Require ${k} of ${Math.max(filled,1)} signatures" style="border-color:${on?'var(--a)':'var(--ln)'};color:${on?'var(--a)':'var(--d)'};background:${on?'color-mix(in srgb,var(--a) 10%,transparent)':'transparent'}" onclick="S.cf.threshold='${k}';render()">${k}</button>`}).join("")})()}</div>
-          <div style="font-size:10px;color:var(--d);letter-spacing:1px;margin-top:6px">${c.threshold} OF ${filled||1} SIGNATURES REQUIRED</div>
+${/* The same consequence line the ADMIN tab states, and this is the more
+             important of the two places to state it: admin is where a threshold is
+             revised, this is where it is decided, and the decision outlives the
+             session. It said "1 OF 1 SIGNATURES REQUIRED" — a third spelling of a
+             figure already in the picker directly above and in the PREVIEW block
+             beside it — while saying nothing about what the choice costs.
+             Held back until an owner exists: with the form empty the picker is a
+             placeholder showing a single button, and warning that a 1-of-1 vault
+             is a hot wallet before anyone has named an owner is noise about a
+             threshold nobody has chosen yet. */''}
+          ${filled?(()=>{const tn=thresholdNote(+c.threshold||1,filled);return`<div class="policy-note${tn.warn?" warn":""}" style="margin:8px 0 0">${tn.text}</div>`})():''}
         </div>
         <div>
           <span class="lbl">INSTANT EXECUTION</span>
@@ -5483,7 +5506,17 @@ function renderCreate(mob){
           <div style="display:flex;gap:4px">${['m','h','d'].map(u=>`<button class="pill${c.delayUnit===u?" on":""}" style="height:34px;padding:0 10px" onclick="S.cf.delayUnit='${u}';render()">${UNIT_LABEL[u]}</button>`).join("")}</div>
           <span style="font-size:11px;letter-spacing:1px;margin-left:14px;color:${ds>0?'var(--m)':'var(--y)'}">${ds>0?'&rarr; '+fmtD(ds):'&mdash; UNLOCKED, NO TIMELOCK'}</span>
         </div>
-        ${ds>0&&ds<SHORT_DELAY_SEC?`<div style="font-size:9px;letter-spacing:1px;color:var(--y);margin-top:8px">SHORT DELAY &middot; LIMITED PROTECTION</div>`:''}
+${/* And the delay's consequence, from the same helper ADMIN uses. It only ever
+           spoke here to say "SHORT DELAY · LIMITED PROTECTION" — five words, for one
+           of the seven presets — so the operator choosing UNLOCKED on the deploy
+           form, the one irreversible-by-default choice on it, was told nothing at
+           all. The vault does not exist yet, so the two facts delayNote reads off
+           one are supplied directly: the threshold being chosen above, and the
+           executor this form will deploy whenever there is a delay to enforce
+           (see the METHOD line in the preview — a delay means the timelock
+           executor is wired in, so the cancel route exists by construction). */''}
+        ${(()=>{const dn=delayNote(ds,{threshold:+c.threshold||1,isTimelockExecutor:true,executor:TIMELOCK_EXECUTOR});
+          return`<div class="policy-note${dn.warn?" warn":""}" style="margin:10px 0 0">${dn.text}</div>`})()}
       </div>
     </div>
     <div style="margin-top:${mob?36:0}px">
@@ -5507,7 +5540,7 @@ METHOD      ${(c.fastPath&&ds>0)||c.wns?"createWithCalls()":"create()"}</div><di
         ${on?`<div class="net-tokens">${t.map(tk=>`<span>${tk}</span>`).join("")}${n.test?'<span style="opacity:.5">+ CUSTOM</span>':""}</div>`:""}
       </div>`}).join("")}</div>
       <span class="lbl" id="lbl-clone" style="display:block;margin-top:20px">CLONE TO OTHER CHAINS <span class="dim">&middot; SAME ADDRESS</span></span>
-      <div class="token-pills" role="group" aria-labelledby="lbl-clone">${NETS.map((n,i)=>i===c.net?'':`<button class="pill${(c.clone||[]).includes(i)?' on':''}" aria-pressed="${(c.clone||[]).includes(i)}" onclick="toggleClone(${i})">${chainIcon(n.id)}${esc(n.name)}${n.test?' <span class="dim" style="font-size:7px">TEST</span>':''}</button>`).filter(Boolean).join('')}</div>
+      <div class="token-pills" role="group" aria-labelledby="lbl-clone">${NETS.map((n,i)=>i===c.net?'':`<button class="pill${(c.clone||[]).includes(i)?' on':''}" aria-pressed="${(c.clone||[]).includes(i)}" onclick="toggleClone(${i})">${chainIcon(n.id)}${esc(n.name)}${n.test?'<span class="pill-test">TEST</span>':''}</button>`).filter(Boolean).join('')}</div>
       ${(()=>{const sel=[c.net,...(c.clone||[])].map(i=>NETS[i]).filter(Boolean);const mixed=sel.some(n=>n.test)&&sel.some(n=>!n.test);return mixed?`<div style="margin-top:12px;font-size:9px;letter-spacing:1px;color:var(--y);line-height:1.5">MIXING MAINNET &amp; TESTNET &mdash; DEPLOYING TO BOTH IN ONE GO. UNCHECK IF UNINTENDED.</div>`:'';})()}
       ${!val.ready?`<div style="margin-top:24px;font-size:10px;letter-spacing:1px;color:var(--y);text-align:center">${esc(val.reason)}</div>`:""}
       ${(()=>{const nc=1+(c.clone||[]).length;return `<button class="btn ${val.ready?"btn-fill":"btn-disabled"} btn-w btn-big" id="deploy-btn" style="margin-top:${val.ready?28:8}px" ${val.ready?"":'title="'+esc(val.reason)+'"'} onclick="${val.ready?"doDeploy()":""}">${nc>1?`DEPLOY TO ${nc} CHAINS`:"DEPLOY"}</button>${nc>1?`<div style="margin-top:8px;font-size:9px;color:var(--d);letter-spacing:1px;text-align:center">Same vault address on ${net.name}${(c.clone||[]).map(i=>", "+NETS[i].name).join("")}</div>`:""}`;})()}
