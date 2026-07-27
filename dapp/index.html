@@ -17,7 +17,7 @@
      provider is initialised with an rpcMap for the one chain it is given, so
      chain reads stay on the RPC hosts listed here; letting the fallback
      through would put a vault's traffic on a host that is not one of them. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://multisig-postgrest.onrender.com https://repo.sourcify.dev https://*.publicnode.com https://1rpc.io https://*.drpc.org https://api.coinbase.com https://mainnet.base.org https://sepolia.base.org https://arb1.arbitrum.io https://mainnet.optimism.io https://mainnet.megaeth.com https://rpc-megaeth-mainnet.globalstake.io https://api.dotmega.domains https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org; img-src 'self' data: https://explorer-api.walletconnect.com; frame-src https://verify.walletconnect.com https://verify.walletconnect.org; upgrade-insecure-requests">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://multisig-postgrest.onrender.com https://repo.sourcify.dev https://*.publicnode.com https://1rpc.io https://*.drpc.org https://api.coinbase.com https://mainnet.base.org https://sepolia.base.org https://arb1.arbitrum.io https://mainnet.optimism.io https://mainnet.megaeth.com https://rpc-megaeth-mainnet.globalstake.io https://api.dotmega.domains https://keys.coinbase.com https://rpc.wallet.coinbase.com https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org; img-src 'self' data: https://explorer-api.walletconnect.com; frame-src https://verify.walletconnect.com https://verify.walletconnect.org; upgrade-insecure-requests">
 <title>multisig</title>
 <meta name="description" content="Multichain multisig with an embedded timelock. A mandatory delay between queuing and execution, so a compromised key or a social-engineered signature can be seen and cancelled before it lands.">
 <!-- Unfurl metadata. Vault links get passed between co-signers and pasted into
@@ -2612,6 +2612,10 @@ class PgQuery {
   ilike(col, val) { this._params.append(col, `ilike.${val}`); return this; }
   in(col, arr) { this._params.append(col, `in.(${arr.join(',')})`); return this; }
   order(col, opts) { this._params.append('order', `${col}.${opts && opts.ascending === false ? 'desc' : 'asc'}`); return this; }
+  // Ordering for an embedded resource. PostgREST spells it as a parameter of the
+  // embedded name rather than as part of the parent's `order`, so it cannot be
+  // expressed through order() above.
+  orderOn(rel, col, opts) { this._params.append(`${rel}.order`, `${col}.${opts && opts.ascending === false ? 'desc' : 'asc'}`); return this; }
   limit(n) { this._params.set('limit', String(n)); return this; }
   maybeSingle() { this._single = true; return this; }
   async _run() {
@@ -8020,13 +8024,40 @@ async function dbAddSig(txId, signerAddr, signature, sigType) {
   return data;
 }
 
+// A proposal's signatures, fetched WITH the proposal rather than after them.
+//
+// The queue load could not run these two reads in parallel: the signature query
+// keys off `tx_id`, so it could not be sent until the rows carrying those ids
+// had come back. Three sequential round trips — rows, then signatures, then the
+// chain — on arrival and again after every sign, submit, execute, cancel and
+// reject. PostgREST will follow `signatures.tx_id -> transactions` and return
+// them nested, which makes the first two into one. Measured against the live
+// service: 294ms to 123ms.
+//
+// It is asked for and checked, not assumed. The relationship is one PostgREST
+// infers from the schema, and a database rebuilt differently could stop exposing
+// it through these views. That failure cannot be allowed to pass quietly: every
+// db* helper here degrades to empty, and empty signatures is not "this proposal
+// has none" — a proposal with no valid signature that the chain does not hold
+// queued is HIDDEN (see loadVaultQueue). So the embed reports whether it worked,
+// and the caller asks the old way when it did not.
+//
+// The list is deliberately unfiltered. dbGetSigs drops approval/sender rows
+// because its callers cannot check them; this path needs them, because
+// chainCheckQueue asks the vault about exactly those and keeps the ones it
+// confirms.
+const SIG_EMBED = 'signatures(signer,signature,sig_type)';
+
 async function dbGetPending(wId) {
-  const { data } = await sb.from('tx_summary')
-    .select('*')
+  const q = () => sb.from('tx_summary')
     .eq('wallet_id', wId)
     .in('status', ['proposed', 'executing', 'queued'])
     .order('nonce', { ascending: true });
-  return data || [];
+  const { data, error } = await q().select('*,' + SIG_EMBED).orderOn('signatures', 'signer');
+  if(!error) return { rows: data || [], sigs: true };
+  console.warn('Proposals with their signatures:', error, '— reading the signatures separately instead');
+  const { data: plain } = await q().select('*');
+  return { rows: plain || [], sigs: false };
 }
 
 // How many retired rows are re-checked against the chain on every queue load.
@@ -8040,13 +8071,17 @@ const TERMINAL_RECHECK = 40;
 // Read so the chain can be asked whether they really are gone — a status in this
 // database is written by an RPC that authenticates by a claimed address, so it
 // is a claim about the vault, not the vault. See loadVaultQueue.
+const TERMINAL_COLS = 'id, nonce, target, value, call_data, status, description, eta, queue_tx';
 async function dbGetRecentTerminal(wId, limit) {
-  const { data } = await sb.from('tx_history')
-    .select('id, nonce, target, value, call_data, status, description, eta, queue_tx')
+  const q = () => sb.from('tx_history')
     .eq('wallet_id', wId)
     .order('sort_ts', { ascending: false })
     .limit(limit || TERMINAL_RECHECK);
-  return data || [];
+  const { data, error } = await q().select(TERMINAL_COLS + ',' + SIG_EMBED).orderOn('signatures', 'signer');
+  if(!error) return { rows: data || [], sigs: true };
+  console.warn('Retired proposals with their signatures:', error, '— reading the signatures separately instead');
+  const { data: plain } = await q().select(TERMINAL_COLS);
+  return { rows: plain || [], sigs: false };
 }
 
 async function dbGetTxByHash(txHash) {
@@ -8077,6 +8112,17 @@ async function dbGetSigs(txId) {
 
 // Batch variant: fetch signatures for many txs in ONE request instead of
 // N per-tx round-trips. Returns a Map of tx_id → sorted signatures.
+// tx_id -> its signature rows, taken from what came back beside the proposals
+// when the embed worked and asked for separately when it did not. One shape out,
+// either way, so nothing downstream has to know which happened.
+async function sigsFor(rows, embedded) {
+  if(!embedded) return dbGetSigsByTxIds(rows.map(t => t.id));
+  const map = new Map();
+  for(const t of rows)
+    map.set(t.id, (t.signatures || []).map(s => ({ signer: s.signer, signature: s.signature, sig_type: s.sig_type })));
+  return map;
+}
+
 async function dbGetSigsByTxIds(txIds) {
   const map = new Map();
   if(!txIds.length) return map;
@@ -8509,10 +8555,11 @@ async function loadVaultQueue(vi) {
     // vault still holds queued is live no matter what any row says, and the
     // vault is already being asked about the queued ones — so ask it about the
     // retired ones too, in the same call, and put back anything it still has.
-    const [pending, retired] = await Promise.all([
+    const [live, gone] = await Promise.all([
       dbGetPending(v.dbId),
       dbGetRecentTerminal(v.dbId, TERMINAL_RECHECK),
     ]);
+    const pending = live.rows, retired = gone.rows;
     const txs = pending;
     const you = window._connectedAddress;
     const queue = [];
@@ -8524,7 +8571,10 @@ async function loadVaultQueue(vi) {
     txs.forEach(t => digests.set(t.id, proposalDigest(v, t)));
     retired.forEach(t => digests.set(t.id, proposalDigest(v, t)));
 
-    const sigMap = await dbGetSigsByTxIds([...txs.map(t => t.id), ...retired.map(t => t.id)]);
+    // Both reads have to have carried their signatures for the nested copies to
+    // be complete; if either fell back, all of them are asked for the old way
+    // rather than half the queue being judged on a partial list.
+    const sigMap = await sigsFor([...txs, ...retired], live.sigs && gone.sigs);
 
     // One aggregate3 for both questions — see chainCheckQueue. The retired rows
     // ride in the same `queued()` batch as the live ones; a nonzero eta on one
@@ -10147,6 +10197,28 @@ async function prodSign(vi, nonce) {
     const domain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address };
     const msg = { target, value, data, nonce };
     const sig = await signer.signTypedData(domain, EIP712_TYPES, msg);
+
+    // A smart account — a Coinbase Smart Wallet, a DAO, a nested multisig —
+    // signs through ERC-1271, and this vault verifies with ecrecover and
+    // nothing else. Such a signature is real; it is just not one anything on
+    // this path can check, and it is a shape basenames make easy to arrive
+    // with, since a great many of them resolve to smart accounts.
+    //
+    // Caught here rather than stored, because stored is the confusing outcome:
+    // verifySigs drops it at submit and again on the next load, so the operator
+    // would be told they had signed, be shown as a signature toward the
+    // threshold, and then silently revert to unsigned with nothing anywhere
+    // saying why. The vault is never at risk either way — the filter is what
+    // keeps an unverifiable signature out of a bundle — but "it did not work
+    // and here is the route that does" is the only version of that an owner can
+    // act on. APPROVE ON-CHAIN is exactly that route, and it is on the same row.
+    let recovered = null;
+    try { recovered = recoverCached(ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg), sig); }
+    catch(_) {}
+    if(!recovered || recovered.toLowerCase() !== connectedAddress.toLowerCase()) {
+      flash('THIS WALLET SIGNS AS A CONTRACT — USE APPROVE ON-CHAIN INSTEAD', 7000);
+      return;
+    }
 
     // Update local state
     tx.approvals[connectedAddress] = true;
