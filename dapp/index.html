@@ -195,6 +195,28 @@ button:active{transform:scale(.97)}
 .sec span:first-child{font-size:10px;letter-spacing:3px;color:var(--d);flex-shrink:0}
 .sec .line{flex:1;height:1px;background:var(--ln)}
 
+/* attention bar — what is waiting, across every vault, above the strip that
+   selects between them. Its counts run over ALL vaults and the queue below it
+   runs over one, so on any vault but the busiest it stated a figure the visible
+   queue could not account for: "1 READY TO EXECUTE" over a queue with nothing
+   ready, and no way to find the one that had it. Two things fix that and both
+   are in this row. A part whose work lives elsewhere is drawn as the way to get
+   there rather than as a number to reconcile, and the count of what is not on
+   this vault is named outright at the end of the row. */
+.attn{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 8px;margin-bottom:4px;border-bottom:1px solid var(--ln);font-size:10px;letter-spacing:2px}
+.attn-n{color:var(--y);font-weight:700;flex-shrink:0}
+.attn-parts{color:var(--d);display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
+/* Underlined, not boxed: this is a destination inside a status line, and the
+   row is not a row of buttons. The touch box is grown with ::after rather than
+   with padding — the same reasoning .icon-btn states — because padding on a
+   10px inline part would break the baseline it shares with the text either
+   side of it. Inset horizontally by less than the 8px gap, so two adjacent
+   parts never overlap each other's target. */
+.attn-jump{position:relative;background:transparent;border:none;font-family:var(--f);font-size:10px;letter-spacing:2px;color:var(--m);padding:0;border-bottom:1px solid var(--fr);transition:color .15s,border-color .15s}
+.attn-jump::after{content:"";position:absolute;inset:-14px -3px}
+@media(hover:hover){.attn-jump:hover{color:var(--a);border-bottom-color:var(--a)}}
+.attn-else{color:var(--d);margin-left:auto;flex-shrink:0}
+
 /* buttons */
 .btn{font-size:11px;font-weight:700;letter-spacing:2px;height:40px;display:inline-flex;align-items:center;justify-content:center;padding:0 20px;text-transform:uppercase;border:none;transition:opacity .15s,background .15s,color .15s,border-color .15s,transform .1s ease}
 .btn-fill{background:var(--a);color:var(--bg)}
@@ -407,6 +429,20 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
    the same bordered treatment the admin roster already gives YOU. */
 .signer-label{font-size:9px;color:var(--m);letter-spacing:2px;border:1px solid var(--ln);padding:1px 6px}
 .signer-you{font-size:9px;font-weight:700;color:var(--m);letter-spacing:1px;border:1px solid var(--fr);padding:1px 6px}
+/* Where an owner stands against the live queue, on the trailing edge of their
+   own row. The roster carried identities and nothing else, in a space-between
+   row holding a single child — so two thirds of every line was blank while the
+   one thing this section could say that no other part of the page says, WHICH
+   owner the queue is waiting on, was recoverable only by reading the approval
+   chips off every card above it and intersecting them by eye.
+   Two states, because they are two different sentences. AWAITING is a call to
+   act — this owner is the reason something cannot proceed — and takes the
+   warning tone the rest of the app reserves for exactly that. The signed tally
+   is a standing, not a request, and stays on the ink ladder; it goes green only
+   at the full count, where the claim is unambiguous. */
+.signer-stand{font-size:10px;font-weight:700;letter-spacing:2px;color:var(--d);flex-shrink:0;white-space:nowrap}
+.signer-stand.await{color:var(--y)}
+.signer-stand.all{color:var(--g)}
 
 /* footer */
 .footer{border-top:1px solid var(--ln);padding:12px 0;display:flex;justify-content:space-between;align-items:center;font-size:9px;letter-spacing:2px;color:var(--m);flex-wrap:wrap;gap:8px}
@@ -462,7 +498,30 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
 .policy-warn{font-size:10px;letter-spacing:1px;line-height:1.6;color:var(--y);border-left:2px solid var(--y);background:color-mix(in srgb,var(--y) 6%,transparent);padding:10px 14px;margin-bottom:20px}
 .thresh-btns{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap}
 .thresh-btn{flex:0 0 auto;min-width:60px;padding:0 10px}
-.btn-disabled{border:1px solid var(--fr)!important;color:var(--d)!important;background:transparent!important;cursor:not-allowed}
+/* A slot that is not a control yet. It keeps the armed button's full-width
+   footprint so the column does not jump the moment a value changes, and states
+   that it is inert with a dashed hairline rather than a solid rule: at --fr,
+   solid, it was the largest and one of the brightest-edged objects on the
+   POLICY tab while being the only thing there that does nothing. */
+.btn-disabled{border:1px dashed var(--ln)!important;color:var(--d)!important;background:transparent!important;cursor:not-allowed}
+/* What a policy figure MEANS, set under the control that sets it. Both callers
+   replace a line that restated the number already set 44px tall directly above
+   it — and neither consequence is derivable from the ratio at a glance: 2-of-4
+   tolerates two lost keys and 3-of-4 tolerates one, and nothing in "3 / 4"
+   says so. Held to 44ch so the sentence breaks like prose rather than running
+   the width of the column. */
+.policy-note{font-size:10px;letter-spacing:1px;line-height:1.65;color:var(--d);margin:-6px 0 14px;max-width:44ch}
+.policy-note.warn{color:var(--y)}
+/* THRESHOLD and DELAY are two halves of one grid row, so their commit buttons
+   belong on one line — and the content stacked above them is not the same
+   height in each column: a threshold has a picker, a delay has a field, a unit
+   group and a seconds readout. Bottom-aligning the button is what survives
+   that, and it survives a consequence note wrapping to one more line in one
+   column than the other, which reserving a fixed height for the note does not.
+   Grid items already stretch to the row's height, so `auto` has real space to
+   take. Once the columns stack there is no shared row and it is a no-op. */
+.policy-col{display:flex;flex-direction:column;min-width:0}
+.policy-col>.btn{margin-top:auto}
 .owner-row{display:grid;grid-template-columns:22px minmax(0,1fr) 120px 40px;grid-template-areas:"num addr label del";gap:12px;align-items:center;margin-bottom:2px}
 .owner-row .o-num{grid-area:num;font-size:10px;font-weight:700}
 .owner-row .o-addr{grid-area:addr;margin:0}
@@ -522,6 +581,12 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
   .wallet-btn{padding:0 10px;font-size:9px;gap:4px}
   .nav button{padding:14px 0;flex:1;text-align:center;font-size:11px}
   .content{padding:4px 0}
+  /* The row wraps to three lines here, and margin-left:auto strands the last of
+     them against the right edge with nothing to be flush with — it reads as a
+     column, not as the tail of a sentence. Once it is on its own line it takes
+     the whole line and starts where the two above it start. */
+  .attn{padding:12px 6px;gap:8px}
+  .attn-else{margin-left:0;flex-basis:100%}
   .sec{margin:28px 0 12px}
   .stats{padding:24px 0 8px}
   .stat-big{font-size:32px}
@@ -2693,6 +2758,68 @@ function getYou(){
   return window._connectedAddress || null;
 }
 
+// Whether a vault has work waiting, as the two flags every tab strip draws its
+// dot from. The dashboard derives these inside the pass it already makes over
+// every queue and hands the result in; this is for the callers with no such
+// pass — the admin strip, which was the one place in the app where changing
+// tab lost the signal for where the work is.
+function vaultWorkFlags(vt){
+  const you = getYou();
+  let rdy = false, needsYou = false;
+  vt.queue.forEach(tx => {
+    const st = txSt(tx, vt);
+    if(st.sign && you && !tx.approvals[you]) needsYou = true;
+    if(st.exec || st.instant) rdy = true;
+  });
+  return { rdy, needsYou };
+}
+// Green outranks yellow: something executable is a thing anyone can finish now,
+// a missing signature is a thing only one person can.
+function vaultDot(f){
+  return f.rdy
+    ? '<span class="vtab-dot" style="background:var(--g)" title="Ready to execute" aria-hidden="true"></span>'
+    : f.needsYou
+    ? '<span class="vtab-dot" style="background:var(--y)" title="Needs your signature" aria-hidden="true"></span>'
+    : "";
+}
+// Selecting a vault, from anywhere. The tab strips and the attention bar all
+// have to reset the admin drafts alongside S.sel — S.nt and S.nd are edits in
+// progress against the vault that was selected when they were typed, and
+// carrying them across would offer to propose one vault's threshold to another.
+function selectVault(i){
+  const vt = S.vaults[i];
+  if(!vt) return;
+  S.sel = i; S.nt = vt.threshold; setNd(vt.delay); S.showTx = false;
+  render();
+}
+// A count in the attention bar is a way in, not a readout: jumping to the work
+// means landing on the dashboard, whichever tab asked.
+function jumpToVaultWork(i){ S.view = 'DASH'; selectVault(i); }
+
+// ── POLICY CONSEQUENCES ───────────────────────────────────────────
+// A threshold is two facts at once and the ratio states neither: how many keys
+// can be lost before the vault is frozen, and how many holders acting together
+// can empty it. Both ends of the range are failure modes worth naming — 1-of-n
+// is a hot wallet with extra steps, n-of-n is one lost key away from permanent
+// freeze — and the middle is the only place the tradeoff is worth stating as a
+// tradeoff.
+function thresholdNote(n, total){
+  const spare = total - n;   // keys that can be lost and still reach quorum
+  if(n <= 1) return { warn:true, text:`ANY SINGLE OWNER CAN MOVE EVERYTHING &mdash; ${total>1?'THE OTHER OWNERS ARE ADVISORY':'THIS IS A HOT WALLET WITH EXTRA STEPS'}.` };
+  if(spare <= 0) return { warn:true, text:`EVERY OWNER MUST SIGN &mdash; ONE LOST KEY FREEZES THE VAULT PERMANENTLY.` };
+  return { warn:false, text:`TOLERATES ${spare} LOST KEY${spare>1?'S':''} &middot; ${n} OWNERS ACTING TOGETHER CAN MOVE EVERYTHING.` };
+}
+// The delay's consequence is the length of the window in which a queued
+// proposal can still be stopped — which is nothing at all without an executor
+// to stop it through, so the note says which of the two situations this vault
+// is in rather than promising a brake it does not have. See canForwardCancel.
+function delayNote(sec, v){
+  if(sec <= 0) return { warn:true, text:`UNLOCKED &mdash; A PROPOSAL AT QUORUM EXECUTES THE MOMENT IT IS SUBMITTED. NO WINDOW TO STOP A BAD ONE.` };
+  if(!canForwardCancel(v)) return { warn:true, text:`${fmtD(sec)} BEFORE A SUBMITTED PROPOSAL CAN RUN &mdash; BUT WITH NO EXECUTOR THERE IS NO ROUTE TO CANCEL INSIDE THAT WINDOW.` };
+  if(sec < SHORT_DELAY_SEC) return { warn:true, text:`SHORT DELAY &middot; LIMITED PROTECTION &mdash; ${fmtD(sec)} IS THE WHOLE WINDOW TO NOTICE A BAD PROPOSAL AND CANCEL IT.` };
+  return { warn:false, text:`${fmtD(sec)} BETWEEN SUBMISSION AND EXECUTION &mdash; THE WINDOW IN WHICH ${v.threshold} OWNERS CAN STILL CANCEL.` };
+}
+
 // Best short identity for an owner: custom label, else resolved
 // .wei/.gwei/ENS name, else a shortened address.
 function ownerIdent(o){
@@ -3720,14 +3847,28 @@ function renderDash(v,mob){
   // Single pass over every vault's queue: accumulate the global action counts
   // and, per vault, the flags the tabs below need — so txSt() is evaluated once
   // per tx instead of again for each tab dot.
-  let needsSig=0,readyExec=0,pendingSubmit=0;
-  const vaultFlags=S.vaults.map(vt=>{
+  //
+  // The same pass now also records WHERE each kind of work is. The bar these
+  // counts feed spans every vault while the queue under it shows one, so a
+  // total on its own could name work the visible queue does not contain and
+  // give the reader no way to find the queue that does. `firstWith` is that
+  // way; `elsewhere` is how much of the total this vault cannot account for.
+  let needsSig=0,readyExec=0,pendingSubmit=0,elsewhere=0;
+  const firstWith={sign:-1,exec:-1,submit:-1};
+  const hereHas={sign:false,exec:false,submit:false};
+  const vaultFlags=S.vaults.map((vt,vi)=>{
+    const here=vi===S.sel;
     let rdy=false,needsYou=false;
     vt.queue.forEach(tx=>{
       const st=txSt(tx,vt);
-      if(st.sign&&you&&!tx.approvals[you]){needsSig++;needsYou=true;}
-      if(st.exec||st.instant){readyExec++;rdy=true;}
-      else if(st.queue)pendingSubmit++;
+      // Each proposal falls in at most one bucket — txSt's branches are
+      // exclusive and st.instant implies st.queue — so counting `elsewhere`
+      // off a single flag counts proposals, not bucket memberships.
+      let hit=false;
+      if(st.sign&&you&&!tx.approvals[you]){needsSig++;needsYou=true;hit=true;if(here)hereHas.sign=true;if(firstWith.sign<0)firstWith.sign=vi;}
+      if(st.exec||st.instant){readyExec++;rdy=true;hit=true;if(here)hereHas.exec=true;if(firstWith.exec<0)firstWith.exec=vi;}
+      else if(st.queue){pendingSubmit++;hit=true;if(here)hereHas.submit=true;if(firstWith.submit<0)firstWith.submit=vi;}
+      if(hit&&!here)elsewhere++;
     });
     return{rdy,needsYou};
   });
@@ -3737,21 +3878,34 @@ function renderDash(v,mob){
   // it was being recomputed (each pass re-running isCancelTx over the whole
   // queue) once per card.
   const firstUnqueued=v.queue.findIndex(t=>t.eta===0&&!isCancelTx(t,v));
+  // A part is a plain figure when the work it counts is (also) on the vault in
+  // view, and a control when every instance of it is somewhere else — there is
+  // nothing to navigate to while you are already looking at it, and a link that
+  // reloads the page you are on is worse than no link. `firstWith` holds the
+  // FIRST vault with each kind, so it is only a reliable "not here" when the
+  // selected vault contributed none of that kind at all, which is what hereHas
+  // records above.
+  const attnPart=(n,label,key)=>{
+    const txt=`${n} ${label}`;
+    if(hereHas[key]||firstWith[key]<0||firstWith[key]===S.sel)return txt;
+    const dest=S.vaults[firstWith[key]];
+    return `<button class="attn-jump" onclick="jumpToVaultWork(${firstWith[key]})" title="In ${esc(dest.name)} — go there">${txt}</button>`;
+  };
   const attnParts=[];
-  if(needsSig)attnParts.push(`${needsSig} NEED${needsSig>1?"":"S"} YOUR SIG`);
-  if(readyExec)attnParts.push(`${readyExec} READY TO EXECUTE`);
-  if(pendingSubmit)attnParts.push(`${pendingSubmit} READY TO SUBMIT`);
+  if(needsSig)attnParts.push(attnPart(needsSig,`NEED${needsSig>1?"":"S"} YOUR SIG`,'sign'));
+  if(readyExec)attnParts.push(attnPart(readyExec,'READY TO EXECUTE','exec'));
+  if(pendingSubmit)attnParts.push(attnPart(pendingSubmit,'READY TO SUBMIT','submit'));
 
   return`
-  ${totalActions>0?`<div role="status" style="padding:${mob?"12px 6px":"14px 8px"};margin-bottom:4px;border-bottom:1px solid var(--ln);display:flex;align-items:center;gap:${mob?8:12}px;flex-wrap:wrap;font-size:10px;letter-spacing:2px">
-    <span style="color:var(--y);font-weight:700">${totalActions} ACTION${totalActions>1?"S":""}</span>
-    <span style="color:var(--d)">${attnParts.join(" &middot; ")}</span>
+  ${totalActions>0?`<div class="attn" role="status">
+    <span class="attn-n">${totalActions} ACTION${totalActions>1?"S":""}</span>
+    <span class="attn-parts">${attnParts.join('<span aria-hidden="true">&middot;</span>')}</span>
+    ${elsewhere?`<span class="attn-else">${elsewhere} IN ${elsewhere>1?"OTHER VAULTS":"ANOTHER VAULT"}</span>`:""}
   </div>`:""}
   <div class="vtabs"><div class="vtabs-inner">
     ${S.vaults.map((vt,i)=>{
       const on=i===S.sel;
-      const {rdy,needsYou}=vaultFlags[i];
-      const dot=rdy?'<span class="vtab-dot" style="background:var(--g)" title="Ready to execute" aria-hidden="true"></span>':needsYou?'<span class="vtab-dot" style="background:var(--y)" title="Needs your signature" aria-hidden="true"></span>':"";
+      const dot=vaultDot(vaultFlags[i]);
       const pending=vt.queue.length>0?`${vt.queue.length} PENDING`:"";
       // The balance summary is a comparison aid for choosing between vaults, so it
       // belongs on the ones you might switch TO. On the selected tab it only
@@ -3760,7 +3914,7 @@ function renderDash(v,mob){
       // pending count and gives the balance back to the hero.
       const bal=vt.holdings.length?tokIcon(vt.holdings[0].token,'sm')+' <span class="priv">'+esc(vt.holdings[0].balance)+'</span> '+esc(vt.holdings[0].token)+(vt.holdings.length>1?" +"+(vt.holdings.length-1)+" MORE":""):"EMPTY";
       const info=on?pending:bal+(pending?` &middot; ${pending}`:"");
-      return`<button class="vtab${on?" on":""}"${on?' aria-current="true"':''} onclick="S.sel=${i};S.nt=S.vaults[${i}].threshold;setNd(S.vaults[${i}].delay);S.showTx=false;render()">
+      return`<button class="vtab${on?" on":""}"${on?' aria-current="true"':''} onclick="selectVault(${i})">
       <div class="vtab-name">${esc(vt.name)}${dot}</div>
       ${info?`<div class="vtab-info">${info}</div>`:""}
     </button>`}).join("")}
@@ -4007,12 +4161,30 @@ ${/* Topping up is the one action here that needs no signature, no quorum and no
 ${/* Name first, then the address it stands for, then the annotations. YOU sits
      inside the group rather than being pushed to the far edge by .row's
      space-between: on a phone that left ~250px between a signer and the label
-     that belongs to them, which reads as a column heading, not an annotation. */''}
-  ${v.owners.map(o=>`<div class="row">
+     that belongs to them, which reads as a column heading, not an annotation.
+     The trailing edge that space-between was leaving empty now carries where
+     this owner stands against the queue above — see .signer-stand. */''}
+  ${v.owners.map(o=>{
+    // Two counts over the live queue, from the owner's side of it. `awaited` is
+    // the actionable one: proposals still collecting signatures that this owner
+    // has not signed, i.e. the ones they personally are holding up. `signed` is
+    // the standing across everything currently queued, which is what the row
+    // falls back to once nobody is being waited on.
+    let signed=0,awaited=0;
+    v.queue.forEach(tx=>{
+      const has=!!tx.approvals[o.addr];
+      if(has)signed++;
+      else if(txSt(tx,v).sign)awaited++;
+    });
+    const stand=!v.queue.length?""
+      :awaited?`<span class="signer-stand await" title="${awaited} proposal${awaited>1?"s are":" is"} still collecting signatures and this owner has not signed ${awaited>1?"them":"it"} yet">${awaited} AWAITING</span>`
+      :`<span class="signer-stand${signed===v.queue.length?" all":""}" title="This owner has signed ${signed} of the ${v.queue.length} proposal${v.queue.length>1?"s":""} in the queue. None of the rest are still collecting signatures.">${signed}/${v.queue.length} SIGNED</span>`;
+    return`<div class="row">
     <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;min-width:0">
       ${signerIdentHtml(o,v.chain)}${o.label&&o.label.trim().toUpperCase()!=='YOU'?`<span class="signer-label">${esc(o.label)}</span>`:""}${o.you?'<span class="signer-you">YOU</span>':""}
     </div>
-  </div>`).join("")}`;
+    ${stand}
+  </div>`}).join("")}`;
 }
 
 // ── TX BUILDER ────────────────────────────────────────────────────
@@ -5236,8 +5408,14 @@ function renderAdmin(v,mob){
   const tab=S.adminTab,tc=S.nt!==v.threshold,ndSec=toSec(S.nd,S.ndUnit),dc=ndSec!==v.delay;
   const explorerBase = S.demoMode ? (EXPLORERS[v.chain]||EXPLORERS.ETHEREUM) : (CHAINS[S.chainId]?CHAINS[S.chainId].explorer:'https://etherscan.io');
   return`
+${/* The same dot the dashboard strip carries. Admin was the one place in the app
+     where switching vault dropped the signal for where the work is — you could
+     be editing DEV_GRANTS' threshold with a proposal sitting executable in
+     TREASURY_ALPHA and this strip would not say so. The name still leads; the
+     dot is an annotation on it, so .vtab-name supplies the same baseline and
+     gap it does on the dashboard rather than the row doing it inline. */''}
   <div class="vtabs"><div class="vtabs-inner" style="min-width:max-content">
-    ${S.vaults.map((vt,i)=>`<button class="vtab${i===S.sel?" on":""}"${i===S.sel?' aria-current="true"':''} style="padding:${mob?"12px 14px":"14px 20px"};font-size:11px" onclick="S.sel=${i};S.nt=S.vaults[${i}].threshold;setNd(S.vaults[${i}].delay);render()">${esc(vt.name)}</button>`).join("")}
+    ${S.vaults.map((vt,i)=>`<button class="vtab${i===S.sel?" on":""}"${i===S.sel?' aria-current="true"':''} style="padding:${mob?"12px 14px":"14px 20px"}" onclick="selectVault(${i})"><span class="vtab-name" style="font-size:11px">${esc(vt.name)}${vaultDot(vaultWorkFlags(vt))}</span></button>`).join("")}
   </div></div>
   <div class="admin-note">CHANGES REQUIRE MULTISIG APPROVAL</div>
   <div class="admin-tabs">
@@ -5255,7 +5433,7 @@ function renderAdmin(v,mob){
       : ` A FREE <b style="color:var(--m)">${WNS_ID_SUFFIX.slice(1)}</b> ON-CHAIN NAME CAN BE CLAIMED FOR THIS VAULT FROM ETHEREUM MAINNET.`}</div>
     <div class="sep"></div>
     <div class="grid2" style="gap:${mob?32:48}px">
-      <div>
+      <div class="policy-col">
         <span class="lbl" id="lbl-thresh"><span class="dim">SET &middot;</span> THRESHOLD</span>
         <div style="display:flex;align-items:baseline;gap:8px;margin:8px 0 20px">
           <span class="policy-big">${S.nt}</span>
@@ -5263,10 +5441,10 @@ function renderAdmin(v,mob){
           ${tc?'<span class="changed-tag">CHANGED</span>':""}
         </div>
         <div class="thresh-btns" role="group" aria-labelledby="lbl-thresh">${Array.from({length:v.ownerCount},(_,i)=>i+1).map(n=>{const on=n===S.nt;return`<button class="btn btn-outline thresh-btn"${on?' aria-current="true"':''} aria-label="Require ${n} of ${v.ownerCount} signatures" style="border-color:${on?'var(--a)':'var(--ln)'};color:${on?'var(--a)':'var(--d)'};background:${on?'color-mix(in srgb,var(--a) 10%,transparent)':'transparent'}" onclick="S.nt=${n};render()">${n}</button>`}).join("")}</div>
-        <div style="font-size:10px;color:var(--d);letter-spacing:1px;margin:-6px 0 14px">${S.nt} OF ${v.ownerCount} SIGNATURES REQUIRED</div>
+        ${(()=>{const tn=thresholdNote(S.nt,v.ownerCount);return`<div class="policy-note${tn.warn?" warn":""}">${tn.text}</div>`})()}
         <button class="btn ${tc?"btn-fill":"btn-disabled"} btn-w" onclick="${tc?`doAdminPropose('setThreshold',${S.nt})`:""}">${tc?"PROPOSE":"NO CHANGE"}</button>
       </div>
-      <div>
+      <div class="policy-col">
         <span class="lbl"><span class="dim">SET &middot;</span> DELAY</span>
         <div style="display:flex;align-items:baseline;gap:8px;margin:8px 0 20px">
           <span class="policy-big">${fmtD(v.delay)}</span>
@@ -5278,7 +5456,12 @@ function renderAdmin(v,mob){
           <div style="display:flex;gap:4px" role="group" aria-label="Delay unit">${['m','h','d'].map(u=>`<button class="pill${S.ndUnit===u?" on":""}"${S.ndUnit===u?' aria-current="true"':''} style="height:34px;padding:0 10px" onclick="S.ndUnit='${u}';render()">${UNIT_LABEL[u]}</button>`).join("")}</div>
           <span style="font-size:10px;letter-spacing:1px;margin-left:auto;color:${dc?'var(--y)':'var(--d)'}">${dc?`&rarr; ${ndSec>0?fmtD(ndSec):'UNLOCKED'} (${ndSec.toLocaleString()}s)`:`${ndSec.toLocaleString()}s`}</span>
         </div>
-        ${dc&&ndSec>0&&ndSec<SHORT_DELAY_SEC?`<div style="font-size:9px;letter-spacing:1px;color:var(--y);margin:-6px 0 14px">SHORT DELAY &middot; LIMITED PROTECTION</div>`:''}
+${/* Stated for whatever is currently picked, changed or not — the same rule the
+           threshold note beside it follows. It used to appear only while the value
+           differed from the vault's, which meant the one moment the panel explained
+           what a delay buys was the moment you were already replacing it, and a vault
+           left on a 30-second delay was never told what that was worth. */''}
+        ${(()=>{const dn=delayNote(ndSec,v);return`<div class="policy-note${dn.warn?" warn":""}">${dn.text}</div>`})()}
         <button class="btn ${dc?"btn-fill":"btn-disabled"} btn-w" onclick="${dc?`doAdminPropose('setDelay',${ndSec})`:""}">${dc?"PROPOSE":"NO CHANGE"}</button>
       </div>
     </div>
@@ -5299,13 +5482,34 @@ function renderAdmin(v,mob){
     </div>
   `:tab==="OWNERS"?`<div>
     ${(()=>{const pc=pendingPolicyChanges(v);return pc.length?`<div class="policy-warn">${pc.length} OWNER/THRESHOLD CHANGE${pc.length>1?"S":""} PENDING (#${pc.map(p=>p.nonce).join(", #")}) &middot; changes execute in order, so a new one here may need re-creating if the owner set shifts first</div>`:''})()}
+${/* Two columns, and until now nothing said the right one was editable. Every
+       input in this app is a bare bottom rule, which reads as a field when it is
+       empty and as static text the moment it holds a value — so a roster of
+       labelled owners looked like a table of facts, and DEPLOYER/CFO/HR read as
+       data the vault had reported rather than as words someone here had typed.
+       The caption is also the only place the app can say what those words ARE:
+       the vault name gets that disclaimer on the POLICY tab and owner labels,
+       which travel the same route to the same coordination record and are just
+       as invisible to the chain, never got one. */''}
+    <div class="row" style="border-bottom-color:var(--fr);padding-top:0;align-items:baseline">
+      <span class="lbl" style="margin:0">OWNERS <span class="dim">&middot; ${v.ownerCount}</span></span>
+      <span class="lbl" style="margin:0;text-align:right">LABEL <span class="dim">&middot; SHARED WITH CO-SIGNERS, NOT ON CHAIN</span></span>
+    </div>
     ${v.owners.map((o,oi)=>{const isYouLbl=o.label&&o.label.trim().toUpperCase()==='YOU';return`<div class="row" style="${mob?"flex-direction:column;align-items:stretch;gap:10px":""}">
       <div style="min-width:0">
         <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;min-width:0">${signerIdentHtml(o,v.chain)}${o.you?'<span class="signer-you">YOU</span>':""}</div>
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-shrink:0${mob?";width:100%":""}">
           <input class="inp" maxlength="64" style="margin:0;${mob?"flex:1":"width:120px"};font-size:11px;letter-spacing:1px;border-bottom-color:var(--ln)" placeholder="LABEL" aria-label="Label for ${esc(shortAddr(o.addr))}" value="${isYouLbl?"":esc(o.label)}" onchange="updateOwnerLabel(${S.sel},${oi},this.value)">
-          ${!o.you?`<button class="btn btn-danger btn-sm" onclick="doAdminPropose('removeOwner',${oi})">REMOVE</button>`:""}
+${/* You cannot propose removing yourself from here, and the row still has to
+             reserve the slot: without it the one label field that has no REMOVE
+             beside it stretches to the row's edge and the whole column reads as
+             ragged. A span rather than a disabled button — there is no control
+             here to disable — sized by the same text so the reservation tracks
+             the real button at every breakpoint, and hidden from assistive tech,
+             which should hear an owner with no remove action rather than a
+             mysterious second "REMOVE". */''}
+          ${!o.you?`<button class="btn btn-danger btn-sm" onclick="doAdminPropose('removeOwner',${oi})">REMOVE</button>`:`<span class="btn btn-sm" style="visibility:hidden" aria-hidden="true">REMOVE</span>`}
         </div>
     </div>`}).join("")}
     <div class="sep"></div>
