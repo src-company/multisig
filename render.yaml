@@ -66,8 +66,19 @@ services:
   - type: web
     name: multisig-dapp
     runtime: static
-    staticPublishPath: ./dapp
-    buildCommand: "echo no build step"
+    # dist/, not dapp/ — see build.js. The source keeps its comments and the
+    # deployment does not: index.html is 236 KB gzipped as written and 121 KB
+    # with the prose removed, on a page that already ships a 505 KB signing
+    # library before it can do anything. Nothing is renamed, reordered or
+    # rewritten; the build proves that its output holds the same literals in the
+    # same order as its input, and that every script parses, before it writes
+    # anything at all.
+    #
+    # Node only, no package tree. This repo vendors ethers rather than
+    # installing it, and a deploy that can fail on an npm registry hiccup is a
+    # deploy that can fail for reasons that have nothing to do with this project.
+    staticPublishPath: ./dist
+    buildCommand: "node build.js"
     headers:
       # frame-ancestors is the one CSP directive a <meta> tag cannot carry —
       # browsers ignore it there — so the pages' own policies cannot express it
@@ -103,6 +114,34 @@ services:
       - path: /*
         name: Permissions-Policy
         value: "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+      # The two vendored bundles are 1.1 MB between them and are the only files
+      # here that are not this project's own source. They are checked in at a
+      # pinned version and change only when someone deliberately replaces them,
+      # so a returning visitor was re-validating — and on a cold cache
+      # re-downloading — a megabyte of unchanged library on every visit.
+      #
+      # A day, not a year, and deliberately not `immutable`: the filenames carry
+      # no version or content hash, so the cache cannot be busted by changing a
+      # URL. A year would mean an upgraded ethers reaching a returning visitor
+      # whenever their browser felt like asking, which is not a property this app
+      # should have. A day bounds that to one day and still turns the common case
+      # — coming back to check a proposal — into no bytes at all.
+      #
+      # Nothing else is listed. index.html, wallet.js and wallet.css are this
+      # app's own code and have to move together: a stale wallet.js against a
+      # fresh index.html is a half-deployed interface, which is worse than a
+      # slow one. They keep the platform default, which revalidates.
+      - path: /ethers.min.js
+        name: Cache-Control
+        value: "public, max-age=86400"
+      - path: /walletconnect.min.js
+        name: Cache-Control
+        value: "public, max-age=86400"
+      # The unfurl card. Fetched by link-preview crawlers rather than by the app,
+      # never referenced by anything that would notice it being a week old.
+      - path: /multisig-card-1200x630.png
+        name: Cache-Control
+        value: "public, max-age=604800"
     # The full CSP is served from the <meta> tag in each page instead of here,
     # so it stays next to the code whose origins it lists. If you move it, point
     # connect-src at the PostgREST service URL above.

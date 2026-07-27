@@ -240,6 +240,24 @@ Every wallet is the same 45-byte clone, so its runtime code can be checked again
 
 Findings and their dispositions are tracked in [`SECURITY.md`](SECURITY.md). The contracts are immutable singletons; the low and informational findings from the 2026-07-11 review are mitigated in the dapp rather than by redeployment.
 
+## Interface
+
+The dapp in [`dapp/`](dapp/) is static — open `dapp/index.html` over any HTTP
+server and it runs. Nothing is compiled, bundled or transpiled, and no package
+tree is involved; ethers is vendored beside it.
+
+What gets deployed is built by [`build.js`](build.js), which is `node build.js`
+with no dependencies and writes `dist/`. It removes comments and the whitespace
+that laid them out, and nothing else: no renaming, no reordering, no rewriting.
+`dapp/index.html` is 236 KB gzipped as written and 121 KB with the prose taken
+out, on a page that also ships a 505 KB signing library — so the source keeps the
+reasoning next to the code it is about, and a visitor does not download it.
+
+The build proves the transform before it writes anything. The stripped text must
+hold exactly the same string, template and regex literals, in the same order, as
+the text it came from, and every script must still parse; a build that cannot
+show both throws and leaves the previous `dist/` alone.
+
 ## Brand and press
 
 **[multisig.software/brand](https://www.multisig.software/brand)** — the

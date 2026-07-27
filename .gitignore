@@ -1,4 +1,5 @@
 cache/
+dist/
 out/
 lcov.info
 __pycache__/
