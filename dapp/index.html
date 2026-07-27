@@ -1653,7 +1653,17 @@ const NAME_KINDS = '.eth / .wei / .gwei / .base.eth / .mega';
 // out beside the label, the rest carry a min-height for the messages that come
 // later. So a form at rest says which namespaces it reads and nothing moves
 // when it stops saying it.
-function nameKindsHint(){ return 'NAMES · ' + NAME_KINDS; }
+// Compact, and derived rather than spelled a second time: the prose form above
+// reads as a sentence ("ENTER AN ADDRESS OR ... NAME"), this one is a label
+// under a field whose placeholder has already said "or a name", so it drops the
+// lead and the spaces around the slashes — which is the spelling the fields
+// themselves used before five namespaces stopped fitting in them.
+//
+// Width is the whole point. At 46 characters it measured 301px, which on a
+// 375px phone is 90% of an owner row and made the dimmest text on the screen
+// also the widest thing in the block. The list is secondary information and
+// should not be the first thing the eye lands on.
+function nameKindsHint(){ return NAME_KINDS.replace(/ \/ /g, '/'); }
 // The subset of those a link may be built on. A deep link is resolved with no
 // operator watching and no field to type a correction into, so it takes only
 // names that answer from one mainnet contract in two calls: WNS and its .gwei
