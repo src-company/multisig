@@ -137,6 +137,9 @@ services:
       - path: /walletconnect.min.js
         name: Cache-Control
         value: "public, max-age=86400"
+      - path: /coinbase.min.js
+        name: Cache-Control
+        value: "public, max-age=86400"
       # The unfurl card. Fetched by link-preview crawlers rather than by the app,
       # never referenced by anything that would notice it being a week old.
       - path: /multisig-card-1200x630.png
