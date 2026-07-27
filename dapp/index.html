@@ -17,7 +17,7 @@
      provider is initialised with an rpcMap for the one chain it is given, so
      chain reads stay on the RPC hosts listed here; letting the fallback
      through would put a vault's traffic on a host that is not one of them. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://multisig-postgrest.onrender.com https://repo.sourcify.dev https://*.publicnode.com https://1rpc.io https://*.drpc.org https://api.coinbase.com https://mainnet.base.org https://sepolia.base.org https://arb1.arbitrum.io https://mainnet.optimism.io https://mainnet.megaeth.com https://rpc-megaeth-mainnet.globalstake.io https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org; img-src 'self' data: https://explorer-api.walletconnect.com; frame-src https://verify.walletconnect.com https://verify.walletconnect.org; upgrade-insecure-requests">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://multisig-postgrest.onrender.com https://repo.sourcify.dev https://*.publicnode.com https://1rpc.io https://*.drpc.org https://api.coinbase.com https://mainnet.base.org https://sepolia.base.org https://arb1.arbitrum.io https://mainnet.optimism.io https://mainnet.megaeth.com https://rpc-megaeth-mainnet.globalstake.io https://api.dotmega.domains https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org; img-src 'self' data: https://explorer-api.walletconnect.com; frame-src https://verify.walletconnect.com https://verify.walletconnect.org; upgrade-insecure-requests">
 <title>multisig</title>
 <meta name="description" content="Multichain multisig with an embedded timelock. A mandatory delay between queuing and execution, so a compromised key or a social-engineered signature can be seen and cancelled before it lands.">
 <!-- Unfurl metadata. Vault links get passed between co-signers and pasted into
@@ -49,7 +49,18 @@
 <link rel="dns-prefetch" href="https://ethereum.publicnode.com">
 <link rel="preload" href="./ethers.min.js" as="script">
 <link rel="preload" href="./wallet.js" as="script">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<!-- Loaded without blocking the first paint. A stylesheet on a third-party host
+     stops the browser painting ANYTHING until that host has been resolved,
+     connected to, negotiated with and answered — including the boot overlay a
+     few lines below, whose whole job is to be on screen while the rest of this
+     page is still arriving. `display=swap` was already set, so the page has
+     always been willing to draw its text in the fallback face and swap when the
+     real one lands; this makes the same promise about the stylesheet itself.
+     `media="print"` is what takes it off the critical path (a print stylesheet
+     is not needed to paint a screen), and the onload hands it back to every
+     medium the moment it has arrived. -->
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all';this.onload=null">
+<noscript><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&display=swap" rel="stylesheet"></noscript>
 <link id="favicon" rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%3Crect%20width%3D%2264%22%20height%3D%2264%22%20fill%3D%22%232D5FE8%22%2F%3E%0A%3Cdefs%3E%0A%3Cpath%20id%3D%22pt%22%20d%3D%22M4%2C4%20H60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pr%22%20d%3D%22M60%2C4%20V60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pb%22%20d%3D%22M60%2C60%20H4%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pl%22%20d%3D%22M4%2C60%20V4%22%20fill%3D%22none%22%2F%3E%0A%3C%2Fdefs%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%23F5FBFF%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pt%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%23F5FBFF%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pr%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%23F5FBFF%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pb%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%23F5FBFF%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pl%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Cpath%20d%3D%22M16%2C48%20V16%20H22%20L32%2C32%20L42%2C16%20H48%20V48%20H42%20V26%20L32%2C42%20L22%2C26%20V48%20Z%22%20fill%3D%22%23F5FBFF%22%2F%3E%0A%3C%2Fsvg%3E" type="image/svg+xml">
 <link rel="stylesheet" href="./wallet.css">
 <style>
@@ -1570,8 +1581,17 @@ const NAME_SERVICES = [
 ];
 // One matcher for every name we accept, so the field hints, the validators and
 // the resolvers can never drift apart. '.gwei' does not end in '.wei', so the
-// suffixes stay unambiguous.
-const NAME_RE = /\.(eth|g?wei)$/i;
+// suffixes stay unambiguous. `.mega` is in here on the same terms as the rest:
+// a name resolves to an address, and an address is the same address on every
+// chain, so where the *namespace* lives decides which network the lookup goes
+// to and nothing else. See NAME_KINDS for what that costs a field to say.
+const NAME_RE = /\.(eth|g?wei|mega)$/i;
+// The list, spelled once. Five namespaces is well past what a placeholder can
+// hold — the narrowest of these fields is a grid cell — so every field says
+// "a name" and this is what the hint under it spells out the moment there is
+// something to hint about. Adding a namespace means adding it here and nowhere
+// else in the interface.
+const NAME_KINDS = '.eth / .wei / .gwei / .base.eth / .mega';
 // The subset of those a link may be built on. A deep link is resolved with no
 // operator watching and no field to type a correction into, so it takes only
 // names that answer from one mainnet contract in two calls: WNS and its .gwei
@@ -1587,6 +1607,185 @@ function nsFor(name) {
   const v = name.toLowerCase();
   return NAME_SERVICES.find(s => v.endsWith(s.suffix)) || null;
 }
+
+// ── BASENAMES (.base.eth) ─────────────────────────────────────────
+// Base's namespace, and the one that needs no new field rules at all: a
+// basename ends in `.eth`, so NAME_RE already takes it and every validator,
+// hint and preview already treats it as a name. What it needs is a resolver.
+//
+// The reason not to leave it to the generic ENS path is what that path costs.
+// `base.eth` on mainnet answers through an ENSIP-10 offchain gateway, so
+// resolving `alice.base.eth` there is a mainnet lookup plus an HTTP round trip
+// to a CCIP endpoint that can be down, blocked or slow — the exact failure mode
+// this app already refuses to build vault links on. The records live on Base,
+// as a plain ENS-shaped resolver, so reading them there is one call and no
+// gateway. And the reverse direction is not available from mainnet at all:
+// mainnet's reverse registry answers with an account's *mainnet* primary name,
+// which for a Base-native account is nothing.
+//
+// Both directions are ordinary ENS shapes against one L2 contract, which means
+// a whole owner list reverse-resolves in ONE Multicall3 call plus one to verify
+// it — cheaper per address than anything else here.
+const BASE_CHAIN_ID = 8453;
+// Basenames L2Resolver, Base mainnet — the same address Coinbase's own
+// OnchainKit uses. Read from Base mainnet always, on every chain this app
+// supports, including Base Sepolia. There IS a separate Sepolia deployment
+// (0x6533C94869D28fAA8dF77cc63f9e2b2D6Cf77eBA) and OnchainKit routes to it
+// when told the chain is Base Sepolia, because it is a component library and
+// the app around it decides. This is not that: here a name is typed into a
+// field, previewed, and signed for by co-signers who may be looking at a
+// different screen. If `alice.base.eth` meant the mainnet registry on one chain
+// and the testnet registry on another, the same string would carry two
+// addresses depending on where it was read — which is the substitution this
+// interface exists to prevent. One registry, one meaning, everywhere.
+const BASE_L2_RESOLVER = '0xC6d566A56A1aFf6508b41f6c90ff131615583BCD';
+const BASE_NAME_RE = /\.base\.eth$/i;
+// Full shape, for anything resolved unattended — the deep-link matcher, as with
+// the WNS and .mega pairs. At least one label in front, so a bare `base.eth` is
+// not a link to anything.
+const BASE_LINK_RE = /^[a-z0-9_-]+(?:\.[a-z0-9_-]+)*\.base\.eth$/i;
+const baseNsIface = new ethers.Interface([
+  'function addr(bytes32 node) view returns (address)',
+  'function name(bytes32 node) view returns (string)',
+]);
+// ENSIP-11 reverse namespace for an EVM chain: coinType 0x80000000 | chainId,
+// spelled in lowercase hex, so Base is `<address>.80002105.reverse`. Written
+// out rather than derived from BASE_CHAIN_ID because it is the node every
+// reverse lookup hangs off, and a wrong one reads as "this address has no name"
+// rather than as an error.
+const BASE_REVERSE_SUFFIX = '.80002105.reverse';
+function baseNamesOn(chainId){ return Number(chainId) === BASE_CHAIN_ID; }
+function isBaseName(t){ return BASE_NAME_RE.test(String(t || '').trim()); }
+
+// Input that is one edit away from a name, named rather than rejected.
+//
+// `jesse.base` is the case this exists for. It is how people say a basename out
+// loud, and it is not one: the registry hashes it to a different node and
+// answers the zero address, so there is nothing there to resolve. The tempting
+// fix is to expand it silently, and this app will not — a name is what an
+// operator typed and reviewed, and substituting a different one before
+// resolving it is the same quiet disagreement with every other tool that the
+// ENSIP-11 handling refuses to make. Coinbase's own tooling does not expand it
+// either, so a habit formed here would break elsewhere.
+//
+// What it does instead is what the bad-checksum line below does: say exactly
+// which spelling is wanted, so the fix is one keystroke rather than a hunt.
+function nameNearMiss(t){
+  const v = String(t || '').trim();
+  if(/\.base$/i.test(v)) return `BASENAMES END IN .base.eth — DID YOU MEAN ${v.toUpperCase()}.ETH?`;
+  return null;
+}
+function baseReverseNode(addr){ return ethers.namehash(String(addr).slice(2).toLowerCase() + BASE_REVERSE_SUFFIX); }
+// Base is a foreign network from every chain but one, exactly as mainnet is,
+// so it goes through makeProvider's cache the same way.
+function baseRpc(){ return makeProvider(BASE_CHAIN_ID); }
+
+// Forward: `<label>.base.eth` -> address, read off Base.
+async function baseResolveName(name){
+  const v = String(name || '').trim().toLowerCase();
+  let addr;
+  try {
+    const ns = new ethers.Contract(BASE_L2_RESOLVER, baseNsIface, baseRpc());
+    addr = await _nameRace(ns.addr(ethers.namehash(v)));
+  } catch(e) {
+    // A call that threw is Base not answering; a name that does not exist is
+    // the zero below. Classified apart so the message says which, and so a
+    // failed lookup is never remembered as "no such name".
+    const kind = _nameKind(e) === 'notfound' ? 'unreachable' : _nameKind(e);
+    throw new NameError(kind, nameErrText(v, { nameKind: kind }));
+  }
+  // The call succeeded, so a zero is a name nobody has registered.
+  if(!addr || addr === ethers.ZeroAddress) throw new NameError('notfound', nameErrText(v, { nameKind:'notfound' }));
+  return ethers.getAddress(addr);
+}
+
+// Reverse: addresses -> the basenames they answer with, forward-verified.
+// Two batched calls for the whole list regardless of its size: one `name()` per
+// address, then one `addr()` per name that came back. The namehash of a claimed
+// name is computed here rather than asked for, so the verification costs one
+// round trip and not two.
+//
+// Returns the names it could prove and the set of addresses Base actually
+// answered for — the caller needs the second to tell "no name" from "ask again
+// later". Never throws.
+async function baseReverseNames(addrs){
+  const names = {}, answered = new Set();
+  const need = (addrs || []).filter(a => ethers.isAddress(a));
+  if(!need.length) return { names, answered };
+  const claimed = [];
+  try {
+    const mc = new ethers.Contract(MC3, MC3_ABI, baseRpc());
+    const res = await _nameRace(mc.aggregate3(need.map(a =>
+      ({ target: BASE_L2_RESOLVER, allowFailure: true, callData: baseNsIface.encodeFunctionData('name', [baseReverseNode(a)]) }))));
+    res.forEach((r, i) => {
+      const k = need[i].toLowerCase();
+      answered.add(k);
+      if(!r.success) return;
+      try {
+        const nm = baseNsIface.decodeFunctionResult('name', r.returnData)[0];
+        // Shape-checked before it is resolved back: `name()` returns whatever
+        // string the record holds, and only a real basename is one this app
+        // will put beside an address.
+        if(nm && BASE_LINK_RE.test(nm)) claimed.push({ k, name: String(nm).toLowerCase() });
+      } catch(_) {}
+    });
+  } catch(e) {
+    // Base did not answer. Nobody is marked answered, so nothing is cached as
+    // "no name" and the next load asks again.
+    console.error('basename reverse resolve:', e);
+    return { names, answered: new Set() };
+  }
+  if(!claimed.length) return { names, answered };
+  // A reverse record is a string its holder set, and the name can be repointed
+  // or sold on without it changing. Same forward check as every other namespace
+  // here: keep only names that resolve back to the address claiming them.
+  try {
+    const mc = new ethers.Contract(MC3, MC3_ABI, baseRpc());
+    const fwd = await _nameRace(mc.aggregate3(claimed.map(c =>
+      ({ target: BASE_L2_RESOLVER, allowFailure: true, callData: baseNsIface.encodeFunctionData('addr', [ethers.namehash(c.name)]) }))));
+    fwd.forEach((r, i) => {
+      if(!r.success) return;
+      try {
+        const back = baseNsIface.decodeFunctionResult('addr', r.returnData)[0];
+        if(String(back).toLowerCase() === claimed[i].k) names[claimed[i].k] = claimed[i].name;
+      } catch(_) {}
+    });
+  } catch(e) {
+    // Could not verify: show nothing rather than an unverified name, and put
+    // the addresses that made a claim back in the queue rather than recording
+    // a blank for them.
+    console.error('basename forward verify:', e);
+    for(const c of claimed) answered.delete(c.k);
+  }
+  return { names, answered };
+}
+
+// ── MEGA NAMES (.mega) ────────────────────────────────────────────
+// MegaETH's own namespace, read over MegaNames' HTTP resolver rather than by
+// contract call: the resolver is edge-cached and answers in one round trip
+// where the contract path would be two (computeId, then addr) against a chain
+// the app is often not pointed at.
+//
+// Accepted everywhere the other three are. A name is a way of spelling an
+// address, and an address is the same address on every chain — so which network
+// a lookup goes to is decided by the suffix, and nothing downstream of the
+// answer cares. That is already how .eth works here: ENS lives on chain 1 and
+// is honoured on all seven. Refusing .mega off MegaETH would have been this app
+// declining to read a namespace it can read perfectly well.
+//
+// What stays MegaETH-specific is precedence and links. On MegaETH a .mega name
+// is the local identity and wins over a mainnet one for the same address; off
+// it, .mega is the last thing tried. And a shareable vault link can only be
+// spelled with a name whose namespace the arriving browser will read on the
+// chain the link implies — see linkableName().
+const MEGA_CHAIN_ID = 4326;
+const MEGA_API = 'https://api.dotmega.domains';
+// Suffix matcher for classifying input; full-shape matcher for anything that
+// gets resolved unattended (deep links), matching the WNS pair above.
+const MEGA_SUFFIX_RE = /\.mega$/i;
+const MEGA_NAME_RE = /^[a-z0-9_-]+(?:\.[a-z0-9_-]+)*\.mega$/i;
+function megaNamesOn(chainId){ return Number(chainId) === MEGA_CHAIN_ID; }
+function isMegaName(t){ return MEGA_SUFFIX_RE.test(String(t || '').trim()); }
 
 // ── WNS · FREE id.wei IDENTITY ────────────────────────────────────
 // A vault with no name is forty-two hex characters in every wallet, every
@@ -1765,6 +1964,15 @@ function wnsAvState(label, from){
   S.wnsAv[k] = { state:'checking', holder:null };
   wnsLookup(label, from).then(r => {
     S.wnsAv[k] = { state: r.free === true ? 'free' : r.free === false ? 'taken' : 'unknown', holder: r.holder };
+    render();
+  }).catch(e => {
+    // wnsLookup settles its own calls, so this is the unexpected kind — a
+    // provider that threw before either went out. Without it the entry stays
+    // 'checking' for the rest of the session and the offer reads as permanently
+    // mid-flight, which is the one state with no way out. 'unknown' has one: it
+    // is retried on demand.
+    console.error('wns availability:', e);
+    S.wnsAv[k] = { state:'unknown', holder:null };
     render();
   });
   return S.wnsAv[k];
@@ -2102,10 +2310,36 @@ function tokIcon(sym, cls){ if(!sym) return ''; return `<span class="tok-ico${cl
 // up in the treasury holdings. Symbol is a display ticker; decimals drive the
 // real amount math — never assume 18.
 function _ctokKey(chainId, addr){ return `ms_ctok:${chainId}:${(addr||'').toLowerCase()}`; }
+// Parsed once per key rather than on every read. This is called from the render
+// path — vaultTokens() and curTok() sit behind the treasury, the token picker,
+// the review card and the queue's SLOW decode — and each call was a synchronous
+// localStorage read plus a JSON.parse. localStorage is not a variable: the read
+// blocks the main thread and, on the first touch after a page load, can reach
+// disk. It was being paid several times per render and again on every keystroke
+// in the amount and recipient fields, to re-derive a list that changes only when
+// somebody adds or removes a token.
+//
+// The returned array is shared, so nothing may edit it in place — the two
+// writers below build their own and drop the entry, which is also what makes the
+// "did the write actually land?" check in saveCustomToken still mean something.
+let _ctokMemo = {};
 function customTokensFor(chainId, addr){
   if(!addr) return [];
-  try { const v = JSON.parse(lsGet(_ctokKey(chainId, addr)) || '[]'); return Array.isArray(v) ? v : []; } catch(_) { return []; }
+  const key = _ctokKey(chainId, addr);
+  const hit = _ctokMemo[key];
+  if(hit) return hit;
+  let list = [];
+  try { const v = JSON.parse(lsGet(key) || '[]'); if(Array.isArray(v)) list = v; } catch(_) {}
+  _ctokMemo[key] = list;
+  return list;
 }
+// Another tab of this app, on the same origin, writing the same keys. Storage
+// events do not fire in the tab that made the change, so this only ever hears
+// about somebody else's — which is exactly the case a memo cannot see coming.
+window.addEventListener('storage', e => {
+  if(!e.key) { _ctokMemo = {}; return; }              // storage cleared wholesale
+  if(e.key.startsWith('ms_ctok:')) delete _ctokMemo[e.key];
+});
 // Persist a custom token against the vault it was added for. Returns whether
 // the token is on disk afterwards: without a vault address there is no key we
 // could ever read back, and localStorage can refuse the write outright (quota,
@@ -2113,13 +2347,19 @@ function customTokensFor(chainId, addr){
 // until the next reload and then silently vanished — callers now report it.
 function saveCustomToken(chainId, addr, tok){
   if(!addr) return false;
-  const list = customTokensFor(chainId, addr);
+  // A copy, not the memoised array: pushing into that would record the token as
+  // saved before the write that saves it, and would keep it there if the write
+  // is refused. The entry is dropped either way, so the confirming read below
+  // goes back to disk and answers about what is actually on it.
+  const list = customTokensFor(chainId, addr).slice();
   if(list.some(t => t.address.toLowerCase() === tok.address.toLowerCase())) return true;
   list.push({ address: tok.address, symbol: tok.symbol, decimals: tok.decimals });
+  const key = _ctokKey(chainId, addr);
   try {
-    localStorage.setItem(_ctokKey(chainId, addr), JSON.stringify(list));
+    localStorage.setItem(key, JSON.stringify(list));
+    delete _ctokMemo[key];
     return customTokensFor(chainId, addr).some(t => t.address.toLowerCase() === tok.address.toLowerCase());
-  } catch(_) { return false; }
+  } catch(_) { delete _ctokMemo[key]; return false; }
 }
 // Parse a pasted token address. An all-lower or all-upper string carries no
 // EIP-55 checksum to violate, so accept and normalise it; a mixed-case string
@@ -2135,7 +2375,9 @@ function parseTokenAddr(raw){
 }
 function removeCustomToken(chainId, addr, tokenAddr){
   const list = customTokensFor(chainId, addr).filter(t => t.address.toLowerCase() !== tokenAddr.toLowerCase());
-  try { localStorage.setItem(_ctokKey(chainId, addr), JSON.stringify(list)); } catch(_){}
+  const key = _ctokKey(chainId, addr);
+  try { localStorage.setItem(key, JSON.stringify(list)); } catch(_){}
+  delete _ctokMemo[key];
 }
 // Decode an ERC-20 symbol() result: string first, then bytes32 (old tokens
 // like MKR return a fixed bytes32 instead of a string).
@@ -2260,15 +2502,30 @@ const CHAINLINK_FEEDS = {
 // alongside the chain's own reads, so a slow or blocked mainnet delays no
 // balance. A failure returns 0, which is what every USD site here already
 // treats as "no price" — the balances still render.
+// A cache only helps a second caller that arrives after the first has answered,
+// and these do not arrive that way: loadAllVaults starts every vault at once, so
+// on a chain with no local feed each of them missed an empty cache in the same
+// tick and sent its own request to mainnet for the one number they all wanted.
+// The request in flight is shared as well as the answer it produces.
 let _ethUsd = { at: 0, price: 0 };
-async function ethUsdFallback(){
-  if(_ethUsd.price > 0 && Date.now() - _ethUsd.at < 120000) return _ethUsd.price;
-  try {
-    const feed = new ethers.Contract(CHAINLINK_FEEDS[1].ETH, CHAINLINK_ABI, mainnetRpc());
-    const answer = Number(await feed.latestAnswer()) / 1e8;
-    if(answer > 0){ _ethUsd = { at: Date.now(), price: answer }; return answer; }
-  } catch(e){ console.warn('Mainnet ETH price:', e && e.message); }
-  return 0;
+let _ethUsdInflight = null;
+function ethUsdFallback(){
+  if(_ethUsd.price > 0 && Date.now() - _ethUsd.at < 120000) return Promise.resolve(_ethUsd.price);
+  if(_ethUsdInflight) return _ethUsdInflight;
+  const p = (async () => {
+    try {
+      const feed = new ethers.Contract(CHAINLINK_FEEDS[1].ETH, CHAINLINK_ABI, mainnetRpc());
+      const answer = Number(await feed.latestAnswer()) / 1e8;
+      if(answer > 0){ _ethUsd = { at: Date.now(), price: answer }; return answer; }
+    } catch(e){ console.warn('Mainnet ETH price:', e && e.message); }
+    return 0;
+  })();
+  _ethUsdInflight = p;
+  // Cleared on settle, not on success: a failed read returns 0 and must not
+  // become the answer every later caller is handed for the rest of the session.
+  p.then(() => { if(_ethUsdInflight === p) _ethUsdInflight = null; },
+         () => { if(_ethUsdInflight === p) _ethUsdInflight = null; });
+  return p;
 }
 
 // Demo token lists for display in create form
@@ -3295,7 +3552,9 @@ function updateLoadStatus(val) {
   if (!t) { el.textContent = ''; return; }
   if (ethers.isAddress(t)) { el.textContent = 'VALID ADDRESS'; el.style.color = 'var(--g)'; }
   else if (NAME_RE.test(t)) { el.textContent = 'NAME · RESOLVES ON LOAD'; el.style.color = 'var(--a)'; }
-  else { el.textContent = 'ENTER AN ADDRESS OR .eth / .wei / .gwei NAME'; el.style.color = 'var(--r)'; }
+  else { const near = nameNearMiss(t);
+    el.textContent = near || ('ENTER AN ADDRESS OR ' + NAME_KINDS + ' NAME');
+    el.style.color = near ? 'var(--y)' : 'var(--r)'; }
 }
 
 function chainName() {
@@ -3738,9 +3997,9 @@ const DOCS_URL = 'docs' + PAGE_EXT, BRAND_URL = 'brand' + PAGE_EXT;
 
 // How a vault is spelled in the links this app hands out. An address is always
 // available and always correct; a name is neither, so one is used only where it
-// has been proven to point back — v.wnsName is set from the same forward-
+// has been proven to point back — v.revName is set from the same forward-
 // verified reverse lookup the header badge is drawn from, never from a bare
-// reverseResolve — and only on the chain WNS is deployed on.
+// reverseResolve — and only on the chain its namespace is read on.
 //
 // A named link is not equivalent to an address link and is not offered as one.
 // It re-resolves on every arrival, so it follows the name: the vault's owners
@@ -3750,18 +4009,29 @@ const DOCS_URL = 'docs' + PAGE_EXT, BRAND_URL = 'brand' + PAGE_EXT;
 // whatever comes back as unverified — which it already does, for every vault,
 // by reading the code at the address and saying so when it is not the audited
 // clone. The address stays in the header beside it either way.
+// A verified name is linkable only where the namespace it belongs to is read:
+// WNS/GNS on mainnet, .mega on MegaETH. A name that the arriving browser would
+// resolve somewhere else, or not at all, is not a link — it is a dead end that
+// looks like one.
+function linkableName(name, chainId) {
+  const n = String(name || '').toLowerCase();
+  if(!n) return null;
+  if(chainId === WNS_CHAIN_ID && WNS_NAME_RE.test(n)) return n;
+  if(megaNamesOn(chainId) && MEGA_NAME_RE.test(n)) return n;
+  if(baseNamesOn(chainId) && BASE_LINK_RE.test(n)) return n;
+  return null;
+}
 function vaultRef(v) {
   if(!v || !v.address || !ethers.isAddress(v.address)) return null;
-  return (S.chainId === WNS_CHAIN_ID && v.wnsName && WNS_NAME_RE.test(v.wnsName))
-    ? v.wnsName.toLowerCase()
-    : v.address;
+  return linkableName(v.revName, S.chainId) || v.address;
 }
 
 // The fragment for a vault reference, and optionally one proposal in it.
 // An address gets the chain in front of it because it says nothing about which
 // chain it lives on and the same address is a different vault — or nothing at
-// all — on each. A name says it already: WNS is on mainnet and nowhere else, so
-// the number would be the one part of the link able to contradict the rest.
+// all — on each. A name says it already: WNS is on mainnet and nowhere else,
+// .mega on MegaETH and nowhere else, so the number would be the one part of the
+// link able to contradict the rest.
 function refHash(ref, nonce) {
   const base = ethers.isAddress(ref) ? S.chainId + '/' + ref : ref;
   return '#' + base + (nonce === undefined || nonce === null ? '' : '/tx/' + nonce);
@@ -3914,8 +4184,8 @@ function renderNow(){
   // currently answers to. Only shown for a name that resolved forward back to
   // this address — the same verified pair the links are built on — and never in
   // demo mode, where there is no chain to have verified anything against.
-  const vName = (v && !S.demoMode && v.wnsName)
-    ? ` <span class="vault-name" title="This vault's on-chain identity. ${esc(v.wnsName)} reverse-resolves to this address on WNS and forward-resolves back to it — verified, not merely claimed — and is what the shareable link above spells.">${esc(v.wnsName)}</span>`
+  const vName = (v && !S.demoMode && v.revName)
+    ? ` <span class="vault-name" title="This vault's on-chain identity. ${esc(v.revName)} reverse-resolves to this address on ${isMegaName(v.revName) ? 'MegaNames' : isBaseName(v.revName) ? 'Basenames' : 'WNS'} and forward-resolves back to it — verified, not merely claimed — and is what the shareable link above spells.">${esc(v.revName)}</span>`
     : '';
 
   // The shareable link to this vault, built rather than read back out of the
@@ -4273,7 +4543,7 @@ function renderChainOverlay(mob){
 
 // ── DASHBOARD ─────────────────────────────────────────────────────
 function renderDash(v,mob){
-  if(!v)return`<div class="empty"><div class="empty-title">NO VAULTS</div><div class="empty-sub">${S.demoMode?"":"DEPLOY YOUR FIRST MULTISIG"}</div><button class="btn btn-outline" style="padding:0 32px;height:48px" onclick="S.view='CREATE';render()">CREATE VAULT</button>${!S.demoMode?`<div style="max-width:400px;margin:44px auto 0;padding-top:32px;border-top:1px solid var(--ln)"><div style="font-size:10px;font-weight:600;letter-spacing:2px;color:var(--m)">LOAD EXISTING VAULT</div><div style="margin-top:12px;display:flex;align-items:center;gap:8px;justify-content:center;flex-wrap:wrap"><input class="inp" id="load-addr" style="max-width:320px;min-width:0;flex:1;margin:0;font-size:16px" placeholder="0x... or name.eth / name.(g)wei" aria-label="Vault address or name" aria-describedby="load-status" oninput="updateLoadStatus(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();loadVaultByAddress()}"><button class="btn btn-outline btn-sm" onclick="loadVaultByAddress()">LOAD</button></div><div id="load-status" role="status" style="font-size:9px;letter-spacing:1px;text-align:center;min-height:12px;margin-top:6px"></div><div style="margin-top:24px"><button class="btn btn-outline" style="font-size:9px;border-color:var(--ln);color:var(--d)" onclick="S.demoMode=true;S.vaults=seed();S.sel=0;flash('DEMO LOADED');render()">LOAD DEMO</button></div></div>`:""}</div>`;
+  if(!v)return`<div class="empty"><div class="empty-title">NO VAULTS</div><div class="empty-sub">${S.demoMode?"":"DEPLOY YOUR FIRST MULTISIG"}</div><button class="btn btn-outline" style="padding:0 32px;height:48px" onclick="S.view='CREATE';render()">CREATE VAULT</button>${!S.demoMode?`<div style="max-width:400px;margin:44px auto 0;padding-top:32px;border-top:1px solid var(--ln)"><div style="font-size:10px;font-weight:600;letter-spacing:2px;color:var(--m)">LOAD EXISTING VAULT</div><div style="margin-top:12px;display:flex;align-items:center;gap:8px;justify-content:center;flex-wrap:wrap"><input class="inp" id="load-addr" style="max-width:320px;min-width:0;flex:1;margin:0;font-size:16px" placeholder="0x... or a name" aria-label="Vault address or name" aria-describedby="load-status" oninput="updateLoadStatus(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();loadVaultByAddress()}"><button class="btn btn-outline btn-sm" onclick="loadVaultByAddress()">LOAD</button></div><div id="load-status" role="status" style="font-size:9px;letter-spacing:1px;text-align:center;min-height:12px;margin-top:6px"></div><div style="margin-top:24px"><button class="btn btn-outline" style="font-size:9px;border-color:var(--ln);color:var(--d)" onclick="S.demoMode=true;S.vaults=seed();S.sel=0;flash('DEMO LOADED');render()">LOAD DEMO</button></div></div>`:""}</div>`;
   const you = getYou();
   const h0=v.holdings[0];
 
@@ -4935,7 +5205,7 @@ function txReviewBody(v){
   const rate = tokRate(hold);
   const slowOn = slowAvailable() && S.txSlow;
   const isAddr = ethers.isAddress(to);
-  const isName = NAME_RE.test(to);
+  const isNamed = NAME_RE.test(to);
   const availNum = hold ? Number(hold.raw != null ? ethers.formatUnits(hold.raw, hold.decimals || ct.decimals) : stripCommas(hold.balance)) : 0;
 
   const amtHtml = amtNum > 0
@@ -4946,10 +5216,10 @@ function txReviewBody(v){
     : `<div class="review-amt ph">${tokIcon(S.txToken)}<span>0.0</span><span style="font-size:13px">${esc(S.txToken)}</span></div>`;
   // A name shows the address it resolves to, right here, because that address
   // is what the proposal will carry and what every co-signer will vote on.
-  const pv = isName ? previewName(to, S.chainId, () => { if(S.showTx) updateTxReview(); }) : null;
+  const pv = isNamed ? previewName(to, S.chainId, () => { if(S.showTx) updateTxReview(); }) : null;
   const toHtml = isAddr
     ? `<div class="review-to">${esc(shortAddr(to))}</div>`
-    : isName
+    : isNamed
       ? `<div class="review-to">${esc(to)}</div>` + (
           !pv ? ''
           : pv.state === 'resolving' ? `<div class="review-to-sub">RESOLVING&hellip;</div>`
@@ -5046,7 +5316,14 @@ function updateTxReview(){
   const usd = document.getElementById('tx-amount-usd');
   if(usd){ const r = Number(usd.dataset.rate) || 0; usd.textContent = (r > 0 && n > 0) ? fmtUsd(n * r) : ''; }
   const st = document.getElementById('tx-to-status');
-  if(st){ const s = _addrState(S.txTo); st.textContent = s.txt; st.style.color = s.color || ''; }
+  // Through _nameHint first, exactly as updateTxToStatus does. Both write this
+  // node and onTxRecipient calls them back to back, so writing the static
+  // description here overwrote the resolved address the hint had just painted —
+  // in the same synchronous handler, before it was ever on screen. The address a
+  // send will actually carry is the one thing this field exists to show.
+  if(st && !_nameHint(st, S.txTo, updateTxToStatus)){
+    const s = _addrState(S.txTo); st.textContent = s.txt; st.style.color = s.color || '';
+  }
 
   _paintTxReady();
 }
@@ -5055,10 +5332,19 @@ function _addrState(t){
   t = (t || '').trim();
   if(!t) return { txt:'', color:'' };
   if(ethers.isAddress(t)) return { txt:'VALID ADDRESS', color:'var(--g)' };
-  // Every namespace is rooted on mainnet, so this holds whichever chain the app
-  // is pointed at. Timing is deliberately not promised here: the send flow now
+  // Which network answers, not which chain the app is on: every namespace here
+  // is honoured from every chain, and they resolve in different places with
+  // different failure modes — .eth/.wei/.gwei are mainnet contracts, .mega is
+  // MegaETH's own resolver. Naming the right one is what makes an outage
+  // message mean something. Timing is deliberately not promised: the send flow
   // resolves in the review, before anything is signed.
+  if(isMegaName(t)) return { txt:'NAME · RESOLVED ON MEGAETH', color:'var(--a)' };
+  if(isBaseName(t)) return { txt:'NAME · RESOLVED ON BASE', color:'var(--a)' };
   if(NAME_RE.test(t)) return { txt:'NAME · RESOLVED ON MAINNET', color:'var(--a)' };
+  // Written with textContent by every caller, so the em dash goes in literally
+  // and nothing here needs escaping.
+  const near = nameNearMiss(t);
+  if(near) return { txt: near, color:'var(--y)' };
   // Right shape, wrong case: a mistyped or truncated paste, not a bad format.
   // Naming it precisely is the difference between a 2-second fix and a re-copy.
   if(/^0x[0-9a-fA-F]{40}$/.test(t)) return { txt:'BAD CHECKSUM — RE-COPY THE ADDRESS', color:'var(--r)' };
@@ -5398,7 +5684,7 @@ function renderTxBuilder(v,mob){
 
         <div class="fset">
           <div class="fhead"><label class="lbl" for="tx-to">RECIPIENT</label><span class="fhint" id="tx-to-status" role="status"></span></div>
-          <input class="inp" id="tx-to" style="margin-bottom:0" placeholder="0x... or name.eth / name.(g)wei" aria-describedby="tx-to-status" value="${esc(S.txTo)}" oninput="onTxRecipient(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();submitTransfer()}">
+          <input class="inp" id="tx-to" style="margin-bottom:0" placeholder="0x... or a name" aria-describedby="tx-to-status" value="${esc(S.txTo)}" oninput="onTxRecipient(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();submitTransfer()}">
         </div>
 
         ${slowUi}
@@ -5511,7 +5797,7 @@ function renderTxBuilder(v,mob){
             <button class="btn ${S.wnsPrimary?'btn-fill':'btn-outline'}" aria-pressed="${!!S.wnsPrimary}" style="padding:0 16px;font-size:10px" onclick="S.wnsPrimary=!S.wnsPrimary;_builderSim=null;render()">${S.wnsPrimary?'INCLUDED':'EXCLUDED'}</button>
             <span style="font-size:10px;color:var(--d);line-height:1.5;flex:1;min-width:180px">${S.wnsPrimary?'The vault will answer with this name wherever its address appears':'The name will resolve to the vault, but the vault will keep showing as an address'}</span>
           </div>
-          ${v.wnsName && !held ? `<div style="margin-top:10px;font-size:9px;letter-spacing:1.5px;color:var(--y);line-height:1.6">THIS VAULT ALREADY ANSWERS WITH <b>${esc(v.wnsName)}</b>. EXECUTING THIS REPLACES THAT RECORD &mdash; THE OLD NAME KEEPS RESOLVING TO THE VAULT, IT JUST STOPS BEING THE ONE SHOWN.</div>` : ''}
+          ${v.revName && !held ? `<div style="margin-top:10px;font-size:9px;letter-spacing:1.5px;color:var(--y);line-height:1.6">THIS VAULT ALREADY ANSWERS WITH <b>${esc(v.revName)}</b>. EXECUTING THIS REPLACES THAT RECORD &mdash; THE OLD NAME KEEPS RESOLVING TO THE VAULT, IT JUST STOPS BEING THE ONE SHOWN.</div>` : ''}
         </div>
 
         <div class="fset">
@@ -5565,7 +5851,7 @@ function renderTxBuilder(v,mob){
     }
     body=`<div class="grid2">
       <div>
-        <label class="lbl" for="cx-target">TARGET</label><input class="inp" id="cx-target" aria-describedby="cx-target-status" placeholder="0x... or name.eth / name.(g)wei" value="${esc(shortAddr(S.cxTarget))}" onfocus="this.value=S.cxTarget" onblur="this.value=shortAddr(S.cxTarget)" oninput="onCxTargetChange(this.value)">
+        <label class="lbl" for="cx-target">TARGET</label><input class="inp" id="cx-target" aria-describedby="cx-target-status" placeholder="0x... or a name" value="${esc(shortAddr(S.cxTarget))}" onfocus="this.value=S.cxTarget" onblur="this.value=shortAddr(S.cxTarget)" oninput="onCxTargetChange(this.value)">
         <div id="cx-target-status" role="status" style="font-size:9px;letter-spacing:1px;margin-top:-8px;margin-bottom:8px;min-height:11px"></div>
         ${abiStatus}${fnPills}
         <label class="lbl" for="cx-value">VALUE (ETH)</label><input class="inp" id="cx-value" aria-describedby="cx-wei" placeholder="0" value="${esc(S.cxValue)}" oninput="S.cxValue=this.value;document.getElementById('cx-wei').textContent=this.value?toUnits(this.value,18)+' WEI':''">
@@ -5577,7 +5863,7 @@ function renderTxBuilder(v,mob){
     body=S.batch.map((c,i)=>`<div class="batch-call">
       <div class="call-hdr"><span>CALL ${String(i+1).padStart(2,"0")}</span>${S.batch.length>1?`<button class="x-btn" onclick="S.batch.splice(${i},1);render()" aria-label="Remove call ${i+1}" title="Remove this call">&#10005;</button>`:""}</div>
       <div class="grid3">
-        <div><label class="lbl" for="batch-t-in-${i}">TARGET</label><input class="inp" id="batch-t-in-${i}" aria-describedby="batch-t-${i}" data-bi="${i}" data-bf="t" placeholder="0x... or .eth/.(g)wei" value="${esc(shortAddr(c.t))}" onfocus="this.value=S.batch[${i}].t" onblur="this.value=shortAddr(S.batch[${i}].t)" oninput="onBatchTarget(${i},this.value)"><div id="batch-t-${i}" style="font-size:9px;letter-spacing:1px;margin-top:-12px;margin-bottom:8px;min-height:11px">${(()=>{const s=_addrState(c.t);return s.txt?`<span style="color:${s.color}">${ethers.isAddress((c.t||'').trim())?'✓':s.txt}</span>`:''})()}</div></div>
+        <div><label class="lbl" for="batch-t-in-${i}">TARGET</label><input class="inp" id="batch-t-in-${i}" aria-describedby="batch-t-${i}" data-bi="${i}" data-bf="t" placeholder="0x... or a name" value="${esc(shortAddr(c.t))}" onfocus="this.value=S.batch[${i}].t" onblur="this.value=shortAddr(S.batch[${i}].t)" oninput="onBatchTarget(${i},this.value)"><div id="batch-t-${i}" style="font-size:9px;letter-spacing:1px;margin-top:-12px;margin-bottom:8px;min-height:11px">${(()=>{const s=_addrState(c.t);return s.txt?`<span style="color:${s.color}">${ethers.isAddress((c.t||'').trim())?'✓':s.txt}</span>`:''})()}</div></div>
         <div><label class="lbl" for="batch-v-in-${i}">VALUE (ETH)</label><input class="inp" id="batch-v-in-${i}" data-bi="${i}" data-bf="v" placeholder="0" value="${esc(c.v)}" oninput="S.batch[${i}].v=this.value;this.nextElementSibling.textContent=this.value?toUnits(this.value,18)+' WEI':''"><div style="font-size:10px;color:var(--d);margin-top:-12px;margin-bottom:8px;word-break:break-all">${c.v?toUnits(c.v,18)+' WEI':''}</div></div>
         <div><label class="lbl" for="batch-d-in-${i}">CALLDATA</label><input class="inp" id="batch-d-in-${i}" aria-describedby="batch-d-${i}" data-bi="${i}" data-bf="d" placeholder="0x..." value="${esc(c.d)}" oninput="onBatchData(${i},this.value)"><div id="batch-d-${i}" style="font-size:9px;letter-spacing:1px;margin-top:-12px;margin-bottom:8px;min-height:11px">${(()=>{const s=_hexState(c.d);return s.txt?`<span style="color:${s.color}">${s.txt}</span>`:''})()}</div></div>
       </div></div>`).join("")+
@@ -5604,6 +5890,11 @@ function getProdTokenSymbols(){
 // ENSIP-11's per-chain address records do not apply to it. Pinning the preview
 // key to 1 also means the resolution survives flipping the form between chains
 // instead of being re-fetched, and re-shown as RESOLVING…, on every click.
+// A .mega owner name is previewed under the same pinned key even though its
+// namespace is not on chain 1: the number is a cache key here, not a resolution
+// input — resolveName() picks the resolver off the suffix — and pinning it is
+// what keeps a .mega name from being re-fetched on every network-panel click
+// just like the other three.
 const OWNER_NS_CHAIN = 1;
 
 // Synchronous create-form validation. Classifies each owner (address / name /
@@ -5676,6 +5967,10 @@ const _OWNER_STATE_COLOR = { address:'var(--g)', name:'var(--a)', invalid:'var(-
 function retryOwnerName(i){
   const raw = ((S.cf.owners[i] || {}).addr || '').trim();
   if(raw) delete _namePreview[_pvKey(raw, OWNER_NS_CHAIN)];
+  // The mainnet path keeps no answer of its own, so clearing the preview is
+  // enough for it. The .mega resolver does, and a retry that reads its own
+  // cache is not a retry.
+  forgetMegaForward(raw);
   render();
 }
 
@@ -5685,7 +5980,13 @@ function retryOwnerName(i){
 // against whatever the operator is holding it up against.
 function ownerRowNote(ow, i, explorerBase){
   const pv = ow.pv;
-  if(ow.state === 'invalid') return { html:'NOT A VALID ADDRESS OR .eth / .wei / .gwei NAME', color:'var(--r)', num:'var(--r)' };
+  if(ow.state === 'invalid') {
+    // esc(), unlike the two status-node callers: this one is written as HTML
+    // and the string carries back what the operator typed.
+    const near = nameNearMiss(ow.raw);
+    if(near) return { html: esc(near), color:'var(--y)', num:'var(--y)' };
+    return { html:`NOT A VALID ADDRESS OR ${esc(NAME_KINDS)} NAME`, color:'var(--r)', num:'var(--r)' };
+  }
   if(ow.state === 'dup') return {
     html: pv && pv.state === 'ok' ? `DUPLICATE &mdash; ${esc(shortAddr(pv.addr))} IS ALREADY LISTED ABOVE` : 'DUPLICATE &mdash; ALREADY LISTED ABOVE',
     color:'var(--r)', num:'var(--r)' };
@@ -5823,7 +6124,7 @@ function renderCreate(mob){
         // operator is typing an address drops them out of the field mid-paste.
         return`<div class="owner-row">
         <span class="o-num" style="color:${note.num}">${String(i+1).padStart(2,"0")}</span>
-        <input class="inp o-addr" id="cf-own-${i}" aria-label="Owner ${i+1} address or name" aria-invalid="${bad}"${note.html?` aria-describedby="cf-own-note-${i}"`:''} style="${bad?'border-bottom-color:var(--r)':''}" placeholder="0x... or .eth/.(g)wei" value="${esc(shortAddr(o.addr))}" onfocus="this.value=S.cf.owners[${i}].addr" onblur="this.value=shortAddr(S.cf.owners[${i}].addr)" oninput="S.cf.owners[${i}].addr=this.value;const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;if(+S.cf.threshold>fc){S.cf.threshold=String(fc)}" onchange="S.cf.owners[${i}].addr=this.value;render()">
+        <input class="inp o-addr" id="cf-own-${i}" aria-label="Owner ${i+1} address or name" aria-invalid="${bad}"${note.html?` aria-describedby="cf-own-note-${i}"`:''} style="${bad?'border-bottom-color:var(--r)':''}" placeholder="0x... or a name" value="${esc(shortAddr(o.addr))}" onfocus="this.value=S.cf.owners[${i}].addr" onblur="this.value=shortAddr(S.cf.owners[${i}].addr)" oninput="S.cf.owners[${i}].addr=this.value;const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;if(+S.cf.threshold>fc){S.cf.threshold=String(fc)}" onchange="S.cf.owners[${i}].addr=this.value;render()">
         <input class="inp o-label" id="cf-own-lbl-${i}" maxlength="64" aria-label="Owner ${i+1} label" placeholder="LABEL" value="${esc(o.label)}" oninput="S.cf.owners[${i}].label=this.value" onchange="render()">
         ${c.owners.length>1?`<button class="x-btn red o-del" aria-label="Remove owner ${i+1}" title="Remove this owner" onclick="S.cf.owners.splice(${i},1);const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;S.cf.threshold=String(Math.min(+S.cf.threshold||1,fc));render()">&#10005;</button>`:""}
       </div>${note.html?`<div class="owner-note" id="cf-own-note-${i}" style="color:${note.color}">${note.html}</div>`:''}`}).join("")}
@@ -5932,7 +6233,7 @@ ${/* The same dot the dashboard strip carries. Admin was the one place in the ap
       <button class="btn btn-outline btn-sm" style="flex-shrink:0" onclick="renameVault()">SAVE</button>
     </div>
     <div style="font-size:9px;letter-spacing:1.5px;color:var(--d);line-height:1.7;margin-top:8px;max-width:520px">A LABEL THIS INTERFACE STORES &mdash; NOTHING ON CHAIN READS IT.${
-      v.wnsName ? ` ON CHAIN THIS VAULT ANSWERS TO <b style="color:var(--a)">${esc(v.wnsName)}</b>.`
+      v.revName ? ` ON CHAIN THIS VAULT ANSWERS TO <b style="color:var(--a)">${esc(v.revName)}</b>.`
       : wnsAvailableChain() ? ` FOR A NAME EVERY WALLET AND EXPLORER CAN READ, CLAIM A FREE <b style="color:var(--m)">${WNS_ID_SUFFIX.slice(1)}</b> SUBDOMAIN FROM THE <b style="color:var(--m)">NAME</b> TAB OF A NEW PROPOSAL.`
       : ` A FREE <b style="color:var(--m)">${WNS_ID_SUFFIX.slice(1)}</b> ON-CHAIN NAME CAN BE CLAIMED FOR THIS VAULT FROM ETHEREUM MAINNET.`}</div>
     <div class="sep"></div>
@@ -6024,7 +6325,7 @@ ${/* You cannot propose removing yourself from here, and the row still has to
     </div>`}).join("")}
     <div class="sep"></div>
     <label class="lbl" for="admin-add-owner"><span class="dim">ADD &middot;</span> OWNER</label>
-    <input class="inp" id="admin-add-owner" style="margin-top:8px" placeholder="0x... or name.eth / name.(g)wei" onkeydown="if(event.key==='Enter'){event.preventDefault();doAdminPropose('addOwner')}">
+    <input class="inp" id="admin-add-owner" style="margin-top:8px" placeholder="0x... or a name" onkeydown="if(event.key==='Enter'){event.preventDefault();doAdminPropose('addOwner')}">
     <input class="inp" id="admin-add-label" maxlength="64" style="font-size:11px;letter-spacing:1px" placeholder="LABEL (OPTIONAL)" aria-label="Label for the new owner (optional)" onkeydown="if(event.key==='Enter'){event.preventDefault();doAdminPropose('addOwner')}">
     <button class="btn btn-outline btn-w" onclick="doAdminPropose('addOwner')">PROPOSE OWNER</button>
   </div>`:`<div>
@@ -6507,6 +6808,8 @@ function safeCloneInput(val){
   if(S.safeClone){ S.safeClone.input = val; S.safeClone.err = ''; }
   const el = document.getElementById('safe-status');
   if(!el) return;
+  // The clone box resolves against the chain the form deploys to, not the one
+  // the app is currently reading — that is the chain its answer will be used on.
   const s = _addrState(val);
   el.textContent = s.txt;
   el.style.color = s.color || '';
@@ -6664,7 +6967,7 @@ function renderSafeCloneModal(){
       </div>
       <div style="font-size:10px;line-height:1.7;color:var(--d);margin-bottom:16px">Copies the owners and threshold of a Gnosis Safe on <b style="color:var(--m)">${esc(net.name)}</b> into this form. Your timelock, instant execution and chain picks stay as you set them. Nothing leaves the Safe &mdash; this deploys a new vault, so move funds once it is live.</div>
       <label class="lbl" for="safe-input">SAFE ADDRESS OR NAME</label>
-      <input class="inp" id="safe-input" style="margin-bottom:4px" placeholder="0x... or name.eth / name.(g)wei" value="${esc(sc.input||'')}" aria-describedby="safe-status" oninput="safeCloneInput(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();safeCloneSearch()}">
+      <input class="inp" id="safe-input" style="margin-bottom:4px" placeholder="0x... or a name" value="${esc(sc.input||'')}" aria-describedby="safe-status" oninput="safeCloneInput(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();safeCloneSearch()}">
       <div id="safe-status" role="status" style="font-size:9px;letter-spacing:1px;min-height:12px;margin-bottom:12px;color:${st.color||''}">${esc(st.txt)}</div>
       ${sc.err?`<div style="font-size:9px;letter-spacing:1px;color:var(--r);line-height:1.6;margin-bottom:12px">${esc(sc.err)}</div>`:''}
       ${rows?`<div style="font-size:9px;letter-spacing:1px;color:var(--y);line-height:1.6">NOT ON ${esc(net.name.toUpperCase())} &mdash; FOUND ELSEWHERE. LOADING ONE SWITCHES THIS DEPLOY TO THAT CHAIN.</div>${rows}<div style="height:14px"></div>`:''}
@@ -6853,9 +7156,17 @@ function _nameRace(p){
 // happened is that mainnet timed out, is the failure this exists to prevent.
 function nameErrText(raw, e){
   const r = String(raw || '').toUpperCase();
+  // Which network failed depends on which namespace was asked. Telling a
+  // MegaETH user that mainnet is down, when what happened is that the .mega
+  // resolver rate-limited them, is the same mistake in a different direction —
+  // and a basename is read off Base, which is a third network again.
+  const mega = isMegaName(raw);
   switch(_nameKind(e)){
     case 'offchain':    return `${r} RESOLVES OFFCHAIN — ITS GATEWAY IS BLOCKED OR DOWN`;
-    case 'unreachable': return 'CANNOT REACH ETHEREUM MAINNET TO RESOLVE NAMES';
+    case 'unreachable': return mega
+      ? ((e && e.shortMessage) || 'CANNOT REACH THE .MEGA RESOLVER')
+      : isBaseName(raw) ? 'CANNOT REACH BASE TO RESOLVE BASENAMES'
+      : 'CANNOT REACH ETHEREUM MAINNET TO RESOLVE NAMES';
     case 'invalid':     return 'ENTER A VALID ADDRESS OR NAME';
     default:            return `${r} DOES NOT RESOLVE`;
   }
@@ -6881,10 +7192,216 @@ async function _nameFailure(v, e){
   return new NameError(kind, nameErrText(v, { nameKind: kind }));
 }
 
+// ── MEGA NAMES · THE RESOLVER CLIENT ──────────────────────────────
+// One client for every .mega lookup the page makes, in either direction, so
+// there is a single cache and a single rate budget to reason about.
+//
+// The resolver publishes a 60-requests-per-minute ceiling and reports what is
+// left of it in every response, so the budget is *read* rather than guessed.
+// That matters because the two places this is called from are the worst shapes
+// for a naive client: a create form that re-validates on every keystroke, and
+// an owner list that can arrive with a hundred addresses in it at once. Three
+// things keep those inside the ceiling — an answer cache that remembers misses
+// as well as hits, an in-flight map so N callers asking for the same name make
+// one request, and a small concurrency gate.
+const MEGA_MAX_INFLIGHT = 4;
+// Never spend the last of the window. A burst that empties it entirely would
+// take the next single lookup — the one an operator is actually watching — into
+// a 429 instead of an answer.
+const MEGA_BUDGET_RESERVE = 2;
+// Not every lookup is worth the same. A name typed into a recipient field is
+// what an operator is waiting on; the names beside a signer list are decoration
+// over addresses that are already correct and already on screen. So bulk work
+// stops well short of the ceiling and never waits for a window to roll over,
+// which is what keeps a hundred-owner vault from spending three minutes of
+// budget and leaving nothing for the field being typed into meanwhile. What
+// bulk gives up is coverage on one pass — uncached and unpunished, so the next
+// load picks up where it left off.
+const MEGA_BULK_FLOOR = 15;
+// How long a lookup will sit out an exhausted window before giving up. Long
+// enough to ride out a burst; short enough that a wedged budget surfaces as a
+// retryable error rather than a form that hangs on RESOLVING… for a minute.
+const MEGA_MAX_WAIT_MS = 8000;
+
+let _megaBudgetLeft = Infinity;   // requests left in the current window
+let _megaBudgetResetAt = 0;       // unix seconds the window rolls over
+let _megaBusy = 0;
+const _megaWaiters = [];
+function _megaSlot(){
+  if(_megaBusy < MEGA_MAX_INFLIGHT){ _megaBusy++; return Promise.resolve(); }
+  return new Promise(res => _megaWaiters.push(res));
+}
+function _megaFree(){
+  const next = _megaWaiters.shift();
+  if(next) next();                // hand the slot straight over; count unchanged
+  else _megaBusy--;
+}
+function _megaNoteBudget(res){
+  const left = parseInt(res.headers.get('x-ratelimit-remaining'), 10);
+  const reset = parseInt(res.headers.get('x-ratelimit-reset'), 10);
+  if(Number.isFinite(left)) _megaBudgetLeft = left;
+  if(Number.isFinite(reset)) _megaBudgetResetAt = reset;
+}
+// Claim one request against the window, waiting for it to roll over if the
+// budget is spent. Throws rather than waiting forever.
+async function _megaClaimBudget(bulk){
+  if(_megaBudgetLeft > (bulk ? MEGA_BULK_FLOOR : MEGA_BUDGET_RESERVE)){ _megaBudgetLeft--; return; }
+  const waitMs = _megaBudgetResetAt * 1000 - Date.now();
+  if(waitMs <= 0){ _megaBudgetLeft = Infinity; return; }   // window rolled over
+  // Decorative work yields instead of queueing. Waiting here would hold a
+  // concurrency slot the interactive path needs, to put a name on an address
+  // that is already legible.
+  if(bulk) throw new NameError('unreachable', 'THE .MEGA RESOLVER IS BUSY');
+  if(waitMs > MEGA_MAX_WAIT_MS) throw new NameError('unreachable', 'TOO MANY .MEGA LOOKUPS AT ONCE — TRY AGAIN IN A MOMENT');
+  await new Promise(r => setTimeout(r, waitMs + 50));
+  _megaBudgetLeft = Infinity;
+}
+// A GET against the resolver. Returns the parsed body, or null for a 404 — the
+// one answer that is *information*: the resolver was reached and there is no
+// such record. Everything else throws, because a lookup that never completed
+// must never be remembered as "no such name".
+async function _megaGet(path, bulk){
+  await _megaSlot();
+  // The deadline covers the body as well as the headers, and the abort signal is
+  // what makes that true — a response that arrives and then stops streaming
+  // would otherwise sit in res.json() forever, with nothing to interrupt it.
+  // That is not a theoretical shape: this call holds the DEPLOY button behind
+  // RESOLVING… while it runs, so an unbounded read is a wedged form.
+  const ctl = new AbortController();
+  let timer = null;
+  try {
+    await _megaClaimBudget(bulk);
+    timer = setTimeout(() => ctl.abort(), NAME_TIMEOUT_MS);
+    let res;
+    try { res = await fetch(MEGA_API + path, { signal: ctl.signal, headers: { accept: 'application/json' } }); }
+    catch(_) { throw new NameError('unreachable', 'CANNOT REACH THE .MEGA RESOLVER'); }
+    _megaNoteBudget(res);
+    if(res.status === 404) return null;
+    if(res.status === 429) throw new NameError('unreachable', 'THE .MEGA RESOLVER IS RATE-LIMITING THIS BROWSER');
+    if(!res.ok) throw new NameError('unreachable', 'THE .MEGA RESOLVER DID NOT ANSWER');
+    try { return await res.json(); }
+    catch(_) { throw new NameError('unreachable', 'THE .MEGA RESOLVER SENT SOMETHING UNREADABLE'); }
+  } finally { clearTimeout(timer); _megaFree(); }
+}
+
+// name -> checksummed address, or null for a name the resolver says is not
+// registered. addr -> name, or null for an address with no primary name. Both
+// remember misses, so a form re-validating on every keystroke costs one request
+// per distinct string and not one per character.
+const _megaFwd = new Map();
+const _megaRev = new Map();
+const _megaFwdPending = new Map();
+const _megaRevPending = new Map();
+function forgetMegaName(addr){
+  if(!addr) return;
+  _megaRev.delete(String(addr).toLowerCase());
+}
+// Drop a remembered forward answer so the next ask really is a new request.
+// The RETRY beside an owner row clears the preview entry, but a .mega miss is
+// remembered a layer below that — without this, RETRY on a .mega name would
+// re-read the same cached "does not resolve" and look broken.
+function forgetMegaForward(name){
+  if(name) _megaFwd.delete(String(name).trim().toLowerCase());
+}
+// Every answer carries the chain it was minted on. A record for anything but
+// MegaETH is not a .mega name this app will act on, however the resolver came
+// to be serving it.
+function _megaOnOurChain(j){ return !j.chain || String(j.chain) === 'megaeth:' + MEGA_CHAIN_ID; }
+
+// Forward: `<label>.mega` -> address. Throws a NameError that already
+// distinguishes "no such name" from "the resolver did not answer", so the
+// callers share one vocabulary with the mainnet path.
+function megaResolveName(name, bulk){
+  const key = String(name || '').trim().toLowerCase();
+  if(_megaFwd.has(key)){
+    const hit = _megaFwd.get(key);
+    return hit ? Promise.resolve(hit) : Promise.reject(new NameError('notfound', nameErrText(key, { nameKind:'notfound' })));
+  }
+  if(_megaFwdPending.has(key)) return _megaFwdPending.get(key);
+  const p = (async () => {
+    const j = await _megaGet('/resolve?name=' + encodeURIComponent(key), bulk);
+    if(!j || !j.address || !ethers.isAddress(j.address) || !_megaOnOurChain(j)){
+      _megaFwd.set(key, null);
+      throw new NameError('notfound', nameErrText(key, { nameKind:'notfound' }));
+    }
+    const addr = ethers.getAddress(j.address);
+    _megaFwd.set(key, addr);
+    return addr;
+  })();
+  _megaFwdPending.set(key, p);
+  // Swallow nothing — the caller still sees the rejection — but do not leave an
+  // unhandled rejection behind on the map entry nobody awaited.
+  p.catch(() => {}).finally(() => _megaFwdPending.delete(key));
+  return p;
+}
+
+// Reverse: address -> the .mega name it answers with, forward-verified.
+//
+// The verification is not ceremony. A primary name is a record its holder set,
+// and the name can be repointed at someone else, or sold on, without that
+// record changing — so the resolver will happily keep answering `alice.mega`
+// for an address `alice.mega` no longer resolves to. Every other reverse lookup
+// in this app is forward-checked before it is shown (ENS by ethers, WNS/GNS by
+// hand below); this is the same check, and it costs one request that lands in
+// the forward cache the create form reads anyway.
+//
+// Returns the name, or null when the resolver answered and there is none to
+// show. Throws only when it could not be reached.
+function megaReverseName(addr, bulk){
+  const key = String(addr || '').toLowerCase();
+  if(!ethers.isAddress(key)) return Promise.resolve(null);
+  if(_megaRev.has(key)) return Promise.resolve(_megaRev.get(key));
+  if(_megaRevPending.has(key)) return _megaRevPending.get(key);
+  const p = (async () => {
+    const j = await _megaGet('/resolve?address=' + encodeURIComponent(ethers.getAddress(key)), bulk);
+    const claimed = j && j.name && _megaOnOurChain(j) ? String(j.name).toLowerCase() : null;
+    if(!claimed || !MEGA_NAME_RE.test(claimed)){ _megaRev.set(key, null); return null; }
+    // Forward-verify. A name that does not come back to the address claiming it
+    // is shown as nothing at all, and that verdict is cached: the resolver
+    // answered both times, so this is a fact about the records, not a failure.
+    let back = null;
+    try { back = await megaResolveName(claimed, bulk); }
+    catch(e) {
+      if(_nameKind(e) !== 'notfound') throw e;     // could not verify — do not remember
+    }
+    const ok = back && back.toLowerCase() === key;
+    _megaRev.set(key, ok ? claimed : null);
+    return ok ? claimed : null;
+  })();
+  _megaRevPending.set(key, p);
+  p.catch(() => {}).finally(() => _megaRevPending.delete(key));
+  return p;
+}
+
+// Reverse-resolve a list. Returns the names it could prove and the set of
+// addresses the resolver actually answered for — the caller needs the second to
+// know which blanks are "no name" and which are "ask again later". Never throws.
+async function megaReverseNames(addrs){
+  const names = {}, answered = new Set();
+  await Promise.all((addrs || []).map(async a => {
+    if(!ethers.isAddress(a)) return;   // never claim the resolver answered for a non-address
+    const k = String(a).toLowerCase();
+    try {
+      const nm = await megaReverseName(a, true);
+      answered.add(k);
+      if(nm) names[k] = nm;
+    } catch(_) {}     // unreachable: leave it unanswered so a later call retries
+  }));
+  return { names, answered };
+}
+
+// Nothing exports megaResolveName/megaReverseName on their own: the connected
+// wallet reaches every chain-local namespace through window.localNames, beside
+// LOCAL_NS, so there is one bridge to keep in step rather than one per
+// namespace. Both are used from resolveName() and the reverse pipeline below.
+
 async function resolveName(input) {
   const v = input.trim();
   if(!v) throw new NameError('invalid', 'ENTER AN ADDRESS OR NAME');
   if(ethers.isAddress(v)) return ethers.getAddress(v);
+  // .mega goes to MegaETH's own resolver. Reached by suffix like the others, so
+  // nothing is ever handed to a service that would hash it into an unrelated id.
+  if(MEGA_SUFFIX_RE.test(v)) return megaResolveName(v);
   // .wei / .gwei — same contract shape, picked by suffix. Each hashes its own
   // suffix away and ignores case, but neither knows the other's: handing a
   // .gwei name to WNS hashes to an unrelated id that may well be registered.
@@ -6903,6 +7420,10 @@ async function resolveName(input) {
     if(!addr || addr === ethers.ZeroAddress) throw new NameError('notfound', nameErrText(v, { nameKind:'notfound' }));
     return ethers.getAddress(addr);
   }
+  // Before the generic .eth path, because a basename IS a .eth name and mainnet
+  // would answer for it through a CCIP gateway. Base holds the records; read
+  // them there.
+  if(BASE_NAME_RE.test(v)) return baseResolveName(v);
   // Case-insensitive to match the field hints: ENS normalizes the name itself,
   // and both name contracts hash case-insensitively, so TYPED.ETH resolves.
   if(/\.eth$/i.test(v)) {
@@ -6912,7 +7433,7 @@ async function resolveName(input) {
     if(!addr) throw await _nameFailure(v, null);
     return ethers.getAddress(addr);
   }
-  throw new NameError('invalid', 'ENTER AN ADDRESS, .eth, .wei OR .gwei NAME');
+  throw new NameError('invalid', 'ENTER AN ADDRESS OR ' + NAME_KINDS.toUpperCase() + ' NAME');
 }
 
 // ── NAME PREVIEW (what you review is what you sign) ───────────────
@@ -6934,7 +7455,11 @@ function _pvKey(raw, chainId){ return String(raw || '').trim().toLowerCase() + '
 // publish one), and quietly disagreeing with every other tool about where funds
 // go is its own hazard. So it warns; it never redirects. Never throws.
 async function altChainAddress(name, chainId, mainAddr){
-  if(!chainId || chainId === 1 || !/\.eth$/i.test(name)) return null;
+  // Basenames are excluded even though they end in .eth: they were resolved off
+  // Base, not off a mainnet resolver, so asking mainnet for a per-chain record
+  // is two calls to a CCIP gateway to compare against an address that did not
+  // come from there.
+  if(!chainId || chainId === 1 || !/\.eth$/i.test(name) || BASE_NAME_RE.test(name)) return null;
   try {
     const r = await _nameRace(mainnetRpc().getResolver(name));
     if(!r) return null;
@@ -6947,12 +7472,25 @@ async function altChainAddress(name, chainId, mainAddr){
 
 // Kick off (or reuse) resolution of `raw` for display. Returns the entry
 // synchronously so the renderer can show 'resolving' immediately.
+//
+// Every caller waiting on the same lookup is told when it lands, not just the
+// one that started it. The same name reaches this from more than one place —
+// the owner rows repaint through render(), the tx and batch fields through
+// their own status writers — and they share a cache entry whenever the keys
+// agree, which on mainnet they do. Keeping only the first callback left the
+// second field sitting at RESOLVING… until something unrelated repainted it,
+// and on the create form that is a disabled DEPLOY button with no way to know
+// it is waiting on nothing.
 function previewName(raw, chainId, onSettle){
   const key = String(raw || '').trim();
   if(!key || !NAME_RE.test(key)) return null;
   const ck = _pvKey(key, chainId);
-  if(_namePreview[ck]) return _namePreview[ck];
-  const entry = _namePreview[ck] = { state:'resolving', addr:null, alt:null, err:'' };
+  const hit = _namePreview[ck];
+  if(hit){
+    if(hit.state === 'resolving' && onSettle) hit.waiting.push(onSettle);
+    return hit;
+  }
+  const entry = _namePreview[ck] = { state:'resolving', addr:null, alt:null, err:'', waiting: onSettle ? [onSettle] : [] };
   (async () => {
     try {
       entry.addr = await resolveName(key);
@@ -6962,7 +7500,12 @@ function previewName(raw, chainId, onSettle){
       entry.state = 'err';
       entry.err = e.shortMessage || e.message || 'DOES NOT RESOLVE';
     }
-    try { onSettle && onSettle(entry); } catch(_) {}
+    // Taken and cleared before calling, so a callback that repaints — and in
+    // doing so asks for this name again — cannot append to the list being
+    // walked, and cannot be run twice.
+    const waiting = entry.waiting;
+    entry.waiting = [];
+    for(const fn of waiting){ try { fn(entry); } catch(_) {} }
   })();
   return entry;
 }
@@ -6976,40 +7519,189 @@ function assertPreviewed(raw, resolved, chainId){
   return resolved;
 }
 
-// Reverse-resolve owner addresses to human-readable names. Primary: WNS (.wei)
-// and GNS (.gwei) reverse resolution, both batched into ONE Multicall3 call on
-// mainnet, .wei preferred when an address holds a name in both.
-// Fallback: ENS reverse for any still-unnamed owners (best-effort, parallel).
+// Reverse-resolve owner addresses to human-readable names. Four namespaces,
+// tried in an order that depends on the chain being displayed:
+//   WNS (.wei) and GNS (.gwei), batched into ONE Multicall3 call on mainnet,
+//     .wei preferred when an address holds a name in both;
+//   then ENS, for any still-unnamed owners (best-effort, capped concurrency);
+//   and .mega through MegaNames' resolver, forward-verified — FIRST on MegaETH,
+//     where it wins outright, and LAST anywhere else, where it only answers for
+//     addresses nothing on mainnet could name.
 // Returns a lowercased-address → name map; never throws.
 const _ownerNameCache = {};
+// The namespaces that live on one chain rather than on mainnet. Each is read
+// from its own network, wins outright on the chain it belongs to, and is a
+// last-resort fallback everywhere else. Adding another is this list plus a
+// reverse function with the same shape: (addrs) -> { names, answered }, never
+// throwing, and marking answered only what its network actually answered for.
+const LOCAL_NS = [
+  { chainId: BASE_CHAIN_ID, scope: 'base', reverse: baseReverseNames },
+  { chainId: MEGA_CHAIN_ID, scope: 'mega', reverse: megaReverseNames },
+];
+// wallet.js names the connected account and loads before this script does, so
+// it reaches these through here rather than carrying its own copies of two
+// resolvers, their caches and their rate budget. Exported in LOCAL_NS order, so
+// the header and the signer row for the same person cannot disagree about what
+// to call them. Adding a namespace above reaches the wallet header with no
+// change to wallet.js at all.
+window.localNames = LOCAL_NS.map(ns => ({
+  chainId: ns.chainId,
+  // Rejects when the namespace could not be reached, rather than reporting the
+  // blank it returns. These functions never throw — they report failure by
+  // leaving an address out of `answered` — and the caller records one answer per
+  // namespace per account and never asks twice. Collapsing "did not answer" into
+  // "has no name" would mean a Base or resolver blip at the moment of connecting
+  // costs that account its name for the whole session, on every chain, with a
+  // reload the only way back.
+  reverse: addr => ns.reverse([addr]).then(r => {
+    const k = String(addr).toLowerCase();
+    if(!r.answered.has(k)) throw new Error('unanswered');
+    return r.names[k] || null;
+  }),
+}));
+// The answer depends on which chain the app is pointed at, because the order
+// the namespaces are tried in does — .mega wins on MegaETH and is the last
+// resort everywhere else — so the chain has to be part of the key. Two scopes
+// is all it takes: MegaETH, and everywhere else, which all share one order.
+// Without it, a signer read on MegaETH would keep their .mega name after a
+// switch to Base, where their mainnet name is what should be shown.
+function _onKey(addr, home){ return String(addr).toLowerCase() + '|' + (home ? home.scope : ''); }
 // Drop one address's cached answer. An owner's name is theirs and changes on
 // their schedule, but a vault's name changes on *this app's* — the NAME tab
 // claims one, and a confirmed "no name" cached before that claim would outlive
 // it for the rest of the session, leaving the vault showing as an address in
-// the one interface that just gave it a name.
-function forgetOwnerName(addr){ if(addr) delete _ownerNameCache[String(addr).toLowerCase()]; }
+// the one interface that just gave it a name. Both scopes go, along with the
+// resolver's own memory of the address: the point is to ask again.
+function forgetOwnerName(addr){
+  if(!addr) return;
+  // Every scope, not just the current one: which chain the operator happens to
+  // be looking at is not what makes the old answer wrong.
+  delete _ownerNameCache[_onKey(addr, null)];
+  for(const ns of LOCAL_NS) delete _ownerNameCache[_onKey(addr, ns)];
+  // The lookup in flight goes too, and for the same reason the cached answer
+  // does: it started before whatever made the old answer wrong — a name claimed
+  // through the NAME tab a moment ago — so joining it would hand back the very
+  // answer this call exists to discard. Revoking the claim stops later callers
+  // joining it, and tells the call that owns it, when it finishes, that its
+  // answer is no longer the current one (see resolveOwnerNames' release), so it
+  // withdraws rather than caches it. The next caller asks again.
+  delete _ownerNameInflight[_onKey(addr, null)];
+  for(const ns of LOCAL_NS) delete _ownerNameInflight[_onKey(addr, ns)];
+  forgetMegaName(addr);
+}
+// Lookups that are running right now, one entry per address being asked about,
+// resolving to the name that was found (or null). The cache above only helps a
+// caller that arrives after an answer has landed, and the callers here do not
+// arrive that way: loadAllVaults starts every vault at once and each one asks
+// about its own owners plus itself. Vaults share owners — that is what a shared
+// signing set IS — so five vaults with an overlapping roster sent five copies of
+// the same mainnet multicall, five copies of the forward-verification batch
+// behind it, and five ENS lookups per unnamed owner, all in the same tick,
+// against public RPC endpoints that rate-limit. Now the first caller to want an
+// address owns the lookup and the rest wait on it.
+const _ownerNameInflight = {};
 async function resolveOwnerNames(addrs) {
   const out = {};
   if(!addrs || !addrs.length) return out;
-  const need = [];
+  // Which chain-local namespace, if any, this chain is the home of. It decides
+  // both the order below and the cache scope, because they are the same fact.
+  const home = LOCAL_NS.find(ns => ns.chainId === S.chainId) || null;
+  const ck = a => _onKey(a, home);
+  // `asked` is everything this call is responsible for caching; `need` is what
+  // is still outstanding and shrinks as each namespace answers. `borrowed` is
+  // the addresses another call in flight is already responsible for.
+  const asked = [];
+  const borrowed = [];
+  // One entry per address, however many times it appears in the argument. A
+  // vault that is one of its own owners, or a caller that concatenates two
+  // rosters, would otherwise claim the same lookup twice and leave the first
+  // claim unsettled forever.
+  const claimedHere = new Set();
+  // Claimed synchronously, before the first await, so two calls in the same tick
+  // cannot both decide they own the same address. `own` is what was claimed, so
+  // the release below can tell "still ours" from "revoked and re-claimed".
+  const settle = {}, own = {};
   for(const a of addrs) {
     const k = String(a).toLowerCase();
-    if(_ownerNameCache[k] !== undefined) { if(_ownerNameCache[k]) out[k] = _ownerNameCache[k]; }
+    const key = ck(a);
+    if(_ownerNameCache[key] !== undefined) { if(_ownerNameCache[key]) out[k] = _ownerNameCache[key]; }
     // Anything that is not an address is skipped rather than encoded: one bad
     // entry would otherwise throw and cost every other owner its name.
-    else if(ethers.isAddress(a)) need.push(a);
+    else if(!ethers.isAddress(a)) continue;
+    else if(claimedHere.has(key)) continue;
+    else if(_ownerNameInflight[key]) borrowed.push([k, _ownerNameInflight[key]]);
+    else {
+      claimedHere.add(key);
+      asked.push(a);
+      own[key] = _ownerNameInflight[key] = new Promise(res => { settle[key] = res; });
+    }
   }
-  if(!need.length) return out;
+  try {
+    if(asked.length) await _resolveOwnerNamesUncached(asked, out, home, ck);
+  } finally {
+    // Whatever happened above — an answer, an empty answer, or a throw out of a
+    // namespace that was supposed not to throw — every claim made here is
+    // released. A promise left unsettled would park every later caller for the
+    // life of the page.
+    for(const a of asked) {
+      const key = ck(a);
+      if(_ownerNameInflight[key] === own[key]) delete _ownerNameInflight[key];
+      // The claim was revoked while it was running — forgetOwnerName decided
+      // this answer was out of date before it arrived. The slot is somebody
+      // else's now, so it is left alone, and the answer just written to the
+      // cache is withdrawn: it is the stale one the revocation was about, and
+      // leaving it would make the invalidation a no-op for every later reader.
+      else delete _ownerNameCache[key];
+      settle[key](out[String(a).toLowerCase()] || null);
+    }
+  }
+  // Awaited only after our own claims are settled, so a call waiting on us can
+  // never be the call we are waiting on.
+  for(const [k, p] of borrowed) {
+    try { const nm = await p; if(nm) out[k] = nm; } catch(_) {}
+  }
+  return out;
+}
+// The lookup itself, for the addresses this caller took responsibility for.
+// Writes names into `out` and confirmed answers into _ownerNameCache.
+async function _resolveOwnerNamesUncached(asked, out, home, ck) {
+  let need = asked;
   // A lookup that never completed must not be remembered as "this address has
   // no name" — mainnet is a foreign network from every other chain, and one
   // rate-limited burst would otherwise blank the signer list for the rest of
-  // the session. Only addresses mainnet actually answered for get cached.
+  // the session. Only addresses a namespace actually answered for get cached.
   const answered = new Set();
+  // Addresses a chain-local namespace could not be reached for. Kept apart from
+  // `answered`, which means "mainnet answered": a blank is only cacheable once
+  // *every* namespace has said there is no name, and mainnet saying so is not
+  // an answer for Base or for MegaETH. Without this, one unreachable resolver
+  // plus a healthy mainnet caches "no name" for an owner who has one.
+  const silent = new Set();
+  // One pass per chain-local namespace, run at whichever end of the chain the
+  // chain in play calls for. Position is the whole of what makes these a local
+  // benefit rather than just more namespaces: at home a namespace goes first
+  // and wins, so a signer is called what their own chain calls them; away it
+  // goes last, so a mainnet name still wins and the lookup is only made for
+  // addresses nothing else could name.
+  const localPass = async ns => {
+    need = need.filter(a => !out[a.toLowerCase()]);
+    if(!need.length) return;
+    const r = await ns.reverse(need);
+    for(const a of need) {
+      const k = a.toLowerCase();
+      if(!r.answered.has(k)) silent.add(k);
+      if(r.names[k]) out[k] = r.names[k];
+    }
+    need = need.filter(a => !out[a.toLowerCase()]);
+  };
+  if(home) await localPass(home);
   // 1) Batched .wei + .gwei reverse resolution in a single Multicall3 on
   // mainnet. Services are walked in NAME_SERVICES order and the first name
   // found wins, so .wei takes precedence over .gwei for the same address.
+  // Skipped outright when .mega already named everyone: an aggregate3 of zero
+  // calls is still a round trip to a chain this app may not even be on.
   const claimed = {};
-  try {
+  if(need.length) try {
     const mc = new ethers.Contract(MC3, MC3_ABI, mainnetRpc());
     const calls = [];
     for(const svc of NAME_SERVICES) {
@@ -7084,14 +7776,21 @@ async function resolveOwnerNames(addrs) {
       }
     }));
   }
+  // Away from home, the local namespaces are the last things tried: only owners
+  // that ENS, WNS and GNS all had nothing for cost a lookup, so the fallback is
+  // bounded by how many signers have no mainnet name at all — and those answers
+  // are cached like every other, hit or miss. Walked in list order, so an
+  // address holding names in two of them reads the same way every time.
+  for(const ns of LOCAL_NS) if(ns !== home) await localPass(ns);
   // Cache both hits and confirmed misses; leave unanswered addresses uncached
-  // so a later call can try again.
-  for(const a of need) {
+  // so a later call can try again. Over `asked` and not `need`, because `need`
+  // has had the named addresses taken out of it and those are exactly the
+  // answers most worth keeping.
+  for(const a of asked) {
     const k = a.toLowerCase();
-    if(out[k]) _ownerNameCache[k] = out[k];
-    else if(answered.has(k)) _ownerNameCache[k] = null;
+    if(out[k]) _ownerNameCache[ck(a)] = out[k];
+    else if(answered.has(k) && !silent.has(k)) _ownerNameCache[ck(a)] = null;
   }
-  return out;
 }
 
 // ── PRODUCTION: MULTICALL ─────────────────────────────────────────
@@ -7683,7 +8382,12 @@ async function loadSingleVaultData(addr, dbWallet) {
     loadedOwners: [...s.owners],
     isTimelockExecutor: isTE,
     codeKind,
-    wnsName: ownerNames[addr.toLowerCase()] || null,
+    // The name this vault reverse-resolves to, in whichever namespace answered
+    // and forward-verified by resolveOwnerNames. Not "wnsName": WNS is one of
+    // five now, and the deploy flow's step.wnsName — the .id.wei it claims — is
+    // a different thing that keeps the old name because for it the old name is
+    // still true.
+    revName: ownerNames[addr.toLowerCase()] || null,
   };
 }
 
@@ -8228,14 +8932,14 @@ async function loadVaultByAddress() {
   if(!raw) { flash('ENTER AN ADDRESS OR NAME'); return; }
   // Only name-shaped input gets the RESOLVING spinner and the "not found"
   // wording; anything else is a malformed address, and saying so is clearer.
-  const isName = NAME_RE.test(raw);
+  const named = NAME_RE.test(raw);
   let checksummed;
-  if(isName) showLoading('RESOLVING NAME');
+  if(named) showLoading('RESOLVING NAME');
   try {
     checksummed = await resolveName(raw);
   } catch(e) {
     hideLoading();
-    flash(isName ? nameErrText(raw, e) : 'ENTER A VALID ADDRESS OR NAME');
+    flash(named ? nameErrText(raw, e) : 'ENTER A VALID ADDRESS OR NAME');
     return;
   }
   // Check if already loaded
@@ -9597,10 +10301,58 @@ function collectSigs(tx, v, connectedAddress) {
   return { sigs, domain, msg, ownerAddrs };
 }
 
+// Which address signed `digest`, remembered.
+//
+// Recovering a public key from a signature is the most expensive arithmetic this
+// interface performs, and it was being repeated for answers it already had: the
+// queue is reloaded after every action and on every refresh, and each pass
+// re-recovered every signature on every proposal from scratch — the same bytes,
+// the same digest, the same answer. On a vault with a full queue that is
+// hundreds of curve operations per reload, all of them on the main thread,
+// between the click and the redraw.
+//
+// Both inputs are bytes and the output is a pure function of them, so a hit here
+// is not an estimate of the answer, it is the answer. What is cached is only the
+// arithmetic: whether a recovered address counts as a *valid* signature is still
+// decided fresh on every pass by verifySigs, against the claimed signer and
+// against the owner set as it stands now. An owner removed between two loads
+// stops counting immediately, cache or no cache.
+//
+// Bounded, because a long session across several vaults would otherwise hold
+// every signature it had ever seen. Map iterates in insertion order, so the
+// oldest entry is the one that goes.
+const _recoverCache = new Map();
+const RECOVER_CACHE_MAX = 4000;
+function recoverCached(digest, sig) {
+  // Only string inputs are keyable — anything else goes straight through rather
+  // than being stringified into a key that could collide with another value.
+  if(typeof digest !== 'string' || typeof sig !== 'string') return ethers.recoverAddress(digest, sig);
+  const k = digest + sig;
+  const hit = _recoverCache.get(k);
+  if(hit !== undefined) return hit;
+  const addr = ethers.recoverAddress(digest, sig);
+  if(_recoverCache.size >= RECOVER_CACHE_MAX) _recoverCache.delete(_recoverCache.keys().next().value);
+  _recoverCache.set(k, addr);
+  return addr;
+}
+
 function verifySigs(sigs, domain, types, msg, owners) {
   const ownerSet = new Set(owners.map(o => o.toLowerCase()));
   const seen = new Set();
   const verified = [];
+  // One digest for the whole list. Every signature here is over the SAME
+  // message — that is what makes them signatures on one proposal — and
+  // ethers.verifyTypedData() hashes the message again for each one, so a
+  // proposal carrying five signatures paid for five identical EIP-712 encodings
+  // of its own target, value, calldata and nonce.
+  //
+  // A message that cannot be hashed is a message no signature over it can be
+  // checked against, which is where the per-signature version already ended up:
+  // verifyTypedData threw inside the loop and every signature was reported
+  // invalid. Same outcome, said once.
+  let digest = null;
+  try { digest = ethers.TypedDataEncoder.hash(domain, types, msg); }
+  catch(e) { console.warn('Proposal cannot be hashed, so no signature on it can be verified:', e.message); }
   for(const s of sigs) {
     const key = s.signer.toLowerCase();
     if(seen.has(key)) continue;
@@ -9610,10 +10362,11 @@ function verifySigs(sigs, domain, types, msg, owners) {
       if(ownerSet.has(key)) { seen.add(key); verified.push(s); }
       continue;
     }
+    if(!digest) continue;
     // Verify ECDSA sigs client-side
     try {
       const sigData = s.sig || s.signature;
-      const recovered = ethers.verifyTypedData(domain, types, msg, sigData);
+      const recovered = recoverCached(digest, sigData);
       if(recovered.toLowerCase() === key && ownerSet.has(key)) {
         seen.add(key);
         verified.push(s);
@@ -11376,6 +12129,21 @@ function parseDeepLink(hash) {
     if(prefix !== null && prefix !== WNS_CHAIN_ID) return null;
     return { chainId: WNS_CHAIN_ID, ref: ref.toLowerCase(), isName: true, nonce };
   }
+  // .mega says MegaETH the same way .wei says mainnet, so the chain comes from
+  // the suffix and a number in front of it that disagrees is a broken link,
+  // not an override.
+  if(MEGA_NAME_RE.test(ref)) {
+    if(prefix !== null && prefix !== MEGA_CHAIN_ID) return null;
+    return { chainId: MEGA_CHAIN_ID, ref: ref.toLowerCase(), isName: true, nonce };
+  }
+  // A basename says Base the same way. Checked here and not under the general
+  // .eth rule, which stays excluded: a plain ENS name may only answer through
+  // an offchain gateway, and a link that opens on some networks and not others
+  // is worse than one that spells its address out.
+  if(BASE_LINK_RE.test(ref)) {
+    if(prefix !== null && prefix !== BASE_CHAIN_ID) return null;
+    return { chainId: BASE_CHAIN_ID, ref: ref.toLowerCase(), isName: true, nonce };
+  }
   return null;
 }
 
@@ -11490,7 +12258,7 @@ window.addEventListener('hashchange', () => {
   const link = parseDeepLink(location.hash.slice(1));
   const v = S.vaults[S.sel];
   const here = link && v && !S.demoMode && link.chainId === S.chainId && (link.isName
-    ? link.ref === String(v.wnsName || '').toLowerCase()
+    ? link.ref === String(v.revName || '').toLowerCase()
     : link.ref.toLowerCase() === String(v.address || '').toLowerCase());
   if(here) {
     // Same vault, different proposal — a co-sign link for the queue on screen.

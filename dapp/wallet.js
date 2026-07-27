@@ -359,6 +359,7 @@ async function connectWithWallet(walletKey) {
         // chain it left.
         _targetChainId = id;
         _targetChainHex = '0x' + id.toString(16);
+        onTargetChainChanged();
         if (typeof window.onWalletChainChanged === 'function') {
           try { window.onWalletChainChanged(id); return; } catch (e) { console.error('onWalletChainChanged:', e); }
         }
@@ -401,6 +402,7 @@ window.disconnectWallet = function() {
   _walletProvider = null;
   _signer = null;
   _connectedAddress = null;
+  _nameOf = _blankNames(null);
   _connectedWalletProvider = null;
   _walletDisplayName = null;
   _walletConnecting = false;
@@ -422,22 +424,74 @@ const _ethMainProvider = new ethers.FallbackProvider(
   _ethRpcs.map((url, i) => ({ provider: new ethers.JsonRpcProvider(url, 1, {staticNetwork:true}), priority: i + 1, stallTimeout: 2000 })), 1, { quorum: 1 }
 );
 
-// Name the connected wallet: .wei, then .gwei, then ENS. Each step only runs
-// if the one before it came back empty, so the preferred name always wins.
+// The chain-local namespaces — Basenames on Base, MegaNames on MegaETH — are
+// owned by the app, which holds their resolvers, caches and rate budget. This
+// file loads first, so the list is read at call time and everything here
+// degrades to "mainnet names only" if it is not there.
+function _localNs() { return window.localNames || []; }
+
+// What the connected account is called, held per namespace rather than as one
+// string. Switching chains then re-picks which name to show instead of
+// re-resolving — an account with both a .eth and a Basename would otherwise
+// flicker back to its hex address and re-fetch on every switch, and this app
+// switches chains constantly.
+let _nameOf = { addr: null, eth: null, local: {}, asked: {} };
+function _blankNames(addr) { return { addr: addr || null, eth: null, local: {}, asked: {} }; }
+function _shortAddr(a) { return a.slice(0, 6) + '...' + a.slice(-4); }
+function _applyWalletName() {
+  const addr = _connectedAddress;
+  if (!addr || _nameOf.addr !== addr) return;
+  // The same precedence the signer list uses, so a person reads the same in the
+  // header as they do in their own row: the chain you are on names you first,
+  // then a mainnet name, then any other chain-local one in list order.
+  let pick = _nameOf.local[_targetChainId] || _nameOf.eth || null;
+  if (!pick) for (const ns of _localNs()) { if (_nameOf.local[ns.chainId]) { pick = _nameOf.local[ns.chainId]; break; } }
+  const next = pick || _shortAddr(addr);
+  if (next === _walletDisplayName) return;
+  _walletDisplayName = next;
+  notifyDisplayUpdate();
+}
+
+// Ask one chain-local namespace what it calls this account. Once per account
+// per namespace, hit or miss; a lookup that could not complete is un-asked so a
+// later chain switch can try it again.
+function _resolveLocalName(addr, chainId) {
+  const ns = _localNs().find(n => n.chainId === chainId);
+  if (!ns || _nameOf.addr !== addr || _nameOf.local[chainId] || _nameOf.asked[chainId]) return;
+  _nameOf.asked[chainId] = true;
+  ns.reverse(addr).then(name => {
+    if (!name || _nameOf.addr !== addr) return;
+    _nameOf.local[chainId] = String(name).toLowerCase();
+    _applyWalletName();
+  }).catch(() => { if (_nameOf.addr === addr) _nameOf.asked[chainId] = false; });
+}
+function _resolveAllLocalNames(addr) {
+  for (const ns of _localNs()) _resolveLocalName(addr, ns.chainId);
+}
+
+// Name the connected wallet: .wei, then .gwei, then ENS, then the chain-local
+// namespaces. Each mainnet step only runs if the one before it came back empty,
+// so the preferred name always wins — except on a chain that has a namespace of
+// its own, where that one is asked for straight away because it is what will be
+// displayed there whatever mainnet says.
+//
+// The mainnet chain runs on those chains too. It is what the account is called
+// the moment the app moves off them, and this app moves between chains as a
+// matter of course; finding it out during the switch would cost a round trip
+// with the header already repainted.
 function resolveWeiName(addr) {
+  _nameOf = _blankNames(addr);
   try {
     const apply = name => {
-      if (_connectedAddress !== addr) return; // account changed — drop it
-      _walletDisplayName = name.toLowerCase();
-      notifyDisplayUpdate();
+      if (_nameOf.addr !== addr) return;      // account changed — drop it
+      _nameOf.eth = String(name).toLowerCase();
+      _applyWalletName();
     };
     const tryEns = () => {
       _ethMainProvider.lookupAddress(addr).then(ensName => {
-        if (ensName && _connectedAddress === addr) {
-          _walletDisplayName = ensName;
-          notifyDisplayUpdate();
-        }
-      }).catch(() => {});
+        if (ensName) apply(ensName);
+        else _resolveAllLocalNames(addr);     // nothing on mainnet — try the rest
+      }).catch(() => _resolveAllLocalNames(addr));
     };
     const tryNS = (registry, next) => {
       const ns = new ethers.Contract(registry, WEINS_ABI, _ethMainProvider);
@@ -448,8 +502,18 @@ function resolveWeiName(addr) {
     };
     tryNS(WEINS, () => tryNS(GWEINS, tryEns));
   } catch (e) {}
+  _resolveLocalName(addr, _targetChainId);
 }
 window.resolveWeiName = resolveWeiName;
+
+// The app moved to another chain. Re-pick the name from what is already known,
+// and go and find that chain's own name if arriving there is the first time it
+// has been worth asking for.
+function onTargetChainChanged() {
+  if (!_connectedAddress) return;
+  _resolveLocalName(_connectedAddress, _targetChainId);
+  _applyWalletName();
+}
 
 // The selected account changed under us. Re-derive the signer for the new account
 // so the app can resync in place — a reload here is what stopped the deploy loop's
@@ -625,6 +689,7 @@ window.walletSwitchChain = async function(opts) {
   _targetChainHex = opts.chainHex || '0x' + opts.chainId.toString(16);
   _targetRpc = opts.rpc || _targetRpc;
   _addChainParams = opts.addChainParams || null;
+  onTargetChainChanged();
   if (!_connectedWalletProvider) return { ok: true, noWallet: true };
   try {
     const current = await _connectedWalletProvider.request({method:'eth_chainId'});
