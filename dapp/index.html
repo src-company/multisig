@@ -8465,16 +8465,11 @@ async function loadSingleVaultData(addr, dbWallet) {
     } catch(e) { console.error('Auto-register vault:', e); }
   }
 
-  // Phase 2: owner labels + executor check + token balances + owner names in parallel
-  const [labelsRaw, fpResult, holdings, ownerNames, codeKind] = await Promise.all([
+  // Phase 2: owner labels + executor check + token balances in parallel
+  const [labelsRaw, fpResult, holdings, codeKind] = await Promise.all([
     dbW?.id ? dbGetOwnerLabels(dbW.id) : Promise.resolve([]),
     readExecutorState(s.executor, addr),
     loadTokenBalances(addr, s.balance),
-    // The vault rides along in the owners' reverse-resolution batch: same
-    // multicall, same forward verification, one more entry. A vault that has
-    // claimed a name should read as that name in its own header, and paying a
-    // separate round trip for it would have been the reason not to.
-    resolveOwnerNames([...s.owners, addr]),
     // What is actually running at this address. A vault can arrive here from a
     // pasted address or a history row, and answering threshold()/getOwners()
     // proves only that something implements the shape — not that it is the
@@ -8488,12 +8483,12 @@ async function loadSingleVaultData(addr, dbWallet) {
   const owners = [...s.owners].map(o => ({
     addr: o,
     label: ownerLabels[o.toLowerCase()] || (o.toLowerCase() === you?.toLowerCase() ? 'YOU' : ''),
-    name: ownerNames[o.toLowerCase()] || null,
+    name: null,                       // filled in when the namespaces answer, below
     you: o.toLowerCase() === you?.toLowerCase()
   }));
   const { isTE, fpEnabled } = fpResult;
 
-  return {
+  const vault = {
     id: dbW?.id || addr.slice(0,8),
     name: dbW?.name || (CHAINS[S.chainId]?.name || 'VAULT').toUpperCase() + '_' + addr.slice(2,6).toUpperCase(),
     chain: (CHAINS[S.chainId]?.name || 'Ethereum').toUpperCase(),
@@ -8517,8 +8512,40 @@ async function loadSingleVaultData(addr, dbWallet) {
     // five now, and the deploy flow's step.wnsName — the .id.wei it claims — is
     // a different thing that keeps the old name because for it the old name is
     // still true.
-    revName: ownerNames[addr.toLowerCase()] || null,
+    revName: null,
   };
+
+  // Names are decoration, and they were holding up the vault.
+  //
+  // Reverse resolution walks five namespaces on three networks — WNS then GNS in
+  // one mainnet multicall, a second call to forward-verify what they claimed,
+  // ENS for whoever is left, then Basenames off Base and MegaNames off its own
+  // resolver — and every one of those was awaited before this function returned
+  // a vault at all. Nothing downstream could start until it finished: not the
+  // render, and not the queue, which loads only after every vault has resolved.
+  // On a real load the queue's first request went out at 4.5 seconds, and about
+  // three of those were spent deciding what to call the signers.
+  //
+  // The queue is why somebody opened this page. A name beside an owner is how it
+  // reads once they have. So the addresses go up now and the names land on top
+  // of them when they arrive — the same shape the balances, the queue and the
+  // history already have, and the same repaint path retryOwnerName already uses.
+  //
+  // Mutated in place rather than returned: this object is the one that goes into
+  // S.vaults, so patching it patches what is on screen, whether that has happened
+  // yet or not.
+  resolveOwnerNames([...s.owners, addr]).then(names => {
+    let changed = false;
+    for(const o of vault.owners) {
+      const n = names[o.addr.toLowerCase()] || null;
+      if(n !== o.name) { o.name = n; changed = true; }
+    }
+    const own = names[addr.toLowerCase()] || null;
+    if(own !== vault.revName) { vault.revName = own; changed = true; }
+    if(changed) render();
+  }).catch(e => console.error('Owner names:', e));
+
+  return vault;
 }
 
 // The EIP-712 digest a proposal row actually has, derived from its own
@@ -9038,16 +9065,29 @@ async function reloadVault(vi) {
       if(match) dbUpdateOwnerLabel(v.dbId, match.addr, pl.label);
     }
     delete v._pendingLabel;
-    // Executor check + token balances + queue + history + owner names in parallel
-    const [fpResult, holdings, , , ownerNames, slowOut] = await Promise.all([
+    // Names are started here and not waited for — see loadSingleVaultData. This
+    // path already carries the previous answers across (oldNames above), so
+    // there is nothing to flicker: what is on screen stays on screen until a
+    // better answer arrives, and the repaint that shows the executed proposal no
+    // longer waits on five namespaces across three networks to re-confirm what
+    // the signers are called.
+    resolveOwnerNames([...s.owners]).then(names => {
+      let changed = false;
+      for(const o of v.owners) {
+        const n = names[o.addr.toLowerCase()];
+        if(n && n !== o.name) { o.name = n; changed = true; }
+      }
+      if(changed) render();
+    }).catch(e => console.error('Owner names:', e));
+
+    // Executor check + token balances + queue + history in parallel
+    const [fpResult, holdings, , , slowOut] = await Promise.all([
       readExecutorState(s.executor, v.address),
       loadTokenBalances(v.address, s.balance),
       loadVaultQueue(vi),
       loadVaultHistory(vi),
-      resolveOwnerNames([...s.owners]),
       loadSlowOutbound(v.address)
     ]);
-    v.owners.forEach(o => { if(ownerNames[o.addr.toLowerCase()]) o.name = ownerNames[o.addr.toLowerCase()]; });
     v.isTimelockExecutor = fpResult.isTE;
     v.fastPath = fpResult.fpEnabled;
     v.holdings = holdings;
