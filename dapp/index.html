@@ -47,7 +47,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preconnect" href="https://multisig-postgrest.onrender.com" crossorigin>
 <link rel="dns-prefetch" href="https://ethereum.publicnode.com">
-<link rel="preload" href="./ethers.min.js" as="script">
+<link rel="preload" href="./ethers.slim.min.js" as="script">
 <link rel="preload" href="./wallet.js" as="script">
 <!-- Loaded without blocking the first paint. A stylesheet on a third-party host
      stops the browser painting ANYTHING until that host has been resolved,
@@ -1039,7 +1039,58 @@ input.amt-in:focus{outline:none;box-shadow:none!important;border-bottom-color:tr
      or "SWITCH WALLET TO BASE" the same moment a sighted user reads it. -->
 <div id="toast-el" class="toast" role="status" aria-live="polite" aria-atomic="true" style="display:none"></div>
 
-<script src="./ethers.min.js"></script>
+<!-- ethers, cut down to the parts this app actually calls.
+     The official dist is 494 KB and carries wallet generation, mnemonics,
+     keystore JSON, and every provider backend there is. This app creates no
+     keys — it signs through the operator's wallet — and talks to three provider
+     classes. Nothing here is patched or rewritten: it is the same package, the
+     same version, with the twenty-five exports the source uses pulled out of it
+     and the unreachable rest dropped.
+
+     494 KB -> 263 KB, and 129 KB -> 85 KB compressed. The compressed figure is
+     the one that is worth having: 44 KB off every cold load, which is about a
+     sixth of everything this page transfers.
+
+     The parsing is NOT worth what the byte count suggests, and it is worth
+     writing that down because it is the obvious thing to assume. Measured over
+     twelve interleaved cold loads at 4x CPU throttle, dropping 47% of the
+     bundle moved DOMContentLoaded by 3% (788ms -> 766ms) and first paint by 6%.
+     V8 pre-parses lazily — it does not compile a function until something calls
+     it — so a smaller file is not a proportionally cheaper one, and most of what
+     was removed was never compiled to begin with. This is a bandwidth change
+     wearing a parsing change's clothes.
+
+     Vendored rather than installed, like walletconnect.min.js and
+     coinbase.min.js beside it, so the deploy needs no package tree. Rebuild it
+     with, exactly:
+
+       npm i ethers@6.13.4 esbuild@0.28.1
+       cat > entry.js <<'EOF'
+       export { AbiCoder, BrowserProvider, Contract, FallbackProvider, Interface,
+         JsonRpcProvider, TypedDataEncoder, ZeroAddress, ZeroHash, concat,
+         decodeBytes32String, formatEther, formatUnits, getAddress,
+         getCreate2Address, id, isAddress, keccak256, namehash, parseEther,
+         parseUnits, recoverAddress, toUtf8Bytes, verifyTypedData, zeroPadValue,
+       } from 'ethers';
+       EOF
+       echo 'import * as m from "./entry.js"; globalThis.ethers = m;' > prod.js
+       npx esbuild prod.js --bundle --minify --format=iife --target=es2020 \
+         --legal-comments=none --outfile=ethers.slim.min.js
+
+       sha256  cd6017b49711284b8281bbbc2a08c3374f84b60b0ae1811f5612099c354f8c7a
+
+     The export list is the whole contract, and it is checkable against the
+     source. This names every ethers symbol the app touches:
+
+       grep -oh 'ethers\.[A-Za-z_$][A-Za-z0-9_$]*' dapp/*.html dapp/*.js \
+         | sed 's/ethers\.//' | sort -u | grep -v '^slim$'
+
+     (the `slim` it would otherwise report is this file's own name, three lines
+     above). Nothing it prints may be absent from the list above. Add an ethers
+     call to the app without adding it here and the page throws on that call,
+     loudly, rather than misbehaving quietly — the failure mode is a missing
+     function, not a wrong answer. -->
+<script src="./ethers.slim.min.js"></script>
 <script src="./wallet.js"></script>
 <script>
 'use strict';

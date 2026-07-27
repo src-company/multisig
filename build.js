@@ -30,6 +30,7 @@
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
+const vm = require('vm');
 
 const SRC = path.join(__dirname, 'dapp');
 const OUT = path.join(__dirname, 'dist');
@@ -317,6 +318,61 @@ function buildHtml(src, name) {
   return out + stripHtmlComments(src.slice(at));
 }
 
+// ── THE ETHERS BUNDLE'S CONTRACT ──────────────────────────────────
+// ethers is vendored as a subset build — the twenty-five exports the app calls,
+// with the unreachable rest of the library dropped (see the comment above the
+// <script> tag in index.html). That is worth 231 KB of parsing and 44 KB on the
+// wire, and it introduces one way to break this app that did not exist before:
+// add an `ethers.something` call to the source without adding `something` to the
+// bundle's entry point, and the call reaches `undefined`.
+//
+// It would throw, loudly, which is the good version of that failure — but it
+// would throw at the moment somebody used the feature, which for a deploy path
+// or an error decoder might be long after the deploy that introduced it. So the
+// question is asked here instead, where the answer costs nothing and arrives
+// before anything ships.
+//
+// Both halves are read rather than declared. What the app uses comes from the
+// stripped source, so a symbol named only in a comment does not count. What the
+// bundle offers comes from evaluating the bundle and reading its exports, not
+// from a list kept alongside it that could drift from the file it describes.
+function checkEthersSurface(built) {
+  const bundle = built.find(([f]) => /(^|\/)ethers[.\w-]*\.js$/i.test(f));
+  if(!bundle) return null;
+  const sandbox = { console, setTimeout, clearTimeout, TextEncoder, TextDecoder, crypto, fetch, URL };
+  sandbox.globalThis = sandbox; sandbox.window = sandbox; sandbox.self = sandbox;
+  vm.createContext(sandbox);
+  try { vm.runInContext(bundle[2].toString('utf8'), sandbox); }
+  catch(e) { throw new Error(`${bundle[0]} does not evaluate: ${e.message}`); }
+  const offered = new Set(Object.keys(sandbox.ethers || {}));
+  if(!offered.size) throw new Error(`${bundle[0]} defines no ethers exports`);
+
+  // Only script bodies, never markup — `<script src="./ethers.slim.min.js">` is
+  // a filename, not a call, and would otherwise read as a use of `ethers.slim`.
+  const used = new Map();
+  for(const [file, , out] of built) {
+    if(/\.min\.js$/i.test(file)) continue;
+    let text = out.toString('utf8');
+    if(/\.html$/i.test(file)) {
+      const bodies = [];
+      const re = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
+      let m;
+      while((m = re.exec(text))) if(!/\bsrc\s*=/i.test(m[1])) bodies.push(m[2]);
+      text = bodies.join('\n');
+    } else if(!/\.js$/i.test(file)) continue;
+    for(const m of text.matchAll(/\bethers\.([A-Za-z_$][A-Za-z0-9_$]*)/g))
+      if(!used.has(m[1])) used.set(m[1], file);
+  }
+  const missing = [...used].filter(([sym]) => !offered.has(sym));
+  if(missing.length) throw new Error(
+    `${bundle[0]} does not export ${missing.map(([s]) => s).join(', ')}, which ` +
+    `${missing.length > 1 ? 'are' : 'is'} used in ` +
+    `${[...new Set(missing.map(([, f]) => f))].join(', ')}.\n` +
+    `  Add ${missing.length > 1 ? 'them' : 'it'} to the entry point and rebuild the bundle — ` +
+    `the recipe is above the <script> tag in dapp/index.html.`);
+  return { file: bundle[0], used: used.size, offered: offered.size };
+}
+
 // ── RUN ───────────────────────────────────────────────────────────
 const kb = b => (b / 1024).toFixed(1) + ' KB';
 const gz = buf => zlib.gzipSync(buf, { level: 9 }).length;
@@ -349,6 +405,9 @@ function main() {
     built.push([file, raw, out]);
   }
 
+  // Asked before anything is written, like every other check here.
+  const surface = checkEthersSurface(built);
+
   // A fresh directory rather than an overwrite, so a file that stops existing in
   // dapp/ does not go on being served out of dist/.
   fs.rmSync(OUT, { recursive: true, force: true });
@@ -368,6 +427,7 @@ function main() {
   console.log('dapp/ -> dist/');
   for(const r of rows) console.log(line(...r));
   console.log(line('TOTAL', sa, sb, ga, gb));
+  if(surface) console.log(`  ${surface.file}: ${surface.used} ethers symbols used, all ${surface.offered} exports present`);
 }
 
 main();
