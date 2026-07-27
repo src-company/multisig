@@ -139,6 +139,18 @@ button:active{transform:scale(.97)}
 @media(hover:hover){.alink:hover{border-bottom-color:var(--a)!important;color:var(--a)!important}}
 .tx-explorer{display:inline-flex;align-items:center;gap:3px;font-size:9px;font-weight:700;letter-spacing:1px;color:var(--d);text-decoration:none;border-bottom:1px solid transparent;transition:color .15s,border-color .15s;white-space:nowrap}
 @media(hover:hover){.tx-explorer:hover{color:var(--a);border-bottom-color:var(--a)}}
+/* A truncated transaction hash, linked. No font-size on purpose — see
+   explorerTxLink: the line it lands in sets the type, and a hash that picks its
+   own would be the one figure in a row not agreeing with the rest. Tracking IS
+   reset: the rows this appears in are tracked out to 1-2px for short uppercase
+   labels, and a 19-character hex string at that spacing is half again as wide
+   for nothing, in the one string here where the characters are read as a block
+   and not as words. */
+.tx-hash{letter-spacing:0;color:inherit;text-decoration:none;border-bottom:1px solid var(--ln);white-space:nowrap}
+/* The non-hash fallback. Same voice, but it is not a link and it has no
+   self-imposed length, so it is capped here — 19ch is what the truncated form
+   above occupies, so a bad value takes exactly the space a good one would. */
+.tx-hash.bad{display:inline-block;max-width:19ch;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom;border-bottom-style:dotted;color:var(--d)}
 .tx:not(.blocked):active{background:color-mix(in srgb,var(--a) 9%,transparent)}
 .net-row:active{transform:translateX(1px)}
 
@@ -147,7 +159,17 @@ button:active{transform:scale(.97)}
 .light .scan{background:repeating-linear-gradient(0deg,transparent,transparent 3px,#0099B302 3px,#0099B302 6px)}
 
 /* frame */
-.frame{position:relative;padding:0 24px;max-width:1060px;margin:0 auto;display:flex;flex-direction:column;flex:1}
+/* width:100% is load-bearing and looks redundant. #app is a COLUMN flex
+   container, so its cross axis is horizontal and .frame would normally stretch
+   to it — except that an auto margin on the cross axis cancels stretch, and
+   `margin:0 auto` is how this is centred. Without stretch the item is sized
+   fit-content, which resolves to min(max-content, max-width) — and max-content
+   here is the whole tab strip, so it took the full 1060px cap no matter how
+   little room there was. Any viewport between 1060 and ~1080 therefore scrolled
+   horizontally by the difference: the frame was wider than the page it sat in.
+   width:100% puts the available space back into that min(), so the cap only
+   binds where there is room for it. */
+.frame{position:relative;padding:0 24px;width:100%;max-width:1060px;margin:0 auto;display:flex;flex-direction:column;flex:1}
 .rail{position:absolute;top:0;bottom:0;width:12px;overflow:hidden;writing-mode:vertical-lr;font-size:11px;letter-spacing:1px;color:var(--fr);user-select:none;line-height:12px}
 .rail-l{left:0}.rail-r{right:0}
 .hbar{font-size:11px;letter-spacing:1px;color:var(--fr);user-select:none;overflow:hidden;white-space:nowrap;line-height:1}
@@ -377,7 +399,14 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
 
 /* tx builder */
 .txb{padding:20px 18px;border:1px solid var(--fr);border-left:2px solid var(--a);background:color-mix(in srgb,var(--a) 4%,transparent);margin:6px 0 28px}
-.txb-tabs{display:flex;gap:20px;margin-bottom:24px;align-items:center}
+/* Wraps, because it has to. The row is a variable number of mode tabs plus a
+   44px discard target held on the trailing edge by margin-left:auto, and with
+   no wrap the overflow lands entirely on that button: at 320px it sat a few
+   pixels outside the frame and took the whole page into a horizontal scroll to
+   reach a control whose only job is to close the thing scrolling. Wrapping puts
+   it on the next line instead, which is where every other crowded row in this
+   file already puts its tail. */
+.txb-tabs{display:flex;flex-wrap:wrap;gap:20px;margin-bottom:24px;align-items:center}
 .txb-tab{position:relative;background:transparent;border:none;font-size:11px;font-weight:700;letter-spacing:2px;padding:4px 0;color:var(--d);border-bottom:2px solid transparent;transition:color .15s}
 .txb-tab.on{color:var(--a)}
 .x-btn{background:transparent;border:none;color:var(--d);font-size:14px;padding:8px;min-width:40px;min-height:40px;display:flex;align-items:center;justify-content:center;margin-left:auto}
@@ -394,8 +423,16 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
    copy affordance belongs against the thing it copies. */
 .icon-btn{position:relative;display:inline-flex;align-items:center;justify-content:center;min-width:auto;min-height:auto;padding:2px 5px;font-size:9px;line-height:1;vertical-align:middle;margin-left:0}
 .icon-btn::after{content:"";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:44px;height:44px}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:32px}
-.grid3{display:grid;grid-template-columns:1fr 1fr 2fr;gap:16px}
+/* minmax(0,1fr), not 1fr. A grid item's automatic minimum size is its
+   min-content width, so a track written as 1fr is really minmax(min-content,
+   1fr) and any column holding something that will not wrap — a chain-pill row,
+   a long unbroken label — pushes past its share instead of being held to it.
+   On CREATE at tablet widths that put the right column, and the DEPLOY button
+   with it, 42px outside the frame and scrolled the page sideways. The rest of
+   the file already spells its tracks this way (.send-grid, .owner-row); these
+   two were the holdouts. */
+.grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+.grid3{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,2fr);gap:16px}
 .tok-ico{display:inline-flex;align-items:center;vertical-align:middle;line-height:0}
 .tok-ico svg{width:15px;height:15px;display:block}
 .pill .tok-ico{margin-right:6px}
@@ -439,8 +476,14 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
    act — this owner is the reason something cannot proceed — and takes the
    warning tone the rest of the app reserves for exactly that. The signed tally
    is a standing, not a request, and stays on the ink ladder; it goes green only
-   at the full count, where the claim is unambiguous. */
-.signer-stand{font-size:10px;font-weight:700;letter-spacing:2px;color:var(--d);flex-shrink:0;white-space:nowrap}
+   at the full count, where the claim is unambiguous.
+   .row's space-between already puts this on the trailing edge while it shares a
+   line with the identity. margin-left:auto is for when it does not: a long
+   name-plus-address pair wraps it to a line of its own, where space-between has
+   only one item to place and puts it at the START — so a roster on a phone
+   could show two owners' standings right-aligned and the one between them left,
+   which reads as three unrelated facts rather than a column. */
+.signer-stand{font-size:10px;font-weight:700;letter-spacing:2px;color:var(--d);flex-shrink:0;white-space:nowrap;margin-left:auto}
 .signer-stand.await{color:var(--y)}
 .signer-stand.all{color:var(--g)}
 
@@ -522,6 +565,22 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
    take. Once the columns stack there is no shared row and it is a no-op. */
 .policy-col{display:flex;flex-direction:column;min-width:0}
 .policy-col>.btn{margin-top:auto}
+/* Caption over the roster's editable half. It is a column heading only while
+   there are two columns: on a phone each owner's label field drops beneath
+   their name, so a heading set in the same 10px tracked caps as OWNERS beside
+   it reads as a second section title over a column that is no longer there.
+   It gives up the heading and keeps the sentence — full width, on the ink
+   ladder, at the weight of the note it always was. */
+.owner-cap{margin:0;font-size:10px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:var(--m);text-align:right}
+.owner-cap .dim{opacity:.5}
+/* The roster's label fields are 11px by design, but every .inp is forced to
+   16px on a phone so iOS does not zoom the page on focus — which left three
+   stacked "LABEL" placeholders set larger than the owner names they belong to,
+   the loudest type on the tab. The zoom trigger is the INPUT's computed size,
+   not the placeholder's, so the field can keep its 16px and the prompt can go
+   back to the size of the label it is standing in for. Typed text stays 16px,
+   which is right: that half is read. */
+.owner-lbl-in::placeholder{font-size:11px;letter-spacing:2px}
 .owner-row{display:grid;grid-template-columns:22px minmax(0,1fr) 120px 40px;grid-template-areas:"num addr label del";gap:12px;align-items:center;margin-bottom:2px}
 .owner-row .o-num{grid-area:num;font-size:10px;font-weight:700}
 .owner-row .o-addr{grid-area:addr;margin:0}
@@ -628,6 +687,8 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
   .empty-title{font-size:28px}
   .admin-tabs{gap:14px;margin-bottom:24px}
   .admin-tab{font-size:11px}
+  .owner-cap{flex-basis:100%;text-align:left;font-size:9px;font-weight:400;letter-spacing:1px;color:var(--d)}
+  .owner-cap-row{gap:4px}
   .policy-big{font-size:32px}
   .link-btn{padding:12px 0;min-height:44px}
   /* Tertiary controls are 9px text in a 6px box — ~23px tall, well under the
@@ -3325,6 +3386,23 @@ function appPath() {
 }
 function appBase() { return location.origin + appPath(); }
 
+// The address bar is a link too. Arriving from the docs page landed an operator
+// on `/index.html#1/0x…` — the filename appPath() drops from every link this app
+// hands out, still sitting in the one place they read a vault out of and paste
+// it from. Normalised once at boot so the two spellings agree; the fragment and
+// query ride along untouched, and off http(s) appPath() is the pathname, so this
+// is a no-op for a copy opened from disk.
+if(location.pathname !== appPath()) {
+  try { history.replaceState(history.state, '', appPath() + location.search + location.hash); } catch(_) {}
+}
+
+// How the sibling pages are linked to. Same argument as appPath(): `.html` is
+// how a page happened to be requested, not part of where it lives, and the host
+// answers both spellings. Off http(s) the filename is the only thing that
+// resolves, so there it stays.
+const PAGE_EXT = /^https?:$/.test(location.protocol) ? '' : '.html';
+const DOCS_URL = 'docs' + PAGE_EXT, BRAND_URL = 'brand' + PAGE_EXT;
+
 // How a vault is spelled in the links this app hands out. An address is always
 // available and always correct; a name is neither, so one is used only where it
 // has been proven to point back — v.wnsName is set from the same forward-
@@ -3356,11 +3434,29 @@ function refHash(ref, nonce) {
   return '#' + base + (nonce === undefined || nonce === null ? '' : '/tx/' + nonce);
 }
 
+// A transaction hash as a link to it. Deliberately carries no size of its own:
+// both callers set the type of the line the hash sits in, and inheriting is
+// what keeps a hash the same weight as the facts beside it. It used to inherit
+// by accident instead — no font-size anywhere in its inline style and none on
+// the history row's trailing group either — so in that row it fell through to
+// the body's 16px and rendered as the largest thing in a line of 10px figures,
+// wide enough to force the nonce and the action label onto separate rows.
 function explorerTxLink(hash) {
-  if(!hash || !/^0x[0-9a-fA-F]{64}$/.test(hash)) return esc(hash||'');
+  // Not a hash. It is still whatever the coordination record holds, and rows
+  // there are anon-writable, so it is shown as text and never linked — but not
+  // as unbounded text: a hash is the one field on a history row with no natural
+  // width, and the raw fallback had none either, so a value that is merely the
+  // wrong length (a full 66-character string that failed the test by a
+  // character, or anything longer) laid the row out to its own width and pushed
+  // the page into a horizontal scroll. Bounded and clipped, with the whole value
+  // on the title for anyone who needs to read it.
+  if(!hash || !/^0x[0-9a-fA-F]{64}$/.test(hash)) {
+    const raw = String(hash || '');
+    return raw ? `<span class="tx-hash bad" title="${esc(raw)}">${esc(raw)}</span>` : '';
+  }
   const c = CHAINS[S.chainId];
   const base = c ? c.explorer : 'https://etherscan.io';
-  return `<a class="alink" href="${base}/tx/${hash}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;border-bottom:1px solid var(--ln)">${hash.slice(0,10)}...${hash.slice(-6)}</a>`;
+  return `<a class="alink tx-hash" href="${base}/tx/${hash}" target="_blank" rel="noopener" title="View this transaction on the explorer">${hash.slice(0,10)}...${hash.slice(-6)}</a>`;
 }
 
 // Explorer link for a queue transaction, context-aware:
@@ -3510,8 +3606,12 @@ function renderNow(){
   // does not depend on which door was used to get in.
   const wantHash = (vRef && !S.demoMode) ? refHash(vRef)
     : (!v || S.demoMode) ? '' : null;
+  // Written as a full path rather than a bare fragment: a bare fragment is
+  // resolved against whatever path the page was requested on, so it would put
+  // the vault back behind `/index.html` on any arrival that carried the
+  // filename. appPath() is the spelling every other link uses.
   if(wantHash !== null && wantHash !== location.hash) {
-    try { history.replaceState(null, '', wantHash || appPath()); } catch(_) {}
+    try { history.replaceState(null, '', appPath() + location.search + wantHash); } catch(_) {}
   }
 
   const _appEl = document.getElementById("app");
@@ -3554,9 +3654,9 @@ ${/* This control copies the shareable URL, not the address it sits beside \u201
         ${v?`<span style="color:var(--ln)">&middot;</span><span>NONCE ${v.nonce}</span>`:""}
       </div>
       <div class="footer-r">
-        <a href="docs.html" class="docs-link">DOCS</a>
-        <a href="docs.html#audits" class="docs-link" target="_blank" rel="noopener" title="Security audits, findings, and how each one is answered">AUDIT</a>
-        <a href="brand.html" class="docs-link" title="Logos, boilerplate and the fact sheet — free to use, no permission needed">BRAND</a>
+        <a href="${DOCS_URL}" class="docs-link">DOCS</a>
+        <a href="${DOCS_URL}#audits" class="docs-link" target="_blank" rel="noopener" title="Security audits, findings, and how each one is answered">AUDIT</a>
+        <a href="${BRAND_URL}" class="docs-link" title="Logos, boilerplate and the fact sheet — free to use, no permission needed">BRAND</a>
         ${S.vaults.length===0&&!S.demoMode?`<button class="reset-btn" onclick="S.demoMode=true;S.vaults=seed();S.sel=0;flash('DEMO LOADED');render()">DEMO</button>`:""}
         ${S.demoMode?`<button class="reset-btn" onclick="S.demoMode=false;S.vaults=[];S.sel=0;S.view='DASH';S.showTx=false;S.batch=[{t:'',v:'',d:''},{t:'',v:'',d:''}];S.adminTab='POLICY';flash('DEMO CLEARED');render()">RESET</button>`:""}
         ${!S.demoMode&&S.vaults.length>0?`<button class="reset-btn" onclick="loadAllVaults()">RELOAD</button>`:""}
@@ -4035,7 +4135,15 @@ ${/* Topping up is the one action here that needs no signature, no quorum and no
             <button class="alt-link" title="${apTitle}" onclick="doApprove(${S.sel},${tx.nonce})">OR APPROVE ON-CHAIN</button>
           </div>`;
     }else if(s.sign&&signedByYou){
-      actionBtn=`<button class="btn btn-outline" ${mob?"style='width:100%'":""} onclick="doUnsign(${S.sel},${tx.nonce})">UNSIGN</button>`;
+      // You have signed and the proposal is short of quorum: there is nothing
+      // here for you to do, and the only control left is the one that undoes
+      // what you already did. It was drawn as an outlined button — full width
+      // on a phone, which made UNDO the heaviest object on a card whose actual
+      // state is "waiting on someone else". The .unsign-link treatment exists
+      // for exactly this and the s.queue branch below already uses it; the two
+      // now agree, instead of the same action changing weight depending on
+      // whether a threshold nobody here controls has been reached.
+      actionBtn=`<button class="unsign-link" onclick="doUnsign(${S.sel},${tx.nonce})">UNSIGN</button>`;
     }else if(s.queue){
       const ac=Object.values(tx.approvals).filter(Boolean).length;
       const unanimous=ac===v.ownerCount;
@@ -4139,7 +4247,13 @@ ${/* Topping up is the one action here that needs no signature, no quorum and no
         })():""}
       </div>
       ${blocked?"":progressLine}
-      <div class="approvals">${apHtml}${etaRow}${(()=>{const xl=txExplorerLink(tx,v);return xl?`<span class="eta" style="margin-left:${etaRow?'12px':'auto'}">${xl}</span>`:'';})()}</div>
+${/* margin-left:auto puts the explorer link on the row's trailing edge, which is
+         right while it shares a line with the approval chips and wrong the moment
+         it does not: wrapped onto a line of its own it sits hard against the right
+         margin with nothing to be flush with, reading as a stranded control rather
+         than the tail of the row. On a phone that wrap is the normal case, so
+         there it simply follows the last chip. */''}
+      <div class="approvals">${apHtml}${etaRow}${(()=>{const xl=txExplorerLink(tx,v);return xl?`<span class="eta" style="margin-left:${mob?'0':etaRow?'12px':'auto'}">${xl}</span>`:'';})()}</div>
       ${blocked?'':(()=>{
         // Any live proposal can be dry-run — knowing it reverts is just as
         // useful while it sits in the timelock as it is before signing.
@@ -5491,16 +5605,22 @@ ${/* Two columns, and until now nothing said the right one was editable. Every
        the vault name gets that disclaimer on the POLICY tab and owner labels,
        which travel the same route to the same coordination record and are just
        as invisible to the chain, never got one. */''}
-    <div class="row" style="border-bottom-color:var(--fr);padding-top:0;align-items:baseline">
+    <div class="row owner-cap-row" style="border-bottom-color:var(--fr);padding-top:0;align-items:baseline">
       <span class="lbl" style="margin:0">OWNERS <span class="dim">&middot; ${v.ownerCount}</span></span>
-      <span class="lbl" style="margin:0;text-align:right">LABEL <span class="dim">&middot; SHARED WITH CO-SIGNERS, NOT ON CHAIN</span></span>
+${/* Two spellings of one fact, because the line has two jobs. Beside a column it
+         names the column and qualifies it; under a stacked roster there is no
+         column to name, so it drops the heading word and becomes the sentence
+         it was always carrying. */''}
+      <span class="owner-cap">${mob
+        ? 'LABELS ARE SHARED WITH CO-SIGNERS AND ARE NOT ON CHAIN'
+        : 'LABEL <span class="dim">&middot; SHARED WITH CO-SIGNERS, NOT ON CHAIN</span>'}</span>
     </div>
     ${v.owners.map((o,oi)=>{const isYouLbl=o.label&&o.label.trim().toUpperCase()==='YOU';return`<div class="row" style="${mob?"flex-direction:column;align-items:stretch;gap:10px":""}">
       <div style="min-width:0">
         <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;min-width:0">${signerIdentHtml(o,v.chain)}${o.you?'<span class="signer-you">YOU</span>':""}</div>
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-shrink:0${mob?";width:100%":""}">
-          <input class="inp" maxlength="64" style="margin:0;${mob?"flex:1":"width:120px"};font-size:11px;letter-spacing:1px;border-bottom-color:var(--ln)" placeholder="LABEL" aria-label="Label for ${esc(shortAddr(o.addr))}" value="${isYouLbl?"":esc(o.label)}" onchange="updateOwnerLabel(${S.sel},${oi},this.value)">
+          <input class="inp owner-lbl-in" maxlength="64" style="margin:0;${mob?"flex:1":"width:120px"};font-size:11px;letter-spacing:1px;border-bottom-color:var(--ln)" placeholder="LABEL" aria-label="Label for ${esc(shortAddr(o.addr))}" value="${isYouLbl?"":esc(o.label||'')}" onchange="updateOwnerLabel(${S.sel},${oi},this.value)">
 ${/* You cannot propose removing yourself from here, and the row still has to
              reserve the slot: without it the one label field that has no REMOVE
              beside it stretches to the row's edge and the whole column reads as
@@ -5532,8 +5652,15 @@ ${/* You cannot propose removing yourself from here, and the row still has to
           <span style="font-size:10px;font-weight:700;color:var(--m);letter-spacing:2px">${esc(tx.act)}</span>
           ${tx.desc&&tx.desc!==tx.act?`<span style="font-size:12px">${tx.amt?`<span class="priv">${esc(tx.amt)}</span> ${esc(tx.descRest||'')}`:esc(tx.desc)}</span>`:""}
         </div>
-        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
-          <span style="font-size:10px;color:var(--m)">${esc(tx.age)}</span>
+${/* The trailing group states its own type. Every child here used to carry an
+             inline font-size of its own except the explorer link, which therefore
+             inherited the body's 16px and rendered a 19-character hash as the
+             largest thing in a row of 10px figures \u2014 wide enough, against
+             flex-shrink:0, to push the nonce and the action label onto separate
+             lines on a phone. Sizing the group is what makes that unrepeatable:
+             anything added here inherits the row's voice instead of the body's. */''}
+        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;font-size:10px">
+          <span style="color:var(--m)">${esc(tx.age)}</span>
           ${tx.status==='executed'
             ?'<span style="color:var(--g);font-size:11px" title="Executed on chain">\u2713</span>'
             :tx.status==='stale'

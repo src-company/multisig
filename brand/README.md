@@ -4,7 +4,7 @@ Logos, colours and type for Multisig, plus the script that builds them.
 
 If you are writing about the project and want the words rather than the files —
 boilerplate at four lengths, a plain-English explainer and a fact sheet — go to
-**[multisig.software/brand.html](https://multisig.software/brand.html)**, or
+**[multisig.software/brand](https://www.multisig.software/brand)**, or
 its markdown twin at [`docs/src/brand.md`](../docs/src/brand.md). This page is
 for whoever has to place a logo.
 

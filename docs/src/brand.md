@@ -9,7 +9,7 @@ product, without having to ask us first.
 </picture>
 
 **The published version of this page is
-[multisig.software/brand.html](https://multisig.software/brand.html)** — same
+[multisig.software/brand](https://www.multisig.software/brand)** — same
 material, with a copy button on every block of boilerplate and the logos
 downloadable in place. That is the link to share. This is its source-of-truth
 twin, for anyone already reading the repository.

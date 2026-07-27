@@ -242,7 +242,7 @@ Findings and their dispositions are tracked in [`SECURITY.md`](SECURITY.md). The
 
 ## Brand and press
 
-**[multisig.software/brand.html](https://multisig.software/brand.html)** — the
+**[multisig.software/brand](https://www.multisig.software/brand)** — the
 press kit: boilerplate at four lengths with a copy button on each, a
 plain-English explainer, the numbers with the commands that reproduce them,
 naming rules and a fact sheet. Written to be quoted verbatim; no permission
