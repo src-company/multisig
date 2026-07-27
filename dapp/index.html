@@ -4849,7 +4849,24 @@ ${/* Topping up is the one action here that needs no signature, no quorum and no
       const apTitle = 'Registers approval in the vault itself instead of signing a message. '
         + 'Use it if you cannot sign — a DAO or contract owner — or if you want this vault to work with no coordination service. '
         + 'Costs gas, is publicly visible, and gives up front-run protection unless a different owner submits the transaction.';
-      actionBtn=mob
+      // A contract owner cannot sign at all — this vault verifies with ecrecover
+      // and has no ERC-1271 path — so for them the two buttons swap places and
+      // SIGN is dropped rather than demoted. Offering an action that cannot
+      // succeed is worse than not offering it: prodSign's guard would catch the
+      // attempt, but only after a wallet prompt the operator had no reason to
+      // expect to fail. Only a confirmed contract flips this; while the chain
+      // has not answered, and for an EOA or a 7702 delegation, signing leads.
+      const mustApprove = cannotSign(ct.connectedAddress, S.chainId);
+      const apLabel = mustApprove ? 'APPROVE ON-CHAIN' : 'APPROVE ON-CHAIN INSTEAD';
+      const apWhy = mustApprove
+        ? 'This wallet is a contract account. It has no key to sign with, so it authorises by registering approval in the vault itself. Costs gas and is publicly visible.'
+        : apTitle;
+      if(mustApprove){
+        actionBtn=`<div style="display:flex;gap:8px;${mob?'flex-direction:column':'align-items:center'}">
+            <button class="btn btn-fill${mob?' btn-w':''}" title="${apWhy}" onclick="doApprove(${S.sel},${tx.nonce})">${apLabel}</button>
+            <span class="alt-link" style="cursor:default;${mob?'width:100%':''}" title="${apWhy}">CONTRACT ACCOUNT &middot; CANNOT SIGN</span>
+          </div>`;
+      } else actionBtn=mob
         ?`<div style="display:flex;gap:8px;flex-direction:column">
             <button class="btn btn-fill btn-w" onclick="doSign(${S.sel},${tx.nonce})">SIGN <span class="btn-qual">OFF-CHAIN</span></button>
             <button class="alt-link" style="width:100%" title="${apTitle}" onclick="doApprove(${S.sel},${tx.nonce})">APPROVE ON-CHAIN INSTEAD</button>
@@ -6064,7 +6081,58 @@ function retryOwnerName(i){
 // `sayKinds` is true for exactly one row per form — the first empty one — so an
 // operator opening CREATE sees which namespaces an owner may be given in,
 // without the same line repeated down every unfilled row.
-function ownerRowNote(ow, i, explorerBase, sayKinds){
+// Does an owner have code on the chain this form deploys to?
+//
+// An owner with code cannot sign. The vault verifies with ecrecover and has no
+// ERC-1271 path, so a contract owner — a DAO, a nested multisig, or a Coinbase
+// Smart Wallet, which is what most Basenames resolve to — authorises by calling
+// approve() on the vault instead. That works, and every proposal row offers it,
+// but it costs a transaction per approval instead of a free signature, for the
+// life of the vault. The owner set is the one thing a deploy cannot take back,
+// so this belongs before the deploy rather than after the first proposal.
+//
+// Advisory, never blocking. A contract owner is a legitimate choice and this
+// only exists to make sure it is a chosen one.
+//
+// Read on the primary deploy chain. An account can have code on one chain and
+// not another, and a multichain deploy carries the same owner set to all of
+// them, so this answers for the chain the form is aimed at and does not claim
+// to answer for the rest.
+//
+// Code alone does not answer it. An EOA that has delegated under EIP-7702 has
+// code — 0xef0100 followed by its delegate — and still holds the key that signs,
+// so ecrecover works for it exactly as before. This app supports those accounts
+// deliberately, and telling one of them it cannot sign would push somebody who
+// signs for free into paying gas on every proposal for the life of the vault.
+// So the delegation prefix is read, not just the presence of bytes.
+//
+// Returns null until the chain answers, then 'eoa' | '7702' | 'contract'.
+const _ownerCode = {};
+function ownerSignerKind(addr, chainId){
+  // CHAINS is checked, not just chainId's truthiness: makeProvider reads
+  // CHAINS[id].rpcs and throws on a chain it does not know, and this runs
+  // inside render() — where a synchronous throw is a blank page rather than a
+  // missing note.
+  if(!addr || !ethers.isAddress(addr) || !chainId || !CHAINS[chainId]) return null;
+  const k = addr.toLowerCase() + '@' + chainId;
+  if(_ownerCode[k] !== undefined) return _ownerCode[k];
+  _ownerCode[k] = null;                       // in flight; null also means "not yet"
+  makeProvider(chainId).getCode(addr)
+    .then(c => {
+      _ownerCode[k] = !c || c === '0x' ? 'eoa'
+        : /^0xef0100/i.test(c) ? '7702'       // still a key behind it
+        : 'contract';
+      render();
+    })
+    // Unanswered is not "no code": drop it so a later paint asks again rather
+    // than reporting an EOA because an RPC blinked.
+    .catch(() => { delete _ownerCode[k]; });
+  return null;
+}
+// The only kind that cannot produce a signature this vault can verify.
+function cannotSign(addr, chainId){ return ownerSignerKind(addr, chainId) === 'contract'; }
+const CONTRACT_NOTE = 'CONTRACT &middot; APPROVES ON-CHAIN, CANNOT SIGN';
+function ownerRowNote(ow, i, explorerBase, sayKinds, chainId){
   const pv = ow.pv;
   if(ow.state === 'invalid') {
     // esc(), unlike the two status-node callers: this one is written as HTML
@@ -6077,14 +6145,20 @@ function ownerRowNote(ow, i, explorerBase, sayKinds){
     html: pv && pv.state === 'ok' ? `DUPLICATE &mdash; ${esc(shortAddr(pv.addr))} IS ALREADY LISTED ABOVE` : 'DUPLICATE &mdash; ALREADY LISTED ABOVE',
     color:'var(--r)', num:'var(--r)' };
   if(ow.state === 'empty' && sayKinds) return { html: esc(nameKindsHint()), color:'var(--d)', num:_OWNER_STATE_COLOR.empty };
+  if(ow.state === 'address' && cannotSign(ow.raw, chainId))
+    return { html: CONTRACT_NOTE, color:'var(--y)', num:'var(--y)' };
   if(ow.state !== 'name') return { html:'', color:'var(--d)', num:_OWNER_STATE_COLOR[ow.state] || 'var(--d)' };
   if(!pv || pv.state === 'resolving') return { html:'NAME &middot; RESOLVING&hellip;', color:'var(--a)', num:'var(--a)' };
   if(pv.state === 'err') return {
     html: `${esc(pv.err)} <button class="reject-link" style="padding:1px 8px;margin-left:6px" onclick="retryOwnerName(${i})">RETRY</button>`,
     color:'var(--r)', num:'var(--r)' };
+  // A name is the likeliest way to arrive at a contract owner without meaning
+  // to, so the resolved address is checked too and the note rides beside it.
+  const code = cannotSign(pv.addr, chainId);
   return {
-    html: `&rarr; <a href="${explorerBase}/address/${esc(pv.addr)}" target="_blank" rel="noopener" title="${esc(pv.addr)} &middot; view on explorer" style="color:var(--g);text-decoration:none;border-bottom:1px solid var(--ln)">${esc(shortAddr(pv.addr))}</a>`,
-    color:'var(--g)', num:'var(--g)' };
+    html: `&rarr; <a href="${explorerBase}/address/${esc(pv.addr)}" target="_blank" rel="noopener" title="${esc(pv.addr)} &middot; view on explorer" style="color:${code?'var(--y)':'var(--g)'};text-decoration:none;border-bottom:1px solid var(--ln)">${esc(shortAddr(pv.addr))}</a>`
+      + (code ? ` &middot; ${CONTRACT_NOTE}` : ''),
+    color: code ? 'var(--y)' : 'var(--g)', num: code ? 'var(--y)' : 'var(--g)' };
 }
 
 // The identity offer, folded out of the vault name that is already being typed.
