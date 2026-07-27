@@ -134,6 +134,19 @@ let _addChainParams = null;
 // about. The app owns this list; without it a session is built for the one chain
 // the page is currently on.
 let _wcChains = null;
+// How often a provider built here should ask the wallet whether the head moved.
+// This is what decides when `tx.wait()` reports a receipt, and ethers' default of
+// four seconds was written for a chain whose blocks take twelve. On a one-second
+// chain it means the interface stands still for up to four seconds after the
+// transaction has landed — the wait is the app's, not the chain's. The app owns
+// the number because only it knows which chain the wallet is on; 0 leaves the
+// ethers default alone.
+let _pollMs = 0;
+function _browserProvider(wp) {
+  const p = new ethers.BrowserProvider(wp, 'any');
+  if (_pollMs) p.pollingInterval = _pollMs;
+  return p;
+}
 
 // --- EIP-6963 ---
 window.addEventListener('eip6963:announceProvider', (event) => {
@@ -311,7 +324,7 @@ async function connectWithWallet(walletKey) {
     // decided its network was a constant. The row went red over a deployed vault,
     // the run walked on to the next chain and did the same again, and neither
     // clone was ever recorded — the DB write sits after the throw.
-    _walletProvider = new ethers.BrowserProvider(walletProvider, 'any');
+    _walletProvider = _browserProvider(walletProvider);
     _signer = await _walletProvider.getSigner();
     _connectedAddress = await _signer.getAddress();
     _walletDisplayName = _connectedAddress.slice(0,6) + '...' + _connectedAddress.slice(-4);
@@ -454,7 +467,7 @@ async function _onAccountsChanged(accts) {
   if (_connectedAddress && next.toLowerCase() === _connectedAddress.toLowerCase()) return;
   if (!canDelegate || !_connectedWalletProvider) { window.location.reload(); return; }
   const prev = _connectedAddress;
-  _walletProvider = new ethers.BrowserProvider(_connectedWalletProvider, 'any');
+  _walletProvider = _browserProvider(_connectedWalletProvider);
   _signer = await _walletProvider.getSigner();
   _connectedAddress = await _signer.getAddress();
   _walletDisplayName = _connectedAddress.slice(0, 6) + '...' + _connectedAddress.slice(-4);
@@ -537,8 +550,21 @@ window.walletInit = function(opts) {
   _wcChains = Array.isArray(opts.chains) && opts.chains.length ? opts.chains.slice() : null;
   _onConnectCallbacks = Array.isArray(opts.onConnect) ? opts.onConnect : (opts.onConnect ? [opts.onConnect] : []);
   _onDisconnectCallbacks = Array.isArray(opts.onDisconnect) ? opts.onDisconnect : (opts.onDisconnect ? [opts.onDisconnect] : []);
+  if (opts.pollMs) window.walletSetPollMs(opts.pollMs);
   injectWalletModal();
   tryAutoConnect();
+};
+
+// Called by the app whenever the chain under it changes, from either direction —
+// its own switcher or the wallet moving on its own. The live provider is updated
+// as well as the next one built: a wait already in flight is exactly the case
+// this is for, and a provider is not rebuilt on a chain change (deliberately, so
+// a switch mid-deploy does not throw away the run).
+window.walletSetPollMs = function(ms) {
+  const n = Number(ms);
+  if (!Number.isFinite(n) || n <= 0) return;
+  _pollMs = n;
+  try { if (window._walletProvider) window._walletProvider.pollingInterval = n; } catch (e) {}
 };
 
 // Every code path here used to end in an empty catch, which collapsed three
@@ -578,7 +604,7 @@ const _rejected = c => c === 4001 || c === 'ACTION_REJECTED';
 // stale is safer than confidently wrong.
 window.walletRebindSigner = async function() {
   if (!_connectedWalletProvider) return null;
-  const p = new ethers.BrowserProvider(_connectedWalletProvider, 'any');
+  const p = _browserProvider(_connectedWalletProvider);
   let s;
   if (_connectedAddress) {
     // getSigner(address) checks the address against the wallet's accounts and

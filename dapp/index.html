@@ -274,15 +274,13 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 .sep{height:1px;background:var(--ln);margin:32px 0}
 
 /* vault tabs */
-.vtabs{overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
-.vtabs::-webkit-scrollbar{display:none}
-/* A vault past the right edge was simply not there. This strip scrolls whenever
-   the names outrun the row — 457px of it is off-screen on a 390px phone with
-   four vaults, and it still loses 72px at 900px — and the scrollbar that would
-   have said so is hidden two lines above, deliberately. So more than half the
-   vault list was unreachable-looking on a phone, on the one control the whole
-   app routes through: the attention bar sends you to another vault, and this is
-   what you arrive at to switch.
+/* The scrollbar is hidden on purpose, and the background is what replaces it.
+   A vault past the right edge was simply not there: this strip scrolls whenever
+   the names outrun the row — 457px of it off-screen on a 390px phone with four
+   vaults, and it still loses 72px at 900px — so more than half the vault list
+   looked unreachable on the one control the whole app routes through. The
+   attention bar sends you to another vault; this is what you arrive at to
+   switch.
    Drawn by the container's own background rather than by a mask, because a mask
    is unconditional and this must not claim there is more when there is not. The
    two gradients set `local` scroll WITH the content and sit over the two set
@@ -295,12 +293,14 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
    already has a hairline under it and a second hard edge crossing that one at
    right angles would read as a border, not as a horizon. */
 .vtabs{
+  overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;
   background:
     linear-gradient(to right, var(--bg) 55%, transparent) left center / 26px 100% no-repeat local,
     linear-gradient(to left,  var(--bg) 55%, transparent) right center / 26px 100% no-repeat local,
     linear-gradient(to right, color-mix(in srgb,var(--a) 22%,transparent), transparent) left center / 16px 100% no-repeat scroll,
     linear-gradient(to left,  color-mix(in srgb,var(--a) 22%,transparent), transparent) right center / 16px 100% no-repeat scroll;
 }
+.vtabs::-webkit-scrollbar{display:none}
 /* max-content is what makes the strip scroll instead of fitting, and it belongs
    only to the breakpoint that wants scrolling. Above it the tabs share the row,
    and leaving it on would hand a long holdings summary — now that .vtab-info is
@@ -682,7 +682,13 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
   .hbar{font-size:10px}
   .logo{font-size:24px}
   .sub{font-size:8px;letter-spacing:7.5px}
-  .info-i{width:16px;height:16px;font-size:8px}
+  /* 16px is the right SIZE for this glyph beside a 24px wordmark and the wrong
+     target. The last discrete control in the app under the 24px floor that is
+     not a link inside a sentence, so it gets the same treatment .icon-btn and
+     .attn-jump use: a transparent ::after carries the touch box, the visual
+     circle keeps its dimensions, and the header lockup does not move. */
+  .info-i{width:16px;height:16px;font-size:8px;position:relative}
+  .info-i::after{content:"";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:44px;height:44px}
   .info-tip{width:min(340px,90vw);font-size:12px;padding:20px}
   .hdr{padding:18px 0 12px}
   .hdr-r{gap:8px}
@@ -729,7 +735,20 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
   .owner-row .o-label{grid-column:label}
   .toast{bottom:max(20px,env(safe-area-inset-bottom));max-width:88vw}
   .footer{font-size:8px;letter-spacing:1px}
-  .footer-l,.footer-r{gap:8px}
+  /* The footer is the last row of discrete controls in the app still sitting at
+     text height. Six of them — the network switcher, three doc links, RESET,
+     and the colophon — at 11-19px tall with 8px between them, on a phone, where
+     RESET discards state and the chain button opens a picker. That is under
+     even the 24px minimum, let alone the 44px the rest of the app holds itself
+     to, and these are a link ROW rather than links inside a sentence, so the
+     inline exemption does not cover them.
+     Padding rather than the ::after trick .icon-btn and .attn-jump use: those
+     grow a target inside a line of running text that must not reflow, whereas
+     this row IS the line, and two rows of grown ::after boxes 8px apart would
+     overlap each other vertically instead. Widening the horizontal gap with it,
+     so neighbours separate in both axes at once. */
+  .footer-l,.footer-r{gap:14px;row-gap:2px}
+  .footer .docs-link,.footer .reset-btn{padding-top:7px;padding-bottom:7px}
   .colophon{font-size:8px;letter-spacing:1px;gap:6px;margin:8px 0 12px}
   .colophon svg{width:12px;height:12px}
   .empty{padding:60px 0}
@@ -1015,15 +1034,34 @@ input.amt-in:focus{outline:none;box-shadow:none!important;border-bottom-color:tr
 'use strict';
 
 // ── CHAIN CONFIG ──────────────────────────────────────────────────
+// `blockMs` is how long a block takes on the chain, and it is the only number in
+// here the interface *feels*. Everything timed was written against Ethereum's
+// twelve seconds — the block counter polled every 12s, and ethers' own 4s
+// polling deciding when a mined transaction is reported as mined — which on a
+// chain that settles in one second means the app sat still for four of them
+// after the work was already done, and a block counter that jumped in twelves.
+// MegaETH is the chain that makes that visible (measured: ~1s per block), but
+// Arbitrum has been a quarter of a second all along. See tickMs() and
+// makeProvider().
 const CHAINS = {
-  1:        { name:'Ethereum',     rpcs:['https://ethereum.publicnode.com','https://1rpc.io/eth','https://eth.drpc.org'],             explorer:'https://etherscan.io',           hex:'0x1' },
-  8453:     { name:'Base',         rpcs:['https://base.publicnode.com','https://1rpc.io/base','https://base.drpc.org'],               explorer:'https://basescan.org',           hex:'0x2105' },
-  42161:    { name:'Arbitrum',    rpcs:['https://arbitrum-one.publicnode.com','https://1rpc.io/arb','https://arbitrum.drpc.org'],    explorer:'https://arbiscan.io',            hex:'0xa4b1' },
-  10:       { name:'OP Mainnet', rpcs:['https://optimism.publicnode.com','https://1rpc.io/op','https://optimism.drpc.org'],       explorer:'https://optimistic.etherscan.io', hex:'0xa' },
-  11155111: { name:'Sepolia',      rpcs:['https://ethereum-sepolia.publicnode.com','https://1rpc.io/sepolia','https://sepolia.drpc.org'], explorer:'https://sepolia.etherscan.io',   hex:'0xaa36a7' },
-  84532:    { name:'Base Sepolia', rpcs:['https://base-sepolia.publicnode.com','https://sepolia.base.org'],                           explorer:'https://sepolia.basescan.org',   hex:'0x14a34' },
-  4326:     { name:'MegaETH',     rpcs:['https://mainnet.megaeth.com/rpc','https://rpc-megaeth-mainnet.globalstake.io','https://megaeth.drpc.org'], explorer:'https://mega.etherscan.io',      hex:'0x10e6' },
+  1:        { name:'Ethereum',     rpcs:['https://ethereum.publicnode.com','https://1rpc.io/eth','https://eth.drpc.org'],             explorer:'https://etherscan.io',           hex:'0x1',       blockMs:12000 },
+  8453:     { name:'Base',         rpcs:['https://base.publicnode.com','https://1rpc.io/base','https://base.drpc.org'],               explorer:'https://basescan.org',           hex:'0x2105',    blockMs:2000 },
+  42161:    { name:'Arbitrum',    rpcs:['https://arbitrum-one.publicnode.com','https://1rpc.io/arb','https://arbitrum.drpc.org'],    explorer:'https://arbiscan.io',            hex:'0xa4b1',    blockMs:250 },
+  10:       { name:'OP Mainnet', rpcs:['https://optimism.publicnode.com','https://1rpc.io/op','https://optimism.drpc.org'],       explorer:'https://optimistic.etherscan.io', hex:'0xa',       blockMs:2000 },
+  11155111: { name:'Sepolia',      rpcs:['https://ethereum-sepolia.publicnode.com','https://1rpc.io/sepolia','https://sepolia.drpc.org'], explorer:'https://sepolia.etherscan.io',   hex:'0xaa36a7',  blockMs:12000 },
+  84532:    { name:'Base Sepolia', rpcs:['https://base-sepolia.publicnode.com','https://sepolia.base.org'],                           explorer:'https://sepolia.basescan.org',   hex:'0x14a34',   blockMs:2000 },
+  4326:     { name:'MegaETH',     rpcs:['https://mainnet.megaeth.com/rpc','https://rpc-megaeth-mainnet.globalstake.io','https://megaeth.drpc.org'], explorer:'https://mega.etherscan.io',      hex:'0x10e6',    blockMs:1000 },
 };
+
+// How often to ask a chain anything that is answered by its head: the block
+// counter, and ethers' wait-for-receipt loop. A block's worth, floored at 1s so
+// Arbitrum's quarter-second does not turn into four requests a second, and
+// capped at Ethereum's 12s because nothing here is worth waiting longer than
+// that for. Unknown chain → the old constant, which is the safe end.
+function chainPollMs(id){
+  const b = (CHAINS[id] && CHAINS[id].blockMs) || 12000;
+  return Math.min(12000, Math.max(1000, b));
+}
 
 const _providerCache = {};
 // A FallbackProvider is not self-healing: ethers marks a backend with
@@ -1039,15 +1077,27 @@ function makeProvider(id) {
   const cached = _providerCache[id];
   if (cached && !cached._wedged) return cached;
   const c = CHAINS[id];
-  const p = c.rpcs.length === 1
-    ? new ethers.JsonRpcProvider(c.rpcs[0], id, { staticNetwork: true })
+  // ethers polls every 4s by default, which is a reasonable guess for a chain
+  // whose blocks take twelve and a bad one for a chain whose blocks take one:
+  // it decides how long after a receipt exists anything awaiting it is told.
+  //
+  // Passed as a constructor option, not assigned afterwards. AbstractProvider —
+  // which FallbackProvider inherits from and does not override — declares
+  // pollingInterval as a getter with no setter, so `p.pollingInterval = ms`
+  // throws a TypeError in strict mode, and every chain here carries more than
+  // one RPC, which means the wrapper is the only shape this function ever
+  // builds. The option reaches the same private field the getter reads, on both
+  // shapes, and it is what a block subscription or waitForTransaction on this
+  // provider polls at.
+  const ms = chainPollMs(id);
+  const kids = c.rpcs.map(url =>
+    new ethers.JsonRpcProvider(url, id, { staticNetwork: true, pollingInterval: ms }));
+  const p = kids.length === 1
+    ? kids[0]
     : new ethers.FallbackProvider(
-        c.rpcs.map((url, i) => ({
-          provider: new ethers.JsonRpcProvider(url, id, { staticNetwork: true }),
-          priority: i + 1, stallTimeout: 2000
-        })),
+        kids.map((provider, i) => ({ provider, priority: i + 1, stallTimeout: 2000 })),
         id,
-        { quorum: 1 }
+        { quorum: 1, pollingInterval: ms }
       );
   const perform = typeof p._perform === 'function' ? p._perform.bind(p) : null;
   if (perform) p._perform = async req => {
@@ -1068,7 +1118,12 @@ const ADD_CHAIN_PARAMS = {
   10:       { chainId:'0xa',   chainName:'OP Mainnet',   rpcUrls:['https://mainnet.optimism.io'],             blockExplorerUrls:['https://optimistic.etherscan.io'], nativeCurrency:{name:'ETH',symbol:'ETH',decimals:18} },
   84532:    { chainId:'0x14a34', chainName:'Base Sepolia',   rpcUrls:['https://sepolia.base.org'],                blockExplorerUrls:['https://sepolia.basescan.org'],  nativeCurrency:{name:'ETH',symbol:'ETH',decimals:18} },
   11155111: { chainId:'0xaa36a7',chainName:'Sepolia',        rpcUrls:['https://ethereum-sepolia.publicnode.com'], blockExplorerUrls:['https://sepolia.etherscan.io'],  nativeCurrency:{name:'ETH',symbol:'ETH',decimals:18} },
-  4326:     { chainId:'0x10e6',  chainName:'MegaETH',       rpcUrls:['https://mainnet.megaeth.com/rpc'],                 blockExplorerUrls:['https://mega.etherscan.io'],    nativeCurrency:{name:'ETH',symbol:'ETH',decimals:18} },
+  // Two RPCs, unlike the rows above, and for a reason that is specific to this
+  // chain: MegaETH is the one an operator's wallet is least likely to already
+  // know, so this entry is the one that actually gets used — and a wallet keeps
+  // whatever it is handed here for good. The others are chains a wallet ships
+  // with, where this row is a fallback that rarely fires.
+  4326:     { chainId:'0x10e6',  chainName:'MegaETH',       rpcUrls:['https://mainnet.megaeth.com/rpc','https://rpc-megaeth-mainnet.globalstake.io'], blockExplorerUrls:['https://mega.etherscan.io'],    nativeCurrency:{name:'ETH',symbol:'ETH',decimals:18} },
 };
 
 // ── ABIs ──────────────────────────────────────────────────────────
@@ -1960,6 +2015,23 @@ const WBTC_ICON = `<svg width="14" height="14" viewBox="0 0 32 32" xmlns="http:/
 const CBBTC_ICON = `<svg width="14" height="14" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><circle cx="16" cy="16" r="16" fill="#0052FF"/><path fill="#FFF" d="M23.189 14.02c.314-2.096-1.283-3.223-3.465-3.975l.708-2.84-1.728-.43-.69 2.765c-.454-.114-.92-.22-1.385-.326l.695-2.783L15.596 6l-.708 2.839c-.376-.086-.746-.17-1.104-.26l.002-.009-2.384-.595-.46 1.846s1.283.294 1.256.312c.7.175.826.638.805 1.006l-.806 3.235c.048.012.11.03.18.057l-.183-.045-1.13 4.532c-.086.212-.303.531-.793.41.018.025-1.256-.313-1.256-.313l-.858 1.978 2.25.561c.418.105.828.215 1.231.318l-.715 2.872 1.727.43.708-2.84c.472.127.93.245 1.378.357l-.706 2.828 1.728.43.715-2.866c2.948.558 5.164.333 6.097-2.333.752-2.146-.037-3.385-1.588-4.192 1.13-.26 1.98-1.003 2.207-2.538zm-3.95 5.538c-.533 2.147-4.148.986-5.32.695l.95-3.805c1.172.293 4.929.872 4.37 3.11zm.535-5.569c-.487 1.953-3.495.96-4.47.717l.86-3.45c.975.243 4.118.696 3.61 2.733z"/></svg>`;
 const WSTETH_ICON = `<svg width="14" height="14" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><g fill="none"><circle fill="#00A3FF" cx="16" cy="16" r="16"/><path d="M9.437 14.864l-.181.275c-2.048 3.097-1.603 7.253 1.034 9.824 1.561 1.521 3.622 2.353 5.683 2.353 0 0 0 0-6.536-12.452z" fill="#FFF"/><path opacity=".6" d="M15.997 18.611l-6.56-3.747c6.56 12.452 6.56 12.452 6.56 12.452 0-2.683 0-5.623 0-8.705z" fill="#FFF"/><path opacity=".6" d="M22.563 14.864l.181.275c2.048 3.097 1.603 7.253-1.034 9.824-1.561 1.521-3.622 2.353-5.683 2.353 0 0 0 0 6.536-12.452z" fill="#FFF"/><path opacity=".2" d="M16.003 18.611l6.56-3.747c-6.56 12.452-6.56 12.452-6.56 12.452 0-2.683 0-5.623 0-8.705z" fill="#FFF"/><path opacity=".2" d="M16.004 10.239v6.459l5.654-3.23-5.654-3.229z" fill="#FFF"/><path opacity=".6" d="M16.005 10.239l-5.655 3.229 5.655 3.23v-6.46z" fill="#FFF"/><path d="M16.005 4.805l-5.655 8.668 5.655-3.233V4.805z" fill="#FFF"/><path opacity=".6" d="M16.004 10.238l5.658 3.23-5.658-8.674v5.444z" fill="#FFF"/></g></svg>`;
 
+// The MegaETH mark, kept in pieces because three things are drawn from it: the
+// chain logo (CHAIN_ICONS below), the MEGA token, and USDm — whose own logo is
+// the mark with the two dots under the M swapped for a pair of dollar signs.
+// Redrawing it three times is how the three would drift apart; this way the M is
+// literally the same path. Defined up here rather than beside the other chain
+// logos only because PROD_TOKENS, a few lines down, needs it.
+const MEGA_M    = 'M71.0365 51.3927H104.799C111.152 68.5801 127.731 117.277 128.941 119.991C129.243 118.634 145.943 65.5649 150.662 51.6943H185.756V172.759C181.399 170.346 177.042 167.935 172.323 165.22C169.055 163.563 166.03 161.753 162.703 160.396C162.4 136.877 162.098 113.508 161.372 89.0842C156.652 103.105 140.376 152.557 139.045 153.913H117.323C117.323 153.913 96.2066 93.9085 95.178 91.1949C94.8757 114.262 94.5731 137.329 93.7866 161.15C80.8383 167.783 73.1544 171.553 70.7344 172.457V51.3927H71.0365Z';
+const MEGA_DOT_R = 'M153.018 199.027C160.881 199.027 167.23 192.682 167.23 184.855C167.23 177.028 160.881 170.683 153.018 170.683C145.217 170.683 138.867 177.028 138.867 184.855C138.867 192.682 145.217 199.027 153.018 199.027Z';
+const MEGA_DOT_L = 'M102.073 199.448C109.935 199.448 116.225 193.103 116.225 185.276C116.225 177.45 109.935 171.105 102.073 171.105C94.2719 171.105 87.9219 177.45 87.9219 185.276C87.9219 193.103 94.2719 199.448 102.073 199.448Z';
+const MEGA_RING = 'M128.03 20.3533C187.265 20.3533 235.67 68.5983 235.67 128C235.67 187.402 187.447 235.647 128.03 235.647C68.6136 235.647 20.3904 187.402 20.3904 128C20.3904 68.5983 68.6136 20.3533 128.03 20.3533ZM128.03 0C57.2991 0 0 57.2911 0 128C0 198.709 57.2991 256 128.03 256C198.701 256 256 198.709 256 128C256 57.2911 198.701 0 128.03 0Z';
+const MEGA_ICON = `<svg width="14" height="14" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg"><circle cx="128" cy="128" r="128" fill="#fff"/><path d="${MEGA_DOT_R}" fill="#19191A"/><path d="${MEGA_DOT_L}" fill="#19191A"/><path d="${MEGA_M}" fill="#19191A"/><path d="${MEGA_RING}" fill="#19191A"/></svg>`;
+// USDm: the same M on MegaUSD's green, with the dots as dollar signs. The
+// dollars are text rather than a path — a sans-serif `$` is one glyph every
+// system has, and it is the one character in this interface that has to be
+// legible at 12px inside a table cell.
+const USDM_ICON = `<svg width="14" height="14" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg"><circle cx="128" cy="128" r="128" fill="#9DBCA4"/><circle cx="128" cy="128" r="117" fill="#3B6B47"/><path d="${MEGA_M}" fill="#F5FBFF"/><text x="103" y="204" font-family="Arial,Helvetica,sans-serif" font-size="50" font-weight="700" fill="#F5FBFF" text-anchor="middle">$</text><text x="155" y="204" font-family="Arial,Helvetica,sans-serif" font-size="50" font-weight="700" fill="#F5FBFF" text-anchor="middle">$</text></svg>`;
+
 const ETH_ONLY = [{ symbol:'ETH', address:ethers.ZeroAddress, decimals:18, icon:ETH_ICON }];
 
 const PROD_TOKENS = {
@@ -1979,10 +2051,19 @@ const PROD_TOKENS = {
     { symbol:'cbBTC',  address:'0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf',   decimals:8,  icon:CBBTC_ICON },
     { symbol:'wstETH', address:'0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452',   decimals:18, icon:WSTETH_ICON },
   ],
+  // Every address here is EIP-55 as ethers spells it, and that is not cosmetic:
+  // these strings are encoded as `address` arguments, which rejects a mixed-case
+  // address whose checksum does not verify — and the encode that throws is the
+  // one batching *all* of a chain's balance reads, so a single mis-cased
+  // constant took the whole holdings panel down with it. USDT0 and wstETH were
+  // both mis-cased here, which is why MegaETH showed nothing but ETH.
   4326: [
     { symbol:'ETH',    address:ethers.ZeroAddress,                              decimals:18, icon:ETH_ICON },
-    { symbol:'USDT0',  address:'0xb8ce59FC3717adA4C02eaDF9682a9E934F625EBb',   decimals:6,  icon:USDT_ICON },
-    { symbol:'wstETH', address:'0x601Ac63637933d88285a025C685Ac4E9a92a98DA',   decimals:18, icon:WSTETH_ICON },
+    { symbol:'MEGA',   address:'0x28B7E77f82B25B95953825F1E3eA0E36c1c29861',   decimals:18, icon:MEGA_ICON },
+    { symbol:'USDm',   address:'0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7',   decimals:18, icon:USDM_ICON },
+    { symbol:'USDT0',  address:'0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb',   decimals:6,  icon:USDT_ICON },
+    { symbol:'WBTC',   address:'0x32090fB1399a31cC095e6341a6353b7c09ba84FB',   decimals:8,  icon:WBTC_ICON },
+    { symbol:'wstETH', address:'0x601aC63637933D88285A025C685AC4e9a92a98dA',   decimals:18, icon:WSTETH_ICON },
   ],
   42161: [
     { symbol:'ETH',    address:ethers.ZeroAddress,                              decimals:18, icon:ETH_ICON },
@@ -2090,8 +2171,14 @@ async function fetchTokenMeta(address){
 }
 // Effective token list for a vault: built-ins + its saved custom tokens.
 function vaultTokens(v){
+  // In the demo the vault's chain is a property of the mock, not of what the
+  // app is pointed at, and the token list has to follow the vault: a MegaETH
+  // vault was being offered mainnet's USDC/DAI/WBTC because the app happened to
+  // be on mainnet, and a transfer built from that list would be denominated in
+  // a token that does not exist where the vault is.
+  if(S.demoMode) return v && v.chain ? (PROD_TOKENS[chainIdOfName(v.chain)] || ETH_ONLY) : (PROD_TOKENS[S.chainId] || ETH_ONLY);
   const base = PROD_TOKENS[S.chainId] || ETH_ONLY;
-  if(S.demoMode || !v || !v.address) return base;
+  if(!v || !v.address) return base;
   const seen = new Set(base.map(t => t.address.toLowerCase()));
   const custom = customTokensFor(S.chainId, v.address)
     .filter(t => !seen.has(t.address.toLowerCase()))
@@ -2100,10 +2187,11 @@ function vaultTokens(v){
 }
 // The currently-selected transfer token, resolved to {symbol,address,decimals}.
 function curTok(v){
-  if(!S.demoMode){
-    const t = vaultTokens(v).find(t => t.symbol === S.txToken);
-    if(t) return t;
-  }
+  // Demo included: vaultTokens now answers for the vault's own chain there, so
+  // the selected token resolves to a real address and its real decimals rather
+  // than to a symbol with an empty address and a guessed 18.
+  const t = vaultTokens(v).find(t => t.symbol === S.txToken);
+  if(t) return t;
   return { symbol: S.txToken, address: S.txToken === 'ETH' ? ethers.ZeroAddress : '', decimals: DECIMALS[S.txToken] || 18, icon: iconForSym(S.txToken) };
 }
 
@@ -2117,17 +2205,74 @@ const CHAINLINK_FEEDS = {
     'cbBTC':  '0x07DA0E54543a844a80ABE69c8A12F22B3aA59f9D',
   },
   42161: {
-    'ETH':    '0x639Fe6ab55C613B19FfBc10bd51CdeB9585D6EB6',
+    // Two things were wrong with the address that used to sit here
+    // (0x639Fe6ab55C613B19FfBc10bd51CdeB9585D6EB6): its checksum did not verify,
+    // so encoding the price call threw and took every Arbitrum balance read in
+    // the same batch down with it, and there is no contract at those bytes on
+    // Arbitrum anyway. This is Chainlink's ETH/USD proxy there, and it answers
+    // latestAnswer() with 8 decimals like the rest of this table.
+    'ETH':    '0x639Fe6ab55C921f74e7fac1ee960C0B6293ba612',
     'WBTC':   '0xd0C7101eACbB49F3deCcCc166d238410D6D46d57',
   },
   10: {
     'ETH':    '0x13e3Ee699D1909E989722E753853AE30b17e08c5',
     'WBTC':   '0x718A5788b89454aAE3A028AE9c111A29Be6c2a6F',
   },
+  // No 4326 entry: Chainlink publishes no feeds on MegaETH. ETH is the same
+  // asset there as anywhere, so its price comes off mainnet's feed instead —
+  // see ethUsdFallback() below.
 };
 
+// A mixed-case address whose EIP-55 checksum does not verify is not something
+// ethers shrugs at: it throws at encode time. Both tables above are encoded into
+// a single aggregate3() per chain, so one mis-cased constant does not hide one
+// row — it throws before the call is made and blanks every holding on that
+// chain. That happened twice (MegaETH's USDT0 and wstETH, Arbitrum's ETH feed)
+// and each time the symptom was a treasury that looked empty rather than an
+// error. The literals are fixed; this closes the class, by re-deriving the
+// checksum from the bytes at load and complaining in the console instead of at
+// the first read.
+(function canonicaliseAddressTables(){
+  const fix = (obj, key, where) => {
+    const v = obj[key];
+    if(typeof v !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(v)) return;
+    let ok = false;
+    try { ok = ethers.getAddress(v) === v; } catch(_){}
+    if(ok) return;
+    const canonical = ethers.getAddress(v.toLowerCase());
+    console.warn(`Bad address checksum in ${where}: ${v} → ${canonical}`);
+    obj[key] = canonical;
+  };
+  Object.entries(PROD_TOKENS).forEach(([id, list]) =>
+    list.forEach(t => fix(t, 'address', `PROD_TOKENS[${id}] ${t.symbol}`)));
+  Object.entries(CHAINLINK_FEEDS).forEach(([id, feeds]) =>
+    Object.keys(feeds).forEach(sym => fix(feeds, sym, `CHAINLINK_FEEDS[${id}] ${sym}`)));
+})();
+
+// ETH's price for a chain that has no feed of its own. A vault on MegaETH holds
+// the same ETH as a vault on mainnet, and quoting one of them in dollars and the
+// other in bare token counts is a difference in this interface, not in the
+// holding: the treasury total, the transfer review and the holdings table all
+// read the same `usd` field, so a chain without a local feed lost its dollars
+// everywhere at once.
+//
+// Cached for two minutes and never awaited on its own: the caller starts it
+// alongside the chain's own reads, so a slow or blocked mainnet delays no
+// balance. A failure returns 0, which is what every USD site here already
+// treats as "no price" — the balances still render.
+let _ethUsd = { at: 0, price: 0 };
+async function ethUsdFallback(){
+  if(_ethUsd.price > 0 && Date.now() - _ethUsd.at < 120000) return _ethUsd.price;
+  try {
+    const feed = new ethers.Contract(CHAINLINK_FEEDS[1].ETH, CHAINLINK_ABI, mainnetRpc());
+    const answer = Number(await feed.latestAnswer()) / 1e8;
+    if(answer > 0){ _ethUsd = { at: Date.now(), price: answer }; return answer; }
+  } catch(e){ console.warn('Mainnet ETH price:', e && e.message); }
+  return 0;
+}
+
 // Demo token lists for display in create form
-const DEMO_TOKENS = {ETHEREUM:["ETH","USDC","USDT","DAI","WBTC","wstETH"],BASE:["ETH","USDC","USDT","DAI","cbBTC","wstETH"],MEGAETH:["ETH","USDT0","wstETH"],ARBITRUM:["ETH","USDC","USDT","DAI","WBTC","wstETH"],"OP MAINNET":["ETH","USDC","USDT","DAI","WBTC","wstETH"],SEPOLIA:["ETH"],"BASE SEPOLIA":["ETH"]};
+const DEMO_TOKENS = {ETHEREUM:["ETH","USDC","USDT","DAI","WBTC","wstETH"],BASE:["ETH","USDC","USDT","DAI","cbBTC","wstETH"],MEGAETH:["ETH","MEGA","USDm","USDT0","WBTC","wstETH"],ARBITRUM:["ETH","USDC","USDT","DAI","WBTC","wstETH"],"OP MAINNET":["ETH","USDC","USDT","DAI","WBTC","wstETH"],SEPOLIA:["ETH"],"BASE SEPOLIA":["ETH"]};
 
 // ── DATABASE (self-hosted PostgREST) ──────────────────────────────
 // Minimal PostgREST client — a small fluent query builder covering just
@@ -2287,7 +2432,14 @@ function getMC3() {
 }
 const SENTINEL = '0x0000000000000000000000000000000000000001';
 // ── DEMO DATA ─────────────────────────────────────────────────────
-const DEMO_YOU = "0x1a2bc8e5c135b427a7b75e21483ae304399c3c4d";
+// EIP-55, like every address the app shows outside the demo: ethers checksums
+// on the way out of resolveName() and getOwners(), so a lowercase demo address
+// is the one place in this interface where an address renders in a case the
+// real thing never does. Every address in the mock below is checksummed for the
+// same reason, and the approval maps key off those constants rather than
+// repeating them — a key that does not match its owner's `addr` character for
+// character reads as "has not signed".
+const DEMO_YOU = "0x1a2Bc8E5c135b427a7B75E21483aE304399C3c4D";
 const NETS = [{name:"ETHEREUM",id:1},{name:"BASE",id:8453},{name:"MEGAETH",id:4326},{name:"ARBITRUM",id:42161},{name:"OP MAINNET",id:10},{name:"SEPOLIA",id:11155111,test:true},{name:"BASE SEPOLIA",id:84532,test:true}];
 const EXPLORERS = {ETHEREUM:"https://etherscan.io",BASE:"https://basescan.org",MEGAETH:"https://mega.etherscan.io",ARBITRUM:"https://arbiscan.io","OP MAINNET":"https://optimistic.etherscan.io",SEPOLIA:"https://sepolia.etherscan.io","BASE SEPOLIA":"https://sepolia.basescan.org"};
 
@@ -2295,7 +2447,10 @@ const EXPLORERS = {ETHEREUM:"https://etherscan.io",BASE:"https://basescan.org",M
 const BASE_LOGO = `<svg viewBox="0 0 249 249" xmlns="http://www.w3.org/2000/svg"><path d="M0 19.671C0 12.9332 0 9.56425 1.26956 6.97276C2.48511 4.49151 4.49151 2.48511 6.97276 1.26956C9.56425 0 12.9332 0 19.671 0H229.329C236.067 0 239.436 0 242.027 1.26956C244.508 2.48511 246.515 4.49151 247.73 6.97276C249 9.56425 249 12.9332 249 19.671V229.329C249 236.067 249 239.436 247.73 242.027C246.515 244.508 244.508 246.515 242.027 247.73C239.436 249 236.067 249 229.329 249H19.671C12.9332 249 9.56425 249 6.97276 247.73C4.49151 246.515 2.48511 244.508 1.26956 242.027C0 239.436 0 236.067 0 229.329V19.671Z" fill="#0000FF"/></svg>`;
 const OP_LOGO = `<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path fill="#FF0421" d="M0 0h1024v1024H0z"/><path fill="#FAFAF9" d="M512.337 60c196.772 0 356.337 159.564 356.337 356.336 0 196.774-159.565 356.34-356.337 356.34v191.296C315.563 963.972 156 804.406 156 607.635c0-196.774 159.563-356.337 356.337-356.337V60Zm-1.651 275.693c-38.71 77.719-96.924 135.931-174.643 174.641v3.303c77.719 38.709 135.933 96.921 174.643 174.64h3.302c38.707-77.719 96.922-135.931 174.641-174.64v-3.303c-77.719-38.71-135.934-96.922-174.641-174.641h-3.302Z"/></svg>`;
 const ARB_LOGO = `<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><circle cx="16" cy="16" r="16" fill="#2C374B"/><path fill-rule="evenodd" clip-rule="evenodd" d="M24.6648 10.3409C24.5095 10.1923 17.6041 6.172 16.8067 5.7666C16.4554 5.58417 15.8067 5.53687 15.4352 5.66525C15.0027 5.80714 7.69192 10.0706 7.39463 10.3477C7.24598 10.4895 7.06355 10.726 6.98923 10.8747C6.86085 11.1382 6.8541 11.3206 6.83382 16.1923L6.82031 21.2327L7.75274 21.78C8.26624 22.0773 8.72571 22.3273 8.75949 22.3408C8.83381 22.3612 15.4689 11.7936 15.4689 11.6517C15.4689 11.5503 13.9689 11.5707 13.4352 11.6788C12.8811 11.8004 12.3946 12.0436 12.1176 12.3409C12.0027 12.4625 11.077 13.8544 10.0635 15.4355C9.05003 17.0166 8.19868 18.3341 8.1649 18.3679C8.13111 18.4085 8.10408 16.9422 8.10408 14.9355V11.4355L8.29327 11.2666C8.61759 10.9693 15.8 6.85444 15.9892 6.85444C16.1716 6.85444 16.273 6.90848 17.9352 7.86794C18.496 8.19226 19.996 9.05712 21.2797 9.78685C22.5635 10.5233 23.6784 11.199 23.7661 11.2868L23.9148 11.4558V18.7256L20.349 13.2505C20.1866 12.9855 20.0171 12.7225 19.9257 12.6005L19.9128 12.5807L19.9113 12.5816C19.8856 12.5487 19.8679 12.5301 19.8608 12.5301C19.8338 12.5368 19.6513 12.8341 18.8338 14.2125C18.7324 14.3814 18.5837 14.6382 18.5095 14.78L18.3675 15.0368L18.3688 15.039L18.3651 15.0413L18.4676 15.2101L18.5432 15.3408C18.5672 15.382 18.592 15.4204 18.6162 15.4547L18.8528 15.8438C18.8819 15.9079 18.9223 15.9804 18.9689 16.0503C19.077 16.2125 19.2189 16.4422 19.2865 16.5638C19.3035 16.5945 19.3219 16.6223 19.3404 16.6462L22.2631 21.4558L21.9148 21.6584C21.7167 21.7707 21.6219 21.8207 21.5619 21.8236L17.9063 16.1404L17.8135 15.9895L17.4824 16.5301L17.4575 16.5715L16.03 18.8918L16.0261 18.8947L18.8815 23.3831C18.5185 23.6677 16.106 25.3222 15.95 25.3222C15.7744 25.3222 12.6176 23.1517 12.6581 23.0773C12.6725 23.0485 13.6463 21.3965 14.8289 19.3902L14.8307 19.3871C15.8669 17.6291 17.0632 15.5996 17.9148 14.1517C18.9283 12.4355 19.3473 11.672 19.2797 11.6517C19.2324 11.6315 18.5568 11.6247 17.7865 11.6382L16.3811 11.6584L13.1378 17.003C11.9437 18.9751 10.8647 20.7534 10.2575 21.7541L10.2561 21.7565C9.9571 22.2492 9.77272 22.5531 9.74597 22.5976L9.59732 22.8408L12.1108 24.2868C13.496 25.084 14.8136 25.8341 15.05 25.9624C15.5433 26.226 16.1108 26.3139 16.5095 26.1787C16.773 26.0976 24.1986 21.8206 24.5703 21.5436C24.6851 21.4557 24.881 21.1923 24.9959 20.9557L25.1986 20.5368L25.1851 15.8408L25.1648 11.1449L25.0026 10.8274C24.9148 10.6517 24.7594 10.4287 24.6648 10.3409ZM23.909 18.8188L23.9148 18.8273V18.815L23.909 18.8188Z" fill="white"/><path d="M24.0516 18.918L19.8649 12.4966L18.2969 15.0132L22.3452 21.6942L24.1198 20.841L24.0516 18.918Z" fill="#24A2EE"/><path d="M22.0116 22.4215L17.8248 16L16.0234 18.8729L19.3839 24.2527L21.5326 23.3803L22.0116 22.4215Z" fill="#24A2EE"/><path fill-rule="evenodd" clip-rule="evenodd" d="M8.17569 11.494L16.0015 6.98539L23.8273 11.494V20.5058L16.0015 25.0144L10.2566 21.7046L9.49122 22.9541L15.7865 26.5809C15.9195 26.6576 16.0834 26.6576 16.2165 26.5809L25.0763 21.4766C25.2098 21.3997 25.2921 21.2574 25.2921 21.1034V10.8964C25.2921 10.7424 25.2098 10.6 25.0763 10.5231L16.2165 5.41884C16.0834 5.34216 15.9195 5.34216 15.7865 5.41884L6.92669 10.5231C6.7932 10.6 6.71094 10.7424 6.71094 10.8964V21.1034C6.71094 21.2574 6.7932 21.3997 6.92669 21.4766L8.69757 22.4969L9.48646 21.2609L8.17569 20.5058V11.494Z" fill="#98BCDC"/><path d="M19.4032 11.5938L16.3802 11.6368L9.48828 22.9593L11.9198 24.3671L19.4032 11.5938Z" fill="white"/><path d="M11.898 12.6265C12.5884 11.4972 14.5651 11.5019 15.4673 11.6454L8.6947 22.4957C8.46471 22.3633 7.89434 22.0353 7.45276 21.7821C6.86927 21.4477 6.77289 21.4388 6.71094 21.1292V20.5286C8.15235 18.3651 11.2078 13.7557 11.898 12.6265Z" fill="white"/></svg>`;
-const MEGA_LOGO = `<svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg"><circle cx="128" cy="128" r="128" fill="#fff"/><path d="M153.018 199.027C160.881 199.027 167.23 192.682 167.23 184.855C167.23 177.028 160.881 170.683 153.018 170.683C145.217 170.683 138.867 177.028 138.867 184.855C138.867 192.682 145.217 199.027 153.018 199.027Z" fill="#19191A"/><path d="M102.073 199.448C109.935 199.448 116.225 193.103 116.225 185.276C116.225 177.45 109.935 171.105 102.073 171.105C94.2719 171.105 87.9219 177.45 87.9219 185.276C87.9219 193.103 94.2719 199.448 102.073 199.448Z" fill="#19191A"/><path d="M71.0365 51.3927H104.799C111.152 68.5801 127.731 117.277 128.941 119.991C129.243 118.634 145.943 65.5649 150.662 51.6943H185.756V172.759C181.399 170.346 177.042 167.935 172.323 165.22C169.055 163.563 166.03 161.753 162.703 160.396C162.4 136.877 162.098 113.508 161.372 89.0842C156.652 103.105 140.376 152.557 139.045 153.913H117.323C117.323 153.913 96.2066 93.9085 95.178 91.1949C94.8757 114.262 94.5731 137.329 93.7866 161.15C80.8383 167.783 73.1544 171.553 70.7344 172.457V51.3927H71.0365Z" fill="#19191A"/><path d="M128.03 20.3533C187.265 20.3533 235.67 68.5983 235.67 128C235.67 187.402 187.447 235.647 128.03 235.647C68.6136 235.647 20.3904 187.402 20.3904 128C20.3904 68.5983 68.6136 20.3533 128.03 20.3533ZM128.03 0C57.2991 0 0 57.2911 0 128C0 198.709 57.2991 256 128.03 256C198.701 256 256 198.709 256 128C256 57.2911 198.701 0 128.03 0Z" fill="#19191A"/></svg>`;
+// Built above, next to the MEGA token that shares its glyph. `.tok-ico svg`
+// sizes it either way, so the chain switcher and the token pill draw the one
+// mark.
+const MEGA_LOGO = MEGA_ICON;
 const CHAIN_ICONS = { 1: ETH_ICON, 8453: BASE_LOGO, 10: OP_LOGO, 42161: ARB_LOGO, 4326: MEGA_LOGO, 11155111: ETH_ICON, 84532: BASE_LOGO };
 function chainIcon(id, cls){ const ic = CHAIN_ICONS[id]; return ic ? `<span class="tok-ico${cls?' '+cls:''}">${ic}</span>` : ''; }
 
@@ -2309,78 +2464,201 @@ const asc = n => "/".repeat(n);
 const ASC400 = asc(400);
 const ASC200 = asc(200);
 
+// Fixed illustrative rates. The demo has no price feed, so every dollar figure
+// it shows is derived from this one table rather than written beside a balance
+// — a balance and its USD value cannot drift apart, and a demo transfer that
+// debits a balance reprices what is left of it.
+const DEMO_PRICES = { ETH: 2050, wstETH: 2478.5, WBTC: 67200, cbBTC: 67200, MEGA: 0.0424, USDC: 1, USDT: 1, USDT0: 1, USDm: 1, DAI: 1 };
+
+function chainIdOfName(name){ const n = NETS.find(x => x.name === name); return n ? n.id : 1; }
+function demoToken(chainName, sym){
+  const list = PROD_TOKENS[chainIdOfName(chainName)] || ETH_ONLY;
+  return list.find(t => t.symbol === sym) || { symbol: sym, address: ethers.ZeroAddress, decimals: DECIMALS[sym] || 18 };
+}
+
+// A holding in exactly the shape loadTokenBalances returns — base units in
+// `raw`, the display string in the house format, USD through fmtUsd — because
+// every consumer downstream (the MAX buttons, the exceeds-balance warning, the
+// USD rate under the amount field) reads those fields and would otherwise be
+// exercising its fallback path in the demo and its real one in production.
+// `amount` is a plain decimal string with no separators: it is parsed, not
+// printed.
+function demoHolding(sym, amount){
+  const decimals = DECIMALS[sym] || 18;
+  return demoPriced({ token: sym, decimals, raw: ethers.parseUnits(amount, decimals).toString() });
+}
+// Balance and USD recomputed together from `raw`, so they move together. Null
+// for a holding that has gone to zero — the treasury loader does not list one,
+// and neither should the demo after a transfer empties it.
+function demoPriced(h){
+  if(BigInt(h.raw) === 0n) return null;
+  const amt = ethers.formatUnits(h.raw, h.decimals);
+  const price = DEMO_PRICES[h.token] || 0;
+  return { token: h.token, decimals: h.decimals, raw: h.raw, balance: fmtBal(h.raw, h.decimals), usd: price ? fmtUsd(Number(amt) * price) : '' };
+}
+// Largest position first, unpriced assets last. The hero stat on the dashboard
+// is holdings[0], and a payroll vault holding $127,450 of USDC and $2,155 of
+// ETH led with the ETH — the loader happened to push the native balance first,
+// which is an implementation order, not an answer to "what is in this vault".
+function sortHoldings(list){
+  const usd = h => parseFloat(String(h.usd || '').replace(/[^0-9.]/g, '')) || 0;
+  return list.slice().sort((a, b) => usd(b) - usd(a));
+}
+
+// ── DEMO PROPOSAL SHAPES ──────────────────────────────────────────
+// Built the way prodSubmit* builds them: a real target, real calldata, and the
+// value in wei. txKind() reads target/callData/rawValue and nothing else, so a
+// demo proposal is badged, classified and explained by the same code that does
+// it for a real one. Without the calldata every self-call in the demo fell
+// through to the no-calldata branch and rendered as "REJECT · NO-OP — A
+// DO-NOTHING SELF-CALL … IT MOVES NOTHING", and every ERC20 transfer was badged
+// ETH TRANSFER.
+//
+// `value` stays an unseparated decimal string because the production code paths
+// that fall back to it hand it to parseEther; `displayValue` is the separated
+// one, and it is the only one that is ever printed.
+function demoEthTx(o){
+  return { nonce: o.nonce, target: o.to, callData: '0x', rawValue: ethers.parseEther(o.amount).toString(),
+    value: o.amount, token: 'ETH', displayValue: groupInt(o.amount), displayToken: 'ETH',
+    dataLabel: 'TRANSFER', eta: o.eta || 0, approvals: o.approvals };
+}
+function demoErc20Tx(o){
+  const t = demoToken(o.chain, o.token);
+  return { nonce: o.nonce, target: t.address, displayTo: o.to,
+    callData: erc20Iface.encodeFunctionData('transfer', [o.to, ethers.parseUnits(o.amount, t.decimals)]),
+    rawValue: '0', value: '0', token: '',
+    displayValue: groupInt(o.amount), displayToken: t.symbol,
+    dataLabel: 'ERC20 TRANSFER', eta: o.eta || 0, approvals: o.approvals };
+}
+function demoSelfTx(o){
+  const callData = (o.fn === 'enableForward' ? tlIface : msIface).encodeFunctionData(o.fn, o.args);
+  return { nonce: o.nonce, target: o.fn === 'enableForward' ? TIMELOCK_EXECUTOR : o.vault, callData,
+    rawValue: '0', value: '0', token: '', dataLabel: selectorToLabel(callData),
+    eta: o.eta || 0, approvals: o.approvals };
+}
+// A history row in the shape loadVaultHistory builds from the coordination
+// record. `at` rather than a frozen age string: the demo is never reloaded, so
+// a literal "1H" would still read 1H after an afternoon on the page.
+function demoHist(o){
+  const split = splitAmountDesc(o.desc);
+  return { nonce: o.nonce, act: o.act, desc: o.desc, status: o.status || 'executed',
+    at: NOW() - o.ago, executionTx: null,
+    amt: split ? split.amt : null, descRest: split ? split.rest : null };
+}
+
+// Seconds, for the mock's ages and delays.
+const DEMO_H = 3600, DEMO_D = 86400;
+
 function seed() {
+  // Named once so an approvals key, a queue target and a history row can never
+  // disagree about which address they mean.
+  const V1 = "0x8F3A700c444912532413045090F932634456e7D1", V2 = "0x42Bf8989cBC44F461369845f47DD0311c20c1ae9",
+        V3 = "0xC1d8E1E32AD8846f9C1841ED9BAA5255DC1093fA", V4 = "0x7E2aba7DDaAeF82c666A204eb824974af273bb04";
+  const TREASURY = "0x5E6fD6e4e48b38Cc4174Bf3Ff39d1931928F7a8b", OPS = "0x9a0Bfffb4d67c3e6a5cb2481BCad3C13e8D7cD1E";
+  const CFO = "0xAA11852f4Fd5a4EE33e0fa9c662966AC7C6FBb22", HR = "0xCC337D3a8EdEea6DCbDc8D92285f118F18E1dD44",
+        COO = "0xEE55bCD84aFAdC3CeDc21b81ef9d7C63876cff66", LEGAL = "0x77881B9586Cdc5aEF266409aEBAd3e7094D99900";
+  const CURATOR = "0xa4D1b74F87113C7851DaBDFd20cE2A8f96c15E99";
+  const ENG = "0xde016277FD5b47233E210137d39E33626DFe1eaD", GRANTS = "0x64A2D1F61c61BB493B20Cc1746dF2E04BB55b4C1",
+        DAO = "0xc0449b3063467188aD67d17A4063bC16dfE4DA01";
+  // Counterparties, reused across a vault's queue and its history the way a
+  // real vault pays the same vendor twice.
+  const VENDOR = "0x7A2554e5e32EB9471d41f656BBb45c4fA90Af3E1", DESK = "0x3BC112Caf371D8Fe6f75acAf6b69A30DFc5da8D4",
+        PAYROLL = "0x9a44b95628A8B75d5a1A275e6e1215CA1d450Ef1", GRANTEE = "0x64a2510b8756a4fcc845C198d75444985834f00d";
+  const short = a => a.slice(0, 8) + '...';
+
   return [
     {
-      id: "V-001", name: "TREASURY_ALPHA", chain: "ETHEREUM", address: "0x8f3a700c444912532413045090f932634456e7d1",
-      threshold: 2, ownerCount: 3, delay: 86400, nonce: 43, executor: TIMELOCK_EXECUTOR, fastPath: true,
-      holdings: [
-        { token: "ETH", balance: "14.2", usd: "$29,181" },
-        { token: "USDC", balance: "52,300", usd: "$52,300" },
-        { token: "wstETH", balance: "3.1", usd: "$7,828" },
-      ],
+      id: "V-001", name: "TREASURY_ALPHA", chain: "ETHEREUM", address: V1,
+      threshold: 2, ownerCount: 3, delay: DEMO_D, nonce: 43,
+      executor: TIMELOCK_EXECUTOR, isTimelockExecutor: true, fastPath: true,
+      holdings: sortHoldings([demoHolding("ETH", "14.203913"), demoHolding("USDC", "52300"), demoHolding("wstETH", "3.104")]),
       owners: [
         { addr: DEMO_YOU, label: "DEPLOYER", you: true },
-        { addr: "0x5e6fd6e4e48b38cc4174bf3ff39d1931928f7a8b", label: "TREASURY" },
-        { addr: "0x9a0bfffb4d67c3e6a5cb2481bcad3c13e8d7cd1e", label: "OPS" },
+        { addr: TREASURY, label: "TREASURY" },
+        // One owner with a resolved name, because production resolves them and
+        // the two-line signer identity was otherwise unreachable in the demo.
+        { addr: OPS, label: "OPS", name: "ops.wei" },
       ],
       queue: [
-        { nonce: 40, target: "0x7a2554e5e32eb9471d41f656bbb45c4fa90af3e1", value: "2.5", token: "ETH", dataLabel: "TRANSFER",
-          eta: NOW() - 3600, approvals: { [DEMO_YOU]: true, "0x5e6fd6e4e48b38cc4174bf3ff39d1931928f7a8b": true, "0x9a0bfffb4d67c3e6a5cb2481bcad3c13e8d7cd1e": false } },
-        { nonce: 41, target: "0x3bc112caf371d8fe6f75acaf6b69a30dfc5da8d4", value: "10,000", token: "USDC", dataLabel: "ERC20 TRANSFER",
-          eta: NOW() + 72000, approvals: { [DEMO_YOU]: true, "0x5e6fd6e4e48b38cc4174bf3ff39d1931928f7a8b": true, "0x9a0bfffb4d67c3e6a5cb2481bcad3c13e8d7cd1e": false } },
+        demoEthTx({ nonce: 40, to: VENDOR, amount: "2.5", eta: NOW() - DEMO_H,
+          approvals: { [DEMO_YOU]: true, [TREASURY]: true, [OPS]: false } }),
+        demoErc20Tx({ nonce: 41, chain: "ETHEREUM", token: "USDC", to: DESK, amount: "10000", eta: NOW() + 20 * DEMO_H,
+          approvals: { [DEMO_YOU]: true, [TREASURY]: true, [OPS]: false } }),
+      ],
+      history: [
+        demoHist({ nonce: 42, act: "TRANSFER", desc: `0.3 ETH → ${short(VENDOR)}`, ago: DEMO_H }),
+        demoHist({ nonce: 39, act: "TRANSFER", desc: `1.2 ETH → ${short(DESK)}`, ago: 4 * DEMO_H }),
+        demoHist({ nonce: 38, act: "SET THRESHOLD", desc: "setThreshold(2)", ago: 18 * DEMO_H }),
+        demoHist({ nonce: 37, act: "ADD OWNER", desc: `addOwner(${short(OPS)})`, ago: 2 * DEMO_D }),
+        demoHist({ nonce: 36, act: "ERC20 TRANSFER", desc: `5,000 USDC → ${short(DESK)}`, ago: 3 * DEMO_D }),
       ],
     },
     {
-      id: "V-002", name: "OPS_PAYROLL", chain: "BASE", address: "0x42bf8989cbc44f461369845f47dd0311c20c1ae9",
-      threshold: 3, ownerCount: 5, delay: 172800, nonce: 109, executor: TIMELOCK_EXECUTOR,
-      holdings: [
-        { token: "USDC", balance: "127,450", usd: "$127,450" },
-        { token: "ETH", balance: "1.05", usd: "$2,158" },
-      ],
+      id: "V-002", name: "OPS_PAYROLL", chain: "BASE", address: V2,
+      threshold: 3, ownerCount: 5, delay: 2 * DEMO_D, nonce: 109,
+      executor: TIMELOCK_EXECUTOR, isTimelockExecutor: true, fastPath: false,
+      holdings: sortHoldings([demoHolding("USDC", "127450"), demoHolding("ETH", "1.0512")]),
       owners: [
         { addr: DEMO_YOU, label: "DEPLOYER", you: true },
-        { addr: "0xaa11852f4fd5a4ee33e0fa9c662966ac7c6fbb22", label: "CFO" },
-        { addr: "0xcc337d3a8edeea6dcbdc8d92285f118f18e1dd44", label: "HR" },
-        { addr: "0xee55bcd84afadc3cedc21b81ef9d7c63876cff66", label: "COO" },
-        { addr: "0x77881b9586cdc5aef266409aebad3e7094d99900", label: "LEGAL" },
+        { addr: CFO, label: "CFO" },
+        { addr: HR, label: "HR" },
+        { addr: COO, label: "COO" },
+        { addr: LEGAL, label: "LEGAL" },
       ],
       queue: [
-        { nonce: 108, target: "0x9a44b95628a8b75d5a1a275e6e1215ca1d450ef1", value: "32,000", token: "USDC", dataLabel: "ERC20 TRANSFER",
-          eta: NOW() + 129600, approvals: { [DEMO_YOU]: true, "0xaa11852f4fd5a4ee33e0fa9c662966ac7c6fbb22": true, "0xcc337d3a8edeea6dcbdc8d92285f118f18e1dd44": true, "0xee55bcd84afadc3cedc21b81ef9d7c63876cff66": false, "0x77881b9586cdc5aef266409aebad3e7094d99900": false } },
+        demoErc20Tx({ nonce: 108, chain: "BASE", token: "USDC", to: PAYROLL, amount: "32000", eta: NOW() + 36 * DEMO_H,
+          approvals: { [DEMO_YOU]: true, [CFO]: true, [HR]: true, [COO]: false, [LEGAL]: false } }),
+      ],
+      history: [
+        demoHist({ nonce: 107, act: "ERC20 TRANSFER", desc: `24,000 USDC → ${short(PAYROLL)}`, ago: 6 * DEMO_D }),
+        demoHist({ nonce: 106, act: "ADD OWNER", desc: `addOwner(${short(LEGAL)})`, ago: 12 * DEMO_D }),
+        demoHist({ nonce: 105, act: "SET THRESHOLD", desc: "setThreshold(3)", ago: 12 * DEMO_D }),
+        demoHist({ nonce: 104, act: "ERC20 TRANSFER", desc: `24,000 USDC → ${short(PAYROLL)}`, ago: 34 * DEMO_D }),
+        demoHist({ nonce: 103, act: "TRANSFER", desc: `0.42 ETH → ${short(COO)}`, ago: 35 * DEMO_D }),
       ],
     },
     {
-      id: "V-003", name: "NFT_VAULT", chain: "ETHEREUM", address: "0xc1d8e1e32ad8846f9c1841ed9baa5255dc1093fa",
-      threshold: 2, ownerCount: 2, delay: 43200, nonce: 13, executor: TIMELOCK_EXECUTOR,
-      holdings: [{ token: "ETH", balance: "3.8", usd: "$7,809" }],
+      id: "V-003", name: "NFT_VAULT", chain: "ETHEREUM", address: V3,
+      threshold: 2, ownerCount: 2, delay: 12 * DEMO_H, nonce: 13,
+      executor: TIMELOCK_EXECUTOR, isTimelockExecutor: true, fastPath: false,
+      holdings: sortHoldings([demoHolding("ETH", "3.802571")]),
       owners: [
         { addr: DEMO_YOU, label: "DEPLOYER", you: true },
-        { addr: "0xa4d1b74f87113c7851dabdfd20ce2a8f96c15e99", label: "CURATOR" },
+        { addr: CURATOR, label: "CURATOR" },
       ],
       queue: [
-        { nonce: 12, target: "0xc1d8e1e32ad8846f9c1841ed9baa5255dc1093fa", value: "0", token: "", dataLabel: "setDelay(86400)",
-          eta: NOW() + 28800, approvals: { [DEMO_YOU]: true, "0xa4d1b74f87113c7851dabdfd20ce2a8f96c15e99": true } },
+        demoSelfTx({ nonce: 12, vault: V3, fn: "setDelay", args: [DEMO_D], eta: NOW() + 8 * DEMO_H,
+          approvals: { [DEMO_YOU]: true, [CURATOR]: true } }),
+      ],
+      history: [
+        demoHist({ nonce: 11, act: "TRANSFER", desc: `1.75 ETH → ${short(CURATOR)}`, ago: 5 * DEMO_D }),
+        // The one cancelled row in the demo: the ✗ glyph and what earns it.
+        demoHist({ nonce: 10, act: "TRANSFER", desc: `4 ETH → ${short(VENDOR)}`, ago: 9 * DEMO_D, status: "cancelled" }),
+        demoHist({ nonce: 9, act: "SET THRESHOLD", desc: "setThreshold(2)", ago: 21 * DEMO_D }),
       ],
     },
     {
-      id: "V-004", name: "DEV_GRANTS", chain: "ARBITRUM", address: "0x7e2aba7ddaaef82c666a204eb824974af273bb04",
-      threshold: 2, ownerCount: 4, delay: 259200, nonce: 8, executor: TIMELOCK_EXECUTOR,
-      holdings: [
-        { token: "ETH", balance: "42.7", usd: "$87,749" },
-        { token: "USDC", balance: "18,000", usd: "$18,000" },
-        { token: "DAI", balance: "5,200", usd: "$5,200" },
-        { token: "WBTC", balance: "0.15", usd: "$10,076" },
-      ],
+      id: "V-004", name: "DEV_GRANTS", chain: "ARBITRUM", address: V4,
+      threshold: 2, ownerCount: 4, delay: 3 * DEMO_D, nonce: 8,
+      executor: TIMELOCK_EXECUTOR, isTimelockExecutor: true, fastPath: false,
+      holdings: sortHoldings([demoHolding("ETH", "42.71083"), demoHolding("USDC", "18000"),
+        demoHolding("DAI", "5200"), demoHolding("WBTC", "0.1502")]),
       owners: [
         { addr: DEMO_YOU, label: "DEPLOYER", you: true },
-        { addr: "0xde016277fd5b47233e210137d39e33626dfe1ead", label: "ENG" },
-        { addr: "0x64a2d1f61c61bb493b20cc1746df2e04bb55b4c1", label: "GRANTS" },
-        { addr: "0xc0449b3063467188ad67d17a4063bc16dfe4da01", label: "DAO" },
+        { addr: ENG, label: "ENG" },
+        { addr: GRANTS, label: "GRANTS" },
+        { addr: DAO, label: "DAO" },
       ],
       queue: [
-        { nonce: 7, target: "0x64a2510b8756a4fcc845c198d75444985834f00d", value: "5,000", token: "USDC", dataLabel: "ERC20 TRANSFER",
-          eta: 0, approvals: { [DEMO_YOU]: false, "0xde016277fd5b47233e210137d39e33626dfe1ead": true, "0x64a2d1f61c61bb493b20cc1746df2e04bb55b4c1": false, "0xc0449b3063467188ad67d17a4063bc16dfe4da01": false } },
+        demoErc20Tx({ nonce: 7, chain: "ARBITRUM", token: "USDC", to: GRANTEE, amount: "5000", eta: 0,
+          approvals: { [DEMO_YOU]: false, [ENG]: true, [GRANTS]: false, [DAO]: false } }),
+      ],
+      history: [
+        demoHist({ nonce: 6, act: "ERC20 TRANSFER", desc: `12,000 USDC → ${short(GRANTEE)}`, ago: 8 * DEMO_D }),
+        demoHist({ nonce: 5, act: "TRANSFER", desc: `5 ETH → ${short(GRANTS)}`, ago: 15 * DEMO_D }),
+        demoHist({ nonce: 4, act: "ADD OWNER", desc: `addOwner(${short(DAO)})`, ago: 26 * DEMO_D }),
+        // Neither executed nor cancelled — superseded, which is the '–' glyph.
+        demoHist({ nonce: 3, act: "ERC20 TRANSFER", desc: `8,000 DAI → ${short(GRANTEE)}`, ago: 31 * DEMO_D, status: "stale" }),
       ],
     },
   ];
@@ -2486,7 +2764,10 @@ function jstr(s) {
   return esc(String(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'"));
 }
 
-const DECIMALS = { ETH: 18, USDC: 6, USDT: 6, USDT0: 6, DAI: 18, WBTC: 8, wstETH: 18, cbBTC: 8 };
+// MEGA and USDm are both 18, which is worth stating rather than leaving to the
+// `|| 18` default two lines from where an amount is scaled: USDm is a stablecoin
+// and the reflex for those is 6.
+const DECIMALS = { ETH: 18, USDC: 6, USDT: 6, USDT0: 6, USDm: 18, MEGA: 18, DAI: 18, WBTC: 8, wstETH: 18, cbBTC: 8 };
 
 function stripCommas(s) { return String(s).replace(/,/g, ''); }
 
@@ -4301,7 +4582,13 @@ ${/* Topping up is the one action here that needs no signature, no quorum and no
           <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-top:6px">
             <span class="tx-val${(!kindTag&&(kind.tone==='policy'||kind.tone==='danger'))?' '+kind.tone:''}" style="display:inline-flex;align-items:center;gap:6px">${(dv&&dv!=='0')?`${tokIcon(dt)}<span class="priv">${esc(dv)}</span> ${esc(dt)}`:esc(display)}</span>
           </div>
-          <div class="tx-to">&rarr; ${S.demoMode?addrLink(tx.target,v.chain):addrLink(tx.displayTo||tx.target)}${(()=>{const a=S.demoMode?tx.target:(tx.displayTo||tx.target);return ethers.isAddress(a)?copyBtn(a):'';})()}</div>
+${/* displayTo in both modes. An ERC20 transfer's target is the token contract
+             and its recipient is inside the calldata, which is why production
+             reads displayTo here — and the demo, having been built out of the
+             same calldata, now has one to read. It used to print tx.target, so
+             a demo USDC payment named the token it was denominated in as the
+             address it was going to. */''}
+          <div class="tx-to">&rarr; ${(()=>{const a=tx.displayTo||tx.target;return (S.demoMode?addrLink(a,v.chain):addrLink(a))+(ethers.isAddress(a)?copyBtn(a):'');})()}</div>
           ${tx.orphanedFrom?`<div class="tx-note warn">${tx.orphanedFrom==='proposed'
             ? 'THE COORDINATION RECORD HAS THIS PROPOSAL AS NEVER QUEUED.'
             : `THE COORDINATION RECORD SAYS THIS PROPOSAL WAS ${esc(String(tx.orphanedFrom).toUpperCase())}.`} THE VAULT DISAGREES — IT IS QUEUED ON CHAIN, STILL MATURING, AND ANYONE CAN EXECUTE IT ONCE IT DOES. THE CHAIN IS THE AUTHORITY: TREAT THIS AS LIVE, AND CANCEL IT IF IT SHOULD NOT RUN.</div>`:''}
@@ -4482,6 +4769,15 @@ function fmtUsd(n){
 function groupInt(s){
   const [w, f] = String(s).split('.');
   return w.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (f ? '.' + f : '');
+}
+// One display rule for a token balance, everywhere a balance is shown: separate
+// the integer part, keep six decimal places, drop trailing zeros. And say
+// "<0.000001" rather than "0.000000" for a holding too small to reach that
+// sixth place — a balance that is not zero must never print as one, on a screen
+// whose whole subject is what a vault is holding.
+function fmtBal(raw, decimals){
+  const s = _amtDisp(ethers.formatUnits(raw, decimals));
+  return (BigInt(raw) > 0n && !/[1-9]/.test(s)) ? '<0.000001' : groupInt(s);
 }
 // What the builder is still missing before it can be signed.
 function txMissing(){
@@ -5733,9 +6029,14 @@ ${/* You cannot propose removing yourself from here, and the row still has to
     <button class="btn btn-outline btn-w" onclick="doAdminPropose('addOwner')">PROPOSE OWNER</button>
   </div>`:`<div>
     ${(()=>{
-      const hist = S.demoMode
-        ? [{nonce:42,act:"TRANSFER",desc:"0.3 ETH \u2192 0xab12",amt:"0.3 ETH",descRest:"\u2192 0xab12",age:"1H",status:"executed"},{nonce:39,act:"TRANSFER",desc:"1.2 ETH \u2192 0x4f21",amt:"1.2 ETH",descRest:"\u2192 0x4f21",age:"4H",status:"executed"},{nonce:38,act:"THRESHOLD",desc:"1 \u2192 2",age:"18H",status:"executed"},{nonce:37,act:"ADD OWNER",desc:"0x9a0bfffb4d67c3e6a5cb2481bcad3c13e8d7cd1e",age:"2D",status:"executed"},{nonce:36,act:"TRANSFER",desc:"5K USDC \u2192 0x8bc2",amt:"5K USDC",descRest:"\u2192 0x8bc2",age:"3D",status:"executed"}]
-        : (v.history||[]);
+      // One list, whichever mode this is. The demo used to answer here with
+      // five rows written into the renderer, so all four demo vaults showed the
+      // same history: a Base payroll vault holding USDC reported an 0.3 ETH
+      // payment at nonce 42 while its own next nonce was 109, and the nonces on
+      // the rows contradicted the queue sitting above them. Each demo vault now
+      // carries its own, seeded in the shape loadVaultHistory builds, and gains
+      // a row when something in the demo executes.
+      const hist = v.history || [];
       if(!hist.length) return '<div style="padding:48px 0;text-align:center;font-size:11px;color:var(--d);letter-spacing:2px">NO HISTORY YET</div>';
       // No pgAttrs here: history runs to 50 rows and a tab stop on each would bury
       // the real controls. Hover reveals on desktop, tap-hover on touch, and the
@@ -5754,7 +6055,12 @@ ${/* The trailing group states its own type. Every child here used to carry an
              lines on a phone. Sizing the group is what makes that unrepeatable:
              anything added here inherits the row's voice instead of the body's. */''}
         <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;font-size:10px">
-          <span style="color:var(--m)">${esc(tx.age)}</span>
+${/* A row carrying `at` restates its age on every render rather than at load.
+             Production rows are rebuilt from the record each time the queue
+             reloads, so their `age` is never stale for long; a demo row is
+             written once and never reloaded, and a literal "1H" would still read
+             1H after an afternoon on the page. */''}
+          <span style="color:var(--m)">${esc(tx.at?fmtAge(new Date(tx.at*1000)):(tx.age||''))}</span>
           ${tx.status==='executed'
             ?'<span style="color:var(--g);font-size:11px" title="Executed on chain">\u2713</span>'
             :tx.status==='stale'
@@ -5774,16 +6080,146 @@ ${/* The trailing group states its own type. Every child here used to carry an
 
 function addTxDemo(tx) {
   const v = S.vaults[S.sel];
-  const n = v.nonce;
+  // nextNonce, not v.nonce, for the same reason production uses it: the nonce a
+  // new proposal takes is one past whatever is already sitting in the queue.
+  const n = nextNonce(v);
   const you = getYou();
   const ap = {};
   v.owners.forEach(o => ap[o.addr] = (o.you || o.addr === you));
-  v.queue.push({ nonce: n, ...tx, eta: 0, approvals: ap });
-  v.nonce++;
+  v.queue.push({ nonce: n, eta: 0, ...tx, approvals: ap });
+  v.nonce = n + 1;
   S.showTx = false;
   resetTxFields();
   flash(`TX #${n} CREATED`);
   render();
+}
+
+// ── DEMO EXECUTION ────────────────────────────────────────────────
+// What executing a demo proposal does to the demo vault.
+//
+// Until this it did nothing at all: EXECUTE deleted the row and stopped there,
+// so the ETH a transfer spent stayed in the balance, the threshold a proposal
+// set stayed where it was, the owner it added never appeared in the roster, and
+// HISTORY never gained a row. The screen that exists to show what a multisig
+// does showed a proposal disappearing.
+//
+// The effect is decoded from the proposal's own calldata rather than from a
+// flag written when it was created, so what lands is what the card said it
+// would do — the same bytes txKind() read to say it.
+
+function demoHoldingFor(vt, sym){ return (vt.holdings || []).find(h => h.token === sym); }
+
+// Returns null on success, or the reason it could not happen. A demo transfer
+// for more than the vault holds fails the way the real one would, which is the
+// only thing that makes the builder's "THIS WILL REVERT ON EXECUTION" warning
+// true rather than decorative.
+function demoDebit(vt, sym, raw){
+  const h = demoHoldingFor(vt, sym);
+  const have = h ? BigInt(h.raw) : 0n;
+  if(raw > have) return `INSUFFICIENT ${sym} BALANCE`;
+  const next = demoPriced({ ...h, raw: (have - raw).toString() });
+  // Re-sorted, because the list is ordered by value and a transfer changes it —
+  // the same way production re-sorts when it reloads the treasury after one.
+  vt.holdings = sortHoldings(next ? vt.holdings.map(x => x === h ? next : x) : vt.holdings.filter(x => x !== h));
+  return null;
+}
+
+function demoDecode(tx, fn, iface){
+  try { return (iface || msIface).decodeFunctionData(fn, tx.callData); } catch(_) { return null; }
+}
+
+function demoApply(vt, tx){
+  const data = tx.callData || '0x';
+  const val = bigOr0(tx.rawValue);
+  const sel = selOf(data);
+
+  // No calldata: either value moving out, or the no-op self-call that exists
+  // only to consume a nonce.
+  if(data === '0x') return val > 0n ? demoDebit(vt, 'ETH', val) : null;
+
+  if(sel === SEL.transfer){
+    const d = demoDecode(tx, 'transfer', erc20Iface);
+    return d ? demoDebit(vt, tx.displayToken || demoTokenSymbolAt(vt, tx.target), BigInt(d[1])) : null;
+  }
+  if(sel === SEL.setThreshold){ const d = demoDecode(tx, 'setThreshold'); if(d) vt.threshold = Number(d[0]); return null; }
+  if(sel === SEL.setDelay){ const d = demoDecode(tx, 'setDelay'); if(d) vt.delay = Number(d[0]); return null; }
+  if(sel === SEL.setExecutor){
+    const d = demoDecode(tx, 'setExecutor'); if(!d) return null;
+    vt.executor = d[0];
+    // The fast path lives on the TimelockExecutor. Pointing the vault somewhere
+    // else does not carry it across, and neither does clearing it.
+    vt.isTimelockExecutor = d[0] === TIMELOCK_EXECUTOR;
+    if(!vt.isTimelockExecutor) vt.fastPath = false;
+    return null;
+  }
+  if(sel === SEL.enableForward){ const d = demoDecode(tx, 'enableForward', tlIface); if(d) vt.fastPath = !!d[0]; return null; }
+  if(sel === SEL.addOwner){
+    const d = demoDecode(tx, 'addOwner'); if(!d) return null;
+    if(vt.owners.some(o => o.addr.toLowerCase() === d[0].toLowerCase())) return 'ALREADY AN OWNER';
+    const pl = vt._pendingLabel;
+    vt.owners.push({ addr: d[0], label: (pl && pl.addr === d[0].toLowerCase()) ? pl.label : '' });
+    vt._pendingLabel = null;
+    vt.ownerCount = vt.owners.length;
+    return null;
+  }
+  if(sel === SEL.removeOwner){
+    const d = demoDecode(tx, 'removeOwner'); if(!d) return null;
+    // The contract's own guard: the owner set may not fall below the threshold.
+    if(vt.ownerCount <= vt.threshold) return 'OWNERS WOULD FALL BELOW THE THRESHOLD';
+    vt.owners = vt.owners.filter(o => o.addr.toLowerCase() !== d[1].toLowerCase());
+    vt.ownerCount = vt.owners.length;
+    return null;
+  }
+  // A batch, a delegatecall, or a call this interface cannot decode: the ETH it
+  // carries still leaves the vault, and nothing else here can be claimed.
+  return val > 0n ? demoDebit(vt, 'ETH', val) : null;
+}
+
+// Which token sits at a call's target, for a proposal that arrived without a
+// displayToken (the builder always sets one; a hand-built row might not).
+function demoTokenSymbolAt(vt, addr){
+  const list = PROD_TOKENS[chainIdOfName(vt.chain)] || ETH_ONLY;
+  const t = list.find(x => x.address.toLowerCase() === String(addr || '').toLowerCase());
+  return t ? t.symbol : 'ETH';
+}
+
+// The description production would have stored for this proposal, so the row it
+// leaves in HISTORY reads the same as a real one.
+function demoDescribe(vt, tx){
+  const sel = selOf(tx.callData);
+  const short = a => String(a || '').slice(0, 8) + '...';
+  if(tx.cancelTarget != null) return `cancelQueued(#${tx.cancelTarget})`;
+  if(sel === SEL.transfer && tx.displayTo) return `${tx.displayValue} ${tx.displayToken} → ${short(tx.displayTo)}`;
+  if(sel === SEL.setThreshold){ const d = demoDecode(tx, 'setThreshold'); return `setThreshold(${d ? d[0] : '?'})`; }
+  if(sel === SEL.setDelay){ const d = demoDecode(tx, 'setDelay'); return `setDelay(${d ? d[0] : '?'})`; }
+  if(sel === SEL.setExecutor){ const d = demoDecode(tx, 'setExecutor'); return `setExecutor(${d ? short(d[0]) : '...'})`; }
+  if(sel === SEL.enableForward){ const d = demoDecode(tx, 'enableForward', tlIface); return `enableForward(${d ? !!d[0] : '?'})`; }
+  if(sel === SEL.addOwner){ const d = demoDecode(tx, 'addOwner'); return `addOwner(${d ? short(d[0]) : '...'})`; }
+  if(sel === SEL.removeOwner){ const d = demoDecode(tx, 'removeOwner'); return `removeOwner(${d ? short(d[1]) : '...'})`; }
+  if((tx.callData || '0x') === '0x' && bigOr0(tx.rawValue) > 0n) return `${tx.displayValue || tx.value} ETH → ${short(tx.target)}`;
+  return selectorToLabel(tx.callData);
+}
+
+function demoRecord(vt, tx, status){
+  const desc = demoDescribe(vt, tx);
+  const split = splitAmountDesc(desc);
+  vt.history.unshift({ nonce: tx.nonce, act: selectorToLabel(tx.callData), desc, status,
+    at: NOW(), executionTx: null, amt: split ? split.amt : null, descRest: split ? split.rest : null });
+}
+
+// Execute one proposal: apply it, file it, drop it from the queue. Returns
+// false and leaves the row in place when the vault would have reverted — the
+// proposal is still queued and still executable, which is what happens on chain.
+function demoExecute(vt, nonce, msg){
+  const tx = vt.queue.find(t => t.nonce === nonce);
+  if(!tx) return false;
+  const reason = demoApply(vt, tx);
+  if(reason){ flash(`WOULD REVERT — ${reason}`); return false; }
+  if(!vt.history) vt.history = [];
+  demoRecord(vt, tx, 'executed');
+  vt.queue = vt.queue.filter(t => t.nonce !== nonce);
+  flash(msg);
+  return true;
 }
 
 function setTxSlow(on){ S.txSlow = !!on; _builderSim = null; render(); }
@@ -5799,13 +6235,19 @@ function onSlowCustom(){
 
 function submitTransfer() {
   if (S.demoMode) {
-    const amt = document.getElementById("tx-amount")?.value || "0";
-    const to = document.getElementById("tx-to")?.value || "";
-    const dec = DECIMALS[S.txToken] || 18;
-    addTxDemo({
-      value: amt, token: S.txToken, target: to, raw: toUnits(amt, dec),
-      dataLabel: S.txToken === "ETH" ? "TRANSFER" : "ERC20 TRANSFER",
-    });
+    const v = S.vaults[S.sel]; if(!v) return;
+    const amt = stripCommas(S.txAmount || document.getElementById("tx-amount")?.value || "0").trim();
+    const to = (S.txTo || document.getElementById("tx-to")?.value || "").trim();
+    if (!(parseFloat(amt) > 0)) { flash('ENTER AN AMOUNT'); return; }
+    // The demo has no resolver behind it, so a name cannot be turned into the
+    // address the calldata needs. Saying so is the same answer production gives
+    // a name that does not resolve; queuing a proposal built around the literal
+    // text would not be.
+    if (!ethers.isAddress(to)) { flash(to ? 'ENTER A RECIPIENT ADDRESS — NAMES DO NOT RESOLVE IN THE DEMO' : 'ENTER A RECIPIENT'); return; }
+    const nonce = nextNonce(v);
+    addTxDemo(S.txToken === "ETH"
+      ? demoEthTx({ nonce, to, amount: amt })
+      : demoErc20Tx({ nonce, chain: v.chain, token: S.txToken, to, amount: amt }));
   } else {
     guardSubmit(prodSubmitTransfer)();
   }
@@ -5828,15 +6270,21 @@ function getCxCalldata() {
 
 function submitCustom() {
   if (S.demoMode) {
-    const t = S.cxTarget || document.getElementById("cx-target")?.value || "";
-    const val = S.cxValue || document.getElementById("cx-value")?.value || "0";
+    const v = S.vaults[S.sel]; if(!v) return;
+    const t = (S.cxTarget || document.getElementById("cx-target")?.value || "").trim();
+    const val = stripCommas(S.cxValue || document.getElementById("cx-value")?.value || "0").trim() || "0";
     const d = getCxCalldata(); if (d === null) return;
-    const fnName = S.cxFn != null && Array.isArray(S.cxAbi) && S.cxAbi[S.cxFn] ? S.cxAbi[S.cxFn].name : null;
+    if (!ethers.isAddress(t)) { flash(t ? 'ENTER A TARGET ADDRESS — NAMES DO NOT RESOLVE IN THE DEMO' : 'ENTER A TARGET'); return; }
+    let wei; try { wei = ethers.parseEther(val); } catch(_) { flash('INVALID ETH VALUE'); return; }
     resetCxState();
-    addTxDemo({
-      value: val, token: "ETH", target: t, wei: toUnits(val, 18),
-      dataLabel: fnName ? fnName.toUpperCase() : (d && d !== '0x' ? `CALL ${d.slice(0, 10)}` : "CALL"),
-    });
+    // The calldata is carried through as typed, so the classifier reads the
+    // same bytes here as it would off a real proposal row — a demo approve()
+    // gets the standing-allowance warning, an unrecognised selector gets the
+    // "nothing here can tell you what it does" note.
+    addTxDemo({ nonce: nextNonce(v), target: t, callData: d || '0x', rawValue: wei.toString(),
+      value: val, token: wei > 0n ? 'ETH' : '',
+      displayValue: wei > 0n ? groupInt(val) : '0', displayToken: wei > 0n ? 'ETH' : '',
+      dataLabel: selectorToLabel(d) });
   } else {
     guardSubmit(prodSubmitCustom)();
   }
@@ -5844,8 +6292,23 @@ function submitCustom() {
 
 function submitBatch() {
   if (S.demoMode) {
-    const v = S.vaults[S.sel];
-    addTxDemo({ value: "0", token: "", target: v.address, dataLabel: `BATCH (${S.batch.length})` });
+    const v = S.vaults[S.sel]; if(!v) return;
+    const calls = S.batch.filter(c => c.t.trim());
+    if (!calls.length) { flash('ADD AT LEAST 1 CALL'); return; }
+    const bad = calls.find(c => !ethers.isAddress(c.t.trim()));
+    if (bad) { flash('EVERY CALL NEEDS A TARGET ADDRESS — NAMES DO NOT RESOLVE IN THE DEMO'); return; }
+    let data;
+    try {
+      data = msIface.encodeFunctionData('batch', [
+        calls.map(c => c.t.trim()),
+        calls.map(c => ethers.parseEther(stripCommas(c.v || '0') || '0')),
+        calls.map(c => (c.d || '0x').trim() || '0x'),
+      ]);
+    } catch(_) { flash('CHECK THE VALUES AND CALLDATA'); return; }
+    // batch() is a self-call, exactly as prodSubmitBatch builds it — which is
+    // what earns the card its BATCH badge and the note about atomicity.
+    addTxDemo({ nonce: nextNonce(v), target: v.address, callData: data, rawValue: '0',
+      value: '0', token: '', dataLabel: 'BATCH' });
   } else {
     guardSubmit(prodSubmitBatch)();
   }
@@ -5904,11 +6367,17 @@ function doSubmit(vi, nonce) {
     const tx = vt.queue.find(t => t.nonce === nonce);
     if (!tx) return;
     if (tx.cancelTarget != null) {
+      // The cancel itself executes; what it cancelled leaves the queue without
+      // ever having run. Two rows, both true, the way the record stores them.
+      const victim = vt.queue.find(t => t.nonce === tx.cancelTarget);
+      if(!vt.history) vt.history = [];
+      if(victim) demoRecord(vt, victim, 'cancelled');
+      demoRecord(vt, tx, 'executed');
       vt.queue = vt.queue.filter(t => t.nonce !== nonce && t.nonce !== tx.cancelTarget);
       flash(`CANCELLED #${tx.cancelTarget} VIA EXECUTOR`);
     } else if (vt.delay === 0) {
-      vt.queue = vt.queue.filter(t => t.nonce !== nonce);
-      flash(`EXECUTED #${nonce}`);
+      // No timelock: a proposal at quorum executes the moment it is submitted.
+      if(!demoExecute(vt, nonce, `EXECUTED #${nonce}`)) { render(); return; }
     } else {
       tx.eta = NOW() + vt.delay;
       flash(`QUEUED #${nonce}`);
@@ -5921,9 +6390,7 @@ function doSubmit(vi, nonce) {
 
 function doExecute(vi, nonce) {
   if (S.demoMode) {
-    const vt = S.vaults[vi];
-    vt.queue = vt.queue.filter(t => t.nonce !== nonce);
-    flash(`EXECUTED #${nonce}`);
+    demoExecute(S.vaults[vi], nonce, `EXECUTED #${nonce}`);
     render();
   } else {
     guardSubmit(prodExecute)(vi, nonce);
@@ -5932,9 +6399,7 @@ function doExecute(vi, nonce) {
 
 function doFastExecute(vi, nonce) {
   if (S.demoMode) {
-    const vt = S.vaults[vi];
-    vt.queue = vt.queue.filter(t => t.nonce !== nonce);
-    flash(`INSTANT EXECUTED #${nonce} VIA EXECUTOR`);
+    demoExecute(S.vaults[vi], nonce, `INSTANT EXECUTED #${nonce} VIA EXECUTOR`);
     render();
   } else {
     guardSubmit(prodFastExecute)(vi,nonce);
@@ -5946,14 +6411,19 @@ function doCancel(vi, nonce) {
     const vt = S.vaults[vi];
     const tx = vt.queue.find(t => t.nonce === nonce);
     if (!tx) return;
-    const n = vt.nonce;
+    const n = nextNonce(vt);
     const ap = {};
     vt.owners.forEach(o => ap[o.addr] = !!o.you);
+    // A cancel is cancelQueued(hash) called by the vault on itself. The hash is
+    // the target proposal's digest, which the demo has no signatures to build —
+    // isCancelTx reads `cancelTarget` first for exactly that reason — but the
+    // selector is real, so the row is labelled and classified like any other.
     vt.queue.push({
-      nonce: n, target: vt.address, value: "0", token: "",
-      dataLabel: `CANCEL #${nonce}`, eta: 0, approvals: ap, cancelTarget: nonce,
+      nonce: n, target: vt.address, value: "0", token: "", rawValue: "0",
+      callData: msIface.encodeFunctionData('cancelQueued', [ethers.ZeroHash]),
+      dataLabel: 'CANCEL', eta: 0, approvals: ap, cancelTarget: nonce,
     });
-    vt.nonce++;
+    vt.nonce = n + 1;
     flash(`CANCEL PROPOSED #${n} \u2192 cancelQueued(#${nonce})`);
     render();
   } else {
@@ -5964,7 +6434,11 @@ function doCancel(vi, nonce) {
 function doReject(vi, nonce) {
   if (S.demoMode) {
     const vt = S.vaults[vi];
-    // Demo: skipping the nonce drops the stuck proposal so the queue advances.
+    // Skipping the nonce drops the stuck proposal so the queue advances. It is
+    // not cancelled and it did not run: its nonce was consumed by the no-op
+    // that replaced it, which is what 'stale' means in the ledger.
+    const tx = vt.queue.find(t => t.nonce === nonce);
+    if(tx){ if(!vt.history) vt.history = []; demoRecord(vt, tx, 'stale'); }
     vt.queue = vt.queue.filter(t => t.nonce !== nonce);
     flash(`REJECTED #${nonce} \u2014 NONCE SKIPPED`);
     render();
@@ -6233,12 +6707,21 @@ async function demoDeploy() {
   if (parseInt(c.threshold) > valid.length) { flash("THRESHOLD > OWNER COUNT"); return; }
 
   const owners = valid.sort((a, b) => a.addr.localeCompare(b.addr))
-    .map((o, i) => ({ addr: o.addr, label: o.label || "OWNER " + (i + 1) }));
+    .map((o, i) => {
+      const raw = o.addr.trim();
+      // Checksummed where it is an address at all — the deploy form accepts a
+      // name too, and the demo has nothing to resolve one with, so that stays
+      // as typed rather than being passed off as an address.
+      return { addr: ethers.isAddress(raw) ? ethers.getAddress(raw) : raw, label: o.label || "OWNER " + (i + 1) };
+    });
   owners[0].you = true; owners[0].addr = DEMO_YOU; owners[0].label = owners[0].label || "DEPLOYER";
 
   const delay = toSec(c.delayVal, c.delayUnit);
   const fp = c.fastPath && delay > 0;
-  const addr = "0x" + Array.from({length:40},()=>((Math.random()*16)|0).toString(16)).join("");
+  // Checksummed, like every address the app shows: a vault deployed in the demo
+  // ends up beside the seeded ones in the switcher, and an all-lowercase address
+  // among them is the one that does not look like the real thing.
+  const addr = ethers.getAddress("0x" + Array.from({length:40},()=>((Math.random()*16)|0).toString(16)).join(""));
   const chainIdxs = [c.net, ...(c.clone||[])].filter((v,i,a)=>a.indexOf(v)===i);
 
   S.deploy = { run: ++_deployRun, chains: chainIdxs.map(i=>NETS[i]), steps: chainIdxs.map(i=>({ id:NETS[i].id, name:NETS[i].name, status:'pending' })), phase:'deploying', address:null, done:false, lastVaultAddr:null };
@@ -6256,34 +6739,74 @@ async function demoDeploy() {
   S.deploy.done = true;
   const id = "V-" + String(S.vaults.length + 1).padStart(3, "0");
   S.vaults.push({
-    id, name: c.name || net.name + "_" + id, chain: net.name, address: addr,
+    // Named the way loadVault names an unnamed one — CHAIN_ + four hex off the
+    // address — rather than after this list's position, which is not a fact
+    // about the vault and is not what the real thing would be called.
+    id, name: c.name || net.name + "_" + addr.slice(2,6).toUpperCase(), chain: net.name, address: addr,
     threshold: parseInt(c.threshold) || 1, ownerCount: owners.length, delay, nonce: 0,
-    executor: TIMELOCK_EXECUTOR, holdings: [], owners, queue: [], history: [], fastPath: fp,
+    executor: TIMELOCK_EXECUTOR, isTimelockExecutor: true, holdings: [], owners, queue: [], history: [], fastPath: fp,
   });
   S.sel = S.vaults.length - 1;
   render();
 }
 
+// Every governance proposal the demo can raise, built as the call it really is.
+// These used to be a queue row carrying an uppercased description and no
+// calldata at all, which put them through txKind's no-calldata branch: a
+// proposal to raise the threshold, add an owner or shorten the timelock all
+// rendered as "REJECT · NO-OP — A DO-NOTHING SELF-CALL WHOSE ONLY EFFECT IS TO
+// CONSUME THIS NONCE. IT MOVES NOTHING." The demo's whole subject is what these
+// proposals do, and it was the one thing it could not say.
 function doAdminPropose(action, val) {
   if (S.demoMode) {
     const v = S.vaults[S.sel];
     if (!v) return;
-    const n = v.nonce;
     const you = getYou();
     const ap = {};
     v.owners.forEach(o => ap[o.addr] = (o.you || o.addr === you));
 
-    let desc, target = v.address;
-    if (action === 'setThreshold') desc = `setThreshold(${val})`;
-    else if (action === 'setDelay') desc = `setDelay(${val})`;
-    else if (action === 'setExecutor') desc = 'setExecutor(...)';
-    else if (action === 'enableForward') { desc = `enableForward(${!v.fastPath})`; target = v.executor; }
-    else if (action === 'removeOwner') desc = `removeOwner(${v.owners[val]?.addr || '...'})`;
-    else if (action === 'addOwner') { desc = `addOwner(${document.getElementById('admin-add-owner')?.value || '...'})`; }
+    let data, target = v.address, desc;
+    if (action === 'setThreshold') { data = msIface.encodeFunctionData('setThreshold', [val]); desc = `setThreshold(${val})`; }
+    else if (action === 'setDelay') { data = msIface.encodeFunctionData('setDelay', [val]); desc = `setDelay(${val})`; }
+    else if (action === 'setExecutor') {
+      const raw = (document.getElementById('admin-executor-input')?.value || '').trim();
+      if (!ethers.isAddress(raw)) { flash(raw ? 'ENTER AN EXECUTOR ADDRESS — NAMES DO NOT RESOLVE IN THE DEMO' : 'ENTER AN EXECUTOR ADDRESS'); return; }
+      data = msIface.encodeFunctionData('setExecutor', [ethers.getAddress(raw)]);
+      desc = `setExecutor(${raw.slice(0,10)}...)`;
+    }
+    else if (action === 'enableForward') {
+      data = tlIface.encodeFunctionData('enableForward', [!v.fastPath]);
+      target = v.executor;
+      desc = `enableForward(${!v.fastPath})`;
+    }
+    else if (action === 'removeOwner') {
+      const o = v.owners[val];
+      if (!o) { flash('INVALID OWNER'); return; }
+      if (v.ownerCount <= v.threshold) { flash('LOWER THRESHOLD FIRST'); return; }
+      // prevOwner is the linked-list predecessor, as on chain: the sentinel for
+      // the head of the list, otherwise the owner listed before this one.
+      const prev = val === 0 ? SENTINEL : v.owners[val - 1].addr;
+      data = msIface.encodeFunctionData('removeOwner', [prev, o.addr]);
+      desc = `removeOwner(${o.addr.slice(0,10)}...)`;
+    }
+    else if (action === 'addOwner') {
+      const raw = (document.getElementById('admin-add-owner')?.value || '').trim();
+      if (!ethers.isAddress(raw)) { flash(raw ? 'ENTER AN OWNER ADDRESS — NAMES DO NOT RESOLVE IN THE DEMO' : 'ENTER AN ADDRESS'); return; }
+      const addr = ethers.getAddress(raw);
+      if (addr === ethers.ZeroAddress || addr.toLowerCase() === SENTINEL.toLowerCase()) { flash('INVALID OWNER ADDRESS'); return; }
+      if (v.owners.some(o => o.addr.toLowerCase() === addr.toLowerCase())) { flash('ALREADY AN OWNER'); return; }
+      data = msIface.encodeFunctionData('addOwner', [addr]);
+      desc = `addOwner(${addr.slice(0,10)}...)`;
+      // Held until the proposal executes, the way production holds it — a label
+      // belongs to an owner the vault has, not to one it has been asked to add.
+      v._pendingLabel = { addr: addr.toLowerCase(), label: (document.getElementById('admin-add-label')?.value || '').trim() };
+    }
     else return;
 
-    v.queue.push({ nonce: n, target, value: "0", token: "", dataLabel: desc.toUpperCase(), eta: 0, approvals: ap });
-    v.nonce++;
+    const n = nextNonce(v);
+    v.queue.push({ nonce: n, target, callData: data, rawValue: "0", value: "0", token: "",
+      dataLabel: selectorToLabel(data), eta: 0, approvals: ap });
+    v.nonce = n + 1;
     flash(`PROPOSE: ${desc}`);
     S.view = "DASH";
     render();
@@ -6603,6 +7126,11 @@ async function loadTokenBalances(walletAddr, ethBalance) {
   const latestAnswerData = clIface.encodeFunctionData('latestAnswer');
   let balances, prices = {};
 
+  // Started here, awaited at the end: a chain with no ETH feed of its own gets
+  // mainnet's, and it costs no time because it runs beside this chain's reads
+  // rather than after them.
+  const ethUsdPromise = feeds['ETH'] ? null : ethUsdFallback();
+
   try {
     const mc = getMC3();
     const balCalls = erc20Tokens.map(t => ({
@@ -6626,38 +7154,67 @@ async function loadTokenBalances(walletAddr, ethBalance) {
       }
     });
   } catch(e) {
-    console.error('Token balances:', e);
-    balances = [];
+    // The batch failing used to empty the treasury on screen: `balances = []`
+    // means every ERC-20 row is skipped below, and prices stay unset, so a vault
+    // holding six tokens rendered as ETH alone with no error anywhere near it.
+    // Ask each token directly instead. It is N calls rather than one, but it
+    // degrades a row at a time, and it is also the path a chain without
+    // Multicall3 would take — multicallLoad already has this fallback for the
+    // vault's own reads.
+    console.error('Token balances (batched):', e);
+    // null, not a throw, for a call that did not answer — one dead token address
+    // must not take the other five rows with it a second time.
+    const direct = async (addr, abi, fn, args) => {
+      try { return await new ethers.Contract(addr, abi, provider)[fn](...(args || [])); }
+      catch(_) { return null; }
+    };
+    const [bals, feedAnswers] = await Promise.all([
+      Promise.all(erc20Tokens.map(t => direct(t.address, ERC20_ABI, 'balanceOf', [walletAddr]))),
+      Promise.all(feedSymbols.map(sym => direct(feeds[sym], CHAINLINK_ABI, 'latestAnswer'))),
+    ]);
+    balances = bals.map(b => ({ success: b != null, bal: b == null ? 0n : b }));
+    feedAnswers.forEach((a, i) => { if(a != null) prices[feedSymbols[i]] = Number(a) / 1e8; });
   }
 
   if(ethBalance == null) ethBalance = await provider.getBalance(walletAddr);
+  if(ethUsdPromise && !prices['ETH']) prices['ETH'] = await ethUsdPromise;
   const ethPrice = prices['ETH'] || 0;
-  const stableSymbols = new Set(['USDC', 'USDT', 'USDT0', 'DAI']);
+  // USDm (MegaUSD) is dollar-pegged like the rest of these, so it is quoted at
+  // par rather than left without a price on a chain that has no feeds.
+  const stableSymbols = new Set(['USDC', 'USDT', 'USDT0', 'USDm', 'DAI']);
   const holdings = [];
+
+  // fmtBal for every asset, replacing three rules that disagreed with each other
+  // and with the rest of the app:
+  //   - ETH was formatEther().slice(0,10), a truncation by character count, so
+  //     a nine-figure treasury lost its decimals and a small one kept nine.
+  //   - a token with 8 or fewer decimals was toFixed(2), which reads a 0.0004
+  //     WBTC position — around $27 — as "0.00" while the USD beside it says
+  //     otherwise. An 8-decimal token cannot be shown to 2.
+  //   - the rest were toFixed(4), and none were separated, so a $127,450
+  //     balance printed as 127450.00 next to a USD figure that had commas.
 
   // ETH
   if(ethBalance > 0n) {
     const ethAmount = Number(ethers.formatEther(ethBalance));
     const ethUsd = ethPrice > 0 ? ethAmount * ethPrice : 0;
-    holdings.push({token:'ETH', balance:ethers.formatEther(ethBalance).slice(0,10), usd: ethUsd > 0 ? `$${ethUsd.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}` : '', raw: ethBalance.toString(), decimals: 18});
+    holdings.push({token:'ETH', balance:fmtBal(ethBalance, 18), usd: ethUsd > 0 ? fmtUsd(ethUsd) : '', raw: ethBalance.toString(), decimals: 18});
   }
 
   // ERC20s
   erc20Tokens.forEach((t, i) => {
     if(!balances[i] || !balances[i].success || balances[i].bal === 0n) return;
-    const formatted = ethers.formatUnits(balances[i].bal, t.decimals);
-    const amount = Number(formatted);
-    const display = t.decimals <= 8 ? amount.toFixed(2) : amount.toFixed(4).replace(/\.?0+$/, '');
+    const amount = Number(ethers.formatUnits(balances[i].bal, t.decimals));
     let usd = 0;
     if(stableSymbols.has(t.symbol)) {
       usd = amount;
     } else if(prices[t.symbol]) {
       usd = amount * prices[t.symbol];
     }
-    holdings.push({token:t.symbol, balance:display, usd: usd > 0 ? `$${usd.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}` : '', raw: balances[i].bal.toString(), decimals: t.decimals});
+    holdings.push({token:t.symbol, balance:fmtBal(balances[i].bal, t.decimals), usd: usd > 0 ? fmtUsd(usd) : '', raw: balances[i].bal.toString(), decimals: t.decimals});
   });
 
-  return holdings;
+  return sortHoldings(holdings);
 }
 
 // ── PRODUCTION: DATABASE HELPERS ──────────────────────────────────
@@ -7478,7 +8035,11 @@ async function loadVaultQueue(vi) {
       const ethVal = rawValue !== '0' ? ethers.formatEther(BigInt(rawValue)) : '0';
       const value = ethVal === '0' ? '0' : ethVal;
       const token = (t.call_data === '0x' || !t.call_data) && ethVal !== '0' ? 'ETH' : '';
-      let displayValue = value, displayToken = token, displayTo = null, slowDelay = 0;
+      // displayValue is the printed one and `value` the parsed one — they are
+      // separated so the figure on the card can carry thousands separators
+      // without reaching parseEther on the fallback paths that still read
+      // `value` when a row has no rawValue.
+      let displayValue = value === '0' ? '0' : groupInt(value), displayToken = token, displayTo = null, slowDelay = 0;
       // Flag a stake from the call shape, so proposals raised outside this UI
       // are labelled the same way.
       const isStake = S.chainId === STAKE_CHAIN_ID && ethVal !== '0' && isStakeCall(t.target, t.call_data);
@@ -7493,7 +8054,7 @@ async function loadVaultQueue(vi) {
               || customTokensFor(S.chainId, v.address).find(x => x.address.toLowerCase() === tk.toLowerCase());
           if(info) {
             // ETH rides in msg.value; the encoded amount is zero for that path.
-            displayValue = fmtAmount(isEth ? BigInt(rawValue) : BigInt(amt), info.decimals);
+            displayValue = groupInt(fmtAmount(isEth ? BigInt(rawValue) : BigInt(amt), info.decimals));
             displayToken = info.symbol;
           }
           displayTo = to;
@@ -7507,7 +8068,7 @@ async function loadVaultQueue(vi) {
           const allTokens = PROD_TOKENS[S.chainId] || ETH_ONLY;
           const tokenInfo = allTokens.find(tk => tk.address.toLowerCase() === t.target.toLowerCase());
           if(tokenInfo && decoded[1] != null) {
-            displayValue = ethers.formatUnits(decoded[1], tokenInfo.decimals);
+            displayValue = groupInt(fmtAmount(decoded[1], tokenInfo.decimals));
             displayToken = tokenInfo.symbol;
             displayTo = decoded[0];
           }
@@ -7565,18 +8126,30 @@ async function loadVaultHistory(vi) {
       const act = selectorToLabel(t.call_data);
       const hv = weiStr(t.value);
       const ethVal = (hv !== null && hv !== '0') ? ethers.formatEther(BigInt(hv)) : null;
-      // Split when the line is ours to split: a derived "0.4 ETH → 0x12ab" has a
-      // figure to veil, a description the user typed is arbitrary text and is left whole.
-      const derived = !t.description && !!ethVal;
-      const desc = t.description || (ethVal ? `${ethVal} ETH → ${t.target.slice(0,6)}...` : act);
+      const desc = t.description || (ethVal ? `${groupInt(ethVal)} ETH → ${t.target.slice(0,8)}...` : act);
+      const split = splitAmountDesc(desc);
       const ts = t.executed_at || t.cancelled_at;
       const age = ts ? fmtAge(new Date(ts)) : '';
       return { nonce: t.nonce, act, desc, status: t.status, age, executionTx: t.execution_tx,
-        amt: derived ? `${ethVal} ETH` : null, descRest: derived ? `→ ${t.target.slice(0,6)}...` : null };
+        amt: split ? split.amt : null, descRest: split ? split.rest : null };
     });
   } catch(e) {
     console.error('loadVaultHistory:', e);
   }
+}
+
+// A history row's description leads with the figure that moved — "2.5 ETH →
+// 0x7A2554..." — and that figure is exactly what the privacy veil exists to
+// cover. The split used to be attempted only for rows with NO stored
+// description, and this app writes one for every proposal it raises, so the
+// veiled branch was unreachable: the eye blurred every balance on the page and
+// left the amounts in the ledger below them in the clear. Split at the arrow —
+// the amount and its symbol are the veiled part, the recipient stays legible.
+// Anything that is not "<number> <symbol> → …" is left whole.
+const AMT_DESC_RE = /^([\d,]+(?:\.\d+)?\s+\S+)\s+(→\s.*)$/;
+function splitAmountDesc(desc) {
+  const m = AMT_DESC_RE.exec(String(desc || ''));
+  return m ? { amt: m[1], rest: m[2] } : null;
 }
 
 function fmtAge(d) {
@@ -8401,7 +8974,14 @@ async function _recordDeployedVault(step, addr, ctx, block, txHash, chainId, rp)
 // budget — which is "cannot be read yet", not "it failed". The caller must not
 // turn the second into the first: a transaction still in the mempool at the end
 // of a minute is one whose vault will exist a block later, and RETRY finds it.
-async function _waitForReceipt(rp, hash, tries=20, gap=3000){
+// The budget is a minute either way; what the chain sets is how finely that
+// minute is divided. Three seconds between reads is a fifth of an Ethereum block
+// and three MegaETH blocks, so on the fast chain the operator watched CHECKING…
+// for up to three seconds after the vault had landed. Same total patience,
+// answered as soon as the answer exists.
+async function _waitForReceipt(rp, hash, chainId, budgetMs=60000){
+  const gap = Math.min(3000, chainPollMs(chainId));
+  const tries = Math.max(1, Math.round(budgetMs / gap));
   for(let i=0;i<tries;i++){
     try { const rec = await rp.getTransactionReceipt(hash); if(rec) return rec; } catch(_){}
     if(i<tries-1) await new Promise(r=>setTimeout(r,gap));
@@ -8681,7 +9261,7 @@ async function deployOnChain(k){
         // must not be made to sit through a minute of polling before it is named.
         if(step.txHash && !blk){
           step.status='checking'; render();
-          const rec = await _waitForReceipt(rp, step.txHash);
+          const rec = await _waitForReceipt(rp, step.txHash, net.id);
           if(rec) blk = Number(rec.blockNumber) || 0;
           // Mined and reverted is a real failure and is worth saying plainly. The
           // thrown error describes whatever broke on the way back, which for a
@@ -9785,7 +10365,7 @@ async function simulateProposal(vi, nonce) {
   const v = S.vaults[vi];
   const tx = v.queue.find(t => t.nonce === nonce);
   if(!tx) return;
-  if(S.demoMode) { tx._sim = _simStamp({ status:'pass', demo:true, assets: [] }); render(); return; }
+  if(S.demoMode) { tx._sim = _simStamp(demoSim(v, tx)); render(); return; }
   tx._sim = { loading:true }; render();
   tx._sim = await runSim(_simTx(v, tx));
   render();
@@ -9847,9 +10427,48 @@ async function buildSimInput() {
   }
   return null;
 }
+// The dry-run the demo can honestly give. The vault's balances are known here,
+// so "what leaves the vault" and "does it have it" are real answers about this
+// vault — the only thing that is not real is the chain they would be checked
+// against, which is what the DEMO tag on the panel says. It used to return a
+// bare pass with an empty ledger, so the one control on the card that explains
+// what a proposal would DO explained nothing.
+function demoSim(v, tx) {
+  const assets = [];
+  const val = bigOr0(tx.rawValue);
+  if(val > 0n) assets.push({ symbol:'ETH', decimals:18, delta: -val });
+  if(selOf(tx.callData) === SEL.transfer) {
+    const d = demoDecode(tx, 'transfer', erc20Iface);
+    const sym = tx.displayToken || demoTokenSymbolAt(v, tx.target);
+    if(d) assets.push({ symbol: sym, decimals: DECIMALS[sym] || 18, delta: -BigInt(d[1]) });
+  }
+  for(const a of assets) {
+    const h = demoHoldingFor(v, a.symbol);
+    if(!h || BigInt(h.raw) < -a.delta) return { status:'revert', demo:true, reason:`INSUFFICIENT ${a.symbol} BALANCE` };
+  }
+  return { status:'pass', demo:true, assets };
+}
+// The builder's inputs as a proposal-shaped object, so the panel above the form
+// answers with the same ledger the card will once the proposal exists.
+function demoBuilderTx(v) {
+  if(S.txMode !== 'TRANSFER') return null;
+  const amt = stripCommas(S.txAmount || document.getElementById('tx-amount')?.value || '0').trim();
+  const to = (S.txTo || document.getElementById('tx-to')?.value || '').trim();
+  if(!(parseFloat(amt) > 0) || !ethers.isAddress(to)) return null;
+  try {
+    return S.txToken === 'ETH'
+      ? demoEthTx({ nonce:0, to, amount: amt })
+      : demoErc20Tx({ nonce:0, chain: v.chain, token: S.txToken, to, amount: amt });
+  } catch(_) { return null; }
+}
 let _builderSim = null;
 async function simulateBuilder() {
-  if(S.demoMode) { _builderSim = _simStamp({ status:'pass', demo:true, assets: [] }); render(); return; }
+  if(S.demoMode) {
+    const v = S.vaults[S.sel];
+    const t = v && demoBuilderTx(v);
+    _builderSim = _simStamp(t ? demoSim(v, t) : { status:'pass', demo:true, assets: [] });
+    render(); return;
+  }
   _builderSim = { loading:true }; render();
   let s;
   try { s = await buildSimInput(); }
@@ -10075,12 +10694,12 @@ async function prodSubmitTransfer() {
       target = toAddr;
       value = amountRaw.toString();
       data = '0x';
-      desc = `${amt} ETH \u2192 ${toAddr.slice(0,8)}...`;
+      desc = `${groupInt(amt)} ETH \u2192 ${toAddr.slice(0,8)}...`;
     } else {
       target = tokenInfo.address;
       value = '0';
       data = erc20Iface.encodeFunctionData('transfer', [toAddr, amountRaw]);
-      desc = `${amt} ${tokenInfo.symbol} \u2192 ${toAddr.slice(0,8)}...`;
+      desc = `${groupInt(amt)} ${tokenInfo.symbol} \u2192 ${toAddr.slice(0,8)}...`;
     }
 
     const domain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address };
@@ -10514,6 +11133,13 @@ function adoptChain(id) {
   S.latestBlock = 0;
   S.txToken = 'ETH';
   resetCxState();
+  // The new chain's cadence, not the old one's: leaving a 12s tick behind on
+  // MegaETH is the whole bug this exists to avoid, and leaving a 2s tick on
+  // Ethereum spends six requests to learn the same block number. The wallet's
+  // provider is told too — it is the one a `tx.wait()` is sitting on — and this
+  // is the single place both directions of a chain change pass through.
+  scheduleTick();
+  if(typeof window.walletSetPollMs === 'function') window.walletSetPollMs(chainPollMs(id));
   fetchBlock();
   return true;
 }
@@ -10926,7 +11552,23 @@ function pollTick() {
   );
   if (anyReady && !hasFocused) render();
 }
-setInterval(pollTick, 12000);
+// Paced by the chain rather than by a constant. A fixed 12s tick is one block on
+// Ethereum and twelve on MegaETH: the counter that is this page's only sign the
+// chain is moving advanced in jumps of twelve, and a timelock that matured did
+// not say READY for up to twelve seconds after it had. Rescheduled on every
+// chain switch (adoptChain), because the right interval is a property of where
+// the app is pointed, not of when it started.
+// Floored at 2s rather than at chainPollMs's 1s: this tick costs a request to a
+// public RPC every time it fires, and the difference between a counter that
+// advances every second and one that advances every two is not worth doubling
+// that. A receipt is a different matter — that one waits on a person — so the
+// providers keep the shorter interval.
+let _tickTimer = null;
+function scheduleTick(){
+  if(_tickTimer) clearInterval(_tickTimer);
+  _tickTimer = setInterval(pollTick, Math.max(2000, chainPollMs(S.chainId)));
+}
+scheduleTick();
 // Refresh immediately when the tab regains focus instead of waiting out the
 // interval, so the block number and ETAs are current the moment the user returns.
 document.addEventListener("visibilitychange", () => { if (!document.hidden) pollTick(); });
@@ -10959,6 +11601,9 @@ setInterval(tickSlowCountdowns, 1000);
 (function init() {
   if(!CHAINS[S.chainId]) S.chainId = 1;
   provider = makeProvider(S.chainId);
+  // Above the timer's own registration, S.chainId may still have been the
+  // unsupported value this line just corrected. Now it is the real one.
+  scheduleTick();
 
   walletInit({
     appName: 'Multisig',
@@ -10971,6 +11616,9 @@ setInterval(tickSlowCountdowns, 1000);
     // mid-run. Each carries its RPC so the session's reads stay on our own hosts.
     chains: Object.keys(CHAINS).map(id => ({ id: Number(id), rpc: CHAINS[id].rpcs[0] })),
     addChainParams: ADD_CHAIN_PARAMS[S.chainId] || null,
+    // How fast this chain settles, so a receipt is reported when it exists
+    // rather than on ethers' four-second default.
+    pollMs: chainPollMs(S.chainId),
     onConnect: [onWalletConnect],
     onDisconnect: [onWalletDisconnect],
   });

@@ -53,10 +53,11 @@ explicitly so a human-readable amount always converts to the right raw units.
 | Base       | ETH, USDC, USDT, DAI, cbBTC, wstETH             |
 | Arbitrum   | ETH, USDC, USDT, DAI, WBTC, wstETH              |
 | OP Mainnet | ETH, USDC, USDT, DAI, WBTC, wstETH              |
-| MegaETH    | ETH, USDT0, wstETH                              |
+| MegaETH    | ETH, MEGA, USDm, USDT0, WBTC, wstETH            |
 | Testnets   | ETH                                             |
 
-Decimals: ETH/DAI/wstETH 18, USDC/USDT/USDT0 6, WBTC/cbBTC 8. Any other token can
+Decimals: ETH/DAI/wstETH/MEGA/USDm 18, USDC/USDT/USDT0 6, WBTC/cbBTC 8 — USDm is
+dollar-pegged but carries 18, not the 6 a stablecoin is usually read as. Any other token can
 be reached through the [custom-call builder](interface.md#tx-builder), and
 user-added tokens are read for their real `symbol` and `decimals` rather than
 assumed.
