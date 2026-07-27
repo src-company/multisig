@@ -77,10 +77,11 @@ function detectWallets() {
   for (const [uuid, { info, provider }] of eip6963Providers.entries()) {
     const name = info?.name || 'Unknown';
     if (seenNames.has(name.toLowerCase())) continue;
-    // data: only. The page's CSP is `img-src 'self' data:`, so an https icon is
-    // blocked by the browser and renders as a broken image rather than as the
-    // wallet's mark — and allowing a remote URL here would also let any installed
-    // extension turn opening this sheet into a request to a host of its choosing.
+    // data: only. The page's `img-src` allows no remote host but WalletConnect's
+    // explorer, so an https icon is blocked by the browser and renders as a broken
+    // image rather than as the wallet's mark — and allowing a remote URL here would
+    // also let any installed extension turn opening this sheet into a request to a
+    // host of its choosing.
     const iconUrl = info.icon && info.icon.startsWith('data:image/') ? info.icon : null;
     const safeIcon = iconUrl ? `<img src="${_esc(iconUrl)}" alt="" style="width:1.5rem;height:1.5rem;">` : '';
     detected.push({ key: `eip6963_${uuid}`, name, icon: safeIcon, getProvider: () => provider });

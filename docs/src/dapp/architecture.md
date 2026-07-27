@@ -14,11 +14,19 @@ site, but nothing about the app requires that host.
 
 ## Content Security Policy
 
-`index.html` carries its own CSP in a `<meta>` tag. `default-src 'self'`, `img-src`
-limited to `'self'` and `data:`, and `connect-src` enumerated: the PostgREST
-service, Sourcify, the RPC hosts for the seven supported chains, the Coinbase price
-endpoint, and `wss:` for WalletConnect. Fonts come from Google Fonts and are the
-only external style and font sources.
+`index.html` carries its own CSP in a `<meta>` tag. `default-src 'self'` and
+`connect-src` enumerated: the PostgREST service, Sourcify, the RPC hosts for the
+seven supported chains, and the Coinbase price endpoint. Fonts come from Google
+Fonts and are the only external style and font sources.
+
+WalletConnect is the one feature that needs third-party hosts, and it needs three:
+`explorer-api.walletconnect.com` for the wallet list and the wallet logos (so it
+appears in `connect-src` and in `img-src`, which otherwise allows only `'self'` and
+`data:`), `relay.walletconnect.com` / `.org` for the session socket, and
+`verify.walletconnect.com` / `.org` in `frame-src` for the iframe that vouches for
+this origin. Its RPC fallback, `rpc.walletconnect.com`, is deliberately not
+allowed: the provider is given an `rpcMap` for the chain it is initialised with, so
+chain reads stay on the RPC hosts above.
 
 `render.yaml` notes the alternative of serving the same policy as a real response
 header instead of a meta tag, which is stricter; the meta form is what ships so the

@@ -3,7 +3,21 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://multisig-postgrest.onrender.com https://repo.sourcify.dev https://*.publicnode.com https://1rpc.io https://*.drpc.org https://api.coinbase.com https://mainnet.base.org https://sepolia.base.org https://arb1.arbitrum.io https://mainnet.optimism.io https://mainnet.megaeth.com https://rpc-megaeth-mainnet.globalstake.io wss:; img-src 'self' data:; upgrade-insecure-requests">
+<!-- WalletConnect brings its own UI, and that UI needs hosts of its own or it
+     half-loads: the explorer API it asks for the wallet list and for each
+     wallet's logo, the relay it carries the session over, and the Verify
+     iframe it frames to have this origin vouched for. Only the relay was
+     allowed (as a scheme-wide `wss:`), so picking WalletConnect produced a
+     modal with no wallets in it, a "Failed to fetch" out of preloadListings,
+     and two blocked frames — the connect path was unusable, not merely noisy.
+     The relay is now named rather than admitted by scheme, since nothing else
+     in the app opens a socket.
+
+     Its RPC fallback (rpc.walletconnect.com) is deliberately still absent. The
+     provider is initialised with an rpcMap for the one chain it is given, so
+     chain reads stay on the RPC hosts listed here; letting the fallback
+     through would put a vault's traffic on a host that is not one of them. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://multisig-postgrest.onrender.com https://repo.sourcify.dev https://*.publicnode.com https://1rpc.io https://*.drpc.org https://api.coinbase.com https://mainnet.base.org https://sepolia.base.org https://arb1.arbitrum.io https://mainnet.optimism.io https://mainnet.megaeth.com https://rpc-megaeth-mainnet.globalstake.io https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org; img-src 'self' data: https://explorer-api.walletconnect.com; frame-src https://verify.walletconnect.com https://verify.walletconnect.org; upgrade-insecure-requests">
 <title>multisig</title>
 <meta name="description" content="Multichain multisig with an embedded timelock. A mandatory delay between queuing and execution, so a compromised key or a social-engineered signature can be seen and cancelled before it lands.">
 <!-- Unfurl metadata. Vault links get passed between co-signers and pasted into
