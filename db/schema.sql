@@ -164,6 +164,155 @@ CREATE TABLE IF NOT EXISTS config_log (
 
 CREATE INDEX IF NOT EXISTS idx_config_wallet ON config_log (wallet_id, created_at);
 
+-- ── INPUT VALIDATION ─────────────────────────────────────────────
+-- Every write below arrives through a SECURITY DEFINER function that any
+-- anonymous browser can call, and until these existed the arguments were taken
+-- entirely on trust: a 1MB description, a `target` of 'not-an-address-at-all',
+-- a negative `value`, calldata that is not hex. None of it can make the vault
+-- do anything — the chain is the authority and the client re-derives every
+-- digest — but all of it lands in this database and stays there, and on a
+-- 256mb instance a loop that writes megabyte descriptions is the whole attack.
+--
+-- Shapes, not semantics: an address is 20 hex bytes, a digest is 32, a wei
+-- amount is a non-negative integer, and free text has a ceiling. Anything that
+-- fails these could not have come from this app and could not correspond to
+-- anything on chain.
+--
+-- Added NOT VALID deliberately. That does NOT mean unenforced — it enforces on
+-- every INSERT and UPDATE from here on; it only skips the retroactive scan of
+-- rows a previous schema already accepted. That matters because this file is
+-- applied by hand to a live database which may well be holding junk that
+-- predates the constraint, and a migration that fails is a migration that never
+-- ran (see the tx_history note above). The consequence, stated so it is not a
+-- surprise: a legacy row that violates one of these is frozen — Postgres
+-- re-checks every constraint on a row when any column of it is updated — so it
+-- can still be read, but not modified, until it is cleaned up by hand.
+--
+-- Wrapped in DO/EXCEPTION rather than IF NOT EXISTS because ADD CONSTRAINT has
+-- no such clause, and this file must apply twice in a row without error.
+DO $$
+DECLARE
+  ADDR  CONSTANT text := '^0x[0-9a-fA-F]{40}$';
+  HASH  CONSTANT text := '^0x[0-9a-fA-F]{64}$';
+  c record;
+BEGIN
+  FOR c IN SELECT * FROM (VALUES
+    -- wallets
+    ('wallets','wallets_address_fmt',  format('address ~ %L', ADDR)),
+    ('wallets','wallets_deployer_fmt', format('deployer ~ %L', ADDR)),
+    ('wallets','wallets_executor_fmt', format('executor ~ %L', ADDR)),
+    -- created_tx is written as '' by the auto-register path (a vault reached by
+    -- address was not deployed by this client, so there is no deploy tx).
+    ('wallets','wallets_created_tx_fmt', format('created_tx IS NULL OR created_tx = '''' OR created_tx ~ %L', HASH)),
+    ('wallets','wallets_salt_int',     'salt >= 0 AND salt = trunc(salt)'),
+    ('wallets','wallets_chain_pos',    'chain_id > 0'),
+    ('wallets','wallets_counts_sane',  'threshold >= 0 AND owner_count >= 0 AND delay >= 0 AND nonce >= 0'),
+    ('wallets','wallets_name_len',     'name IS NULL OR length(name) <= 128'),
+    -- owners
+    ('owners','owners_address_fmt',    format('address ~ %L', ADDR)),
+    ('owners','owners_label_len',      'label IS NULL OR length(label) <= 64'),
+    ('owners','owners_position_sane',  'position >= 0'),
+    -- transactions
+    ('transactions','tx_chain_pos',    'chain_id > 0'),
+    ('transactions','tx_nonce_sane',   'nonce >= 0'),
+    ('transactions','tx_target_fmt',   format('target ~ %L', ADDR)),
+    ('transactions','tx_value_int',    'value >= 0 AND value = trunc(value)'),
+    -- Even-length hex. 16KB of calldata is a batch of roughly eighty transfers;
+    -- nothing this app builds comes close, and the cap is what stops the column
+    -- being used as free storage.
+    ('transactions','tx_calldata_fmt', 'call_data ~ ''^0x([0-9a-fA-F]{2})*$'' AND length(call_data) <= 16384'),
+    ('transactions','tx_hash_fmt',     format('tx_hash ~ %L', HASH)),
+    ('transactions','tx_threshold_sane','threshold >= 0'),
+    ('transactions','tx_desc_len',     'description IS NULL OR length(description) <= 512'),
+    ('transactions','tx_proposed_by_fmt', format('proposed_by IS NULL OR proposed_by ~ %L', ADDR)),
+    ('transactions','tx_cancelled_by_fmt',format('cancelled_by IS NULL OR cancelled_by ~ %L', ADDR)),
+    ('transactions','tx_exec_tx_fmt',  format('execution_tx IS NULL OR execution_tx = '''' OR execution_tx ~ %L', HASH)),
+    ('transactions','tx_queue_tx_fmt', format('queue_tx IS NULL OR queue_tx = '''' OR queue_tx ~ %L', HASH)),
+    ('transactions','tx_eta_sane',     'eta IS NULL OR eta >= 0'),
+    -- signatures: one ECDSA sig is 0x + 130 hex; the sender-slot encoding is the
+    -- same width. The ceiling is generous and still finite.
+    ('signatures','sigs_signer_fmt',   format('signer ~ %L', ADDR)),
+    ('signatures','sigs_sig_fmt',      'signature ~ ''^0x[0-9a-fA-F]*$'' AND length(signature) <= 512'),
+    -- approvals
+    ('approvals','appr_owner_fmt',     format('owner ~ %L', ADDR)),
+    ('approvals','appr_hash_fmt',      format('tx_hash ~ %L', HASH)),
+    ('approvals','appr_tx_fmt',        format('approval_tx IS NULL OR approval_tx = '''' OR approval_tx ~ %L', HASH)),
+    ('approvals','appr_chain_pos',     'chain_id > 0'),
+    -- config_log
+    ('config_log','cfg_subject_fmt',   format('subject IS NULL OR subject ~ %L', ADDR)),
+    ('config_log','cfg_tx_fmt',        format('tx_hash IS NULL OR tx_hash = '''' OR tx_hash ~ %L', HASH))
+  ) AS t(tbl, name, expr)
+  LOOP
+    BEGIN
+      EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I CHECK (%s) NOT VALID', c.tbl, c.name, c.expr);
+    EXCEPTION WHEN duplicate_object OR duplicate_table THEN NULL;
+    END;
+  END LOOP;
+END $$;
+
+-- ── RATE LIMITING ────────────────────────────────────────────────
+-- Shapes and ceilings bound how big one write can be. They do nothing about how
+-- MANY, and every write function here is reachable without credentials, so the
+-- remaining lever is a counter.
+--
+-- Not granted to anon in any form: the table has no grant, and rate_gate is
+-- called only from inside the SECURITY DEFINER functions, which run as the
+-- owner. A caller cannot read its own budget, reset it, or call the gate
+-- directly.
+CREATE TABLE IF NOT EXISTS write_rate (
+  bucket       text PRIMARY KEY,
+  window_start timestamptz NOT NULL DEFAULT now(),
+  n            int NOT NULL DEFAULT 0
+);
+ALTER TABLE write_rate ENABLE ROW LEVEL SECURITY; -- no policy: nothing may read it
+
+-- The client address, taken from the RIGHTMOST entry of X-Forwarded-For.
+-- Deliberately not the leftmost: a client can send its own XFF header and the
+-- proxy appends rather than replaces, so the left of that list is attacker
+-- text and only the last hop — the one Render itself wrote — is evidence.
+-- Returns 'unknown' when there is no header at all, which buckets every such
+-- caller together rather than giving each an unlimited private budget.
+CREATE OR REPLACE FUNCTION client_ip() RETURNS text AS $$
+  SELECT COALESCE(
+    NULLIF(btrim(split_part(
+      current_setting('request.headers', true)::json->>'x-forwarded-for',
+      ',',
+      array_length(string_to_array(
+        current_setting('request.headers', true)::json->>'x-forwarded-for', ','), 1)
+    )), ''),
+    'unknown');
+$$ LANGUAGE sql STABLE;
+
+-- Raises once the bucket is over budget for the window.
+--
+-- The RAISE aborts the transaction, which rolls back this call's own increment
+-- — so a bucket at its ceiling stops advancing rather than climbing. That is
+-- the intended behaviour and not a leak: every call past the ceiling still
+-- re-reaches it and still raises, for as long as the window holds.
+CREATE OR REPLACE FUNCTION rate_gate(p_bucket text, p_max int, p_window interval)
+RETURNS void AS $$
+DECLARE cur int;
+BEGIN
+  INSERT INTO write_rate AS w (bucket, window_start, n)
+  VALUES (p_bucket, now(), 1)
+  ON CONFLICT (bucket) DO UPDATE SET
+    window_start = CASE WHEN w.window_start < now() - p_window THEN now() ELSE w.window_start END,
+    n            = CASE WHEN w.window_start < now() - p_window THEN 1    ELSE w.n + 1      END
+  RETURNING w.n INTO cur;
+
+  IF cur > p_max THEN
+    RAISE EXCEPTION 'Rate limit exceeded for % — slow down', p_bucket
+      USING ERRCODE = 'too_many_connections';
+  END IF;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Rows accumulate one per bucket and are only useful inside their window.
+-- Swept opportunistically by register_wallet so nothing external has to run.
+CREATE OR REPLACE FUNCTION rate_sweep() RETURNS void AS $$
+  DELETE FROM write_rate WHERE window_start < now() - interval '1 hour';
+$$ LANGUAGE sql SECURITY DEFINER;
+
 -- ── VIEWS ────────────────────────────────────────────────────────
 
 -- Dropped, not replaced. CREATE OR REPLACE VIEW only accepts a new definition
@@ -275,6 +424,9 @@ CREATE POLICY config_read ON config_log FOR SELECT USING (true);
 
 -- ── HELPERS ──────────────────────────────────────────────────────
 
+-- Is this address a CURRENT owner? Used where currency is the question being
+-- asked — which row to label, which set to show — and NOT as the write gate.
+-- See is_wallet_writer below for why those are two different questions.
 CREATE OR REPLACE FUNCTION is_wallet_owner(p_wallet_id uuid, p_address text)
 RETURNS boolean AS $$
   SELECT EXISTS (
@@ -282,6 +434,48 @@ RETURNS boolean AS $$
     WHERE wallet_id = p_wallet_id
       AND lower(address) = lower(p_address)
       AND is_current = true
+  );
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+
+-- The write gate. Deliberately WITHOUT `is_current`, and that is the whole
+-- point of it.
+--
+-- Every function here authenticates by an address the caller supplies, against
+-- an owner list that is public on chain and readable here. That is a claim, not
+-- a credential, and it cannot be made into one without a signature — so none of
+-- these checks stop a determined forger, and the client is written on that
+-- assumption: it re-derives every digest and recovers every signature against
+-- the chain's own owner set.
+--
+-- What the gate CAN do is decide whether the damage is recoverable, and while
+-- it read `is_current` the answer was no. sync_wallet_state takes the new owner
+-- set as an argument and rewrites the table with it, so one anonymous request
+-- naming any real owner as its caller retired every one of them and installed
+-- the sender instead. The victims then failed this check — they could not
+-- propose, sign, or cancel; the vault left their dashboard (my_wallets joins on
+-- is_current); and, worst of all, they could not put it back, because the
+-- repair path is sync_wallet_state and register_wallet, and both asked the
+-- table the attacker had just rewritten. Verified: a locked-out owner could
+-- reach the vault by neither route. Recovery meant hand-editing the database.
+--
+-- Authorising on ever-having-been-an-owner breaks that loop. A retired owner
+-- keeps write access, so the next ordinary page load repairs the record all by
+-- itself — reloadVault calls dbSyncWalletState with the owner set it just read
+-- from the chain, which restores the real owners and retires the impostor. The
+-- attack degrades from permanent seizure to a defacement that heals on refresh.
+--
+-- The cost, stated plainly: an owner legitimately removed from a vault keeps
+-- the ability to write to its coordination rows. That is not a new exposure —
+-- anyone at all already has it, by naming a current owner — and it buys the
+-- property that no anonymous request can ever take a vault away from the people
+-- who own it. When these writes are properly authenticated, this should become
+-- a check on the authenticated identity and the currency question moves here.
+CREATE OR REPLACE FUNCTION is_wallet_writer(p_wallet_id uuid, p_address text)
+RETURNS boolean AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM owners
+    WHERE wallet_id = p_wallet_id
+      AND lower(address) = lower(p_address)
   );
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
@@ -299,6 +493,21 @@ DECLARE
   i int;
   existed boolean;
 BEGIN
+  -- Bucketed on the caller rather than the vault: this is the one write that
+  -- CREATES vaults, so a per-vault budget would be a fresh budget every time
+  -- and no limit at all. Registration is a once-per-vault event (a deploy, or
+  -- the first time one is opened by address), so a real client never approaches
+  -- this.
+  PERFORM rate_gate('reg:' || client_ip(), 60, interval '1 minute');
+  PERFORM rate_sweep();
+
+  IF p_owners IS NULL OR array_length(p_owners, 1) IS NULL THEN
+    RAISE EXCEPTION 'Owner list must not be empty';
+  END IF;
+  IF array_length(p_owners, 1) > 100 THEN
+    RAISE EXCEPTION 'Owner list too long';
+  END IF;
+
   -- Deployer must be in the owner list (case-insensitive)
   IF NOT (SELECT lower(p_deployer) = ANY(SELECT lower(unnest(p_owners)))) THEN
     RAISE EXCEPTION 'Deployer must be an owner';
@@ -329,12 +538,15 @@ BEGIN
   -- case (a re-deploy, a vault reached by address, a client resyncing) and is
   -- still allowed. For anyone else this degrades to a lookup: they get the
   -- wallet id, which is all a viewer needs, and change nothing.
-  -- The owner-set test is skipped for a row that has no current owners at all,
+  -- The owner-set test is skipped for a row that has no owner rows at all,
   -- which is not reachable through this file but would otherwise be a wallet
   -- nobody could ever re-register or write to again.
+  -- is_wallet_writer, not is_wallet_owner: a caller the last owner-set rewrite
+  -- retired is exactly who needs this path to work, because re-registering is
+  -- one of the two ways a defaced vault gets put back.
   IF existed
-     AND EXISTS (SELECT 1 FROM owners WHERE wallet_id = w_id AND is_current = true)
-     AND NOT is_wallet_owner(w_id, p_deployer) THEN
+     AND EXISTS (SELECT 1 FROM owners WHERE wallet_id = w_id)
+     AND NOT is_wallet_writer(w_id, p_deployer) THEN
     RETURN w_id;
   END IF;
 
@@ -373,8 +585,19 @@ CREATE OR REPLACE FUNCTION propose_tx(
 DECLARE
   t_id uuid;
 BEGIN
-  IF NOT is_wallet_owner(p_wallet_id, p_proposed_by) THEN
+  IF NOT is_wallet_writer(p_wallet_id, p_proposed_by) THEN
     RAISE EXCEPTION 'Not an owner';
+  END IF;
+  PERFORM rate_gate('propose:' || p_wallet_id::text, 60, interval '1 minute');
+
+  -- A ceiling on how much of this database one vault can occupy. Proposals are
+  -- never deleted — they go terminal and stay as history — so without this the
+  -- row count for a single vault is bounded only by how long someone is willing
+  -- to keep POSTing. Two orders of magnitude above any real vault's lifetime
+  -- traffic, and it is the count that is capped rather than the rate, because a
+  -- rate limit alone just makes filling the disk take longer.
+  IF (SELECT count(*) FROM transactions WHERE wallet_id = p_wallet_id) >= 20000 THEN
+    RAISE EXCEPTION 'Too many transactions recorded for this vault';
   END IF;
 
   INSERT INTO transactions (wallet_id, chain_id, nonce, target, value, call_data, tx_hash, threshold, proposed_by, description)
@@ -423,9 +646,10 @@ BEGIN
   IF w_id IS NULL THEN
     RAISE EXCEPTION 'Transaction not found';
   END IF;
-  IF NOT is_wallet_owner(w_id, p_signer) THEN
+  IF NOT is_wallet_writer(w_id, p_signer) THEN
     RAISE EXCEPTION 'Not an owner';
   END IF;
+  PERFORM rate_gate('sig:' || w_id::text, 120, interval '1 minute');
 
   INSERT INTO signatures (tx_id, signer, sig_type, signature)
   VALUES (p_tx_id, p_signer, p_sig_type, p_signature)
@@ -459,21 +683,36 @@ CREATE OR REPLACE FUNCTION mark_executed(
 DECLARE
   w_id uuid;
   prev_status tx_status;
+  moved int;
 BEGIN
   SELECT wallet_id, status INTO w_id, prev_status FROM transactions WHERE id = p_tx_id;
   IF w_id IS NULL THEN
     RAISE EXCEPTION 'Transaction not found';
   END IF;
-  IF NOT is_wallet_owner(w_id, p_caller) THEN
+  IF NOT is_wallet_writer(w_id, p_caller) THEN
     RAISE EXCEPTION 'Not an owner';
   END IF;
+  PERFORM rate_gate('mark:' || w_id::text, 240, interval '1 minute');
 
+  -- Only a LIVE proposal can become executed. Without this guard the update was
+  -- unconditional, so a terminal row could be flipped back: a cancelled
+  -- proposal — one an owner pulled the brake on — reappeared in the history
+  -- ledger under a green tick with whatever block number the caller chose.
+  -- Terminal is terminal; the chain has already spoken about that nonce.
   UPDATE transactions
   SET status = 'executed', executed_at = now(), executed_block = p_block, execution_tx = p_execution_tx
-  WHERE id = p_tx_id;
+  WHERE id = p_tx_id AND status IN ('proposed', 'executing', 'queued');
+  GET DIAGNOSTICS moved = ROW_COUNT;
+  IF moved = 0 THEN
+    RETURN;
+  END IF;
 
   -- Increment nonce for real executions only:
-  -- Skip if queued (already incremented at queue time) or if block=0 (stale tx cleanup)
+  -- Skip if queued (already incremented at queue time) or if block=0 (stale tx cleanup).
+  -- Gated on the row having actually moved, which is what `moved` above buys:
+  -- the update used to be unconditional, so calling this twice on the same row
+  -- — a retry, or a loop — advanced the recorded nonce once per call for a
+  -- single execution, and the record drifted arbitrarily far from the chain.
   IF prev_status != 'queued' AND p_block > 0 THEN
     UPDATE wallets SET nonce = nonce + 1 WHERE id = w_id;
   END IF;
@@ -497,9 +736,12 @@ BEGIN
   IF w_id IS NULL THEN
     RAISE EXCEPTION 'Transaction not found';
   END IF;
-  IF NOT is_wallet_owner(w_id, p_caller) THEN
+  IF NOT is_wallet_writer(w_id, p_caller) THEN
     RAISE EXCEPTION 'Not an owner';
   END IF;
+  -- Roomier than the others: loadVaultQueue prunes superseded rows in a loop,
+  -- up to TERMINAL_RECHECK of them, and that burst is legitimate.
+  PERFORM rate_gate('mark:' || w_id::text, 240, interval '1 minute');
 
   UPDATE transactions
   SET status = 'stale', cancelled_at = now()
@@ -520,14 +762,16 @@ CREATE OR REPLACE FUNCTION mark_queued(
 DECLARE
   w_id uuid;
   prev_status tx_status;
+  moved int;
 BEGIN
   SELECT wallet_id, status INTO w_id, prev_status FROM transactions WHERE id = p_tx_id;
   IF w_id IS NULL THEN
     RAISE EXCEPTION 'Transaction not found';
   END IF;
-  IF NOT is_wallet_owner(w_id, p_caller) THEN
+  IF NOT is_wallet_writer(w_id, p_caller) THEN
     RAISE EXCEPTION 'Not an owner';
   END IF;
+  PERFORM rate_gate('mark:' || w_id::text, 240, interval '1 minute');
 
   UPDATE transactions
   SET status = 'queued', eta = p_eta, queued_at = now(), queued_block = p_block, queue_tx = p_queue_tx
@@ -537,7 +781,11 @@ BEGIN
   -- Guarded on the row having actually moved: a retried write — this call goes
   -- through the client's retry path — would otherwise advance the recorded
   -- nonce a second time for one on-chain queueing.
-  IF prev_status IN ('proposed', 'executing') THEN
+  -- ROW_COUNT rather than the status read above, because two concurrent calls
+  -- both read 'proposed' before either updates: only one of them changes a row,
+  -- and only that one may move the nonce.
+  GET DIAGNOSTICS moved = ROW_COUNT;
+  IF moved > 0 AND prev_status IN ('proposed', 'executing') THEN
     UPDATE wallets SET nonce = nonce + 1 WHERE id = w_id;
   END IF;
 END;
@@ -553,9 +801,10 @@ BEGIN
   IF w_id IS NULL THEN
     RAISE EXCEPTION 'Transaction not found';
   END IF;
-  IF NOT is_wallet_owner(w_id, p_cancelled_by) THEN
+  IF NOT is_wallet_writer(w_id, p_cancelled_by) THEN
     RAISE EXCEPTION 'Not an owner';
   END IF;
+  PERFORM rate_gate('mark:' || w_id::text, 240, interval '1 minute');
 
   -- Any live proposal, not just a queued one. The old `status = 'queued'` guard
   -- made this a silent no-op for a proposal still collecting signatures — which
@@ -578,11 +827,25 @@ BEGIN
   IF w_id IS NULL THEN
     RAISE EXCEPTION 'Transaction not found';
   END IF;
-  IF NOT is_wallet_owner(w_id, p_signer) THEN
+  IF NOT is_wallet_writer(w_id, p_signer) THEN
     RAISE EXCEPTION 'Not an owner';
   END IF;
+  PERFORM rate_gate('sig:' || w_id::text, 120, interval '1 minute');
 
-  DELETE FROM signatures WHERE tx_id = p_tx_id AND signer = p_signer;
+  -- Only from a live proposal. A terminal row's signatures are the record of
+  -- what was collected before it went terminal, and nothing legitimate unsigns
+  -- an executed or cancelled proposal — so allowing it only let the history be
+  -- quietly edited after the fact.
+  -- Case-insensitive, like every other address comparison in this file: the
+  -- lookup that authorised this call folds case, so a signer whose stored row
+  -- is cased differently from the argument passed the check and then deleted
+  -- nothing, and the caller was told it worked.
+  DELETE FROM signatures s
+  USING transactions t
+  WHERE s.tx_id = p_tx_id
+    AND t.id = s.tx_id
+    AND lower(s.signer) = lower(p_signer)
+    AND t.status IN ('proposed', 'executing', 'queued');
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
@@ -590,9 +853,10 @@ CREATE OR REPLACE FUNCTION update_wallet_name(
   p_wallet_id uuid, p_name text, p_caller text
 ) RETURNS void AS $$
 BEGIN
-  IF NOT is_wallet_owner(p_wallet_id, p_caller) THEN
+  IF NOT is_wallet_writer(p_wallet_id, p_caller) THEN
     RAISE EXCEPTION 'Not an owner';
   END IF;
+  PERFORM rate_gate('meta:' || p_wallet_id::text, 60, interval '1 minute');
   UPDATE wallets SET name = p_name WHERE id = p_wallet_id;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -601,9 +865,10 @@ CREATE OR REPLACE FUNCTION update_owner_label(
   p_wallet_id uuid, p_address text, p_label text, p_caller text
 ) RETURNS void AS $$
 BEGIN
-  IF NOT is_wallet_owner(p_wallet_id, p_caller) THEN
+  IF NOT is_wallet_writer(p_wallet_id, p_caller) THEN
     RAISE EXCEPTION 'Not an owner';
   END IF;
+  PERFORM rate_gate('meta:' || p_wallet_id::text, 60, interval '1 minute');
   -- Case-insensitive, like every other address comparison in this file. It was
   -- the one that was not, so a label set against an address in a different case
   -- than the stored row updated nothing and reported success.
@@ -618,9 +883,10 @@ CREATE OR REPLACE FUNCTION record_approval(
   p_approval_tx text DEFAULT NULL
 ) RETURNS void AS $$
 BEGIN
-  IF NOT is_wallet_owner(p_wallet_id, p_owner) THEN
+  IF NOT is_wallet_writer(p_wallet_id, p_owner) THEN
     RAISE EXCEPTION 'Not an owner';
   END IF;
+  PERFORM rate_gate('appr:' || p_wallet_id::text, 60, interval '1 minute');
   INSERT INTO approvals (wallet_id, chain_id, owner, tx_hash, approved, block_number, approval_tx, updated_at)
   VALUES (p_wallet_id, p_chain_id, p_owner, p_tx_hash, p_approved, p_block_number, p_approval_tx, now())
   ON CONFLICT (wallet_id, owner, tx_hash) DO UPDATE SET
@@ -642,8 +908,23 @@ DECLARE
   old_delay int;
   old_executor text;
 BEGIN
-  IF NOT is_wallet_owner(p_wallet_id, p_caller) THEN
+  IF NOT is_wallet_writer(p_wallet_id, p_caller) THEN
     RAISE EXCEPTION 'Not an owner';
+  END IF;
+  PERFORM rate_gate('sync:' || p_wallet_id::text, 60, interval '1 minute');
+
+  -- This function's whole job is to replace the owner set with the one the
+  -- caller passes, which makes it the most destructive thing anon can reach.
+  -- An empty or absent array is not a legitimate sync — a live vault always has
+  -- at least one owner on chain — and honouring it would retire every owner and
+  -- leave a vault with no owner rows at all: nothing to display, and, before
+  -- the write gate stopped reading is_current, nobody who could ever write to
+  -- it again. Refuse rather than interpret.
+  IF p_owners IS NULL OR array_length(p_owners, 1) IS NULL THEN
+    RAISE EXCEPTION 'Owner list must not be empty';
+  END IF;
+  IF array_length(p_owners, 1) > 100 THEN
+    RAISE EXCEPTION 'Owner list too long';
   END IF;
 
   -- Capture prior state so we can journal what actually changed. This is the
@@ -695,11 +976,40 @@ BEGIN
       UPDATE owners SET position = i - 1
       WHERE wallet_id = p_wallet_id AND lower(address) = lower(p_owners[i]) AND is_current = true;
     ELSE
-      INSERT INTO owners (wallet_id, address, position, is_current)
-      VALUES (p_wallet_id, p_owners[i], i - 1, true);
+      -- An address that was an owner before and is one again gets its existing
+      -- row revived rather than a second one inserted beside it: the partial
+      -- unique index only covers current rows, so a re-add would otherwise
+      -- accumulate a retired row per cycle. This is also the path that repairs
+      -- a vault whose owner set was rewritten by an anonymous caller.
+      UPDATE owners SET is_current = true, removed_at = NULL, position = i - 1
+      WHERE wallet_id = p_wallet_id AND lower(address) = lower(p_owners[i]) AND is_current = false;
+      IF NOT FOUND THEN
+        INSERT INTO owners (wallet_id, address, position, is_current)
+        VALUES (p_wallet_id, p_owners[i], i - 1, true);
+      END IF;
       INSERT INTO config_log (wallet_id, event, subject, owner_count)
       VALUES (p_wallet_id, 'owner_added', p_owners[i], p_owner_count);
     END IF;
   END LOOP;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ── GRANT SELF-HEAL ──────────────────────────────────────────────
+-- DROP FUNCTION takes the function's grants with it, and two functions above
+-- are dropped on every run (mark_executed and mark_queued, because CREATE OR
+-- REPLACE cannot remove a parameter default). So applying THIS file alone —
+-- which is exactly what the client's drift banner tells an operator to do —
+-- silently revoked anon's access to both, and the dapp went on calling them
+-- with the errors discarded: proposals executed on chain simply stopped being
+-- recorded, with nothing on screen to say so.
+--
+-- Re-granting here means schema.sql is self-sufficient for the surface it
+-- drops. roles.sql remains the file that CREATES the roles and grants
+-- everything else; this only puts back what this file just took away, and only
+-- if the role is already there.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION mark_executed(uuid, bigint, text, text) TO anon';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION mark_queued(uuid, bigint, bigint, text, text) TO anon';
+  END IF;
+END $$;
