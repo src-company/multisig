@@ -9145,12 +9145,26 @@ async function reloadVault(vi) {
     // better answer arrives, and the repaint that shows the executed proposal no
     // longer waits on five namespaces across three networks to re-confirm what
     // the signers are called.
-    resolveOwnerNames([...s.owners]).then(names => {
+    // The vault rides along with its own owners, exactly as it does on a first
+    // load. Without it a vault that claimed a name during this session kept
+    // showing as an address: the NAME tab's proposal executes, this runs, and
+    // the one lookup that would have noticed the new name was the one not being
+    // made. forgetOwnerName is what makes the answer new rather than the blank
+    // cached before the claim — the case its own comment describes, which until
+    // now only the full-load path acted on. It costs one more entry in a batch
+    // that is already being sent.
+    forgetOwnerName(v.address);
+    resolveOwnerNames([...s.owners, v.address]).then(names => {
       let changed = false;
       for(const o of v.owners) {
         const n = names[o.addr.toLowerCase()];
         if(n && n !== o.name) { o.name = n; changed = true; }
       }
+      // Assigned even when it comes back empty, unlike the owners above: a name
+      // this vault has stopped answering with must leave the header and the
+      // shareable link, and those are built from revName.
+      const own = names[v.address.toLowerCase()] || null;
+      if(own !== v.revName) { v.revName = own; changed = true; }
       if(changed) render();
     }).catch(e => console.error('Owner names:', e));
 
