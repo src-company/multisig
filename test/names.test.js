@@ -1,6 +1,10 @@
 // Name resolution — the parts of it that are decidable without a network.
 //
-//   node --test test/
+//   node --test              (from the repo root; discovers both suites)
+//
+// Not `node --test test/`: a bare directory argument is resolved as a module by
+// current Node and fails before a test runs. Discovery from the root finds this
+// file and deploy.test.js and leaves the .sol beside them alone.
 //
 // No dependencies and no build step, because the dapp has neither: it is one
 // HTML file with its script inline, served as written. That shape is deliberate
