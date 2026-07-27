@@ -1643,6 +1643,17 @@ const NAME_RE = /\.(eth|g?wei|mega)$/i;
 // something to hint about. Adding a namespace means adding it here and nowhere
 // else in the interface.
 const NAME_KINDS = '.eth / .wei / .gwei / .base.eth / .mega';
+// What a field takes, for the field to say while it is empty. Until this
+// existed the list was only ever printed for input that had already failed, so
+// the only way to find out that .base.eth or .mega resolved was to type
+// something wrong first — the namespaces this app went furthest out of its way
+// to support were the two nothing advertised.
+//
+// Every hint node it lands in already reserves its line: .fhead lays the row
+// out beside the label, the rest carry a min-height for the messages that come
+// later. So a form at rest says which namespaces it reads and nothing moves
+// when it stops saying it.
+function nameKindsHint(){ return 'NAMES · ' + NAME_KINDS; }
 // The subset of those a link may be built on. A deep link is resolved with no
 // operator watching and no field to type a correction into, so it takes only
 // names that answer from one mainnet contract in two calls: WNS and its .gwei
@@ -3604,7 +3615,7 @@ function updateLoadStatus(val) {
   const el = document.getElementById('load-status');
   if (!el) return;
   const t = (val || '').trim();
-  if (!t) { el.textContent = ''; return; }
+  if (!t) { el.textContent = nameKindsHint(); el.style.color = 'var(--d)'; return; }
   if (ethers.isAddress(t)) { el.textContent = 'VALID ADDRESS'; el.style.color = 'var(--g)'; }
   else if (NAME_RE.test(t)) { el.textContent = 'NAME · RESOLVES ON LOAD'; el.style.color = 'var(--a)'; }
   else { const near = nameNearMiss(t);
@@ -4598,7 +4609,7 @@ function renderChainOverlay(mob){
 
 // ── DASHBOARD ─────────────────────────────────────────────────────
 function renderDash(v,mob){
-  if(!v)return`<div class="empty"><div class="empty-title">NO VAULTS</div><div class="empty-sub">${S.demoMode?"":"DEPLOY YOUR FIRST MULTISIG"}</div><button class="btn btn-outline" style="padding:0 32px;height:48px" onclick="S.view='CREATE';render()">CREATE VAULT</button>${!S.demoMode?`<div style="max-width:400px;margin:44px auto 0;padding-top:32px;border-top:1px solid var(--ln)"><div style="font-size:10px;font-weight:600;letter-spacing:2px;color:var(--m)">LOAD EXISTING VAULT</div><div style="margin-top:12px;display:flex;align-items:center;gap:8px;justify-content:center;flex-wrap:wrap"><input class="inp" id="load-addr" style="max-width:320px;min-width:0;flex:1;margin:0;font-size:16px" placeholder="0x... or a name" aria-label="Vault address or name" aria-describedby="load-status" oninput="updateLoadStatus(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();loadVaultByAddress()}"><button class="btn btn-outline btn-sm" onclick="loadVaultByAddress()">LOAD</button></div><div id="load-status" role="status" style="font-size:9px;letter-spacing:1px;text-align:center;min-height:12px;margin-top:6px"></div><div style="margin-top:24px"><button class="btn btn-outline" style="font-size:9px;border-color:var(--ln);color:var(--d)" onclick="S.demoMode=true;S.vaults=seed();S.sel=0;flash('DEMO LOADED');render()">LOAD DEMO</button></div></div>`:""}</div>`;
+  if(!v)return`<div class="empty"><div class="empty-title">NO VAULTS</div><div class="empty-sub">${S.demoMode?"":"DEPLOY YOUR FIRST MULTISIG"}</div><button class="btn btn-outline" style="padding:0 32px;height:48px" onclick="S.view='CREATE';render()">CREATE VAULT</button>${!S.demoMode?`<div style="max-width:400px;margin:44px auto 0;padding-top:32px;border-top:1px solid var(--ln)"><div style="font-size:10px;font-weight:600;letter-spacing:2px;color:var(--m)">LOAD EXISTING VAULT</div><div style="margin-top:12px;display:flex;align-items:center;gap:8px;justify-content:center;flex-wrap:wrap"><input class="inp" id="load-addr" style="max-width:320px;min-width:0;flex:1;margin:0;font-size:16px" placeholder="0x... or a name" aria-label="Vault address or name" aria-describedby="load-status" oninput="updateLoadStatus(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();loadVaultByAddress()}"><button class="btn btn-outline btn-sm" onclick="loadVaultByAddress()">LOAD</button></div><div id="load-status" role="status" style="font-size:9px;letter-spacing:1px;text-align:center;min-height:12px;margin-top:6px;color:var(--d)">${esc(nameKindsHint())}</div><div style="margin-top:24px"><button class="btn btn-outline" style="font-size:9px;border-color:var(--ln);color:var(--d)" onclick="S.demoMode=true;S.vaults=seed();S.sel=0;flash('DEMO LOADED');render()">LOAD DEMO</button></div></div>`:""}</div>`;
   const you = getYou();
   const h0=v.holdings[0];
 
@@ -5011,7 +5022,7 @@ function updateTxToStatus(){
   if(!s) return;
   const val = S.txTo || '';
   if(_nameHint(s, val, updateTxToStatus)) return;
-  const st = _addrState(val);
+  const st = addrHint(val);
   s.textContent = st.txt;
   s.style.color = st.color || '';
 }
@@ -5377,10 +5388,17 @@ function updateTxReview(){
   // in the same synchronous handler, before it was ever on screen. The address a
   // send will actually carry is the one thing this field exists to show.
   if(st && !_nameHint(st, S.txTo, updateTxToStatus)){
-    const s = _addrState(S.txTo); st.textContent = s.txt; st.style.color = s.color || '';
+    const s = addrHint(S.txTo); st.textContent = s.txt; st.style.color = s.color || '';
   }
 
   _paintTxReady();
+}
+// A field's hint at rest. Used where the field stands alone; the repeated rows
+// below pick their own moment, so a create form with three empty owners says
+// what it takes once rather than three times.
+function addrHint(t){
+  const s = _addrState(t);
+  return s.txt ? s : { txt: nameKindsHint(), color:'var(--d)' };
 }
 // Shared address/name field feedback (returns state; writes to a status node).
 function _addrState(t){
@@ -6033,7 +6051,10 @@ function retryOwnerName(i){
 // as good as the address it resolves to, so it is shown — truncated, and linked
 // to the explorer of the chain this form is aimed at, so it can be checked
 // against whatever the operator is holding it up against.
-function ownerRowNote(ow, i, explorerBase){
+// `sayKinds` is true for exactly one row per form — the first empty one — so an
+// operator opening CREATE sees which namespaces an owner may be given in,
+// without the same line repeated down every unfilled row.
+function ownerRowNote(ow, i, explorerBase, sayKinds){
   const pv = ow.pv;
   if(ow.state === 'invalid') {
     // esc(), unlike the two status-node callers: this one is written as HTML
@@ -6045,6 +6066,7 @@ function ownerRowNote(ow, i, explorerBase){
   if(ow.state === 'dup') return {
     html: pv && pv.state === 'ok' ? `DUPLICATE &mdash; ${esc(shortAddr(pv.addr))} IS ALREADY LISTED ABOVE` : 'DUPLICATE &mdash; ALREADY LISTED ABOVE',
     color:'var(--r)', num:'var(--r)' };
+  if(ow.state === 'empty' && sayKinds) return { html: esc(nameKindsHint()), color:'var(--d)', num:_OWNER_STATE_COLOR.empty };
   if(ow.state !== 'name') return { html:'', color:'var(--d)', num:_OWNER_STATE_COLOR[ow.state] || 'var(--d)' };
   if(!pv || pv.state === 'resolving') return { html:'NAME &middot; RESOLVING&hellip;', color:'var(--a)', num:'var(--a)' };
   if(pv.state === 'err') return {
@@ -6172,7 +6194,8 @@ function renderCreate(mob){
       ${(()=>{const you=window._connectedAddress;if(you&&!S.demoMode&&!c.safeSrc&&c.owners.every(o=>!o.addr.trim())){c.owners[0].addr=you;c.owners[0].label='YOU'}return''})()}${c.owners.map((o,i)=>{
         const ow=val.owners[i], st=ow.state;
         const bad=st==='invalid'||st==='dup'||(ow.pv&&ow.pv.state==='err');
-        const note=ownerRowNote(ow,i,explorerBase);
+        // One row speaks for the form: the first that is still empty.
+        const note=ownerRowNote(ow,i,explorerBase,i===val.owners.findIndex(o=>o.state==='empty'));
         // Stable ids: a name resolving in the background repaints this form, and
         // captureFocus/restoreFocus can only put the caret back into a field it
         // can name. Without them, a lookup landing (or any poll tick) while the
@@ -6865,7 +6888,7 @@ function safeCloneInput(val){
   if(!el) return;
   // The clone box resolves against the chain the form deploys to, not the one
   // the app is currently reading — that is the chain its answer will be used on.
-  const s = _addrState(val);
+  const s = addrHint(val);
   el.textContent = s.txt;
   el.style.color = s.color || '';
 }
@@ -7008,7 +7031,7 @@ function undoSafeClone(){
 
 function renderSafeCloneModal(){
   const sc = S.safeClone, net = NETS[S.cf.net] || NETS[0];
-  const st = _addrState(sc.input || '');
+  const st = addrHint(sc.input || '');
   const rows = (sc.found || []).map(f => `<button class="safe-row" onclick="applyFoundSafe(${f.chainId})">
     ${chainIcon(f.chainId)}<span>${esc(String(CHAINS[f.chainId]?.name || f.chainId).toUpperCase())}</span>
     <span style="margin-left:auto;color:var(--d);font-weight:400">${f.threshold} OF ${f.owners.length}${f.version?' &middot; v'+esc(f.version):''}</span>
