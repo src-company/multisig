@@ -131,7 +131,7 @@ services:
       # app's own code and have to move together: a stale wallet.js against a
       # fresh index.html is a half-deployed interface, which is worse than a
       # slow one. They keep the platform default, which revalidates.
-      - path: /ethers.min.js
+      - path: /ethers.slim.min.js
         name: Cache-Control
         value: "public, max-age=86400"
       - path: /walletconnect.min.js

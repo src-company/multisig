@@ -1045,8 +1045,20 @@ input.amt-in:focus{outline:none;box-shadow:none!important;border-bottom-color:tr
      keys — it signs through the operator's wallet — and talks to three provider
      classes. Nothing here is patched or rewritten: it is the same package, the
      same version, with the twenty-five exports the source uses pulled out of it
-     and the unreachable rest dropped. 494 KB -> 263 KB, which is 231 KB of
-     parsing a phone no longer does before this page can be used.
+     and the unreachable rest dropped.
+
+     494 KB -> 263 KB, and 129 KB -> 85 KB compressed. The compressed figure is
+     the one that is worth having: 44 KB off every cold load, which is about a
+     sixth of everything this page transfers.
+
+     The parsing is NOT worth what the byte count suggests, and it is worth
+     writing that down because it is the obvious thing to assume. Measured over
+     twelve interleaved cold loads at 4x CPU throttle, dropping 47% of the
+     bundle moved DOMContentLoaded by 3% (788ms -> 766ms) and first paint by 6%.
+     V8 pre-parses lazily — it does not compile a function until something calls
+     it — so a smaller file is not a proportionally cheaper one, and most of what
+     was removed was never compiled to begin with. This is a bandwidth change
+     wearing a parsing change's clothes.
 
      Vendored rather than installed, like walletconnect.min.js and
      coinbase.min.js beside it, so the deploy needs no package tree. Rebuild it
