@@ -172,6 +172,11 @@ button:active{transform:scale(.97)}
    heavier so the eye lands on it first — it is the readable half of the pair —
    without growing the line: same size as the address it sits next to. */
 .vault-name{font-weight:700;color:var(--a)}
+/* The one copy button in the app that hands over something other than the string
+   it sits next to, so it is the one that carries a word. Tracked and sized like
+   the .addr line it belongs to rather than like the glyph, and set a little in
+   from the address so the pair does not read as one token. */
+.addr-link-btn{gap:5px;letter-spacing:2px;font-size:9px;font-weight:600;margin-left:6px}
 .hdr-r{display:flex;gap:10px;align-items:center}
 .theme-btn{background:transparent;border:1px solid var(--ln);color:var(--a);width:40px;height:40px;font-size:14px;display:flex;align-items:center;justify-content:center;transition:background .15s}
 .wallet-btn{background:transparent;border:1px solid var(--ln);color:var(--m);height:40px;padding:0 14px;font-size:10px;font-weight:600;letter-spacing:1px;display:flex;align-items:center;gap:6px;transition:background .15s;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -213,7 +218,15 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 /* vault tabs */
 .vtabs{overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
 .vtabs::-webkit-scrollbar{display:none}
-.vtabs-inner{display:flex;border-bottom:1px solid var(--ln);min-width:max-content}
+/* max-content is what makes the strip scroll instead of fitting, and it belongs
+   only to the breakpoint that wants scrolling. Above it the tabs share the row,
+   and leaving it on would hand a long holdings summary — now that .vtab-info is
+   one line — the power to stretch the strip a character at a time into a
+   horizontal scroll with no visible bar (.vtabs hides it), which is a worse loss
+   than an ellipsis. A long list of vaults still overflows and scrolls: that
+   comes from .vtab's 140px basis and flex-shrink:0, not from here. */
+.vtabs-inner{display:flex;border-bottom:1px solid var(--ln)}
+@media(max-width:640px){.vtabs-inner{min-width:max-content}}
 /* Top-aligned, not centre-aligned. A <button> centres its content by default,
    which was invisible while every tab carried a name AND an info line; now that
    the selected tab gives its balance back to the hero it can be one line tall,
@@ -222,7 +235,20 @@ textarea.inp{min-height:80px;resize:vertical;border:1px solid var(--ln);padding:
 .vtab.on{color:var(--a)}
 .vtab-name{font-size:14px;font-weight:700;display:flex;align-items:center;gap:6px}
 .vtab-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;animation:pulse 2s infinite}
-.vtab-info{font-size:10px;opacity:.85;margin-top:3px}
+/* One line, always. This strip exists to be compared across — that is the whole
+   argument for putting a balance on the tabs you might switch TO — and a column
+   of summaries can only be read at a glance while they share a baseline. A vault
+   holding more tokens than its neighbours spelled a longer line, wrapped, and
+   pushed its own pending count onto a second row while every other tab's sat on
+   the first; the row stopped being scannable at the one moment it had something
+   to say. Truncation is the right loss: the exact figure is one click away in
+   the hero below, and what a glance needs off this row is which vault, not the
+   last digit of its balance.
+   align-self is what supplies a width to truncate against — the tab is a
+   flex-start column, so without it the line is content-sized and can never
+   overflow. Below 640px .vtabs-inner is max-content and the strip scrolls
+   instead, which is where these already sat on one line. */
+.vtab-info{font-size:10px;opacity:.85;margin-top:3px;align-self:stretch;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* stats */
 .stats{padding:36px 0 8px}
@@ -274,6 +300,14 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
   body.priv-on .priv{transition:none}
 }
 .meta{display:flex;gap:24px;font-size:11px;letter-spacing:2px;color:var(--m);margin-top:12px;flex-wrap:wrap}
+/* When this vault executes: the delay, and the one route around it. One rule
+   brackets the pair, so the exception is read as belonging to the delay rather
+   than as another entry in the run of facts beside it. The inner gap is narrower
+   than .meta's 24px — they are two halves of one clause, and at the row's own
+   spacing they would read as two of its items. */
+.meta-when{display:inline-flex;align-items:baseline;gap:14px;flex-wrap:wrap;border-left:2px solid var(--a);padding-left:10px;margin-left:2px}
+.meta-when.open{border-left-color:var(--y);color:var(--y)}
+.meta-fast{color:var(--g)}
 
 /* queue */
 .tx{padding:18px 8px;border-bottom:1px solid var(--ln);transition:opacity .3s,background .15s}
@@ -298,6 +332,16 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
 .eta{color:var(--d);margin-left:auto;font-size:10px}
 .tx-progress{display:flex;align-items:center;gap:10px;margin:14px 0 12px;font-size:9px;font-weight:700;letter-spacing:2px;color:var(--d)}
 .tx-progress>.plabel{min-width:78px}
+/* The maturity date is the TIMELOCK bar's readout — the instant it is filling
+   toward — so it takes the same trailing slot the SIGNATURES bar puts its count
+   in, and the row's own type with it. It was sitting at the end of the approvals
+   row instead, where .eta's margin-left:auto stranded it against the card's far
+   edge with nothing beside it to say what it was the time OF. That left the one
+   bar on the card with no figure against it while its sibling had one.
+   letter-spacing stays at 1: a date is read as words and numerals, not as the
+   tracked-out labels around it, and at 2px "Jul 28, 04:19 AM" grows wide enough
+   to crowd the bar on a phone. */
+.tx-progress .eta{margin-left:0;font-size:9px;letter-spacing:1px;color:var(--m)}
 .pbar{height:4px;background:var(--ln);overflow:hidden;flex:1;min-width:70px;max-width:220px}
 .pbar>i{display:block;height:100%;transition:width .4s ease}
 /* Proposal footer. The status pill reads as state and lives in the header next
@@ -3353,7 +3397,16 @@ function renderNow(){
       <div>
         <div style="display:flex;align-items:center;gap:4px"><h1 class="logo">MULTISIG</h1><button type="button" id="info-btn" class="info-i" onclick="toggleInfo()" aria-expanded="false" aria-haspopup="dialog" aria-label="What this is">?</button></div>
         <div class="sub" aria-hidden="true">.software</div>
-        ${v?`<div class="addr">${vAddr}${vName}${!S.demoMode&&v.address&&ethers.isAddress(v.address)?` <button class="x-btn copy-btn icon-btn" onclick="copyText('${jstr(vaultLink)}','LINK COPIED')" aria-label="Copy shareable link to this vault" title="Copy shareable link \u00B7 ${esc(vaultLink)}">\u29C9</button>`:""}</div>`:""}
+${/* This control copies the shareable URL, not the address it sits beside \u2014 and
+             it wore the bare \u29C9 that copyBtn() puts against an address at every
+             other call site in the app, including the one on the same vault's
+             address in the hero a few hundred pixels below. Two identical glyphs
+             against two identical truncations of the same address, handing over
+             two different strings, told apart only by hovering for a tooltip.
+             The glyph stays (it is still a copy, and the vocabulary is worth
+             keeping) and the payload is named instead: LINK is the whole
+             difference, so LINK is what the button says. */''}
+        ${v?`<div class="addr">${vAddr}${vName}${!S.demoMode&&v.address&&ethers.isAddress(v.address)?` <button class="x-btn copy-btn icon-btn addr-link-btn" onclick="copyText('${jstr(vaultLink)}','LINK COPIED')" aria-label="Copy shareable link to this vault" title="Copy shareable link \u00B7 ${esc(vaultLink)}">\u29C9 LINK</button>`:""}</div>`:""}
       </div>
       <div class="hdr-r">
         <button class="theme-btn priv-btn" onclick="togglePriv()" aria-pressed="${S.priv}" aria-label="${S.priv?'Balances veiled. Show them.':'Balances visible. Veil them.'}" title="${S.priv?'Balances veiled \u00B7 hover or tap a figure to read it. Click to show them.':'Balances visible. Click to veil them.'}">${S.priv?EYE_OFF:EYE_ON}</button>
@@ -3727,9 +3780,22 @@ function renderDash(v,mob){
     <div style="font-size:11px;color:var(--d);letter-spacing:2px;margin-top:8px">NO BALANCES</div>`}
     <div class="meta">
       <span>${v.threshold}/${v.ownerCount} SIG</span>
-      ${v.delay>0
-        ?`<span style="border-left:2px solid var(--a);padding-left:10px;margin-left:2px"><strong>${fmtD(v.delay)}</strong> TIMELOCK</span>`
-        :`<span style="border-left:2px solid var(--y);padding-left:10px;margin-left:2px;color:var(--y)"><strong>UNLOCKED</strong></span>`}
+${/* When this vault executes, as one bracketed clause. The delay and the one
+           thing that voids it are a single sentence — "1D TIMELOCK, unless every
+           owner signs, in which case none" — so the accent rule brackets both.
+           INSTANT · ALL OWNERS used to sit at the far end of this row, two
+           unrelated facts downstream of the delay it contradicts, and on a phone
+           it wrapped onto a line of its own where it read as a free-standing
+           claim that this vault executes instantly. Nothing about it is
+           free-standing: without a delay to bypass it says nothing.
+           The bracket is shared rather than written twice so an UNLOCKED vault
+           groups the same way, and the whitespace between the two spans is real
+           — the gap between them is CSS, and a screen reader reading the text
+           straight through would otherwise say "1D TIMELOCKINSTANT". */''}
+      <span class="meta-when${v.delay>0?"":" open"}">${v.delay>0
+        ?`<span><strong>${fmtD(v.delay)}</strong> TIMELOCK</span>`
+        :`<span><strong>UNLOCKED</strong></span>`}
+        ${v.fastPath?'<span class="meta-fast" title="Unanimous owner signatures can bypass the timelock — instant execution via the executor">INSTANT &middot; ALL OWNERS</span>':""}</span>
       <span>${S.demoMode?v.chain:chainName()}</span>
       ${v.address&&ethers.isAddress(v.address)?`<span>${S.demoMode?addrLink(v.address,v.chain):addrLink(v.address)}${copyBtn(v.address)}</span>`:""}
 ${/* The name used to sit here too. It moved up to the header, beside the
@@ -3739,7 +3805,6 @@ ${/* The name used to sit here too. It moved up to the header, beside the
       ${v.executor===ethers.ZeroAddress||v.executor==="0x0000...0000"?'<span style="color:var(--y)">NO EXECUTOR</span>':""}
       ${v.codeKind==='foreign'?'<span style="color:var(--r)" title="The code at this address is not the audited Multisig clone. Everything below is read from a contract this interface cannot vouch for.">UNVERIFIED CODE</span>':""}
       ${v.codeKind==='7702'?'<span style="color:var(--m)" title="An EOA delegating to the Multisig implementation under EIP-7702. The key behind the address can revoke that delegation at any time.">EIP-7702</span>':""}
-      ${v.fastPath?'<span style="color:var(--g)" title="Unanimous owner signatures can bypass the timelock — instant execution via the executor">INSTANT &middot; ALL OWNERS</span>':""}
     </div>
 ${/* Topping up is the one action here that needs no signature, no quorum and no
        proposal — anyone can send to the address. It sits below the facts rather
@@ -3771,19 +3836,28 @@ ${/* Topping up is the one action here that needs no signature, no quorum and no
     // across the badge, the headline and the note, instead of two.
     const display=dv&&dv!=="0"?`${dv} ${dt}`:kind.label;
     const acCount=Object.values(tx.approvals).filter(Boolean).length;
-    let progressLine="";
+    // The absolute moment this proposal matures. Hoisted above the progress line
+    // because that line claims it when it has a bar to attach it to; the ticker
+    // finds it by [data-eta] wherever it ends up, so which parent holds it is a
+    // layout question only.
+    const etaHtml=tx.eta>0&&fmtEta(tx.eta)!=="READY"?`<span class="eta" data-eta="${tx.eta}">${new Date(tx.eta*1000).toLocaleString("en-US",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"})}</span>`:"";
+    let progressLine="",etaRow=etaHtml;
     if(!isCancel&&!isQueued&&!blocked){
       const pct=v.threshold?Math.min(1,acCount/v.threshold):0,done=acCount>=v.threshold;
       progressLine=`<div class="tx-progress"><span class="plabel">SIGNATURES</span><div class="pbar" role="progressbar" aria-label="Signatures collected" aria-valuemin="0" aria-valuemax="${v.threshold}" aria-valuenow="${acCount}"><i style="width:${Math.round(pct*100)}%;background:${done?"var(--g)":"var(--y)"}"></i></div><span style="color:${done?"var(--g)":"var(--m)"}">${acCount}/${v.threshold}${done&&acCount>=v.ownerCount?" \u00B7 ALL":""}</span></div>`;
     }else if(isQueued&&v.delay>0&&fmtEta(tx.eta)!=="READY"){
       const queuedAt=tx.eta-v.delay,pct=Math.min(1,Math.max(0,(NOW()-queuedAt)/v.delay));
-      progressLine=`<div class="tx-progress"><span class="plabel">TIMELOCK</span><div class="pbar" role="progressbar" aria-label="Timelock elapsed" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(pct*100)}"><i data-tl-eta="${tx.eta}" data-tl-delay="${v.delay}" style="width:${Math.round(pct*100)}%;background:var(--a)"></i></div></div>`;
+      // The date moves into the bar's value slot and out of the approvals row \u2014
+      // it is what this bar is counting to, and it is the only thing on the card
+      // that says WHEN rather than how long. Only in this branch: a card with no
+      // timelock bar has no slot to move it to, so it stays where it was.
+      progressLine=`<div class="tx-progress"><span class="plabel">TIMELOCK</span><div class="pbar" role="progressbar" aria-label="Timelock elapsed" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(pct*100)}"><i data-tl-eta="${tx.eta}" data-tl-delay="${v.delay}" style="width:${Math.round(pct*100)}%;background:var(--a)"></i></div>${etaHtml}</div>`;
+      etaRow="";
     }
     const apHtml=v.owners.map(o=>{
       const signed=!!tx.approvals[o.addr];
       return `<span class="${signed?"ap-ok":"ap-no"}" title="${esc(ownerIdent(o))} ${signed?"has signed":"has not signed"}"><span aria-hidden="true">${signed?"\u2713":"\u25CB"}</span><span class="vh">${signed?"signed":"not signed"}</span> ${esc(ownerIdent(o))}${o.you?"*":""}</span>`;
     }).join("");
-    const etaHtml=tx.eta>0&&fmtEta(tx.eta)!=="READY"?`<span class="eta" data-eta="${tx.eta}">${new Date(tx.eta*1000).toLocaleString("en-US",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"})}</span>`:"";
     const signedByYou=you&&tx.approvals[you];
     let actionBtn="";
     if(s.sign&&!signedByYou){
@@ -3911,7 +3985,7 @@ ${/* Topping up is the one action here that needs no signature, no quorum and no
         })():""}
       </div>
       ${blocked?"":progressLine}
-      <div class="approvals">${apHtml}${etaHtml}${(()=>{const xl=txExplorerLink(tx,v);return xl?`<span class="eta" style="margin-left:${etaHtml?'12px':'auto'}">${xl}</span>`:'';})()}</div>
+      <div class="approvals">${apHtml}${etaRow}${(()=>{const xl=txExplorerLink(tx,v);return xl?`<span class="eta" style="margin-left:${etaRow?'12px':'auto'}">${xl}</span>`:'';})()}</div>
       ${blocked?'':(()=>{
         // Any live proposal can be dry-run — knowing it reverts is just as
         // useful while it sits in the timelock as it is before signing.
@@ -5073,7 +5147,7 @@ function renderCreate(mob){
   <div class="grid2" style="gap:${mob?0:48}px">
     <div>
       <label class="lbl" for="cf-name">VAULT NAME</label>
-      <input class="inp" id="cf-name" style="margin-bottom:${c.name&&c.name.trim()?'8px':'20px'}" placeholder="MY VAULT" value="${esc(c.name||'')}" oninput="S.cf.name=this.value" onchange="render()">
+      <input class="inp" id="cf-name" maxlength="128" style="margin-bottom:${c.name&&c.name.trim()?'8px':'20px'}" placeholder="MY VAULT" value="${esc(c.name||'')}" oninput="S.cf.name=this.value" onchange="render()">
       ${renderCreateWns(c)}
       <div class="fhead"><span class="lbl" style="margin:0">OWNERS</span>
         <button class="pill safe-pill" id="safe-clone-btn" aria-haspopup="dialog" title="Copy the owners and threshold of an existing Gnosis Safe" onclick="openSafeClone()">${safeIcon()}CLONE</button>
@@ -5094,7 +5168,7 @@ function renderCreate(mob){
         return`<div class="owner-row">
         <span class="o-num" style="color:${note.num}">${String(i+1).padStart(2,"0")}</span>
         <input class="inp o-addr" id="cf-own-${i}" aria-label="Owner ${i+1} address or name" aria-invalid="${bad}"${note.html?` aria-describedby="cf-own-note-${i}"`:''} style="${bad?'border-bottom-color:var(--r)':''}" placeholder="0x... or .eth/.(g)wei" value="${esc(shortAddr(o.addr))}" onfocus="this.value=S.cf.owners[${i}].addr" onblur="this.value=shortAddr(S.cf.owners[${i}].addr)" oninput="S.cf.owners[${i}].addr=this.value;const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;if(+S.cf.threshold>fc){S.cf.threshold=String(fc)}" onchange="S.cf.owners[${i}].addr=this.value;render()">
-        <input class="inp o-label" id="cf-own-lbl-${i}" aria-label="Owner ${i+1} label" placeholder="LABEL" value="${esc(o.label)}" oninput="S.cf.owners[${i}].label=this.value" onchange="render()">
+        <input class="inp o-label" id="cf-own-lbl-${i}" maxlength="64" aria-label="Owner ${i+1} label" placeholder="LABEL" value="${esc(o.label)}" oninput="S.cf.owners[${i}].label=this.value" onchange="render()">
         ${c.owners.length>1?`<button class="x-btn red o-del" aria-label="Remove owner ${i+1}" title="Remove this owner" onclick="S.cf.owners.splice(${i},1);const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;S.cf.threshold=String(Math.min(+S.cf.threshold||1,fc));render()">&#10005;</button>`:""}
       </div>${note.html?`<div class="owner-note" id="cf-own-note-${i}" style="color:${note.color}">${note.html}</div>`:''}`}).join("")}
       <button class="link-btn" onclick="S.cf.owners.push({addr:'',label:''});S.cf.threshold=String(Math.min(+S.cf.threshold||1,S.cf.owners.length));render()">+ ADD</button>
@@ -5172,7 +5246,7 @@ function renderAdmin(v,mob){
   ${tab==="POLICY"?`
     <label class="lbl" for="admin-vault-name">VAULT NAME</label>
     <div style="display:flex;gap:8px;max-width:520px">
-      <input class="inp" id="admin-vault-name" style="margin:0;flex:1" placeholder="${esc(v.name)}" value="${esc(v.name)}" onkeydown="if(event.key==='Enter'){event.preventDefault();renameVault()}">
+      <input class="inp" id="admin-vault-name" maxlength="128" style="margin:0;flex:1" placeholder="${esc(v.name)}" value="${esc(v.name)}" onkeydown="if(event.key==='Enter'){event.preventDefault();renameVault()}">
       <button class="btn btn-outline btn-sm" style="flex-shrink:0" onclick="renameVault()">SAVE</button>
     </div>
     <div style="font-size:9px;letter-spacing:1.5px;color:var(--d);line-height:1.7;margin-top:8px;max-width:520px">A LABEL THIS INTERFACE STORES &mdash; NOTHING ON CHAIN READS IT.${
@@ -5230,14 +5304,14 @@ function renderAdmin(v,mob){
         <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;min-width:0">${signerIdentHtml(o,v.chain)}${o.you?'<span class="signer-you">YOU</span>':""}</div>
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-shrink:0${mob?";width:100%":""}">
-          <input class="inp" style="margin:0;${mob?"flex:1":"width:120px"};font-size:11px;letter-spacing:1px;border-bottom-color:var(--ln)" placeholder="LABEL" aria-label="Label for ${esc(shortAddr(o.addr))}" value="${isYouLbl?"":esc(o.label)}" onchange="updateOwnerLabel(${S.sel},${oi},this.value)">
+          <input class="inp" maxlength="64" style="margin:0;${mob?"flex:1":"width:120px"};font-size:11px;letter-spacing:1px;border-bottom-color:var(--ln)" placeholder="LABEL" aria-label="Label for ${esc(shortAddr(o.addr))}" value="${isYouLbl?"":esc(o.label)}" onchange="updateOwnerLabel(${S.sel},${oi},this.value)">
           ${!o.you?`<button class="btn btn-danger btn-sm" onclick="doAdminPropose('removeOwner',${oi})">REMOVE</button>`:""}
         </div>
     </div>`}).join("")}
     <div class="sep"></div>
     <label class="lbl" for="admin-add-owner"><span class="dim">ADD &middot;</span> OWNER</label>
     <input class="inp" id="admin-add-owner" style="margin-top:8px" placeholder="0x... or name.eth / name.(g)wei" onkeydown="if(event.key==='Enter'){event.preventDefault();doAdminPropose('addOwner')}">
-    <input class="inp" id="admin-add-label" style="font-size:11px;letter-spacing:1px" placeholder="LABEL (OPTIONAL)" aria-label="Label for the new owner (optional)" onkeydown="if(event.key==='Enter'){event.preventDefault();doAdminPropose('addOwner')}">
+    <input class="inp" id="admin-add-label" maxlength="64" style="font-size:11px;letter-spacing:1px" placeholder="LABEL (OPTIONAL)" aria-label="Label for the new owner (optional)" onkeydown="if(event.key==='Enter'){event.preventDefault();doAdminPropose('addOwner')}">
     <button class="btn btn-outline btn-w" onclick="doAdminPropose('addOwner')">PROPOSE OWNER</button>
   </div>`:`<div>
     ${(()=>{
@@ -6337,16 +6411,42 @@ async function dbGetSigsByTxIds(txIds) {
   return map;
 }
 
+// The four writes below all run AFTER a transaction has landed on chain, and
+// every one of them discarded its result. That is how a database serving an
+// older schema stayed invisible for weeks: mark_executed had lost its grant to
+// anon — schema.sql DROPs and recreates it, which takes the grant with it — so
+// every execution came back 403 and nothing recorded it, while the interface
+// went on saying the action had succeeded. Which it had. That is exactly why
+// these must not throw or flash a failure: the operator's transaction is
+// mined and irreversible, and reporting it as failed would be a lie in the
+// more alarming direction.
+//
+// What a failure here actually means is narrower: the record now lags the
+// chain. It is self-healing — loadVaultQueue re-reads the vault and reconciles
+// every row against it — so the honest report is a notice that says so, once,
+// rather than one per call in a cascade.
+let _dbLagWarnedAt = 0;
+function dbWriteLagged(op, error) {
+  console.error('DB ' + op + ':', error);
+  const now = Date.now();
+  if(now - _dbLagWarnedAt < 15000) return;
+  _dbLagWarnedAt = now;
+  flash('THE TRANSACTION LANDED ON CHAIN, BUT THE COORDINATION RECORD DID NOT UPDATE — IT WILL RESYNC ON RELOAD', 7000);
+}
+
 async function dbMarkExecuted(txId, block, execTx) {
-  await sb.rpc('mark_executed', { p_tx_id: txId, p_block: block, p_execution_tx: execTx, p_caller: window._connectedAddress });
+  const { error } = await sb.rpc('mark_executed', { p_tx_id: txId, p_block: block, p_execution_tx: execTx, p_caller: window._connectedAddress });
+  if(error) dbWriteLagged('mark executed', error);
 }
 
 async function dbMarkQueued(txId, eta, block, queueTx) {
-  await sb.rpc('mark_queued', { p_tx_id: txId, p_eta: eta, p_block: block, p_queue_tx: queueTx || null, p_caller: window._connectedAddress });
+  const { error } = await sb.rpc('mark_queued', { p_tx_id: txId, p_eta: eta, p_block: block, p_queue_tx: queueTx || null, p_caller: window._connectedAddress });
+  if(error) dbWriteLagged('mark queued', error);
 }
 
 async function dbCancelTx(txId, cancelledBy) {
-  await sb.rpc('cancel_tx', { p_tx_id: txId, p_cancelled_by: cancelledBy });
+  const { error } = await sb.rpc('cancel_tx', { p_tx_id: txId, p_cancelled_by: cancelledBy });
+  if(error) dbWriteLagged('cancel tx', error);
 }
 
 // Retire a proposal that never ran — its nonce was consumed by something else,
@@ -6356,8 +6456,14 @@ async function dbCancelTx(txId, cancelledBy) {
 // under the same green tick as one that did. A queued row leaving the chain is
 // the sharpest case — executed and cancelled are indistinguishable from here,
 // and calling both "executed" picks the flattering one.
+// Logged but never flashed: this is a background sweep that runs in a loop over
+// every superseded row on each queue load, so a failure is neither the
+// operator's doing nor anything they can act on — and one notice per swept row
+// would bury the ones that matter. sb.rpc resolves with {error} rather than
+// rejecting, so the caller's .catch() never saw these.
 async function dbPruneTx(txId) {
-  await sb.rpc('prune_tx', { p_tx_id: txId, p_caller: window._connectedAddress });
+  const { error } = await sb.rpc('prune_tx', { p_tx_id: txId, p_caller: window._connectedAddress });
+  if(error) console.error('DB prune tx:', error);
 }
 
 // `state` is an already-loaded multicallLoad() result. Its only caller has one
