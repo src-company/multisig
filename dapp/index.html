@@ -3047,6 +3047,12 @@ const S = {
   // create form
   cf: {
     name: '', threshold: "1", delayVal: "24", delayUnit: 'h', net: 0, clone: [], fastPath: false,
+    // Whether the operator has chosen the deploy networks themselves — a primary
+    // in the panel, a clone target in the row, or a Safe loaded from another
+    // chain. Until they have, `net` follows the chain the app is pointed at, so
+    // the default is the one network they have already said out loud rather than
+    // whichever one happens to be first in the list. See syncCreateNet.
+    netPicked: false,
     owners: [{ addr: '', label: '' }, { addr: '', label: '' }, { addr: '', label: '' }],
     safeSrc: null,        // set when the signer set was cloned from a Gnosis Safe
     wns: false,           // claim <slug(name)>.id.wei in the deploy transaction
@@ -4409,7 +4415,14 @@ function renderDeployOverlay(){
       // by a reply — otherwise a dead RPC reads as a cleared preflight. The
       // executor only counts when this vault will carry one; unasked is not
       // unanswered.
-      const unread = s.pf && (s.pf.factoryOk===null || s.pf.gasOk===null || (s.pf.needExec && s.pf.executorOk===null));
+      //
+      // No `pf` at all is the same claim in its strongest form: the preflight
+      // never filed an answer for this chain. It is reachable — the preflight's
+      // own catch drops straight to this screen — and it read as READY on every
+      // row, because each individual check was written as "pf says false", and a
+      // preflight that never ran says nothing at all. Absence is unread, not
+      // ready.
+      const unread = !s.pf || s.pf.factoryOk===null || s.pf.gasOk===null || (s.pf.needExec && s.pf.executorOk===null);
       const w=[];
       if(s.pf&&s.pf.factoryOk===false)w.push('NO FACTORY');
       if(s.pf&&s.pf.implOk===false)w.push('UNKNOWN FACTORY');
@@ -4522,14 +4535,21 @@ function renderDeployOverlay(){
     const badImpl = d.steps.some(s=>s.pf&&s.pf.implOk===false);
     const notOwner = d.ctx && d.ctx.deployerIsOwner === false;
     const fpVoid = d.ctx && d.ctx.fastPathVoid === true;
-    const unread = d.steps.some(s=>s.pf&&(s.pf.factoryOk===null||s.pf.gasOk===null));
+    const unread = d.steps.some(s=>!s.pf||s.pf.factoryOk===null||s.pf.gasOk===null);
     // The review screen is now the checkpoint for every deploy, clean ones
     // included, so the warning block only appears when there is something to
     // warn about — and "proceed anyway and those chains may fail" is not
     // something to tell someone whose preflight came back green.
     const warnText = `${fpVoid?`At ${d.ctx.thresh}-of-${d.ctx.resolvedOwners.length} every quorum is already unanimous, so instant execution makes the timelock advisory rather than enforced — the same signatures can queue or execute, whichever the submitter picks. Lower the threshold, or leave instant execution off, to keep the delay enforced. `:''}${noFac?'No factory on some chains — the vault cannot be deployed there. ':''}${badImpl?'On some chains the factory address holds code that does not name the audited implementation — a vault deployed there would not be the reviewed contract. ':''}${noExec?`No TimelockExecutor on some chains${d.ctx&&d.ctx.wantForward?' — instant execution cannot be enabled there, and there':' — there'} is no way to cancel a queued proposal inside its ${d.ctx?esc(fmtD(d.ctx.del)):''} window: a cancel raised as an ordinary proposal is itself queued for the full delay. `:''}${noGas?`Not enough gas in the connected wallet on some chains${shortfall>0n?` — up to ${esc(fmtGasShort(shortfall))} short`:''}. `:''}${notOwner?'You are not one of the owners — the vault will deploy, but it will not appear in your history. ':''}${d.ctx&&d.ctx.wns&&d.wnsAvail!==true?`${d.ctx.wns.full} ${d.wnsAvail===false?'has been claimed by someone else since you picked it':'could not be confirmed free — mainnet did not answer'}. The vault deploys either way; the name is dropped rather than reverting the deploy, and you can claim another one from the NAME tab afterwards. `:''}`;
     const anyWarn = !!warnText;
-    footer = `${anyWarn?`<div style="margin-top:14px;font-size:10px;color:var(--y);letter-spacing:1px;line-height:1.6">${warnText}Proceed anyway and those chains may fail.</div>`
+    // Kept out of the block above, and stated first. The mined address is the
+    // reason this screen exists — it is the only place the address funds will be
+    // sent to can be read before anything is signed — so its absence is a fact
+    // about the screen, not one more thing that might go wrong on some chain.
+    // Folding it in would have hung "proceed anyway and those chains may fail"
+    // off the end of a sentence about no chain in particular.
+    const addrMsg = d.address ? '' : `<div style="margin-top:14px;font-size:10px;color:var(--y);letter-spacing:1px;line-height:1.6">The vault address could not be mined here — it will be mined when the first chain deploys, and shown on the rows as it lands. Everything else below is unaffected.</div>`;
+    footer = `${addrMsg}${anyWarn?`<div style="margin-top:14px;font-size:10px;color:var(--y);letter-spacing:1px;line-height:1.6">${warnText}Proceed anyway and those chains may fail.</div>`
       :`<div style="margin-top:14px;font-size:9px;color:var(--d);letter-spacing:1px;line-height:1.6">${unread?'Some chains would not answer the preflight — they are listed as unchecked, not as ready. ':''}${nch>1?`Deploys run one chain at a time and each one needs a network switch plus a signature in your wallet — ${nch} in total.`:'Needs one signature in your wallet.'}</div>`}
       <div style="display:flex;gap:8px;margin-top:16px"><button class="btn btn-outline btn-w" onclick="closeDeploy()">CANCEL</button><button class="btn btn-fill btn-w" onclick="proceedDeploy()">${nch>1?`DEPLOY &middot; ${nch} CHAINS`:'DEPLOY'}</button></div>`;
   } else if(d.done){
@@ -4538,17 +4558,37 @@ function renderDeployOverlay(){
     // stopped on, what it was waiting for, how many chains are still owed a vault
     // — and offer the one button that carries on from there. Without this the
     // flow's only recovery was RETRY per chain, in the right order, guessed.
+    // How many chains actually came away with the vault. Both messages below are
+    // about this figure, so it is counted once.
+    const landedN = d.steps.filter(s=>s.status==='done'||s.status==='skipped').length;
     let haltMsg = '';
     if(d.halted){
-      const landed = d.steps.filter(s=>s.status==='done'||s.status==='skipped').length;
       const drift = S.walletChain && S.walletChain !== d.chains[d.halted.at].id
         ? ` Your wallet is on ${esc(CHAINS[S.walletChain] ? CHAINS[S.walletChain].name : 'chain ' + S.walletChain)}.` : '';
       // Closing is safe to say here because the salt is now saved outside the run:
       // the untried chains can still reach this address in a later session.
-      haltMsg = `<div style="margin-top:14px;font-size:10px;color:var(--y);letter-spacing:1px;line-height:1.6">Stopped at ${esc(d.halted.name)} — ${esc(String(d.halted.reason).toLowerCase())}.${drift} ${landed} of ${nch} chain${nch>1?'s':''} ${landed===1?'has':'have'} the vault; the rest were left untried rather than firing the same prompt at each one. Fix it in your wallet and press RESUME.${landed?' Closing is safe too — the mined address is held, and the RESUME banner will offer the remaining chains again.':''}</div>`;
+      haltMsg = `<div style="margin-top:14px;font-size:10px;color:var(--y);letter-spacing:1px;line-height:1.6">Stopped at ${esc(d.halted.name)} — ${esc(String(d.halted.reason).toLowerCase())}.${drift} ${landedN} of ${nch} chain${nch>1?'s':''} ${landedN===1?'has':'have'} the vault; the rest were left untried rather than firing the same prompt at each one. Fix it in your wallet and press RESUME.${landedN?' Closing is safe too — the mined address is held, and the RESUME banner will offer the remaining chains again.':''}</div>`;
     }
-    footer = `${haltMsg}${dbWarn?`<div style="margin-top:14px;font-size:10px;color:var(--y);letter-spacing:1px;line-height:1.6">Deployed on-chain, but not recorded in history — the vault is live at the address above.</div>`:''}
-      <div style="display:flex;gap:8px;margin-top:20px">${d.halted?`<button class="btn btn-outline btn-w" onclick="closeDeploy()">CLOSE</button><button class="btn btn-fill btn-w" onclick="resumeDeploy()">RESUME &middot; ${remaining} CHAIN${remaining>1?'S':''}</button>`
+    // Every chain still owed a vault gets the same one button, whether the run
+    // stopped on the wallet or a chain simply failed. RESUME was offered only for
+    // a halt, and a halt is not the only way to finish short: a RETRY that
+    // succeeds clears the halt, so the chains the run never reached were left
+    // sitting at NOT ATTEMPTED under a DONE title, with one button on the dialog
+    // and it said VIEW VAULT. The only route back to them was a banner the
+    // operator had to close the dialog to discover.
+    //
+    // Gated on the address, not on the count: with nothing mined there is no
+    // shared address to resume towards, and resuming would just mine a new one.
+    const canResume = remaining > 0 && !!(d.ctx && d.ctx.minedAddr);
+    // What closing costs depends on whether anything landed, and it is not the
+    // same sentence either way: a record with a chain on it survives and is
+    // offered again, a record with none is cleared on the way out and the next
+    // deploy mines a different address.
+    const leftMsg = canResume && !d.halted
+      ? `<div style="margin-top:14px;font-size:10px;color:var(--y);letter-spacing:1px;line-height:1.6">${landedN?`${landedN} of ${nch} chain${nch>1?'s':''} ${landedN===1?'has':'have'} the vault. `:''}RESUME takes ${remaining===1?'the remaining chain':`the remaining ${remaining} chains`} to the same address.${landedN?' Closing is safe too — the mined address is held, and the RESUME banner will offer them again.':' Closing lets the mined address go; a later deploy would land somewhere else.'}</div>`
+      : '';
+    footer = `${haltMsg}${leftMsg}${dbWarn?`<div style="margin-top:14px;font-size:10px;color:var(--y);letter-spacing:1px;line-height:1.6">Deployed on-chain, but not recorded in history — the vault is live at the address above.</div>`:''}
+      <div style="display:flex;gap:8px;margin-top:20px">${canResume?`<button class="btn btn-outline btn-w" onclick="closeDeploy()">CLOSE</button><button class="btn btn-fill btn-w" onclick="resumeDeploy()">RESUME &middot; ${remaining} CHAIN${remaining>1?'S':''}</button>`
         :`<button class="btn btn-fill btn-w" onclick="closeDeploy()">${anyFail?'CLOSE':'VIEW VAULT'}</button>`}</div>`;
   } else if(phase==='deploying'){
     // Which chain, and what it is waiting for. "APPROVE EACH WALLET PROMPT" is
@@ -6209,6 +6249,11 @@ function renderCreateWns(c){
   const slug = wnsSlug(c.name);
   const mainIdx = NETS.findIndex(n => n.id === WNS_CHAIN_ID);
   const onMainnet = c.net === mainIdx || (c.clone || []).includes(mainIdx);
+  // Ethereum added by this tick and then chosen as the primary target is no
+  // longer this option's to remove — it is not in the clone row any more, so the
+  // line telling the operator to untick it there points at nothing, and dropping
+  // the claim must not drop a chain they now deploy to on purpose.
+  if(c.wnsAddedNet && c.net === mainIdx) c.wnsAddedNet = false;
   // Unticking Ethereum in the panel below cancels the claim rather than leaving
   // a ticked box for a chain the deploy no longer touches. Normalised here, at
   // the one place that reads both, so the network panel does not have to know
@@ -6255,7 +6300,41 @@ function renderCreateWns(c){
   </div>`;
 }
 
+// The chain this form deploys to follows the chain the app is pointed at, right
+// up until the operator picks one themselves.
+//
+// It used to be a constant — index 0, ETHEREUM — whatever the wallet was
+// connected to. So an operator working on Base opened CREATE, filled in the
+// owners, and pressed a button that asked their wallet to move to Ethereum and
+// spend mainnet gas on a chain they had never chosen; the only statement of
+// which chain it would be sat in a panel below the fold, already ticked. The
+// default has to be the one network the operator has already said out loud.
+//
+// Only until they choose. Picking a network in the panel, or loading a Safe
+// found on another chain, is a decision this must never quietly overturn —
+// including later, when the wallet moves and this would otherwise drag the form
+// along behind it.
+function syncCreateNet(){
+  const c = S.cf;
+  if(c.netPicked) return;
+  // Never while a deploy is on screen. The CREATE view renders underneath that
+  // overlay — the deploy is started from it — and the chain walk moves S.chainId
+  // once per chain, so following it here would rewrite the form's primary target
+  // to whichever chain is being signed for and, because a chain cannot be both
+  // primary and a clone, delete each one from the clone row as the walk reached
+  // it. A three-chain deploy would end with a form that deploys to one.
+  if(S.deploy) return;
+  const i = NETS.findIndex(n => n.id === S.chainId);
+  if(i < 0 || i === c.net) return;
+  c.net = i;
+  // A chain cannot be both the primary target and a clone of it. This is only
+  // ever reached before the operator has picked anything — ticking a clone
+  // target sets netPicked for exactly this reason, so a selection they made is
+  // never the thing this drops.
+  c.clone = (c.clone || []).filter(x => x !== i);
+}
 function renderCreate(mob){
+  syncCreateNet();
   const c=S.cf,ds=toSec(c.delayVal,c.delayUnit),net=NETS[c.net],toks=DEMO_TOKENS[net.name]||["ETH"];
   const explorerBase = CHAINS[net.id]?.explorer || 'https://etherscan.io';
   const val = validateCreate(c, S.demoMode);
@@ -6279,7 +6358,7 @@ function renderCreate(mob){
         const ow=val.owners[i], st=ow.state;
         const bad=st==='invalid'||st==='dup'||(ow.pv&&ow.pv.state==='err');
         // One row speaks for the form: the first that is still empty.
-        const note=ownerRowNote(ow,i,explorerBase,i===val.owners.findIndex(o=>o.state==='empty'));
+        const note=ownerRowNote(ow,i,explorerBase,i===val.owners.findIndex(o=>o.state==='empty'),net.id);
         // Stable ids: a name resolving in the background repaints this form, and
         // captureFocus/restoreFocus can only put the caret back into a field it
         // can name. Without them, a lookup landing (or any poll tick) while the
@@ -6353,7 +6432,7 @@ EXECUTOR    ${ds>0?`<a href="${explorerBase}/address/${TIMELOCK_EXECUTOR}" targe
 METHOD      ${(c.fastPath&&ds>0)||c.wns?"createWithCalls()":"create()"}</div><div class="sep"></div>`:""}
       <span class="lbl" id="lbl-network">NETWORK</span>
       <div class="net-panel" role="group" aria-labelledby="lbl-network">${NETS.map((n,i)=>{const on=c.net===i,t=DEMO_TOKENS[n.name]||["ETH"];return`<div>
-        <button type="button" class="net-row${on?" on":""}"${on?' aria-current="true"':''} onclick="S.cf.net=${i};S.cf.clone=(S.cf.clone||[]).filter(x=>x!==${i});render()">
+        <button type="button" class="net-row${on?" on":""}"${on?' aria-current="true"':''} onclick="S.cf.net=${i};S.cf.netPicked=true;S.cf.clone=(S.cf.clone||[]).filter(x=>x!==${i});render()">
           <span style="font-size:8px" aria-hidden="true">${on?"\u25CF":"\u25CB"}</span>${chainIcon(n.id)}<span>${esc(n.name)}</span>
           <span class="net-id">${n.id}</span>${n.test?'<span class="net-test">TEST</span>':""}
         </button>
@@ -6946,6 +7025,12 @@ function toggleClone(i){
   const s = new Set(S.cf.clone || []);
   s.has(i) ? s.delete(i) : s.add(i);
   S.cf.clone = [...s];
+  // Choosing what to clone to is choosing the deploy set, primary included: a
+  // form left following the wallet would, the moment it moved onto one of these
+  // chains, promote it to primary and drop it from the row it was just ticked
+  // in — turning "Ethereum and Base" into "Base" with nothing said. See
+  // syncCreateNet.
+  S.cf.netPicked = true;
   render();
 }
 
@@ -7084,12 +7169,15 @@ async function applySafe(src, typed){
     ownerCount: src.owners.length, threshold: src.threshold,
     // Snapshot everything this function touches — the chain picks included,
     // since loading a Safe found elsewhere moves the deploy target too.
-    prev: { owners: c.owners.map(o => ({ ...o })), threshold: c.threshold, name: c.name, net: c.net, clone: (c.clone || []).slice() },
+    prev: { owners: c.owners.map(o => ({ ...o })), threshold: c.threshold, name: c.name, net: c.net, netPicked: !!c.netPicked, clone: (c.clone || []).slice() },
   };
   c.owners = src.owners.map(a => ({ addr: a, label: a.toLowerCase() === you ? 'YOU' : (names[a.toLowerCase()] || '') }));
   c.threshold = String(Math.min(Math.max(src.threshold || 1, 1), c.owners.length));
+  // Loading a Safe found on another chain is a choice of deploy target, so it
+  // counts as picking one: the form must not drift back to whatever chain the
+  // app happens to be reading on the next repaint.
   const ni = netIdx(src.chainId);
-  if(ni >= 0){ c.net = ni; c.clone = (c.clone || []).filter(x => x !== ni); }
+  if(ni >= 0){ c.net = ni; c.netPicked = true; c.clone = (c.clone || []).filter(x => x !== ni); }
   // Name the vault after whatever the operator searched for, but never
   // overwrite a name they typed themselves.
   if(!String(c.name || '').trim()) c.name = (NAME_RE.test(typed || '') ? typed.trim() : 'SAFE ' + src.addr.slice(2, 6)).toUpperCase();
@@ -7105,7 +7193,7 @@ function undoSafeClone(){
     c.owners = s.prev.owners?.length ? s.prev.owners : [{ addr:'', label:'' }];
     c.threshold = s.prev.threshold;
     c.name = s.prev.name;
-    if(typeof s.prev.net === 'number') c.net = s.prev.net;
+    if(typeof s.prev.net === 'number'){ c.net = s.prev.net; c.netPicked = !!s.prev.netPicked; }
     if(Array.isArray(s.prev.clone)) c.clone = s.prev.clone.slice();
   }
   c.safeSrc = null;
@@ -8430,7 +8518,14 @@ async function loadAllVaults() {
   const addr = window._connectedAddress;
   if(!addr) return;
   const hadVaults = S.vaults.length > 0;
-  if(!hadVaults) showLoading('LOADING VAULTS');
+  // Never behind the deploy dialog. That dialog is the one screen in this app
+  // whose buttons are the recovery — RESUME, RETRY, the explorer link to a
+  // transaction that may or may not have landed — and a reload triggered from
+  // underneath it (the chain walk moved the app, so the list has to be rebuilt
+  // for where it landed) would drop a full-screen spinner over exactly that.
+  // The same reasoning already gates the wallet's chain and account handlers;
+  // it belongs here, where the loader actually is.
+  if(!hadVaults && !S.deploy) showLoading('LOADING VAULTS');
   try {
     const wallets = await dbMyWallets(addr);
     // Unreachable, not empty — see dbMyWallets. Leave whatever is on screen
@@ -9269,9 +9364,23 @@ function buildInitcode(impl) {
 // chain-independent, so a candidate that is free here but taken on a clone
 // target lands on an address that already holds a different vault — and the
 // deploy loop would report that stranger's vault as "already deployed".
-async function mineVanitySalt(factory, impl, caller, rps) {
+//
+// `avoid` is the other half of that, and it is not about chains at all. This
+// search is deterministic: same deployer, same factory, same implementation,
+// same first candidate, every time. The only thing that moves it on is finding
+// code at the address — so an unfinished deploy, which by definition has *not*
+// put code on the chains it never reached, is mined straight over. Concretely:
+// a two-chain vault lands on Ethereum, the Base switch is declined, the operator
+// ignores the banner and creates a second vault on Base — and that second vault
+// is minted at the exact address the first one is still holding open for its
+// clone. The first vault's Base clone then cannot ever be made: RESUME reads
+// code at the address, finds a different owner set, and refuses. The multi-slot
+// resume store already stops one run's salt from overwriting another's; this
+// stops one run's *address* from being taken by another.
+async function mineVanitySalt(factory, impl, caller, rps, avoid) {
   const providers = (Array.isArray(rps) ? rps : [rps]).filter(Boolean);
   if(!providers.length) providers.push(provider);
+  const held = new Set((avoid || []).filter(Boolean).map(a => String(a).toLowerCase()));
   const hash = ethers.keccak256(buildInitcode(impl));
   const base = BigInt(caller) << 96n;
   const MAX_ITER = 2000000n;
@@ -9279,6 +9388,9 @@ async function mineVanitySalt(factory, impl, caller, rps) {
     const salt = '0x' + (base | n).toString(16).padStart(64, '0');
     const addr = ethers.getCreate2Address(factory, salt, hash);
     if(addr.slice(2, 4) === '00') {
+      // Spoken for by a deploy that has not finished. Cheaper than the reads
+      // below and checked first, since no chain can answer this question.
+      if(held.has(addr.toLowerCase())) continue;
       // A chain that will not answer cannot clear the address, but it cannot
       // block mining forever either — deployOnChain re-checks before signing.
       const codes = await Promise.all(providers.map(p => p.getCode(addr).catch(() => '0x')));
@@ -9355,6 +9467,14 @@ function _resumeValid(r){
   // of the RESUME button or send a malformed address to an RPC.
   if(typeof r.salt !== 'string' || !/^0x[0-9a-fA-F]{1,64}$/.test(r.salt)) return false;
   if(typeof r.minedAddr !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(r.minedAddr)) return false;
+  // The owner list is checked to the same standard, and for a sharper reason
+  // than not throwing. The CREATE2 address is a function of the salt alone — the
+  // owners are not in it — so a record whose owner list has been mangled would
+  // resume perfectly happily and put a *different vault* at the same address on
+  // every chain the run never reached. Two chains, one address, two owner sets,
+  // and nothing on screen to say so. A record that cannot state who owns the
+  // vault it is finishing is not a record worth finishing from.
+  if(!r.owners.every(a => typeof a === 'string' && /^0x[0-9a-fA-F]{40}$/.test(a))) return false;
   if(!Number.isFinite(Number(r.thresh)) || !Number.isFinite(Number(r.del))) return false;
   if(!r.chains.every(c => c && Number.isFinite(Number(c.id)))) return false;
   return true;
@@ -9440,6 +9560,16 @@ function _saveDeployResume(){
   _writeAllResume([rec, ...all.filter(r => !_sameAddr(r.minedAddr, d.ctx.minedAddr))]);
 }
 
+// Addresses that an unfinished deploy is still holding open, for the miner to
+// step over. Every record, not only this account's: a record belonging to
+// another deployer cannot collide (the factory binds the salt's top 160 bits to
+// the caller, so their addresses are not in this caller's search space at all),
+// and reading the whole store costs nothing while making that argument something
+// this function does not have to depend on being true.
+function _heldAddresses(){
+  return _readAllResume().map(r => r.minedAddr);
+}
+
 // Drop one deploy's record. Addressed rather than wholesale: the store holds every
 // unfinished deploy, and finishing or dismissing this one says nothing about them.
 function _clearDeployResume(addr){
@@ -9509,6 +9639,15 @@ function resumeSavedDeploy(){
   const found = loadDeployResume();
   if(!found){ flash('NOTHING TO RESUME'); render(); return; }
   const { rec, left } = found;
+  // The banner is drawn for the account that was connected when the page last
+  // painted, and accounts change without a repaint in between. Said here, before
+  // a preflight and a review screen are spent on it: the salt only works for the
+  // account that mined it — the factory requires salt >> 96 to equal msg.sender —
+  // so every prompt this run could raise would revert.
+  if(!window._connectedAddress || !_sameAddr(rec.deployer, window._connectedAddress)){
+    flash(`CONNECT ${shortAddr(rec.deployer)} TO FINISH THIS DEPLOY`);
+    render(); return;
+  }
   const chains = left.map(c => ({ id:c.id, name:(NETS.find(n=>n.id===c.id)||c).name }));
   const run = ++_deployRun;
   S.deploy = {
@@ -9695,11 +9834,35 @@ async function prodDeploy() {
 // the answer this feeds is a yes/no about affordability, and an estimate that
 // runs under the truth is the one that lets a deploy fail after the operator has
 // already approved it.
-function deployGasEstimate(ctx) {
+// Priced per chain, because the transaction is not the same on every chain. The
+// name claim is two init calls that only ever ride on the mainnet step — WNS
+// lives there and nowhere else — so charging every clone target for them made
+// the check stricter than the truth on exactly the chains an operator is least
+// likely to be holding a float on, and a red NEEDS ~X MORE against a chain that
+// could in fact pay is the same lie as a green one against a chain that cannot.
+// `chainId` omitted means "price the heaviest version", which is the right
+// default for any caller that does not yet know which chain it is asking about.
+function deployGasEstimate(ctx, chainId) {
   const owners = (ctx && ctx.resolvedOwners ? ctx.resolvedOwners.length : 1);
-  const initCalls = (ctx && ctx.wantForward ? 1 : 0) + (ctx && ctx.wns ? 2 : 0);
+  const wnsHere = !!(ctx && ctx.wns) && (chainId == null || Number(chainId) === WNS_CHAIN_ID);
+  const initCalls = (ctx && ctx.wantForward ? 1 : 0) + (wnsHere ? 2 : 0);
   return 150000n + BigInt(owners) * 30000n + BigInt(initCalls) * 70000n;
 }
+
+// Two facts per chain that cannot change while this page is open: the factory is
+// deployed there and names the audited implementation, and the TimelockExecutor
+// is there and answers. Code at an address is what it is for the life of a
+// session, and re-reading it is three round trips per chain spent re-confirming
+// what the last run established — with the operator watching CHECKING… while it
+// happens. On a seven-chain clone that is twenty-one requests, every time the
+// review screen is reopened, for an answer that has already been given.
+//
+// Only settled positives are remembered. A chain that would not answer, or that
+// answered wrong, is asked again next time: caching a negative would hold a
+// perfectly good chain down for the rest of the session on the strength of one
+// wedged RPC, and it is a negative that stops a deploy.
+const _factoryVerified = new Set();
+const _executorVerified = new Set();
 
 async function _deployPreflight(run, chains, connectedAddress) {
   const ctx = (S.deploy && S.deploy.ctx) || {};
@@ -9711,7 +9874,6 @@ async function _deployPreflight(run, chains, connectedAddress) {
   // works and still queues, but the only brake that can act inside the delay
   // window is not there, and nothing said so until an owner needed it.
   const needExecutor = Number(ctx.del) > 0;
-  const gasNeeded = deployGasEstimate(ctx);
   // Preflight (read-only, no chain switch): is the factory deployed on each
   // chain, can the wallet actually pay for the deploy there, and — where the
   // vault will carry one — is the TimelockExecutor present? The factory check is
@@ -9726,15 +9888,22 @@ async function _deployPreflight(run, chains, connectedAddress) {
   // the rest are independent and now go together.
   const pfPromise = Promise.all(chains.map(async net => {
     const rp = makeProvider(net.id);
+    const gasNeeded = deployGasEstimate(ctx, net.id);
     let gasOk = null, executorOk = null, factoryOk = null, implOk = null, gasShort = null;
+    // Balance and fees are asked every time: they are the two facts this deploy
+    // is about to change. The other two are code at a fixed address, so once a
+    // chain has answered for them it has answered.
+    const facKnown = _factoryVerified.has(Number(net.id));
+    const exKnown = needExecutor && _executorVerified.has(Number(net.id));
     const settled = p => p.then(v => ({ ok:true, v }), e => ({ ok:false, e }));
     const [fcR, balR, feeR, exCodeR] = await Promise.all([
-      settled(rp.getCode(FACTORY)),
+      facKnown ? null : settled(rp.getCode(FACTORY)),
       settled(rp.getBalance(connectedAddress)),
       settled(rp.getFeeData()),
-      needExecutor ? settled(rp.getCode(TIMELOCK_EXECUTOR)) : Promise.resolve(null),
+      (needExecutor && !exKnown) ? settled(rp.getCode(TIMELOCK_EXECUTOR)) : Promise.resolve(null),
     ]);
-    if(fcR.ok) factoryOk = !!fcR.v && fcR.v !== '0x';
+    if(facKnown) { factoryOk = true; implOk = true; }
+    else if(fcR.ok) factoryOk = !!fcR.v && fcR.v !== '0x';
     // "Has a balance" is not "can pay". This was `balance > 0n`, so a wallet
     // holding a single wei cleared the preflight green and then failed at the
     // wallet prompt, or after it — on the chain the operator was least likely to
@@ -9760,13 +9929,15 @@ async function _deployPreflight(run, chains, connectedAddress) {
     // rather than assumed, and the cheapest confirmation is the factory naming
     // its own implementation: a chain where that address holds something else
     // would mint vaults running code this audit never saw.
-    if(factoryOk){
+    if(factoryOk && !facKnown){
       try {
         const impl = await new ethers.Contract(FACTORY, FACTORY_ABI, rp).implementation();
         implOk = String(impl).toLowerCase() === IMPLEMENTATION.toLowerCase();
+        if(implOk) _factoryVerified.add(Number(net.id));
       } catch(_){}
     }
-    if(needExecutor){
+    if(exKnown){ executorOk = true; }
+    else if(needExecutor){
       try {
         if(!exCodeR.ok) throw exCodeR.e;
         const code = exCodeR.v;
@@ -9778,6 +9949,7 @@ async function _deployPreflight(run, chains, connectedAddress) {
         else {
           await new ethers.Contract(TIMELOCK_EXECUTOR, TIMELOCK_EXECUTOR_ABI, rp).forwardEnabled(ethers.ZeroAddress);
           executorOk = true;
+          _executorVerified.add(Number(net.id));
         }
       } catch(e){
         const answered = e && (e.code === 'CALL_EXCEPTION' || e.code === 'BAD_DATA');
@@ -9802,7 +9974,7 @@ async function _deployPreflight(run, chains, connectedAddress) {
   const haveSalt = !!(S.deploy && S.deploy.ctx && S.deploy.ctx.salt && S.deploy.ctx.minedAddr);
   const minePromise = haveSalt ? Promise.resolve() : (async () => {
     try {
-      const mined = await mineVanitySalt(FACTORY, IMPLEMENTATION, connectedAddress, chains.map(n => makeProvider(n.id)));
+      const mined = await mineVanitySalt(FACTORY, IMPLEMENTATION, connectedAddress, chains.map(n => makeProvider(n.id)), _heldAddresses());
       if(_deployLive(run)){ S.deploy.ctx.salt = mined.salt; S.deploy.ctx.minedAddr = mined.address; S.deploy.address = mined.address; _saveDeployResume(); render(); }
     } catch(e){ console.error('Vanity mining (preflight):', e); }
   })();
@@ -9985,6 +10157,39 @@ async function deployOnChain(k){
     // reads ALREADY DEPLOYED still links out to the attempt that failed.
     step.status='switching'; step.err=null; step.blocked=false; step.wnsSkipped=null; step.wnsName=null;
     step.txHash=null; step.verified=undefined; step.dbWarn=false; render();
+    // Asked before the wallet is asked for anything. A create() sent to a chain
+    // that has no factory is a plain transfer to a codeless address: the wallet
+    // signs it, the chain mines it with status 1, and it deploys nothing — the
+    // step then fails on the read-back with NO CODE AT ADDRESS, having spent a
+    // switch prompt, a signature and a fee to establish what one read already
+    // knew. The review screen does warn, but the operator is allowed to proceed
+    // past it, and "proceed anyway" should not have to mean "sign a transaction
+    // that cannot work".
+    //
+    // Free on the path that matters: a chain the preflight already confirmed the
+    // factory on is not read again, because that answer is code at a fixed
+    // address and does not go stale. What is left is exactly the chains the
+    // preflight condemned or could not reach — the ones worth a round trip
+    // before a prompt rather than after one.
+    //
+    // Only a definite answer stops the run. A read that failed is silence, and
+    // so is one that never came back — which is why it is raced against a clock
+    // rather than awaited on trust. This sits in front of a wallet prompt on a
+    // chain whose RPC is, by hypothesis, the questionable one; an unbounded read
+    // there would leave the row saying SWITCH IN WALLET… with no prompt sent and
+    // no way forward.
+    if(!_factoryVerified.has(Number(net.id))){
+      let facTimer;
+      const fac = await Promise.race([
+        rp.getCode(FACTORY).catch(() => null),
+        new Promise(r => { facTimer = setTimeout(() => r(null), 4000); }),
+      ]).finally(() => clearTimeout(facTimer));
+      if(fac === '0x'){
+        step.status='failed';
+        step.err=`NO FACTORY ON ${NM} — NOTHING TO DEPLOY THROUGH, SO NOTHING WAS SIGNED`;
+        render(); return 'failed';
+      }
+    }
     let sw = { ok:true };
     // Whether to ask is decided by where the *wallet* is, not by where the app
     // thinks it is. Those come apart: the operator switches by hand mid-run, or a
@@ -10068,7 +10273,7 @@ async function deployOnChain(k){
     }
     if(!ctx.salt){
       step.status='mining'; render();
-      const mined = await mineVanitySalt(FACTORY, IMPLEMENTATION, ctx.connectedAddress, d.chains.map(n => makeProvider(n.id)));
+      const mined = await mineVanitySalt(FACTORY, IMPLEMENTATION, ctx.connectedAddress, d.chains.map(n => makeProvider(n.id)), _heldAddresses());
       ctx.salt = mined.salt; ctx.minedAddr = mined.address; d.address = mined.address; _saveDeployResume(); render();
     }
     const existing = await rp.getCode(ctx.minedAddr);
@@ -10274,7 +10479,33 @@ async function _finishDeploy(){
   }
   render();
   const addr = d.lastVaultAddr || (d.resumed ? d.ctx && d.ctx.minedAddr : null);
-  if(!addr) return;
+  // Nothing landed anywhere. There is no vault to show — but the walk has still
+  // moved the app, and returning here without saying so was leaving the page in
+  // a state nobody chose. switchChain adopts a chain *before* the wallet answers,
+  // so a run that got no further than a declined switch ends with S.chainId
+  // naming a chain the operator never reached, while the vault list underneath
+  // is still the one loaded for the chain they were browsing: cards for vaults
+  // that do not exist here, balances read against this chain's copy of their
+  // addresses, and EIP-712 domains built with this chain's id if anyone signs on
+  // one. That is the same hazard the successful path repairs below, reached by
+  // the one route that skipped the repair.
+  //
+  // Follow the wallet rather than guessing: it is the only chain signing can
+  // happen on, and it answers both shapes of this failure — a refused switch
+  // left it where it started, a failure after the switch left it on the target.
+  if(!addr){
+    const back = (CHAINS[S.walletChain] && S.walletChain) || d.startChainId;
+    if(back != null && CHAINS[back] && back !== S.chainId) adoptChain(back);
+    // Only when the app really did end up somewhere else. Landing back on the
+    // chain the operator started on leaves the list that was loaded for it
+    // exactly as valid as it was before the run.
+    if(d.startChainId != null && S.chainId !== d.startChainId){
+      S.vaults = []; S.sel = 0;
+      loadAllVaults().catch(e => console.error('Reload after deploy:', e));
+    }
+    render();
+    return;
+  }
   // Land on a chain where the vault actually exists: the primary if it deployed,
   // otherwise the first chain that succeeded. loadSingleVaultData reads the live
   // `provider`, so pointing at a chain without the vault (e.g. after a trailing
@@ -10287,8 +10518,15 @@ async function _finishDeploy(){
     // When the run halted because the wallet refused something, move only the
     // app's own reads — the vault has to be read off a chain it exists on, but
     // the answer to a declined prompt is not another prompt. RESUME asks again.
+    //
+    // The same holds for a run that simply finished short. A chain still owed a
+    // vault means RESUME is the next button, and RESUME's first act is to switch
+    // the wallet away again — so sending it home first is two prompts to end up
+    // where it already was. Only a run with nothing left to do has earned the
+    // right to ask the wallet for anything.
+    const owed = d.steps.some(s => s.status!=='done' && s.status!=='skipped');
     if(homeId !== S.chainId){
-      if(d.halted || landIdx < 0) adoptChain(homeId);
+      if(d.halted || owed || landIdx < 0) adoptChain(homeId);
       else try { await switchChain(homeId, true); } catch(e){ console.error('Return to home chain:', e); }
     }
   } else if(landIdx < 0) return;   // nothing deployed anywhere this run can read
