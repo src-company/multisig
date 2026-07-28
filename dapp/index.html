@@ -5775,24 +5775,80 @@ async function openTopUp(){
   // balances in whichever dialog happened to be up when it finished. That is a
   // MAX button offering another chain's balance of a token this one does not
   // hold, on the one screen whose whole job is to say how much you can send.
-  const t = S.topup = { sym:'ETH', bals:null, loading:true, sending:false, err:null, showCustom:false, txHash:null };
+  const t = S.topup = { sym:'ETH', amt:'', bals:null, gasPrice:null, loading:true, sending:false, err:null, showCustom:false, txHash:null };
   render();
   try {
-    const bals = await fetchTopUpBalances(window._connectedAddress, vaultTokens(v));
-    if(S.topup === t){ t.bals = bals; t.loading = false; render(); }
+    // The wallet is priced as well as counted: MAX on the native asset has to
+    // leave the fee for its own transfer behind. See topUpSpendable.
+    const [bals, fee] = await Promise.all([
+      fetchTopUpBalances(window._connectedAddress, vaultTokens(v)),
+      provider.getFeeData().then(f => f, () => null),
+    ]);
+    if(S.topup === t){
+      t.bals = bals;
+      const p = fee && (fee.maxFeePerGas || fee.gasPrice);
+      t.gasPrice = p ? p.toString() : null;
+      t.loading = false; render();
+    }
   } catch(_){ if(S.topup === t){ t.loading = false; render(); } }
+}
+// The most of a balance a top up can actually send. For an ERC-20 it is the
+// whole balance — gas is paid in the native asset, out of a different number.
+// For the native asset it is not: a deposit of every last wei cannot pay for
+// itself, so the wallet rejects it, and this modal was printing KEEP SOME ETH
+// FOR GAS directly beneath a button that made that impossible.
+//
+// 21000 is the exact gas of a plain value transfer, and doubling the current
+// price is headroom for a base fee that moves between this read and the signing
+// prompt. With no fee data there is no reserve rather than an invented one: a
+// guessed figure quietly shrinks what somebody is allowed to deposit, and the
+// wallet checks the real one either way.
+const TOPUP_GAS = 21000n;
+function topUpSpendable(raw, isNative, gasPrice){
+  let bal;
+  try { bal = BigInt(raw); } catch(_){ return 0n; }
+  // BigInt does not throw on '-1' — weiStr rejects negatives for the same
+  // reason. A balanceOf cannot be one, and nothing downstream of here should
+  // have to be the first to notice if one ever were.
+  if(bal <= 0n) return 0n;
+  if(!isNative || !gasPrice) return bal;
+  const reserve = TOPUP_GAS * BigInt(gasPrice) * 2n;
+  return bal > reserve ? bal - reserve : 0n;
 }
 function closeTopUp(){ S.topup = null; render(); }
 function selectTopUpToken(sym){ if(S.topup){ S.topup.sym = sym; S.topup.showCustom = false; S.topup.err = null; render(); } }
 function onTopUpAmount(val, dec, avail, unit){
+  // Held in state, not only in the field. The overlay is rebuilt from scratch by
+  // every render, and this dialog renders on its own account — the balance read
+  // that opens it lands in one, so an amount typed while the wallet was still
+  // being counted was erased by the answer arriving. Focus and caret already
+  // survive a rebuild (captureFocus/restoreFocus); the value now does too.
+  if(S.topup) S.topup.amt = val;
   const u = document.getElementById('topup-units');
   if(u) u.textContent = val ? toUnits(val, dec) + ' ' + unit : '';
+  const n = parseFloat(stripCommas(String(val))) || 0;
+  const over = avail > 0 && n > avail;
   const w = document.getElementById('topup-warn');
-  if(w){ const n = parseFloat(String(val).replace(/,/g,'')) || 0; w.textContent = (avail > 0 && n > avail) ? 'EXCEEDS WALLET BALANCE' : ''; }
+  if(w) w.textContent = over ? 'EXCEEDS WALLET BALANCE' : '';
+  // Dimmed rather than disabled, the way the send builder's submit is: the
+  // button still answers a click, and what it says back — ENTER AN AMOUNT — is
+  // more use than a control that does nothing for a reason it never gives.
+  const b = document.getElementById('topup-send');
+  if(b) b.classList.toggle('btn-pending', !(n > 0) || over);
 }
-function fillTopUpMax(amountStr, dec, avail, unit){
+// 25 / 50 / MAX, against what is spendable rather than what is held — on the
+// native asset those differ by the gas reserve.
+function fillTopUpPct(frac, amountStr, dec, avail, unit){
   const el = document.getElementById('topup-amount'); if(!el) return;
-  el.value = amountStr; onTopUpAmount(amountStr, dec, avail, unit); el.focus();
+  let out;
+  if(frac >= 1) out = amountStr;                       // MAX fills the exact figure, no rounding
+  else {
+    const n = Number(amountStr) * frac;
+    // _amtTrim rather than a trailing-zero regex: /\.?0+$/ turns 1000 units of a
+    // 0-decimal token into 1, because there is no point for it to stop at.
+    out = n > 0 ? _amtTrim(n.toFixed(Math.min(dec, 8))) : '0';
+  }
+  el.value = out; onTopUpAmount(out, dec, avail, unit); el.focus();
 }
 async function addTopUpCustom(){
   const v = S.vaults[S.sel];
@@ -5831,7 +5887,7 @@ async function submitTopUp(){
   const w = requireSigner(); if(!w) return;
   const { signer } = w;
   const sel = vaultTokens(v).find(x => x.symbol === t.sym) || vaultTokens(v)[0];
-  const amtStr = (document.getElementById('topup-amount')?.value || '').trim();
+  const amtStr = String(t.amt || '').trim();
   if(!amtStr){ flash('ENTER AN AMOUNT'); return; }
   let amount;
   try { amount = ethers.parseUnits(stripCommas(amtStr), sel.decimals); }
@@ -5875,54 +5931,106 @@ function renderTopUp(){
   const sel = toks.find(x => x.symbol === t.sym) || toks[0];
   const dec = sel.decimals;
   const unitLabel = sel.symbol === 'ETH' ? 'WEI' : 'UNITS (' + dec + ' DECIMALS)';
+  const isNative = sel.symbol === 'ETH' || sel.address === ethers.ZeroAddress;
   const balInfo = t.bals ? t.bals[sel.symbol] : null;
   const availStr = balInfo ? ethers.formatUnits(balInfo.raw, balInfo.decimals) : '';
   const availNum = availStr ? Number(availStr) : 0;
   const hasBal = balInfo && BigInt(balInfo.raw) > 0n;
+  const sending = t.sending;
+
+  // What the quick buttons fill, which on the native asset is not what the
+  // wallet holds — the difference is the gas this deposit costs to send.
+  const spendRaw = balInfo ? topUpSpendable(balInfo.raw, isNative, t.gasPrice) : 0n;
+  const spendStr = balInfo ? ethers.formatUnits(spendRaw, balInfo.decimals) : '';
+  const gasKept = hasBal && spendRaw > 0n ? BigInt(balInfo.raw) - spendRaw : 0n;
 
   const pills = toks.map(x => {
     const b = t.bals ? t.bals[x.symbol] : null;
     const owns = b && BigInt(b.raw) > 0n;
-    return `<button class="pill${t.sym===x.symbol?' on':''}" style="${owns?'':'opacity:.55'}" onclick="selectTopUpToken('${jstr(x.symbol)}')"><span class="tok-ico">${x.icon||iconForSym(x.symbol)}</span>${esc(x.symbol)}</button>`;
+    const on = t.sym === x.symbol;
+    // Dimmed, never disabled — a token about to arrive in the wallet is one you
+    // may want selected before it does. The title says what the dimming means
+    // rather than leaving it to be read off an opacity.
+    //
+    // Nothing is dimmed while the read is in flight. `owns` is false for every
+    // token until the balances land, so the row opened with all seven greyed
+    // out — the picture of a wallet holding nothing — and then lit up. The
+    // honest state before an answer is no claim either way.
+    return `<button class="pill${on?' on':''}" style="${(owns||t.loading)?'':'opacity:.55'}" aria-pressed="${on}"${(!owns&&!t.loading)?` title="Your wallet holds no ${esc(x.symbol)} on ${esc(chainName())}"`:''} ${sending?'disabled':''} onclick="selectTopUpToken('${jstr(x.symbol)}')"><span class="tok-ico">${x.icon||iconForSym(x.symbol)}</span>${esc(x.symbol)}</button>`;
   }).join('');
 
-  const availRow = t.loading
-    ? `<span style="font-size:9px;color:var(--d);letter-spacing:1px;animation:pulse 2s infinite">CHECKING WALLET…</span>`
+  // Beside the asset, the way the send builder puts VAULT HOLDS beside its token
+  // picker: this is a fact about the asset, not about the number being typed.
+  const holds = t.loading
+    ? `<span class="fhint" style="animation:pulse 2s infinite">CHECKING YOUR WALLET&hellip;</span>`
     : hasBal
-      ? `<button class="link-btn" style="font-size:9px;margin:0;padding:0" onclick="fillTopUpMax('${availStr}',${dec},${availNum},'${unitLabel}')">MAX <span class="priv">${esc(_amtDisp(availStr))}</span> ${esc(sel.symbol)}</button>`
-      : `<span style="font-size:9px;color:var(--y);letter-spacing:1px">NO ${esc(sel.symbol)} IN WALLET</span>`;
+      // fmtBal, not _amtDisp: it groups the integer side, and a balance that is
+      // not zero never prints as zero out of it — dust below the sixth decimal
+      // reads <0.000001 rather than 0.000000, which is a sentence this screen
+      // must not say about a wallet that is holding something.
+      ? `<span class="fhint privg"${pgAttrs()}>WALLET HOLDS <b><span class="priv">${esc(fmtBal(balInfo.raw, balInfo.decimals))}</span> ${esc(sel.symbol)}</b></span>`
+      : `<span class="fhint" style="color:var(--y)">NO ${esc(sel.symbol)} IN YOUR WALLET</span>`;
 
-  const sending = t.sending;
+  // MAX was three flex items in a row with no gap between them — "MAX", the
+  // figure, the symbol — so it rendered as MAX0.003846ETH: flex drops the
+  // whitespace-only text nodes that were doing the spacing. It is now the send
+  // builder's quick-fill row, which reads as buttons because it is made of them.
+  const qbtns = spendRaw > 0n
+    ? `<span class="qbtns">${[['25%',.25],['50%',.5],['MAX',1]].map(([l,f])=>`<button class="qbtn" ${sending?'disabled':''} onclick="fillTopUpPct(${f},'${spendStr}',${dec},${availNum},'${esc(unitLabel)}')">${l}</button>`).join('')}</span>`
+    : '';
+
+  // KEEP SOME ETH FOR GAS asked the reader to do arithmetic this page has
+  // already done. Say the figure, and say it where MAX is.
+  const gasNote = (!isNative || !hasBal) ? ''
+    : spendRaw === 0n
+      ? `<span class="fhint" style="flex-basis:100%;color:var(--y)">THIS BALANCE WILL NOT COVER THE GAS FOR A DEPOSIT</span>`
+      : gasKept > 0n
+        ? `<span class="fhint" style="flex-basis:100%">MAX KEEPS <b>${esc(_amtTrim(ethers.formatUnits(gasKept, balInfo.decimals)))} ${esc(sel.symbol)}</b> BACK FOR GAS</span>`
+        : `<span class="fhint" style="flex-basis:100%">KEEP SOME ${esc(sel.symbol)} BACK FOR GAS</span>`;
+
+  // Both echoes below the field are painted from state as well as patched on
+  // input, so a rebuild — balances landing, a token switch, the tx hash
+  // arriving — redraws what it is describing instead of blanking under it.
+  const amtN = parseFloat(stripCommas(String(t.amt || ''))) || 0;
+  const over = availNum > 0 && amtN > availNum;
   const btnLabel = sending ? (t.txHash ? 'CONFIRMING…' : 'CONFIRM IN WALLET…') : `SEND ${esc(sel.symbol)} TO VAULT`;
 
   return `<div class="ovl" onclick="if(event.target===this&&!(S.topup&&S.topup.sending))closeTopUp()">
     <div class="ovl-card" role="dialog" aria-modal="true" aria-label="Top up ${esc(v.name)}">
-      <div class="ovl-head">
+      ${/* The close button is a 40px tap target (44 on a phone) around a 14px
+           glyph, and .ovl-head aligns to the top of it, so it pushed the head
+           down by the difference and opened a gap under the title that read as a
+           missing line. Pulled into the card's own padding: the target keeps
+           every pixel of its size, the ✕ sits level with the title. */''}
+      <div class="ovl-head" style="margin-bottom:6px">
         <div class="ovl-title">TOP UP &middot; ${esc(v.name)}</div>
-        <button class="x-btn" style="margin:0;${sending?'opacity:.4':''}" onclick="closeTopUp()" ${sending?'disabled':''} aria-label="Close">&#10005;</button>
+        <button class="x-btn" style="margin:-8px -8px 0 auto;${sending?'opacity:.4':''}" onclick="closeTopUp()" ${sending?'disabled':''} aria-label="Close">&#10005;</button>
       </div>
-      <div class="ovl-sub" style="margin-bottom:18px">DEPOSIT FROM YOUR WALLET &rarr; ${shortAddr(v.address)} ON ${esc(chainName())}</div>
+      <div class="ovl-sub" style="margin-bottom:22px">DEPOSIT FROM YOUR WALLET &rarr; ${shortAddr(v.address)} ON ${esc(chainName())}</div>
 
-      <div class="lbl" id="topup-asset-lbl">ASSET</div>
-      <div class="token-pills" role="group" aria-labelledby="topup-asset-lbl">${pills}<button class="pill" onclick="S.topup.showCustom=!S.topup.showCustom;render()" aria-expanded="${!!t.showCustom}">+ CUSTOM</button></div>
-      ${t.showCustom?`<div style="margin:4px 0 12px">
-        <div style="display:flex;gap:8px"><input class="inp" id="topup-custom-addr" style="margin:0;flex:1;min-width:0;font-size:16px" placeholder="0x... TOKEN ADDRESS" aria-label="Custom token address" onkeydown="if(event.key==='Enter'){event.preventDefault();addTopUpCustom()}"><button class="btn btn-outline btn-sm" onclick="addTopUpCustom()">ADD</button></div>
-        ${(()=>{const cl=customTokensFor(S.chainId,v.address);return cl.length?`<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">${cl.map(x=>`<span class="ctok-chip">${tokIcon(x.symbol,'sm')} ${esc(x.symbol)} <span class="dim">${x.decimals}d</span><button onclick="removeCustomTokenFlow('${x.address}')" aria-label="Remove ${esc(x.symbol)}" title="Remove ${esc(x.symbol)}">&#10005;</button></span>`).join('')}</div>`:''})()}
-        <div style="font-size:9px;color:var(--d);letter-spacing:1px;line-height:1.5;margin-top:8px">SAVED TO THIS BROWSER FOR THIS VAULT &mdash; AVAILABLE FOR SENDS TOO</div>
-      </div>`:''}
-
-      <div class="privg">
-        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-top:16px"><label class="lbl" for="topup-amount">AMOUNT</label>${availRow}</div>
-        <input class="inp priv" id="topup-amount" inputmode="decimal" style="font-size:16px" placeholder="0.0" ${sending?'disabled':''} aria-describedby="topup-units topup-warn" oninput="onTopUpAmount(this.value,${dec},${availNum},'${unitLabel}')" onkeydown="if(event.key==='Enter'){event.preventDefault();submitTopUp()}">
-        <div id="topup-units" class="priv" style="font-size:10px;color:var(--d);margin-top:-12px;word-break:break-all"></div>
+      <div class="fset">
+        <div class="fhead"><span class="lbl" id="topup-asset-lbl">ASSET</span>${holds}</div>
+        <div class="token-pills" style="margin-bottom:0" role="group" aria-labelledby="topup-asset-lbl">${pills}<button class="pill" ${sending?'disabled':''} onclick="S.topup.showCustom=!S.topup.showCustom;render()" aria-expanded="${!!t.showCustom}">+ CUSTOM</button></div>
+        ${t.showCustom?`<div style="margin-top:12px">
+          <div style="display:flex;gap:8px"><input class="inp" id="topup-custom-addr" style="margin:0;flex:1;min-width:0;font-size:16px" placeholder="0x... TOKEN ADDRESS" aria-label="Custom token address" onkeydown="if(event.key==='Enter'){event.preventDefault();addTopUpCustom()}"><button class="btn btn-outline btn-sm" onclick="addTopUpCustom()">ADD</button></div>
+          ${(()=>{const cl=customTokensFor(S.chainId,v.address);return cl.length?`<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">${cl.map(x=>`<span class="ctok-chip">${tokIcon(x.symbol,'sm')} ${esc(x.symbol)} <span class="dim">${x.decimals}d</span><button onclick="removeCustomTokenFlow('${x.address}')" aria-label="Remove ${esc(x.symbol)}" title="Remove ${esc(x.symbol)}">&#10005;</button></span>`).join('')}</div>`:''})()}
+          <div style="font-size:9px;color:var(--d);letter-spacing:1px;line-height:1.5;margin-top:8px">SAVED TO THIS BROWSER FOR THIS VAULT &mdash; AVAILABLE FOR SENDS TOO</div>
+        </div>`:''}
       </div>
-      <div id="topup-warn" style="font-size:10px;color:var(--r);letter-spacing:1px;min-height:12px;margin-bottom:4px"></div>
-      ${sel.symbol==='ETH'?`<div style="font-size:9px;color:var(--d);letter-spacing:1px;margin-bottom:4px">KEEP SOME ETH FOR GAS</div>`:''}
+
+      <div class="fset privg" style="margin-bottom:2px">
+        <div class="fhead"><label class="lbl" for="topup-amount">AMOUNT</label><span class="fhint priv" id="topup-units">${t.amt?esc(toUnits(String(t.amt), dec) + ' ' + unitLabel):''}</span></div>
+        <div class="amt">
+          <input class="amt-in priv" id="topup-amount" inputmode="decimal" placeholder="0.0" value="${esc(t.amt||'')}" ${sending?'disabled':''} aria-describedby="topup-units topup-warn" oninput="onTopUpAmount(this.value,${dec},${availNum},'${esc(unitLabel)}')" onkeydown="if(event.key==='Enter'){event.preventDefault();submitTopUp()}">
+          <span class="amt-tok">${tokIcon(sel.symbol)}${esc(sel.symbol)}</span>
+        </div>
+        <div class="amt-foot">${qbtns}${gasNote}<span class="amt-warn" id="topup-warn">${over?'EXCEEDS WALLET BALANCE':''}</span></div>
+      </div>
 
       ${t.err?`<div style="font-size:10px;color:var(--r);letter-spacing:1px;line-height:1.5;margin:8px 0">${esc(String(t.err).slice(0,120))}</div>`:''}
       ${t.txHash?`<div style="font-size:9px;color:var(--m);letter-spacing:1px;margin:8px 0;word-break:break-all">TX ${explorerTxLink(t.txHash)} &middot; ${addrLink(v.address)}</div>`:''}
 
-      <button class="btn ${sending?'btn-disabled':'btn-fill'} btn-w btn-big" style="margin-top:14px" ${sending?'disabled':''} onclick="submitTopUp()">${btnLabel}</button>
+      <button class="btn ${sending?'btn-disabled':'btn-fill'}${(!sending&&(!(amtN>0)||over))?' btn-pending':''} btn-w btn-big" id="topup-send" style="margin-top:14px" ${sending?'disabled':''} onclick="submitTopUp()">${btnLabel}</button>
       <div style="margin-top:10px;font-size:9px;color:var(--d);letter-spacing:1px;text-align:center;line-height:1.5">A DIRECT TRANSFER FROM YOUR WALLET &mdash; NO SIGNATURES OR TIMELOCK NEEDED TO DEPOSIT</div>
     </div>
   </div>`;
