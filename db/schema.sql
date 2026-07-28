@@ -1105,9 +1105,36 @@ END $$;
 -- the denial of service it exists to prevent, which is precisely what roles.sql
 -- warns about two lines above its own grant list.
 --
--- Revoked from PUBLIC rather than from anon: anon holds no explicit grant on
--- any of these, so removing the default is all that is needed, and it leaves
--- every deliberate grant elsewhere untouched.
+-- Revoked from PUBLIC rather than from anon: every function the dapp is meant to
+-- reach holds an explicit `anon=X` grant from roles.sql, and REVOKE ... FROM
+-- PUBLIC does not touch an explicit grant. So this removes the default and
+-- leaves the intended surface exactly as it was.
+--
+-- Every function, not a list of the ones known to be sensitive today. A list is
+-- the version of this that fails quietly: it covers what was thought of when it
+-- was written, and the next internal helper added to this file is public until
+-- somebody remembers to extend it — which is precisely how rate_gate came to be
+-- callable in the first place. Deny by default and let roles.sql name the
+-- exceptions, which is what it already does.
+--
+-- A loop over the catalog, and not ALTER DEFAULT PRIVILEGES, because that does
+-- not work here and it is worth writing down why rather than leaving the next
+-- person to find out. roles.sql ends with
+--
+--   ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON FUNCTIONS FROM PUBLIC
+--
+-- which reads like exactly this protection. Tested directly: after running it,
+-- pg_default_acl holds no row for the schema owner, and a function created
+-- immediately afterwards is still EXECUTE-able by anon. The same is true in
+-- production, where the only default-ACL rows belong to the `postgres` role and
+-- came from Render's own provisioning. So nothing has ever been guarding a
+-- newly created function, and the comment in roles.sql promising otherwise is
+-- the reason nobody looked.
+--
+-- The loop needs no such guarantee. A function is added to this file and this
+-- file is then applied, so the revoke runs in the same pass that creates it —
+-- the protection and the thing it protects arrive together, which is the one
+-- ordering that cannot be forgotten.
 DO $$
 DECLARE f record;
 BEGIN
@@ -1115,11 +1142,11 @@ BEGIN
     SELECT p.oid::regprocedure AS sig
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
     WHERE n.nspname = 'public'
-      AND p.proname IN ('is_wallet_owner','is_wallet_writer','rate_gate','rate_sweep','client_ip')
   LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC', f.sig);
   END LOOP;
 END $$;
+
 
 -- ── SECURITY DEFINER HARDENING ───────────────────────────────────
 -- Every write function in this file is SECURITY DEFINER, which means it runs as

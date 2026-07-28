@@ -104,6 +104,15 @@ TO anon;
 
 -- ── DEFAULTS ─────────────────────────────────────────────────────
 -- Keep future objects from leaking to anon unless granted explicitly.
+--
+-- The FUNCTIONS line does not do this, and the belief that it did is what let
+-- rate_gate ship as an anon-callable endpoint. Tested directly: after running
+-- it, pg_default_acl holds no row for this role, and a function created
+-- immediately afterwards is still EXECUTE-able by anon — a new function keeps
+-- PostgreSQL's built-in PUBLIC=X, and REVOKE here does not displace it. Left in
+-- place because it is harmless and because TABLES behaves as written; the
+-- function surface is actually held by the revoke loop at the end of
+-- schema.sql, which runs in the same pass that creates them.
 ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM PUBLIC;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON FUNCTIONS FROM PUBLIC;
 
