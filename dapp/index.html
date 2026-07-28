@@ -613,7 +613,7 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
 .policy-of{font-size:18px;font-weight:700;color:var(--m)}
 .changed-tag{font-size:10px;color:var(--y);letter-spacing:2px}
 .policy-warn{font-size:10px;letter-spacing:1px;line-height:1.6;color:var(--y);border-left:2px solid var(--y);background:color-mix(in srgb,var(--y) 6%,transparent);padding:10px 14px;margin-bottom:20px}
-.thresh-btns{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap}
+.thresh-btns{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;align-items:center}
 .thresh-btn{flex:0 0 auto;min-width:60px;padding:0 10px}
 /* A slot that is not a control yet. It keeps the armed button's full-width
    footprint so the column does not jump the moment a value changes, and states
@@ -3586,6 +3586,75 @@ function thresholdNote(n, total){
   if(spare <= 0) return { warn:true, text:`EVERY OWNER MUST SIGN &mdash; ONE LOST KEY FREEZES THE VAULT PERMANENTLY.` };
   return { warn:false, text:`TOLERATES ${spare} LOST KEY${spare>1?'S':''} &middot; ${n} OWNERS ACTING TOGETHER CAN MOVE EVERYTHING.` };
 }
+
+// One button per owner is the right control for the vault sizes people actually
+// build, and the wrong one past that. Both pickers in this app — the one that
+// decides a threshold on the create form and the one that revises it in ADMIN —
+// laid out a button for every owner with no ceiling on the count, and the count
+// has no small ceiling: a cloned Safe may bring up to MAX_CLONE_OWNERS signers,
+// a pasted list up to MAX_SAFE_THRESHOLD. At those sizes the row stops being a
+// picker and becomes a wall of a hundred identical numbers, wrapped over eight
+// lines, repainted in full on every keystroke elsewhere in the form — and the
+// value someone wants out of it is a number they already know.
+//
+// So past this many owners the same choice is offered as a number, with the
+// three answers that are actually chosen kept as one-click buttons beside it.
+// Below it, nothing changes: a 3-of-5 is still five buttons.
+const THRESH_BTNS_MAX = 12;
+
+// `setter` is the name of a global that takes the new value and re-renders —
+// the two pickers write to different state (the create form's string, ADMIN's
+// number) and both clamp on the way in, which the number input needs and the
+// buttons do not.
+function thresholdPicker(cur, max, setter, inputId){
+  // `Number(max) || 0` before the floor, not `max`: Math.max(undefined, 1) is
+  // NaN, and NaN fails `n <= THRESH_BTNS_MAX`, so a missing owner count fell
+  // through to the number-input branch and drew `max="NaN"`, `OF NaN`, and a
+  // MAJORITY button whose onclick set the threshold to NaN. No caller passes one
+  // today — every path that builds a vault runs ownerCount through Number() off
+  // a multicall with allowFailure:false — which is exactly what makes it worth
+  // pinning: this line exists to be right when a caller stops being careful.
+  const n = Math.max(Number(max) || 0, 1);
+  if(n <= THRESH_BTNS_MAX){
+    return Array.from({length:n}, (_,i) => i+1).map(k => {
+      const on = k === cur;
+      return `<button class="btn btn-outline thresh-btn"${on?' aria-current="true"':''} aria-label="Require ${k} of ${n} signatures" style="border-color:${on?'var(--a)':'var(--ln)'};color:${on?'var(--a)':'var(--d)'};background:${on?'color-mix(in srgb,var(--a) 10%,transparent)':'transparent'}" onclick="${setter}(${k})">${k}</button>`;
+    }).join('');
+  }
+  // Majority is the answer a large owner set is usually reaching for, and it is
+  // the one that is tedious to work out and easy to get wrong by one: for an
+  // even count, half is not a majority.
+  const maj = Math.floor(n/2) + 1;
+  const presets = [[1,'ANY ONE'], [maj,'MAJORITY'], [n,'ALL']]
+    // A duplicate preset is not a choice. n=2 makes MAJORITY and ALL the same
+    // number, and two buttons that do the same thing under different names is
+    // worse than one — though at n=2 this branch is unreachable, the same
+    // collapse happens for any n where the arithmetic coincides.
+    .filter(([k],i,a) => a.findIndex(x => x[0]===k) === i)
+    .map(([k,lbl]) => {
+      const on = k === cur;
+      return `<button class="btn btn-outline thresh-btn"${on?' aria-current="true"':''} style="min-width:0;border-color:${on?'var(--a)':'var(--ln)'};color:${on?'var(--a)':'var(--d)'};background:${on?'color-mix(in srgb,var(--a) 10%,transparent)':'transparent'}" onclick="${setter}(${k})">${lbl} &middot; ${k}</button>`;
+    }).join('');
+  // onchange, not oninput: this re-renders, and re-rendering on every keystroke
+  // would clamp "12" to "1" the moment the 1 was typed and take the caret with
+  // it. The spinner arrows and Enter both fire change, so nothing is lost.
+  return `<input class="inp" id="${inputId}" type="number" min="1" max="${n}" step="1" value="${cur}" aria-label="Signatures required, out of ${n} owners" style="width:88px;margin:0;text-align:center" onchange="${setter}(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();${setter}(this.value)}">
+    <span style="font-size:11px;letter-spacing:1px;color:var(--d)">OF ${n}</span>
+    <span style="flex-basis:100%;height:0"></span>${presets}`;
+}
+function setCreateThreshold(k){
+  const c = S.cf;
+  const max = c.owners.filter(o => (o.addr || '').trim()).length || 1;
+  c.threshold = String(Math.min(Math.max(Math.round(+k) || 1, 1), max));
+  render();
+}
+function setAdminThreshold(k){
+  const v = S.vaults[S.sel];
+  const max = (v && v.ownerCount) || 1;
+  S.nt = Math.min(Math.max(Math.round(+k) || 1, 1), max);
+  render();
+}
+
 // The delay's consequence is the length of the window in which a queued
 // proposal can still be stopped — which is nothing at all without an executor
 // to stop it through, so the note says which of the two situations this vault
@@ -4703,7 +4772,14 @@ function renderDeployOverlay(){
       ${d.address
         ? `<div style="margin-bottom:16px">
              <div style="font-size:9px;color:var(--d);letter-spacing:1px;margin-bottom:3px">${d.done||phase==='deploying'?'VAULT ADDRESS':'WILL DEPLOY TO'}${nch>1?` &middot; SAME ON ALL ${nch} CHAINS`:''}</div>
-             <div style="font-size:11px;color:var(--m);letter-spacing:1px;word-break:break-all">${xa(d.address)}</div>
+${/* Copyable, at every phase this address is known at. It is a CREATE2 address:
+                it is the vault's address on every chain in the run, and it is that
+                before anything is signed, so the two things an operator does with it
+                here — prefund it, or send it to a co-signer to check against their
+                own copy of the owner set — both want it on the clipboard rather than
+                read off a screen. The explorer link beside it does not serve either:
+                on the review screen there is nothing at that address to look at yet. */''}
+             <div style="font-size:11px;color:var(--m);letter-spacing:1px;word-break:break-all">${xa(d.address)} ${copyBtn(d.address, 'VAULT ADDRESS COPIED')}</div>
            </div>`
         : `<div style="font-size:10px;color:var(--d);letter-spacing:1px;margin-bottom:16px">${phase==='preflight'?'MINING THE VAULT ADDRESS&hellip;':'Same vault address on every chain'}</div>`}
       ${summary}
@@ -6209,6 +6285,100 @@ function retryOwnerName(i){
   render();
 }
 
+// An owner set almost never starts life in this form. It starts in a spreadsheet,
+// a Notion page, a Signal thread or the output of whatever produced the keys, and
+// it arrives as a list. Pasting that list into an owner field put the whole blob
+// into one row and produced NOT A VALID ADDRESS, so the only route in was one
+// address per row, one paste per row, N times — for the one input on the page
+// whose value cannot be corrected after the deploy without a full multisig round
+// of the vault being created. Retyping is where transposed characters come from.
+//
+// So a paste that carries more than one owner is spread across rows. What counts
+// as "an owner" is exactly what the form already accepts — an address, or a name
+// in one of the namespaces this app resolves — and nothing else is invented: the
+// tokens go into rows as text, and the same validateCreate that judges a typed
+// row judges a pasted one, with the same dedup, the same 0x0/0x1 rejection and
+// the same name resolution.
+//
+// The formats are the ones lists actually come in. One per line; several on a
+// line separated by commas; a CSV-ish `address, label` pair out of a spreadsheet;
+// bullets, numbering and quotes from a document. A line with a single owner on it
+// donates its leftover text as the label, because that is what the second column
+// of a spreadsheet is. A line with several gets none, because "0xA, 0xB" has no
+// leftover to be a label and guessing one would file a signer under a name that
+// was never written.
+//
+// Nothing is deduped or dropped here. A list with a repeat in it is a list the
+// operator needs to see the repeat in, and validateCreate marks it on the row —
+// silently swallowing it would hide the fact that the source list was wrong.
+function parseOwnerPaste(text){
+  // Trailing punctuation a document added, not part of a name: `.eth` survives
+  // it because `h` is not in the set, and an address never ends in one. Quotes
+  // and brackets are not here — they separate, below.
+  const strip = t => t.replace(/^[\s<]+/, '').replace(/[>,;:.]+$/, '');
+  const isOwner = t => !!t && (ethers.isAddress(t) || NAME_RE.test(t));
+  const out = [];
+  for(const line of String(text || '').split(/[\r\n]+/)){
+    // Bullets and numbering, off the front of the line only — an address does
+    // not start with them and a label that does has lost nothing worth keeping.
+    const cleaned = line.replace(/^[\s>*•–-]+/, '').replace(/^\d+[.)]\s+/, '');
+    if(!cleaned.trim()) continue;
+    // Quotes and brackets separate rather than being stripped, so a line lifted
+    // straight out of a script or a Safe export — ["0xA","0xB"] — is the list it
+    // looks like rather than one unparseable token. A quoted label survives it:
+    // its words are split apart here and joined back below.
+    const toks = cleaned.split(/[\s,;|"'[\]()]+/).map(strip).filter(Boolean);
+    const hits = toks.filter(isOwner);
+    if(!hits.length) continue;
+    if(hits.length === 1){
+      // A token with no letter or digit anywhere in it is punctuation the line
+      // used to separate a name from an address — "Alice - 0x…", "Bob → 0x…" —
+      // and a separator is not part of a label. Written as "has no letter or
+      // digit" rather than as a list of separators so that an unfamiliar dash or
+      // arrow is treated the same as the ones that were thought of.
+      // maxlength on the label input is 64; a pasted one is held to the same
+      // ceiling rather than being allowed in over the top of it.
+      const label = toks.filter(t => !isOwner(t) && !/^[^\p{L}\p{N}]+$/u.test(t)).join(' ').trim().slice(0, 64);
+      out.push({ addr: hits[0], label });
+    } else {
+      for(const a of hits) out.push({ addr: a, label: '' });
+    }
+  }
+  return out;
+}
+
+// The paste handler on an owner address field. Intercepts only a paste that
+// carries two or more owners: a single address pasted into a single field is
+// what the browser already does correctly, and taking that over would mean
+// re-implementing selection replacement, undo and the mid-edit paste for no
+// gain.
+function pasteOwners(ev, i){
+  const cb = ev.clipboardData || window.clipboardData;
+  if(!cb) return;
+  const found = parseOwnerPaste(cb.getData('text') || '');
+  if(found.length < 2) return;          // one owner (or none) — let the browser paste it
+  ev.preventDefault();
+  const c = S.cf;
+  // Rows after the paste point that are still blank are placeholders — the form
+  // opens with three of them — so the list lands as a list rather than being
+  // interleaved with the gaps it was pasted over. Rows the operator has already
+  // filled in below are kept, because those are owners, not spacing.
+  const tail = c.owners.slice(i + 1).filter(o => (o.addr || '').trim() || (o.label || '').trim());
+  const room = Math.max(0, MAX_SAFE_THRESHOLD - i - tail.length);
+  const taken = found.slice(0, room);
+  c.owners = [...c.owners.slice(0, i), ...taken.map(o => ({ addr:o.addr, label:o.label })), ...tail];
+  if(!c.owners.length) c.owners = [{ addr:'', label:'' }];
+  // The threshold buttons only go up to the number of owners, and a paste can
+  // move that number in either direction — the same clamp every other edit to
+  // this list applies.
+  const fc = c.owners.filter(o => (o.addr || '').trim()).length || 1;
+  c.threshold = String(Math.min(+c.threshold || 1, fc));
+  flash(found.length > taken.length
+    ? `PASTED ${taken.length} OWNERS · ${found.length - taken.length} DROPPED AT THE ${MAX_SAFE_THRESHOLD}-OWNER CEILING`
+    : `PASTED ${taken.length} OWNERS`);
+  render();
+}
+
 // The note under an owner row, and the colour of its row number. A name is only
 // as good as the address it resolves to, so it is shown — truncated, and linked
 // to the explorer of the chain this form is aimed at, so it can be checked
@@ -6460,16 +6630,25 @@ function renderCreate(mob){
         // operator is typing an address drops them out of the field mid-paste.
         return`<div class="owner-row">
         <span class="o-num" style="color:${note.num}">${String(i+1).padStart(2,"0")}</span>
-        <input class="inp o-addr" id="cf-own-${i}" aria-label="Owner ${i+1} address or name" aria-invalid="${bad}"${note.html?` aria-describedby="cf-own-note-${i}"`:''} style="${bad?'border-bottom-color:var(--r)':''}" placeholder="0x... or a name" value="${esc(shortAddr(o.addr))}" onfocus="this.value=S.cf.owners[${i}].addr" onblur="this.value=shortAddr(S.cf.owners[${i}].addr)" oninput="S.cf.owners[${i}].addr=this.value;const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;if(+S.cf.threshold>fc){S.cf.threshold=String(fc)}" onchange="S.cf.owners[${i}].addr=this.value;render()">
+        <input class="inp o-addr" id="cf-own-${i}" aria-label="Owner ${i+1} address or name" aria-invalid="${bad}"${note.html?` aria-describedby="cf-own-note-${i}"`:''} style="${bad?'border-bottom-color:var(--r)':''}" placeholder="0x... or a name" value="${esc(shortAddr(o.addr))}" onpaste="pasteOwners(event,${i})" onfocus="this.value=S.cf.owners[${i}].addr" onblur="this.value=shortAddr(S.cf.owners[${i}].addr)" oninput="S.cf.owners[${i}].addr=this.value;const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;if(+S.cf.threshold>fc){S.cf.threshold=String(fc)}" onchange="S.cf.owners[${i}].addr=this.value;render()">
         <input class="inp o-label" id="cf-own-lbl-${i}" maxlength="64" aria-label="Owner ${i+1} label" placeholder="LABEL" value="${esc(o.label)}" oninput="S.cf.owners[${i}].label=this.value" onchange="render()">
         ${c.owners.length>1?`<button class="x-btn red o-del" aria-label="Remove owner ${i+1}" title="Remove this owner" onclick="S.cf.owners.splice(${i},1);const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;S.cf.threshold=String(Math.min(+S.cf.threshold||1,fc));render()">&#10005;</button>`:""}
       </div>${note.html?`<div class="owner-note" id="cf-own-note-${i}" style="color:${note.color}">${note.html}</div>`:''}`}).join("")}
-      <button class="link-btn" onclick="S.cf.owners.push({addr:'',label:''});S.cf.threshold=String(Math.min(+S.cf.threshold||1,S.cf.owners.length));render()">+ ADD</button>
+      <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap">
+        <button class="link-btn" onclick="S.cf.owners.push({addr:'',label:''});S.cf.threshold=String(Math.min(+S.cf.threshold||1,S.cf.owners.length));render()">+ ADD</button>
+${/* An owner set arrives as a list far more often than it is typed one row at a
+             time, and a paste that spreads itself across rows is invisible until it
+             is tried — nothing on the form suggested a field would take more than
+             one address. Said once, beside the control it is an alternative to, and
+             withdrawn as soon as there is a list in the form: someone with two
+             owners already entered has either found it or does not need it. */''}
+        ${filled<2&&!c.safeSrc?`<span style="font-size:9px;letter-spacing:1px;color:var(--d)">OR PASTE A LIST &mdash; ONE PER LINE, OR <span style="color:var(--m)">ADDRESS, LABEL</span></span>`:''}
+      </div>
       <div class="sep"></div>
       <div class="grid2" style="gap:32px">
         <div>
           <span class="lbl" id="lbl-cf-thresh">THRESHOLD</span>
-          <div class="thresh-btns" role="group" aria-labelledby="lbl-cf-thresh">${(()=>{const n=Math.max(filled,1);return Array.from({length:n},(_,i)=>i+1).map(k=>{const on=k===+c.threshold;return`<button class="btn btn-outline thresh-btn"${on?' aria-current="true"':''} aria-label="Require ${k} of ${Math.max(filled,1)} signatures" style="border-color:${on?'var(--a)':'var(--ln)'};color:${on?'var(--a)':'var(--d)'};background:${on?'color-mix(in srgb,var(--a) 10%,transparent)':'transparent'}" onclick="S.cf.threshold='${k}';render()">${k}</button>`}).join("")})()}</div>
+          <div class="thresh-btns" role="group" aria-labelledby="lbl-cf-thresh">${thresholdPicker(+c.threshold||1, filled, 'setCreateThreshold', 'cf-thresh-n')}</div>
 ${/* The same consequence line the ADMIN tab states, and this is the more
              important of the two places to state it: admin is where a threshold is
              revised, this is where it is decided, and the decision outlives the
@@ -6581,7 +6760,7 @@ ${/* The same dot the dashboard strip carries. Admin was the one place in the ap
           <span class="policy-of">/ ${v.ownerCount}</span>
           ${tc?'<span class="changed-tag">CHANGED</span>':""}
         </div>
-        <div class="thresh-btns" role="group" aria-labelledby="lbl-thresh">${Array.from({length:v.ownerCount},(_,i)=>i+1).map(n=>{const on=n===S.nt;return`<button class="btn btn-outline thresh-btn"${on?' aria-current="true"':''} aria-label="Require ${n} of ${v.ownerCount} signatures" style="border-color:${on?'var(--a)':'var(--ln)'};color:${on?'var(--a)':'var(--d)'};background:${on?'color-mix(in srgb,var(--a) 10%,transparent)':'transparent'}" onclick="S.nt=${n};render()">${n}</button>`}).join("")}</div>
+        <div class="thresh-btns" role="group" aria-labelledby="lbl-thresh">${thresholdPicker(S.nt, v.ownerCount, 'setAdminThreshold', 'admin-thresh-n')}</div>
         ${(()=>{const tn=thresholdNote(S.nt,v.ownerCount);return`<div class="policy-note${tn.warn?" warn":""}">${tn.text}</div>`})()}
         <button class="btn ${tc?"btn-fill":"btn-disabled"} btn-w" onclick="${tc?`doAdminPropose('setThreshold',${S.nt})`:""}">${tc?"PROPOSE":"NO CHANGE"}</button>
       </div>
