@@ -148,7 +148,7 @@ button:active{transform:scale(.97)}
   .btn-fill:hover,.btn-green:hover{opacity:.85}
   .btn-outline:hover{opacity:1;background:var(--a);color:var(--bg)}
   .btn-danger:hover{opacity:1;background:var(--r);color:var(--on);border-color:var(--r)}
-  .net-row:hover{color:var(--a);background:var(--ln);transform:translateX(3px);box-shadow:inset 2px 0 0 var(--a)}
+  .net-row:not(.soon):hover{color:var(--a);background:var(--ln);transform:translateX(3px);box-shadow:inset 2px 0 0 var(--a)}
   .vtab:hover{color:var(--a)}
   .pill:not(.on):hover{border-color:var(--a);color:var(--a);background:color-mix(in srgb,var(--a) 6%,transparent)}
   .row:hover{background:var(--ln);box-shadow:inset 2px 0 0 var(--fr)}
@@ -177,7 +177,7 @@ button:active{transform:scale(.97)}
    above occupies, so a bad value takes exactly the space a good one would. */
 .tx-hash.bad{display:inline-block;max-width:19ch;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom;border-bottom-style:dotted;color:var(--d)}
 .tx:not(.blocked):active{background:color-mix(in srgb,var(--a) 9%,transparent)}
-.net-row:active{transform:translateX(1px)}
+.net-row:not(.soon):active{transform:translateX(1px)}
 
 /* scanline */
 .scan{position:fixed;inset:0;pointer-events:none;z-index:100;background:repeating-linear-gradient(0deg,transparent,transparent 3px,#0A0A0A04 3px,#0A0A0A04 6px)}
@@ -582,6 +582,21 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
 .net-panel .net-row:last-child,.net-panel .net-tokens:last-child{border-bottom:none}
 .net-tokens{padding:8px 0 12px 16px;border-bottom:1px solid var(--ln);font-size:10px;color:var(--d);display:flex;gap:10px;flex-wrap:wrap}
 .net-tokens span{font-weight:600}
+/* Bitcoin is on the roadmap, not on the factory. The row sits with the chains
+   that do work so the answer to "is bitcoin coming" is where the question gets
+   asked — inert, desaturated, and carrying no chain id, because a row that
+   looked selectable would be a lie the deploy button has to catch. SOON is the
+   only thing it has to say, so on a pointer it waits for the hover that asks
+   rather than standing at full contrast beside five live chain names. Touch has
+   no hover to wait for, so there it just stays put. */
+.net-row.soon{cursor:default}
+.net-row.soon>span:not(.net-soon){opacity:.5}
+.net-row.soon .tok-ico svg{filter:grayscale(1)}
+.net-soon{margin-left:auto;font-size:8px;letter-spacing:2px;color:var(--m);transition:opacity .15s}
+@media(hover:hover){
+  .net-soon{opacity:0}
+  .net-row.soon:hover .net-soon{opacity:1}
+}
 
 /* admin */
 .admin-note{font-size:10px;color:var(--d);letter-spacing:2px;margin:12px 0 20px}
@@ -2793,6 +2808,29 @@ const ARB_LOGO = `<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><c
 // sizes it either way, so the chain switcher and the token pill draw the one
 // mark.
 const MEGA_LOGO = MEGA_ICON;
+// The wrapped-bitcoin token mark is the bitcoin mark — same orange disc, same
+// glyph — so the not-yet-a-chain row in the network panel draws the one already
+// built above rather than shipping a second copy of it. It is deliberately NOT
+// in CHAIN_ICONS: there is no chain id to key it on, and everything that reads
+// that table reads it to act on a chain.
+const BTC_LOGO = WBTC_ICON;
+// The row itself, shared by the two places a chain gets picked — the CREATE
+// panel and the SELECT CHAIN overlay — because a roadmap that reads one way in
+// one picker and another way in the other is worse than not being there. A
+// plain <div>, not a <button>: nothing to click, nothing to tab to, and no way
+// for it to reach S.cf.net or switchChain. The open bullet is the same
+// unselected mark its neighbours draw.
+const BTC_SOON_ROW = `<div class="net-row soon">
+  <span style="font-size:8px" aria-hidden="true">○</span><span class="tok-ico">${BTC_LOGO}</span><span>BITCOIN</span>
+  <span class="net-soon">SOON</span>
+</div>`;
+// Where it goes: after the last mainnet, in both pickers. The overlay groups
+// under MAINNETS/TESTNETS headings and would put it under the wrong one at the
+// end; the CREATE panel has no headings but is ordered mainnets-then-testnets,
+// and appending there dropped BITCOIN below SEPOLIA — the same list reading two
+// different ways depending on which screen you were on. Derived from NETS, so a
+// sixth mainnet moves it rather than stranding it.
+const BTC_ROW_AFTER = NETS.reduce((last, n, i) => n.test ? last : i, -1);
 const CHAIN_ICONS = { 1: ETH_ICON, 8453: BASE_LOGO, 10: OP_LOGO, 42161: ARB_LOGO, 4326: MEGA_LOGO, 11155111: ETH_ICON, 84532: BASE_LOGO };
 function chainIcon(id, cls){ const ic = CHAIN_ICONS[id]; return ic ? `<span class="tok-ico${cls?' '+cls:''}">${ic}</span>` : ''; }
 
@@ -4692,7 +4730,7 @@ function renderChainOverlay(mob){
         <button class="x-btn" onclick="S.showChains=false;render()" style="margin:0" aria-label="Close">&#10005;</button>
       </div>
       <div style="font-size:9px;letter-spacing:2px;color:var(--d);margin-bottom:8px">MAINNETS</div>
-      ${mainnets.map(row).join("")}
+      ${mainnets.map(row).join("")}${BTC_SOON_ROW}
       <div style="font-size:9px;letter-spacing:2px;color:var(--d);margin:12px 0 8px">TESTNETS</div>
       ${testnets.map(row).join("")}
     </div>
@@ -6494,7 +6532,7 @@ METHOD      ${(c.fastPath&&ds>0)||c.wns?"createWithCalls()":"create()"}</div><di
           <span class="net-id">${n.id}</span>${n.test?'<span class="net-test">TEST</span>':""}
         </button>
         ${on?`<div class="net-tokens">${t.map(tk=>`<span>${tk}</span>`).join("")}${n.test?'<span style="opacity:.5">+ CUSTOM</span>':""}</div>`:""}
-      </div>`}).join("")}</div>
+      </div>${i===BTC_ROW_AFTER?`<div>${BTC_SOON_ROW}</div>`:''}`}).join("")}</div>
       <span class="lbl" id="lbl-clone" style="display:block;margin-top:20px">CLONE TO OTHER CHAINS <span class="dim">&middot; SAME ADDRESS</span></span>
       <div class="token-pills" role="group" aria-labelledby="lbl-clone">${NETS.map((n,i)=>i===c.net?'':`<button class="pill${(c.clone||[]).includes(i)?' on':''}" aria-pressed="${(c.clone||[]).includes(i)}" onclick="toggleClone(${i})">${chainIcon(n.id)}${esc(n.name)}${n.test?'<span class="pill-test">TEST</span>':''}</button>`).filter(Boolean).join('')}</div>
       ${(()=>{const sel=[c.net,...(c.clone||[])].map(i=>NETS[i]).filter(Boolean);const mixed=sel.some(n=>n.test)&&sel.some(n=>!n.test);return mixed?`<div style="margin-top:12px;font-size:9px;letter-spacing:1px;color:var(--y);line-height:1.5">MIXING MAINNET &amp; TESTNET &mdash; DEPLOYING TO BOTH IN ONE GO. UNCHECK IF UNINTENDED.</div>`:'';})()}
