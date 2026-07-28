@@ -310,6 +310,37 @@ CREATE OR REPLACE FUNCTION client_ip() RETURNS text AS $$
     'unknown');
 $$ LANGUAGE sql STABLE;
 
+-- Every bucket is keyed on the vault AND the caller, never on the vault alone.
+--
+-- Keyed on the vault alone, this limiter was a weapon rather than a shield. The
+-- write functions are anon-callable and authenticate by a claimed address, and
+-- owner addresses are public — so a stranger could POST propose_tx sixty times
+-- in a minute for a vault they have nothing to do with, and the vault's real
+-- owners got 'Rate limit exceeded' for the rest of that minute. Nothing was
+-- forged and nothing had to be: the budget was shared, so spending it was
+-- enough.
+--
+-- It is the one forgery the client cannot absorb. A planted proposal is hidden,
+-- a buried one is restored from the chain, a forged approval is not counted —
+-- all of that happens on read, where there is something to inspect. A write
+-- that was refused left nothing to inspect, and the owners simply could not act.
+-- Worst against the cancel path, where the minutes are the point.
+--
+-- Adding the caller costs nothing a real client will notice — owners are on
+-- different connections, and one owner's own burst (loadVaultQueue prunes up to
+-- TERMINAL_RECHECK rows in a loop) sits well inside its own budget. An attacker
+-- now spends only their own, and buying more means buying addresses.
+--
+-- The per-vault ceiling this replaces was never what bounded storage: propose_tx
+-- caps a vault at 20,000 rows outright, which is the check that actually holds
+-- the disk, and it is untouched by any of this.
+--
+-- client_ip() reads the rightmost X-Forwarded-For entry — the hop Render itself
+-- wrote — so it cannot be spoofed by a client appending its own header. Callers
+-- arriving with no header at all share the 'unknown' bucket, which is the
+-- conservative direction: they are limited together rather than each handed a
+-- private, unlimited budget.
+
 -- Raises once the bucket is over budget for the window.
 --
 -- The RAISE aborts the transaction, which rolls back this call's own increment
@@ -620,7 +651,7 @@ BEGIN
   IF NOT is_wallet_writer(p_wallet_id, p_proposed_by) THEN
     RAISE EXCEPTION 'Not an owner';
   END IF;
-  PERFORM rate_gate('propose:' || p_wallet_id::text, 60, interval '1 minute');
+  PERFORM rate_gate('propose:' || p_wallet_id::text || ':' || client_ip(), 60, interval '1 minute');
 
   -- A ceiling on how much of this database one vault can occupy. Proposals are
   -- never deleted — they go terminal and stay as history — so without this the
@@ -703,7 +734,7 @@ BEGIN
   IF NOT is_wallet_writer(w_id, p_signer) THEN
     RAISE EXCEPTION 'Not an owner';
   END IF;
-  PERFORM rate_gate('sig:' || w_id::text, 120, interval '1 minute');
+  PERFORM rate_gate('sig:' || w_id::text || ':' || client_ip(), 120, interval '1 minute');
 
   INSERT INTO signatures (tx_id, signer, sig_type, signature)
   VALUES (p_tx_id, p_signer, p_sig_type, p_signature)
@@ -746,7 +777,7 @@ BEGIN
   IF NOT is_wallet_writer(w_id, p_caller) THEN
     RAISE EXCEPTION 'Not an owner';
   END IF;
-  PERFORM rate_gate('mark:' || w_id::text, 240, interval '1 minute');
+  PERFORM rate_gate('mark:' || w_id::text || ':' || client_ip(), 240, interval '1 minute');
 
   -- Only a LIVE proposal can become executed. Without this guard the update was
   -- unconditional, so a terminal row could be flipped back: a cancelled
@@ -795,7 +826,7 @@ BEGIN
   END IF;
   -- Roomier than the others: loadVaultQueue prunes superseded rows in a loop,
   -- up to TERMINAL_RECHECK of them, and that burst is legitimate.
-  PERFORM rate_gate('mark:' || w_id::text, 240, interval '1 minute');
+  PERFORM rate_gate('mark:' || w_id::text || ':' || client_ip(), 240, interval '1 minute');
 
   UPDATE transactions
   SET status = 'stale', cancelled_at = now()
@@ -825,7 +856,7 @@ BEGIN
   IF NOT is_wallet_writer(w_id, p_caller) THEN
     RAISE EXCEPTION 'Not an owner';
   END IF;
-  PERFORM rate_gate('mark:' || w_id::text, 240, interval '1 minute');
+  PERFORM rate_gate('mark:' || w_id::text || ':' || client_ip(), 240, interval '1 minute');
 
   UPDATE transactions
   SET status = 'queued', eta = p_eta, queued_at = now(), queued_block = p_block, queue_tx = p_queue_tx
@@ -858,7 +889,7 @@ BEGIN
   IF NOT is_wallet_writer(w_id, p_cancelled_by) THEN
     RAISE EXCEPTION 'Not an owner';
   END IF;
-  PERFORM rate_gate('mark:' || w_id::text, 240, interval '1 minute');
+  PERFORM rate_gate('mark:' || w_id::text || ':' || client_ip(), 240, interval '1 minute');
 
   -- Any live proposal, not just a queued one. The old `status = 'queued'` guard
   -- made this a silent no-op for a proposal still collecting signatures — which
@@ -884,7 +915,7 @@ BEGIN
   IF NOT is_wallet_writer(w_id, p_signer) THEN
     RAISE EXCEPTION 'Not an owner';
   END IF;
-  PERFORM rate_gate('sig:' || w_id::text, 120, interval '1 minute');
+  PERFORM rate_gate('sig:' || w_id::text || ':' || client_ip(), 120, interval '1 minute');
 
   -- Only from a live proposal. A terminal row's signatures are the record of
   -- what was collected before it went terminal, and nothing legitimate unsigns
@@ -910,7 +941,7 @@ BEGIN
   IF NOT is_wallet_writer(p_wallet_id, p_caller) THEN
     RAISE EXCEPTION 'Not an owner';
   END IF;
-  PERFORM rate_gate('meta:' || p_wallet_id::text, 60, interval '1 minute');
+  PERFORM rate_gate('meta:' || p_wallet_id::text || ':' || client_ip(), 60, interval '1 minute');
   UPDATE wallets SET name = p_name WHERE id = p_wallet_id;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -922,7 +953,7 @@ BEGIN
   IF NOT is_wallet_writer(p_wallet_id, p_caller) THEN
     RAISE EXCEPTION 'Not an owner';
   END IF;
-  PERFORM rate_gate('meta:' || p_wallet_id::text, 60, interval '1 minute');
+  PERFORM rate_gate('meta:' || p_wallet_id::text || ':' || client_ip(), 60, interval '1 minute');
   -- Case-insensitive, like every other address comparison in this file. It was
   -- the one that was not, so a label set against an address in a different case
   -- than the stored row updated nothing and reported success.
@@ -940,7 +971,7 @@ BEGIN
   IF NOT is_wallet_writer(p_wallet_id, p_owner) THEN
     RAISE EXCEPTION 'Not an owner';
   END IF;
-  PERFORM rate_gate('appr:' || p_wallet_id::text, 60, interval '1 minute');
+  PERFORM rate_gate('appr:' || p_wallet_id::text || ':' || client_ip(), 60, interval '1 minute');
   INSERT INTO approvals (wallet_id, chain_id, owner, tx_hash, approved, block_number, approval_tx, updated_at)
   VALUES (p_wallet_id, p_chain_id, p_owner, p_tx_hash, p_approved, p_block_number, p_approval_tx, now())
   ON CONFLICT (wallet_id, owner, tx_hash) DO UPDATE SET
@@ -965,7 +996,7 @@ BEGIN
   IF NOT is_wallet_writer(p_wallet_id, p_caller) THEN
     RAISE EXCEPTION 'Not an owner';
   END IF;
-  PERFORM rate_gate('sync:' || p_wallet_id::text, 60, interval '1 minute');
+  PERFORM rate_gate('sync:' || p_wallet_id::text || ':' || client_ip(), 60, interval '1 minute');
 
   -- This function's whole job is to replace the owner set with the one the
   -- caller passes, which makes it the most destructive thing anon can reach.
