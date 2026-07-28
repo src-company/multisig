@@ -6311,12 +6311,26 @@ function retryOwnerName(i){
 // Nothing is deduped or dropped here. A list with a repeat in it is a list the
 // operator needs to see the repeat in, and validateCreate marks it on the row —
 // silently swallowing it would hide the fact that the source list was wrong.
+//
+// The same applies, harder, to an address that is nearly one. ethers.isAddress
+// rejects a truncated address and — the one that catches people — a mixed-case
+// address whose checksum does not verify, which is what a chat client, an editor
+// or a careless retype produces from a good one. Filtering those out as "not an
+// owner" would have taken a five-line paste and quietly seated four signers,
+// with the count in the toast as the only evidence and no way to tell which line
+// went missing. So anything 0x-shaped is carried into a row as typed: the row
+// goes red, validateCreate names it, DEPLOY stays held, and the fix is one
+// character in the field it is wrong in rather than a re-copy of the whole list.
 function parseOwnerPaste(text){
   // Trailing punctuation a document added, not part of a name: `.eth` survives
   // it because `h` is not in the set, and an address never ends in one. Quotes
   // and brackets are not here — they separate, below.
   const strip = t => t.replace(/^[\s<]+/, '').replace(/[>,;:.]+$/, '');
   const isOwner = t => !!t && (ethers.isAddress(t) || NAME_RE.test(t));
+  // Meant to be an address, whether or not it is one. Length is deliberately not
+  // checked: 39 hex characters is exactly the case this has to catch.
+  const isAddrish = t => /^0x[0-9a-fA-F]*$/.test(t) && t.length > 2;
+  const isCand = t => isOwner(t) || isAddrish(t);
   const out = [];
   for(const line of String(text || '').split(/[\r\n]+/)){
     // Bullets and numbering, off the front of the line only — an address does
@@ -6328,7 +6342,7 @@ function parseOwnerPaste(text){
     // looks like rather than one unparseable token. A quoted label survives it:
     // its words are split apart here and joined back below.
     const toks = cleaned.split(/[\s,;|"'[\]()]+/).map(strip).filter(Boolean);
-    const hits = toks.filter(isOwner);
+    const hits = toks.filter(isCand);
     if(!hits.length) continue;
     if(hits.length === 1){
       // A token with no letter or digit anywhere in it is punctuation the line
@@ -6338,7 +6352,7 @@ function parseOwnerPaste(text){
       // arrow is treated the same as the ones that were thought of.
       // maxlength on the label input is 64; a pasted one is held to the same
       // ceiling rather than being allowed in over the top of it.
-      const label = toks.filter(t => !isOwner(t) && !/^[^\p{L}\p{N}]+$/u.test(t)).join(' ').trim().slice(0, 64);
+      const label = toks.filter(t => !isCand(t) && !/^[^\p{L}\p{N}]+$/u.test(t)).join(' ').trim().slice(0, 64);
       out.push({ addr: hits[0], label });
     } else {
       for(const a of hits) out.push({ addr: a, label: '' });
@@ -6373,9 +6387,16 @@ function pasteOwners(ev, i){
   // this list applies.
   const fc = c.owners.filter(o => (o.addr || '').trim()).length || 1;
   c.threshold = String(Math.min(+c.threshold || 1, fc));
-  flash(found.length > taken.length
-    ? `PASTED ${taken.length} OWNERS · ${found.length - taken.length} DROPPED AT THE ${MAX_SAFE_THRESHOLD}-OWNER CEILING`
-    : `PASTED ${taken.length} OWNERS`);
+  // The rows are already red and validateCreate already holds DEPLOY, so this
+  // is not the warning — it is the pointer to it. Somebody who pastes forty
+  // owners and glances away needs to be told there is something to look at,
+  // because forty rows do not fit on a screen and the bad one may be off it.
+  const bad = taken.filter(o => !ethers.isAddress(o.addr) && !NAME_RE.test(o.addr)).length;
+  flash([
+    `PASTED ${taken.length} OWNERS`,
+    bad ? `${bad} NOT A VALID ADDRESS — SEE THE RED ROW${bad>1?'S':''}` : '',
+    found.length > taken.length ? `${found.length - taken.length} DROPPED AT THE ${MAX_SAFE_THRESHOLD}-OWNER CEILING` : '',
+  ].filter(Boolean).join(' · '));
   render();
 }
 

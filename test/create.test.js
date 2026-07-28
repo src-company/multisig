@@ -609,3 +609,64 @@ test('the admin threshold is clamped at both ends, not just the top', () => {
     assert.equal(sandbox.S.cf.threshold, '1', `"${typed}" did not clamp to one`);
   }
 });
+
+// ── an address that is nearly one ─────────────────────────────────
+//
+// ethers.isAddress rejects a truncated address and a mixed-case one whose
+// checksum does not verify — which is what a chat client, an editor or a retype
+// makes of a good address. Treating those as "not an owner" and skipping the
+// line would take a five-line paste and seat four signers into an owner set that
+// cannot be revised without a full multisig round of the vault being created.
+
+const BAD_SUM = '0xDAC17F958D2ee523a2206206994597C13D831ec7';   // one letter case-flipped
+const GOOD_SUM = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
+const SHORT = '0x111111111111111111111111111111111111111';      // 39 hex characters
+
+test('the fixtures are what this section claims they are', () => {
+  // Otherwise a change in ethers turns the four tests below into tests of
+  // nothing at all, silently.
+  assert.equal(sandbox.ethers.isAddress(GOOD_SUM), true);
+  assert.equal(sandbox.ethers.isAddress(BAD_SUM), false, 'the bad-checksum fixture verifies');
+  assert.equal(sandbox.ethers.isAddress(SHORT), false);
+});
+
+test('an address with a broken checksum lands in a row, it does not vanish', () => {
+  const r = parseOwnerPaste(`${A}\n${BAD_SUM}\n${B}`);
+  assert.deepEqual(r.map(o => o.addr), [A, BAD_SUM, B],
+    'a signer was dropped out of an owner set that cannot be corrected after deploy');
+});
+
+test('a truncated address lands in a row too, in the position it was pasted at', () => {
+  assert.deepEqual(parseOwnerPaste(`${A}\n${SHORT}`).map(o => o.addr), [A, SHORT]);
+});
+
+test('a row that is nearly an address is a row the form refuses to deploy', () => {
+  // The whole point of carrying it through: validateCreate judges it exactly as
+  // it judges a typed one, and the reason names the row rather than the paste.
+  const v = validateCreate(form([A, BAD_SUM]), false);
+  assert.equal(v.owners[1].state, 'invalid');
+  assert.equal(v.ready, false);
+  assert.match(v.reason, /INVALID/);
+});
+
+test('the paste says there is a bad row, because forty rows do not fit on a screen', () => {
+  cf(['']);
+  paste(`${A}\n${BAD_SUM}\n${B}`);
+  assert.deepEqual(sandbox.S.cf.owners.map(o => o.addr), [A, BAD_SUM, B]);
+  assert.match(sandbox._flashed, /PASTED 3 OWNERS/);
+  assert.match(sandbox._flashed, /1 NOT A VALID ADDRESS/);
+});
+
+test('a near-miss address is not mistaken for the label of the owner beside it', () => {
+  // "0xGOOD, 0xBROKEN" is two attempts at an owner, not an owner named 0xBROKEN.
+  const r = parseOwnerPaste(`${A}, ${SHORT}`);
+  assert.equal(r.length, 2);
+  assert.equal(r[0].label, '');
+});
+
+test('a word is still a label and a header is still skipped', () => {
+  // The widened net catches 0x-shaped tokens only. Everything else reads as
+  // before, or the change would turn every spreadsheet header into a red row.
+  assert.deepEqual(parseOwnerPaste('OWNERS\nsigners:'), []);
+  assert.deepEqual(parseOwnerPaste(`${A}, Alice`), [{ addr: A, label: 'Alice' }]);
+});
