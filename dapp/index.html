@@ -6463,8 +6463,24 @@ function ownerRowNote(ow, i, explorerBase, sayKinds, chainId){
   if(ow.state === 'invalid') {
     // esc(), unlike the two status-node callers: this one is written as HTML
     // and the string carries back what the operator typed.
+    //
+    // 0x0 and 0x1 arrive here as well, and they are the one kind of invalid that
+    // is a perfectly good address — validateCreate rejects them because init()
+    // builds its owner list as a linked list headed by address(1), not because
+    // the text is malformed. Telling someone who typed 0x0 that it is not a
+    // valid address sends them to check the characters.
+    if(ethers.isAddress(ow.raw))
+      return { html:`${esc(shortAddr(ow.raw))} IS A SENTINEL, NOT AN OWNER &mdash; THE VAULT'S OWNER LIST IS BUILT ON 0x0 AND 0x1`, color:'var(--r)', num:'var(--r)' };
     const near = nameNearMiss(ow.raw);
     if(near) return { html: esc(near), color:'var(--y)', num:'var(--y)' };
+    // The same two readings _addrState gives every other address field in the
+    // app, which this row was the one place not to offer. A pasted list makes it
+    // matter more than it did: an address damaged in transit — a chat client
+    // capitalising it, an editor wrapping it — is right in every character and
+    // wrong only in case, and "NOT A VALID ADDRESS OR .ETH / .WEI … NAME" sends
+    // the operator to re-copy a list where one row needs one character.
+    if(/^0x[0-9a-fA-F]{40}$/.test(ow.raw)) return { html:'BAD CHECKSUM &mdash; RE-COPY THIS ADDRESS', color:'var(--r)', num:'var(--r)' };
+    if(/^0x[0-9a-fA-F]*$/.test(ow.raw)) return { html:`${ow.raw.length-2}/40 HEX CHARS`, color:'var(--r)', num:'var(--r)' };
     return { html:`NOT A VALID ADDRESS OR ${esc(NAME_KINDS)} NAME`, color:'var(--r)', num:'var(--r)' };
   }
   if(ow.state === 'dup') return {

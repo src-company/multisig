@@ -82,6 +82,10 @@ const NEEDED = [
   // leave a picker whose every button throws ReferenceError, on a page that goes
   // blank rather than saying so. Lifting it means a rename fails this suite.
   'setAdminThreshold',
+  // The note under an owner row. Only its invalid branch is exercised below —
+  // the rest reaches the chain for an owner's code — but the whole function is
+  // lifted, so a rename or a reshuffle of the branches fails here.
+  'NAME_KINDS', 'nameNearMiss', '_OWNER_STATE_COLOR', 'ownerRowNote',
 ];
 
 // What previewName is told to answer, keyed by the raw text of the name. A name
@@ -97,6 +101,12 @@ const sandbox = {
   // off the toast — but pasteOwners raises one, and a paste that throws on the
   // way to reporting itself has not pasted anything.
   flash: (m) => { sandbox._flashed = m; },
+  // Reaches the chain for an owner's code and answers null until it replies.
+  // What is asserted here is the note a rejected row carries, which is decided
+  // before this is consulted; a valid row only has to reach it without throwing.
+  cannotSign: () => false,
+  esc: (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])),
+  shortAddr: (a) => (/^0x[0-9a-fA-F]{40}$/.test(a || '') ? a.slice(0, 6) + '\u2026' + a.slice(-4) : (a || '')),
   previewName: (raw) => previews.get(raw) || { state: 'resolving' },
   TextEncoder, TextDecoder, URL, setTimeout, clearTimeout,
   crypto: globalThis.crypto,
@@ -669,4 +679,43 @@ test('a word is still a label and a header is still skipped', () => {
   // before, or the change would turn every spreadsheet header into a red row.
   assert.deepEqual(parseOwnerPaste('OWNERS\nsigners:'), []);
   assert.deepEqual(parseOwnerPaste(`${A}, Alice`), [{ addr: A, label: 'Alice' }]);
+});
+
+// ── what a rejected owner row says ────────────────────────────────
+//
+// The row is where a bad owner gets fixed, so the note on it is the whole
+// remedy. Every one of these was "NOT A VALID ADDRESS OR .ETH / .WEI / … NAME"
+// — a sentence that is true of all of them and useful for none, and which sends
+// somebody who pasted forty owners back to re-copy the list when one row needs
+// one character.
+
+const note = (raw) => sandbox.ownerRowNote(validateCreate(form([raw]), false).owners[0], 0, 'https://x', false, 1);
+
+test('a case-damaged address is named as one, not as a bad format', () => {
+  assert.match(note(BAD_SUM).html, /BAD CHECKSUM/);
+});
+
+test('a truncated address counts itself', () => {
+  assert.match(note(SHORT).html, /39\/40 HEX CHARS/);
+});
+
+test('a sentinel is a good address that cannot be an owner, and is told apart from a typo', () => {
+  // 0x0 is right in every character. Reporting it as malformed sends the
+  // operator to check the characters, which are fine.
+  const z = note('0x' + '0'.repeat(40)).html;
+  assert.match(z, /SENTINEL/);
+  assert.doesNotMatch(z, /NOT A VALID ADDRESS/);
+});
+
+test('text that is not an address at all still says which names a row takes', () => {
+  assert.match(note('carol').html, /NOT A VALID ADDRESS OR/);
+  assert.match(note('carol').html, /\.eth/i);
+});
+
+test('a basename near-miss keeps its own correction', () => {
+  assert.match(note('alice.base').html, /DID YOU MEAN/);
+});
+
+test('a valid owner is not given an error note at all', () => {
+  assert.equal(/CHECKSUM|HEX CHARS|SENTINEL|NOT A VALID/.test(note(A).html), false);
 });
