@@ -9282,11 +9282,32 @@ async function loadVaultQueue(vi) {
       // it left every owner's queue while sitting on chain, maturing, executable
       // by anyone the moment it matured. The vault gets asked now, and it is
       // asked before the record is believed.
+      //
+      // Three answers, not two. `queued()` returning 0 is the vault saying it is
+      // not holding this; undefined is a read that did not happen — aggregate3
+      // goes out with allowFailure:true, so one sub-call can come back
+      // unsuccessful inside a batch that otherwise worked, and a multicall that
+      // throws outright leaves every entry undefined. Testing truthiness folded
+      // those together, and the folded branch is the destructive one: it pushes
+      // the row onto staleTxIds, which is a dbPruneTx() that writes 'stale' to
+      // the shared database for every owner of the vault. A transient RPC blip
+      // therefore retired a live proposal on everybody's behalf — the same
+      // disappearance an anonymous cancel_tx would have caused, arrived at by
+      // accident, and the exact direction the hide-check below spells out as the
+      // one that must never be taken. It self-heals on the next good load, via
+      // the retired-row re-check, but only for as long as the row stays inside
+      // TERMINAL_RECHECK.
       if(t.status === 'proposed' && t.nonce < v.nonce) {
-        if(!onchainQueued[t.id]) { staleTxIds.push(t.id); continue; }
-        t.eta = onchainQueued[t.id];
-        t.orphanedFrom = t.status;
-        t.status = 'queued';
+        const held = onchainQueued[t.id];
+        if(held === 0) { staleTxIds.push(t.id); continue; }
+        // Unread: leave the row exactly as it is and show it. An extra proposal
+        // on screen for one poll is the cheap failure; retiring a live one for
+        // everybody is not.
+        if(held > 0) {
+          t.eta = held;
+          t.orphanedFrom = t.status;
+          t.status = 'queued';
+        }
       }
 
       // Skip accelerate/cancel/reject companions — they aggregate sigs separately
