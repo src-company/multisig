@@ -86,6 +86,7 @@ const NEEDED = [
   // the rest reaches the chain for an owner's code — but the whole function is
   // lifted, so a rename or a reshuffle of the branches fails here.
   'NAME_KINDS', 'nameNearMiss', '_OWNER_STATE_COLOR', 'ownerRowNote',
+  'seedYouAsOwner',
 ];
 
 // What previewName is told to answer, keyed by the raw text of the name. A name
@@ -718,4 +719,121 @@ test('a basename near-miss keeps its own correction', () => {
 
 test('a valid owner is not given an error note at all', () => {
   assert.equal(/CHECKSUM|HEX CHARS|SENTINEL|NOT A VALID/.test(note(A).html), false);
+});
+
+// ── the account that is already connected ─────────────────────────
+//
+// Offering the connected account as owner 1 saves retyping an address into a
+// form the wallet is already attached to. Doing it on every paint instead of
+// once made the row impossible to empty — onchange calls render(), so clearing
+// the last filled row put the address straight back — and a vault deployed by
+// somebody who is not one of its owners is a case the app supports on purpose.
+
+const { seedYouAsOwner } = sandbox;
+
+const YOU = '0x9999999999999999999999999999999999999999';
+const OTHER = '0x8888888888888888888888888888888888888888';
+
+const blankForm = (o) => Object.assign({
+  owners: [{ addr: '', label: '' }, { addr: '', label: '' }, { addr: '', label: '' }],
+  threshold: '1', youSeeded: null, safeSrc: null,
+}, o);
+
+test('an untouched form is opened with the connected account in row one', () => {
+  sandbox._connectedAddress = YOU;
+  sandbox.S.demoMode = false;
+  const c = blankForm();
+  seedYouAsOwner(c);
+  assert.equal(c.owners[0].addr, YOU);
+  assert.equal(c.owners[0].label, 'YOU');
+});
+
+test('a row cleared by hand stays cleared', () => {
+  // The whole bug. Every render used to re-seed a form whose rows were all
+  // blank, and the address field calls render() when it loses focus.
+  sandbox._connectedAddress = YOU;
+  const c = blankForm();
+  seedYouAsOwner(c);
+  c.owners[0].addr = ''; c.owners[0].label = '';
+  seedYouAsOwner(c);
+  seedYouAsOwner(c);
+  assert.equal(c.owners[0].addr, '', 'the address came back after being deleted');
+});
+
+test('connecting a different wallet offers the new address', () => {
+  // Latched on which account was seeded, not on the fact of seeding — otherwise
+  // switching accounts on an empty form leaves the previous one in row 1.
+  sandbox._connectedAddress = YOU;
+  const c = blankForm();
+  seedYouAsOwner(c);
+  c.owners[0].addr = ''; c.owners[0].label = '';
+  sandbox._connectedAddress = OTHER;
+  seedYouAsOwner(c);
+  assert.equal(c.owners[0].addr, OTHER);
+});
+
+test('a form with anything in it is not seeded into, and does not become one later', () => {
+  sandbox._connectedAddress = YOU;
+  const c = blankForm({ owners: [{ addr: A, label: '' }, { addr: '', label: '' }] });
+  seedYouAsOwner(c);
+  assert.equal(c.owners[0].addr, A);
+  // Emptying it must not turn it into a fresh form.
+  c.owners[0].addr = '';
+  seedYouAsOwner(c);
+  assert.equal(c.owners[0].addr, '');
+});
+
+test('a cloned Safe is left exactly as the Safe had it', () => {
+  sandbox._connectedAddress = YOU;
+  const c = blankForm({ safeSrc: { addr: B }, owners: [{ addr: '', label: '' }] });
+  seedYouAsOwner(c);
+  assert.equal(c.owners[0].addr, '', 'the deployer was added to a cloned signer set');
+});
+
+test('the demo has no wallet to seed from', () => {
+  sandbox._connectedAddress = YOU;
+  sandbox.S.demoMode = true;
+  const c = blankForm();
+  seedYouAsOwner(c);
+  assert.equal(c.owners[0].addr, '');
+  // And nothing was latched, so leaving the demo still offers the account.
+  sandbox.S.demoMode = false;
+  seedYouAsOwner(c);
+  assert.equal(c.owners[0].addr, YOU);
+});
+
+test('no wallet connected latches nothing, so connecting later still seeds', () => {
+  sandbox._connectedAddress = undefined;
+  sandbox.S.demoMode = false;
+  const c = blankForm();
+  seedYouAsOwner(c);
+  assert.equal(c.youSeeded, null);
+  sandbox._connectedAddress = YOU;
+  seedYouAsOwner(c);
+  assert.equal(c.owners[0].addr, YOU);
+});
+
+test('the seeded form is a form validateCreate already calls ready', () => {
+  // The paint-order half of the fix. Seeding used to happen inside the owner
+  // rows, after `val` had been read off the empty form, so the render that put
+  // the address on screen also drew ADD AT LEAST ONE OWNER over a greyed-out
+  // DEPLOY beside it. Seeding before validation is what makes those agree.
+  sandbox._connectedAddress = YOU;
+  sandbox.S.demoMode = false;
+  const c = blankForm();
+  seedYouAsOwner(c);
+  const v = validateCreate(Object.assign(c, { delayVal: '24' }), false);
+  assert.equal(v.filled, 1);
+  assert.equal(v.ready, true);
+  assert.equal(v.owners[0].state, 'address');
+});
+
+test('a form with no rows at all is not a blank page', () => {
+  // every() on an empty list is true, so the emptiness check alone would send
+  // this into owners[0] of nothing — a throw out of render(), which this app
+  // paints as an empty document rather than an error.
+  sandbox._connectedAddress = YOU;
+  sandbox.S.demoMode = false;
+  const c = blankForm({ owners: [] });
+  assert.doesNotThrow(() => seedYouAsOwner(c));
 });

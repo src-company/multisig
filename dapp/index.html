@@ -3101,6 +3101,9 @@ const S = {
     // whichever one happens to be first in the list. See syncCreateNet.
     netPicked: false,
     owners: [{ addr: '', label: '' }, { addr: '', label: '' }, { addr: '', label: '' }],
+    // The account seedYouAsOwner has already offered as owner 1, so a row cleared
+    // by hand is not put back on the next paint, and a different wallet still is.
+    youSeeded: null,
     safeSrc: null,        // set when the signer set was cloned from a Gnosis Safe
     wns: false,           // claim <slug(name)>.id.wei in the deploy transaction
   },
@@ -6743,8 +6746,50 @@ function syncCreateNet(){
   // never the thing this drops.
   c.clone = (c.clone || []).filter(x => x !== i);
 }
+// The connected account, offered as the first owner of a form nobody has filled
+// in yet. Whoever is deploying is nearly always the first signer, and retyping
+// your own address into a form your wallet is already connected to is a
+// transcription risk taken for nothing.
+//
+// Once per account, not once per paint. This ran on every render and re-seeded
+// whenever every row was blank, which made the row impossible to clear: onchange
+// on the address field calls render(), so emptying the last filled row put the
+// address straight back in. Deploying a vault you are not an owner of is a case
+// this app supports on purpose — prodDeploy computes deployerIsOwner and the
+// review screen says so out loud — and the form was the one place refusing it.
+//
+// The latch remembers which account was seeded rather than that seeding
+// happened, so connecting a different wallet still offers the new address, and a
+// row cleared by hand stays cleared.
+//
+// Latched even when nothing is seeded. A form that already has something in it —
+// a cloned Safe, a pasted list, one row typed by hand — is not one to seed into,
+// and it must not become one the moment it is emptied.
+//
+// Called before validateCreate rather than from inside the owner rows, which is
+// where it used to sit. From there it mutated c.owners after the paint's `val`
+// had already been computed off the empty form, so the render that seeded the
+// address drew it into row 1 while the rest of the screen still described a form
+// with no owners in it: the name-kinds hint under the row, a threshold picker of
+// one button, ADD AT LEAST ONE OWNER in amber and DEPLOY greyed out, all with
+// the address sitting visibly in the field. It corrected itself on the next
+// paint, which is why it read as a flicker rather than a fault.
+function seedYouAsOwner(c){
+  const you = window._connectedAddress;
+  if(!you || S.demoMode || c.youSeeded === you) return;
+  c.youSeeded = you;
+  // A row-count check as well as an emptiness one: `every` on no rows at all is
+  // true, and seeding into owners[0] of an empty list throws out of render() —
+  // which in this app is a blank page, not a missing field. No path reaches here
+  // with no rows today; this runs on every paint of the form, so it does not
+  // depend on that staying so.
+  if(c.safeSrc || !c.owners.length || !c.owners.every(o => !(o.addr || '').trim())) return;
+  c.owners[0].addr = you;
+  c.owners[0].label = 'YOU';
+}
 function renderCreate(mob){
   syncCreateNet();
+  seedYouAsOwner(S.cf);
   const c=S.cf,ds=toSec(c.delayVal,c.delayUnit),net=NETS[c.net],toks=DEMO_TOKENS[net.name]||["ETH"];
   const explorerBase = CHAINS[net.id]?.explorer || 'https://etherscan.io';
   const val = validateCreate(c, S.demoMode);
@@ -6764,7 +6809,7 @@ function renderCreate(mob){
         <span style="color:var(--m)">${c.safeSrc.threshold} OF ${c.safeSrc.ownerCount}</span>
         <button class="x-btn" aria-label="Undo the clone" title="Undo the clone" onclick="undoSafeClone()">&#10005;</button>
       </div>`})():''}
-      ${(()=>{const you=window._connectedAddress;if(you&&!S.demoMode&&!c.safeSrc&&c.owners.every(o=>!o.addr.trim())){c.owners[0].addr=you;c.owners[0].label='YOU'}return''})()}${c.owners.map((o,i)=>{
+      ${c.owners.map((o,i)=>{
         const ow=val.owners[i], st=ow.state;
         const bad=st==='invalid'||st==='dup'||(ow.pv&&ow.pv.state==='err');
         // One row speaks for the form: the first that is still empty.
@@ -6780,7 +6825,13 @@ function renderCreate(mob){
         ${c.owners.length>1?`<button class="x-btn red o-del" aria-label="Remove owner ${i+1}" title="Remove this owner" onclick="S.cf.owners.splice(${i},1);const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;S.cf.threshold=String(Math.min(+S.cf.threshold||1,fc));render()">&#10005;</button>`:""}
       </div>${note.html?`<div class="owner-note" id="cf-own-note-${i}" style="color:${note.color}">${note.html}</div>`:''}`}).join("")}
       <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap">
-        <button class="link-btn" onclick="S.cf.owners.push({addr:'',label:''});S.cf.threshold=String(Math.min(+S.cf.threshold||1,S.cf.owners.length));render()">+ ADD</button>
+${/* No threshold clamp, unlike the remove button beside it. Adding a blank row
+             cannot lower the number of owners, and every path that can — a delete, a
+             paste, a cleared field — clamps on its own way out, so the Math.min that
+             used to sit here compared the threshold against a row count that had
+             just grown and could never fire. A guard that cannot run reads as one
+             that is holding something. */''}
+        <button class="link-btn" onclick="S.cf.owners.push({addr:'',label:''});render()">+ ADD</button>
 ${/* An owner set arrives as a list far more often than it is typed one row at a
              time, and a paste that spreads itself across rows is invisible until it
              is tried — nothing on the form suggested a field would take more than
