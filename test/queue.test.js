@@ -116,6 +116,10 @@ const sandbox = {
   appBase: () => 'https://example.test/',
   refHash: (ref, nonce) => '#1/' + ref + (nonce == null ? '' : '/tx/' + nonce),
   nameKindsHint: () => '.eth/.wei',
+  // The line under the empty state's LOAD field. It classifies what has been
+  // typed there, which is names' business and not this suite's; what is asserted
+  // here is that the empty state draws at all.
+  loadStatusFor: () => ({ txt: '.eth/.wei', color: 'var(--d)' }),
   chainName: () => 'ETHEREUM',
   isMegaName: () => false,
   isBaseName: () => false,

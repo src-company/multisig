@@ -3084,11 +3084,14 @@ const S = {
   wnsLabel: "",          // the label being claimed (NAME tab, mainnet only)
   wnsPrimary: true,      // also point reverse resolution at it
   showCustomTok: false,
+  customTokAddr: "",     // the address typed into + CUSTOM, in state for the reason above
   txSlow: false,          // outbound delivery mode: false = INSTANT, true = SLOW (delayed)
   txSlowDelaySec: 86400,  // SLOW timelock in seconds (default 1 day)
   txSlowUnit: 'd',        // custom-delay unit for the builder input
+  txSlowCustom: '',       // the custom delay as typed, so the field still shows what it set
   deploy: null,
   topup: null,
+  loadAddr: "",          // the address or name typed into the empty state's LOAD field
   batch: [{ t: "", v: "", d: "" }, { t: "", v: "", d: "" }],
 
   // create form
@@ -3130,6 +3133,18 @@ const S = {
   cxFn: null,
   cxArgs: {},
   cxAddr: '',
+  cxData: '',            // raw calldata, in state so an ABI lookup landing cannot wipe it
+  // The ADMIN screen's three free-text fields, held for the same reason as the
+  // builder's. That screen renders on a poll tick, on a holdings reload and on
+  // every queue change, and an address pasted into one of them was gone.
+  // A rename in progress, and which vault it is for. Keyed rather than bare,
+  // the same way S.topup is an instance rather than a flag: a draft is about one
+  // vault, and switching selection with one open must not carry the text over
+  // onto another vault's name field.
+  rename: null,
+  adminExec: '',
+  adminAddOwner: '',
+  adminAddLabel: '',
   cxLoading: false,
 };
 
@@ -3746,16 +3761,20 @@ function highlightTx(nonce) {
 }
 
 // Inline validity hint for the load-existing-vault field.
+function loadStatusFor(val) {
+  const t = (val || '').trim();
+  if (!t) return { txt: nameKindsHint(), color: 'var(--d)' };
+  if (ethers.isAddress(t)) return { txt: 'VALID ADDRESS', color: 'var(--g)' };
+  if (NAME_RE.test(t)) return { txt: 'NAME \u00b7 RESOLVES ON LOAD', color: 'var(--a)' };
+  const near = nameNearMiss(t);
+  return { txt: near || ('ENTER AN ADDRESS OR ' + NAME_KINDS + ' NAME'), color: near ? 'var(--y)' : 'var(--r)' };
+}
 function updateLoadStatus(val) {
   const el = document.getElementById('load-status');
   if (!el) return;
-  const t = (val || '').trim();
-  if (!t) { el.textContent = nameKindsHint(); el.style.color = 'var(--d)'; return; }
-  if (ethers.isAddress(t)) { el.textContent = 'VALID ADDRESS'; el.style.color = 'var(--g)'; }
-  else if (NAME_RE.test(t)) { el.textContent = 'NAME · RESOLVES ON LOAD'; el.style.color = 'var(--a)'; }
-  else { const near = nameNearMiss(t);
-    el.textContent = near || ('ENTER AN ADDRESS OR ' + NAME_KINDS + ' NAME');
-    el.style.color = near ? 'var(--y)' : 'var(--r)'; }
+  const s = loadStatusFor(val);
+  el.textContent = s.txt;
+  el.style.color = s.color;
 }
 
 function chainName() {
@@ -3964,6 +3983,7 @@ function resetCxState() {
   S.cxFn = null;
   S.cxArgs = {};
   S.cxAddr = '';
+  S.cxData = '';
   S.cxLoading = false;
   clearTimeout(_cxDebounce);
 }
@@ -4818,7 +4838,7 @@ function renderChainOverlay(mob){
 
 // ── DASHBOARD ─────────────────────────────────────────────────────
 function renderDash(v,mob){
-  if(!v)return`<div class="empty"><div class="empty-title">NO VAULTS</div><div class="empty-sub">${S.demoMode?"":"DEPLOY YOUR FIRST MULTISIG"}</div><button class="btn btn-outline" style="padding:0 32px;height:48px" onclick="S.view='CREATE';render()">CREATE VAULT</button>${!S.demoMode?`<div style="max-width:400px;margin:44px auto 0;padding-top:32px;border-top:1px solid var(--ln)"><div style="font-size:10px;font-weight:600;letter-spacing:2px;color:var(--m)">LOAD EXISTING VAULT</div><div style="margin-top:12px;display:flex;align-items:center;gap:8px;justify-content:center;flex-wrap:wrap"><input class="inp" id="load-addr" style="max-width:320px;min-width:0;flex:1;margin:0;font-size:16px" placeholder="0x... or a name" aria-label="Vault address or name" aria-describedby="load-status" oninput="updateLoadStatus(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();loadVaultByAddress()}"><button class="btn btn-outline btn-sm" onclick="loadVaultByAddress()">LOAD</button></div><div id="load-status" role="status" style="font-size:9px;letter-spacing:1px;text-align:center;min-height:12px;margin-top:6px;color:var(--d)">${esc(nameKindsHint())}</div><div style="margin-top:24px"><button class="btn btn-outline" style="font-size:9px;border-color:var(--ln);color:var(--d)" onclick="S.demoMode=true;S.vaults=seed();S.sel=0;flash('DEMO LOADED');render()">LOAD DEMO</button></div></div>`:""}</div>`;
+  if(!v)return`<div class="empty"><div class="empty-title">NO VAULTS</div><div class="empty-sub">${S.demoMode?"":"DEPLOY YOUR FIRST MULTISIG"}</div><button class="btn btn-outline" style="padding:0 32px;height:48px" onclick="S.view='CREATE';render()">CREATE VAULT</button>${!S.demoMode?`<div style="max-width:400px;margin:44px auto 0;padding-top:32px;border-top:1px solid var(--ln)"><div style="font-size:10px;font-weight:600;letter-spacing:2px;color:var(--m)">LOAD EXISTING VAULT</div><div style="margin-top:12px;display:flex;align-items:center;gap:8px;justify-content:center;flex-wrap:wrap"><input class="inp" id="load-addr" style="max-width:320px;min-width:0;flex:1;margin:0;font-size:16px" placeholder="0x... or a name" aria-label="Vault address or name" aria-describedby="load-status" value="${esc(S.loadAddr)}" oninput="S.loadAddr=this.value;updateLoadStatus(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();loadVaultByAddress()}"><button class="btn btn-outline btn-sm" onclick="loadVaultByAddress()">LOAD</button></div>${(()=>{const ls=loadStatusFor(S.loadAddr);return `<div id="load-status" role="status" style="font-size:9px;letter-spacing:1px;text-align:center;min-height:12px;margin-top:6px;color:${ls.color}">${esc(ls.txt)}</div>`})()}<div style="margin-top:24px"><button class="btn btn-outline" style="font-size:9px;border-color:var(--ln);color:var(--d)" onclick="S.demoMode=true;S.vaults=seed();S.sel=0;flash('DEMO LOADED');render()">LOAD DEMO</button></div></div>`:""}</div>`;
   const you = getYou();
   const h0=v.holdings[0];
 
@@ -5292,7 +5312,13 @@ function fillTxPct(frac, amountStr, dec, avail, unit){
   if(frac >= 1) out = amountStr;                       // MAX sends the exact raw balance, no rounding
   else {
     const n = Number(amountStr) * frac;
-    out = n > 0 ? n.toFixed(Math.min(dec, 8)).replace(/\.?0+$/, '') : '0';
+    // _amtTrim rather than /\.?0+$/. toFixed(0) of 250 is "250", and that regex
+    // eats the final zero because there is no decimal point in it to stop at —
+    // 25% of 1000 units of a 0-decimal token became 25. The sibling below is not
+    // affected only because toFixed(8) always leaves a point behind; this one
+    // takes its precision from the token. The figure this writes is the figure
+    // the proposal carries and every co-signer signs.
+    out = n > 0 ? _amtTrim(n.toFixed(Math.min(dec, 8))) : '0';
   }
   el.value = out;
   onTxAmount(out, dec, avail, unit);
@@ -5706,17 +5732,17 @@ function onBatchData(i, val){
 // vault, select it for the transfer, and refresh holdings so it's tracked.
 async function addCustomTokenFlow(){
   const v = S.vaults[S.sel]; if(!v) return;
-  const parsed = parseTokenAddr(document.getElementById('custom-tok-addr')?.value);
+  const parsed = parseTokenAddr(S.customTokAddr);
   if(parsed.err){ flash(parsed.err); return; }
   const addr = parsed.addr;
   const existing = vaultTokens(v).find(t => t.address && t.address.toLowerCase() === addr.toLowerCase());
-  if(existing){ S.txToken = existing.symbol; S.showCustomTok = false; render(); return; }
+  if(existing){ S.txToken = existing.symbol; S.showCustomTok = false; S.customTokAddr = ''; render(); return; }
   flash('FETCHING TOKEN…');
   try {
     const meta = await fetchTokenMeta(addr);
     if(vaultTokens(v).some(t => t.symbol === meta.symbol)){ flash(`SYMBOL "${meta.symbol}" ALREADY LISTED`); return; }
     const saved = saveCustomToken(S.chainId, v.address, meta);
-    S.txToken = meta.symbol; S.showCustomTok = false;
+    S.txToken = meta.symbol; S.showCustomTok = false; S.customTokAddr = '';
     flash(saved ? `ADDED ${meta.symbol} · ${meta.decimals} DEC · SAVED` : `ADDED ${meta.symbol} · COULD NOT SAVE LOCALLY`);
     render();
     reloadHoldings(S.sel);
@@ -5778,7 +5804,7 @@ async function openTopUp(){
   // balances in whichever dialog happened to be up when it finished. That is a
   // MAX button offering another chain's balance of a token this one does not
   // hold, on the one screen whose whole job is to say how much you can send.
-  const t = S.topup = { sym:'ETH', amt:'', bals:null, gasPrice:null, loading:true, sending:false, err:null, showCustom:false, txHash:null };
+  const t = S.topup = { sym:'ETH', amt:'', customAddr:'', bals:null, gasPrice:null, loading:true, sending:false, err:null, showCustom:false, txHash:null };
   render();
   try {
     // The wallet is priced as well as counted: MAX on the native asset has to
@@ -5860,11 +5886,11 @@ async function addTopUpCustom(){
   // reopened against another vault across either of them.
   const t0 = S.topup;
   if(!v || !t0) return;
-  const parsed = parseTokenAddr(document.getElementById('topup-custom-addr')?.value);
+  const parsed = parseTokenAddr(t0.customAddr);
   if(parsed.err){ flash(parsed.err); return; }
   const addr = parsed.addr;
   const existing = vaultTokens(v).find(t => t.address && t.address.toLowerCase() === addr.toLowerCase());
-  if(existing){ t0.sym = existing.symbol; t0.showCustom = false; render(); return; }
+  if(existing){ t0.sym = existing.symbol; t0.showCustom = false; t0.customAddr = ''; render(); return; }
   flash('FETCHING TOKEN…');
   try {
     const meta = await fetchTokenMeta(addr);
@@ -5874,7 +5900,7 @@ async function addTopUpCustom(){
     // this one list.
     const saved = saveCustomToken(S.chainId, v.address, meta);
     if(S.topup === t0){
-      t0.sym = meta.symbol; t0.showCustom = false;
+      t0.sym = meta.symbol; t0.showCustom = false; t0.customAddr = '';
       let bals = null;
       try { bals = await fetchTopUpBalances(window._connectedAddress, vaultTokens(v)); } catch(_){}
       if(S.topup === t0 && bals) t0.bals = bals;
@@ -6015,7 +6041,7 @@ function renderTopUp(){
         <div class="fhead"><span class="lbl" id="topup-asset-lbl">ASSET</span>${holds}</div>
         <div class="token-pills" style="margin-bottom:0" role="group" aria-labelledby="topup-asset-lbl">${pills}<button class="pill" ${sending?'disabled':''} onclick="S.topup.showCustom=!S.topup.showCustom;render()" aria-expanded="${!!t.showCustom}">+ CUSTOM</button></div>
         ${t.showCustom?`<div style="margin-top:12px">
-          <div style="display:flex;gap:8px"><input class="inp" id="topup-custom-addr" style="margin:0;flex:1;min-width:0;font-size:16px" placeholder="0x... TOKEN ADDRESS" aria-label="Custom token address" onkeydown="if(event.key==='Enter'){event.preventDefault();addTopUpCustom()}"><button class="btn btn-outline btn-sm" onclick="addTopUpCustom()">ADD</button></div>
+          <div style="display:flex;gap:8px"><input class="inp" id="topup-custom-addr" style="margin:0;flex:1;min-width:0;font-size:16px" placeholder="0x... TOKEN ADDRESS" aria-label="Custom token address" value="${esc(t.customAddr||'')}" oninput="if(S.topup)S.topup.customAddr=this.value" onkeydown="if(event.key==='Enter'){event.preventDefault();addTopUpCustom()}"><button class="btn btn-outline btn-sm" onclick="addTopUpCustom()">ADD</button></div>
           ${(()=>{const cl=customTokensFor(S.chainId,v.address);return cl.length?`<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">${cl.map(x=>`<span class="ctok-chip">${tokIcon(x.symbol,'sm')} ${esc(x.symbol)} <span class="dim">${x.decimals}d</span><button onclick="removeCustomTokenFlow('${x.address}')" aria-label="Remove ${esc(x.symbol)}" title="Remove ${esc(x.symbol)}">&#10005;</button></span>`).join('')}</div>`:''})()}
           <div style="font-size:9px;color:var(--d);letter-spacing:1px;line-height:1.5;margin-top:8px">SAVED TO THIS BROWSER FOR THIS VAULT &mdash; AVAILABLE FOR SENDS TOO</div>
         </div>`:''}
@@ -6073,7 +6099,7 @@ function renderTxBuilder(v,mob){
           <div class="token-pills" style="margin-bottom:0">${SLOW_PRESETS.map(p=>`<button class="pill${Number(S.txSlowDelaySec)===p.s?" on":""}" onclick="setSlowDelay(${p.s})">${p.l}</button>`).join("")}</div>
           <div class="slow-custom">
             <label class="slow-custom-l" for="slow-custom-n">CUSTOM</label>
-            <input class="inp" id="slow-custom-n" style="flex:1" inputmode="decimal" placeholder="0" onchange="onSlowCustom()" onkeydown="if(event.key==='Enter'){event.preventDefault();onSlowCustom()}">
+            <input class="inp" id="slow-custom-n" style="flex:1" inputmode="decimal" placeholder="0" value="${esc(S.txSlowCustom)}" oninput="S.txSlowCustom=this.value" onchange="onSlowCustom()" onkeydown="if(event.key==='Enter'){event.preventDefault();onSlowCustom()}">
             <select class="slow-unit" id="slow-custom-u" aria-label="Delay unit" onchange="onSlowCustom()">
               <option value="h"${S.txSlowUnit==="h"?" selected":""}>HOURS</option>
               <option value="d"${S.txSlowUnit==="d"?" selected":""}>DAYS</option>
@@ -6087,7 +6113,7 @@ function renderTxBuilder(v,mob){
         <div class="fset">
           <div class="fhead"><span class="lbl" id="lbl-token">TOKEN</span>${hold?`<span class="fhint privg"${pgAttrs()}>VAULT HOLDS <b><span class="priv">${esc(hold.balance)}</span> ${esc(S.txToken)}</b>${hold.usd?` &middot; <span class="priv">${esc(hold.usd)}</span>`:''}</span>`:`<span class="fhint">NO ${esc(S.txToken)} BALANCE</span>`}</div>
           <div class="token-pills" style="margin-bottom:0" role="group" aria-labelledby="lbl-token">${tokenObjs.map(t=>`<button class="pill${S.txToken===t.symbol?" on":""}"${S.txToken===t.symbol?' aria-current="true"':''} onclick="selectTxToken('${jstr(t.symbol)}')"><span class="tok-ico">${t.icon||iconForSym(t.symbol)}</span>${esc(t.symbol)}</button>`).join("")}${S.demoMode?"":`<button class="pill" onclick="S.showCustomTok=!S.showCustomTok;render()">+ CUSTOM</button>`}</div>
-          ${(!S.demoMode&&S.showCustomTok)?`<div style="margin-top:12px"><div style="display:flex;gap:8px"><input class="inp" id="custom-tok-addr" style="margin:0;flex:1;min-width:0;font-size:13px" placeholder="0x... TOKEN ADDRESS" aria-label="Custom token address" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomTokenFlow()}"><button class="btn btn-outline btn-sm" onclick="addCustomTokenFlow()">ADD</button></div>${(()=>{const cl=customTokensFor(S.chainId,v.address);return cl.length?`<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">${cl.map(t=>`<span class="ctok-chip">${tokIcon(t.symbol,'sm')} ${esc(t.symbol)} <span class="dim">${t.decimals}d</span><button onclick="removeCustomTokenFlow('${t.address}')" aria-label="Remove ${esc(t.symbol)}" title="Remove ${esc(t.symbol)}">&#10005;</button></span>`).join('')}</div>`:''})()}
+          ${(!S.demoMode&&S.showCustomTok)?`<div style="margin-top:12px"><div style="display:flex;gap:8px"><input class="inp" id="custom-tok-addr" style="margin:0;flex:1;min-width:0;font-size:13px" placeholder="0x... TOKEN ADDRESS" aria-label="Custom token address" value="${esc(S.customTokAddr)}" oninput="S.customTokAddr=this.value" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomTokenFlow()}"><button class="btn btn-outline btn-sm" onclick="addCustomTokenFlow()">ADD</button></div>${(()=>{const cl=customTokensFor(S.chainId,v.address);return cl.length?`<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">${cl.map(t=>`<span class="ctok-chip">${tokIcon(t.symbol,'sm')} ${esc(t.symbol)} <span class="dim">${t.decimals}d</span><button onclick="removeCustomTokenFlow('${t.address}')" aria-label="Remove ${esc(t.symbol)}" title="Remove ${esc(t.symbol)}">&#10005;</button></span>`).join('')}</div>`:''})()}
           <div style="font-size:9px;color:var(--d);letter-spacing:1px;line-height:1.5;margin-top:8px">SAVED TO THIS BROWSER FOR THIS VAULT &mdash; AVAILABLE FOR TOP UPS TOO</div></div>`:''}
         </div>
 
@@ -6269,7 +6295,7 @@ function renderTxBuilder(v,mob){
         ? '<div style="font-size:10px;color:var(--r);margin-bottom:12px;letter-spacing:1px">ENCODE ERROR — CHECK PARAMS</div>' : '';
       rightCol = `${params}${selFn.stateMutability==='payable'?'<div style="font-size:10px;color:var(--g);margin:-8px 0 12px;letter-spacing:1px">PAYABLE</div>':''}${preview}${encodeFail}<button class="btn btn-fill btn-w btn-big" style="margin-top:${mob?8:16}px" onclick="submitCustom()">SIGN + SUBMIT</button>`;
     } else {
-      rightCol = `<label class="lbl" for="cx-data">CALLDATA</label><textarea class="inp" id="cx-data" placeholder="0x..."></textarea><button class="btn btn-fill btn-w btn-big" style="margin-top:${mob?8:16}px" onclick="submitCustom()">SIGN + SUBMIT</button>`;
+      rightCol = `<label class="lbl" for="cx-data">CALLDATA</label><textarea class="inp" id="cx-data" placeholder="0x..." oninput="S.cxData=this.value">${esc(S.cxData)}</textarea><button class="btn btn-fill btn-w btn-big" style="margin-top:${mob?8:16}px" onclick="submitCustom()">SIGN + SUBMIT</button>`;
     }
     body=`<div class="grid2">
       <div>
@@ -6922,6 +6948,9 @@ METHOD      ${(c.fastPath&&ds>0)||c.wns?"createWithCalls()":"create()"}</div><di
 function renderAdmin(v,mob){
   if(!v)return'<div style="padding:80px 0;text-align:center;font-size:24px;font-weight:700">NO VAULT</div>';
   const tab=S.adminTab,tc=S.nt!==v.threshold,ndSec=toSec(S.nd,S.ndUnit),dc=ndSec!==v.delay;
+  // The name field's equivalent of tc and dc, and read the same way by the same
+  // kind of button.
+  const rn=renameState(v);
   const explorerBase = S.demoMode ? (EXPLORERS[v.chain]||EXPLORERS.ETHEREUM) : (CHAINS[S.chainId]?CHAINS[S.chainId].explorer:'https://etherscan.io');
   return`
 ${/* The same dot the dashboard strip carries. Admin was the one place in the app
@@ -6940,8 +6969,8 @@ ${/* The same dot the dashboard strip carries. Admin was the one place in the ap
   ${tab==="POLICY"?`
     <label class="lbl" for="admin-vault-name">VAULT NAME</label>
     <div style="display:flex;gap:8px;max-width:520px">
-      <input class="inp" id="admin-vault-name" maxlength="128" style="margin:0;flex:1" placeholder="${esc(v.name)}" value="${esc(v.name)}" onkeydown="if(event.key==='Enter'){event.preventDefault();renameVault()}">
-      <button class="btn btn-outline btn-sm" style="flex-shrink:0" onclick="renameVault()">SAVE</button>
+      <input class="inp" id="admin-vault-name" maxlength="128" style="margin:0;flex:1" placeholder="${esc(v.name)}" value="${esc(rn.text)}" oninput="onRenameInput(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();renameVault()}">
+      <button class="btn ${rn.dirty?'btn-fill':'btn-disabled'} btn-sm" id="admin-rename-btn" style="flex-shrink:0" onclick="renameVault()">${rn.dirty?'SAVE':'NO CHANGE'}</button>
     </div>
     <div style="font-size:9px;letter-spacing:1.5px;color:var(--d);line-height:1.7;margin-top:8px;max-width:520px">A LABEL THIS INTERFACE STORES &mdash; NOTHING ON CHAIN READS IT.${
       v.revName ? ` ON CHAIN THIS VAULT ANSWERS TO <b style="color:var(--a)">${esc(v.revName)}</b>.`
@@ -6987,7 +7016,7 @@ ${/* Stated for whatever is currently picked, changed or not — the same rule t
         <span class="lbl"><span class="dim">SET &middot;</span> EXECUTOR</span>
         <div style="font-size:12px;font-weight:700;margin:8px 0 4px;word-break:break-all">${S.demoMode?addrLink(v.executor,v.chain):addrLink(v.executor)}${ethers.isAddress(v.executor)?copyBtn(v.executor):""}</div>
         <div style="font-size:10px;color:var(--d);letter-spacing:1px;margin-bottom:14px">${v.executor===TIMELOCK_EXECUTOR?"TIMELOCK EXECUTOR (DEFAULT)":(v.executor===ethers.ZeroAddress||v.executor==="0x0000...0000")?"DISABLED":"CUSTOM EXECUTOR"}</div>
-        <input class="inp" id="admin-executor-input" placeholder="0x... NEW EXECUTOR" aria-label="New executor address" onkeydown="if(event.key==='Enter'){event.preventDefault();doAdminPropose('setExecutor')}">
+        <input class="inp" id="admin-executor-input" placeholder="0x... NEW EXECUTOR" aria-label="New executor address" value="${esc(S.adminExec)}" oninput="S.adminExec=this.value" onkeydown="if(event.key==='Enter'){event.preventDefault();doAdminPropose('setExecutor')}">
         <button class="btn btn-outline btn-w" onclick="doAdminPropose('setExecutor')">PROPOSE EXECUTOR</button>
       </div>
       ${v.delay>0&&v.executor!==ethers.ZeroAddress&&v.executor!=="0x0000...0000"?`<div>
@@ -7036,8 +7065,8 @@ ${/* You cannot propose removing yourself from here, and the row still has to
     </div>`}).join("")}
     <div class="sep"></div>
     <label class="lbl" for="admin-add-owner"><span class="dim">ADD &middot;</span> OWNER</label>
-    <input class="inp" id="admin-add-owner" style="margin-top:8px" placeholder="0x... or a name" onkeydown="if(event.key==='Enter'){event.preventDefault();doAdminPropose('addOwner')}">
-    <input class="inp" id="admin-add-label" maxlength="64" style="font-size:11px;letter-spacing:1px" placeholder="LABEL (OPTIONAL)" aria-label="Label for the new owner (optional)" onkeydown="if(event.key==='Enter'){event.preventDefault();doAdminPropose('addOwner')}">
+    <input class="inp" id="admin-add-owner" style="margin-top:8px" placeholder="0x... or a name" value="${esc(S.adminAddOwner)}" oninput="S.adminAddOwner=this.value" onkeydown="if(event.key==='Enter'){event.preventDefault();doAdminPropose('addOwner')}">
+    <input class="inp" id="admin-add-label" maxlength="64" style="font-size:11px;letter-spacing:1px" placeholder="LABEL (OPTIONAL)" aria-label="Label for the new owner (optional)" value="${esc(S.adminAddLabel)}" oninput="S.adminAddLabel=this.value" onkeydown="if(event.key==='Enter'){event.preventDefault();doAdminPropose('addOwner')}">
     <button class="btn btn-outline btn-w" onclick="doAdminPropose('addOwner')">PROPOSE OWNER</button>
   </div>`:`<div>
     ${(()=>{
@@ -7235,9 +7264,11 @@ function demoExecute(vt, nonce, msg){
 }
 
 function setTxSlow(on){ S.txSlow = !!on; _builderSim = null; render(); }
-function setSlowDelay(sec){ S.txSlowDelaySec = sec; render(); }
+// A preset and the custom field are two ways to say one thing, so picking a
+// preset clears the field rather than leaving it contradicting the pill.
+function setSlowDelay(sec){ S.txSlowDelaySec = sec; S.txSlowCustom = ''; render(); }
 function onSlowCustom(){
-  const n = parseFloat(stripCommas(document.getElementById('slow-custom-n')?.value || ''));
+  const n = parseFloat(stripCommas(S.txSlowCustom || ''));
   const u = document.getElementById('slow-custom-u')?.value || 'd';
   S.txSlowUnit = u;
   if(!(n > 0)) { render(); return; }
@@ -7277,7 +7308,7 @@ function getCxCalldata() {
     if(!d) { flash('INVALID PARAMETERS — CHECK INPUTS'); return null; }
     return d;
   }
-  return (document.getElementById("cx-data")?.value || "0x").trim();
+  return (S.cxData || "0x").trim();
 }
 
 function submitCustom() {
@@ -7780,6 +7811,43 @@ async function demoDeploy() {
 // rendered as "REJECT · NO-OP — A DO-NOTHING SELF-CALL WHOSE ONLY EFFECT IS TO
 // CONSUME THIS NONCE. IT MOVES NOTHING." The demo's whole subject is what these
 // proposals do, and it was the one thing it could not say.
+// What the VAULT NAME field shows, and whether that is the vault's name or an
+// edit of it that has not been saved.
+//
+// The field used to be painted straight from v.name, so every render — a poll
+// tick, a queue reload, a holdings refresh — snapped a half-typed rename back to
+// the old name mid-keystroke. Holding the draft fixes that and raises the
+// question the rest of this screen already answers: with an unsaved edit in the
+// box, the box and the vault disagree about what this thing is called, and
+// nothing said which was which.
+//
+// The answer is the one the THRESHOLD and DELAY editors below give. Their value
+// lives in state too (S.nt, S.nd), and their button reads PROPOSE when it
+// differs from the chain and NO CHANGE when it does not. So: NO CHANGE means the
+// field is the vault's name. SAVE means it is not, yet. There is no third state
+// to be confused by, and an empty field is not an edit — the placeholder shows
+// the real name and the button says NO CHANGE.
+function renameState(v){
+  if(!v) return { text: '', dirty: false };
+  const held = S.rename && S.rename.addr === v.address ? S.rename.text : null;
+  const text = held == null ? (v.name || '') : held;
+  const t = text.trim();
+  return { text, dirty: t !== '' && t !== (v.name || '') };
+}
+// Patched in place rather than rendered, like the top up dialog's send button:
+// a full rebuild per keystroke to restyle one button is not a trade this page
+// makes for any other field.
+function onRenameInput(val){
+  const v = S.vaults[S.sel]; if(!v) return;
+  S.rename = { addr: v.address, text: val };
+  const b = document.getElementById('admin-rename-btn');
+  if(!b) return;
+  const dirty = renameState(v).dirty;
+  b.classList.toggle('btn-fill', dirty);
+  b.classList.toggle('btn-disabled', !dirty);
+  b.textContent = dirty ? 'SAVE' : 'NO CHANGE';
+}
+function clearAdminFields(){ S.adminExec = ''; S.adminAddOwner = ''; S.adminAddLabel = ''; }
 function doAdminPropose(action, val) {
   if (S.demoMode) {
     const v = S.vaults[S.sel];
@@ -7792,7 +7860,7 @@ function doAdminPropose(action, val) {
     if (action === 'setThreshold') { data = msIface.encodeFunctionData('setThreshold', [val]); desc = `setThreshold(${val})`; }
     else if (action === 'setDelay') { data = msIface.encodeFunctionData('setDelay', [val]); desc = `setDelay(${val})`; }
     else if (action === 'setExecutor') {
-      const raw = (document.getElementById('admin-executor-input')?.value || '').trim();
+      const raw = (S.adminExec || '').trim();
       if (!ethers.isAddress(raw)) { flash(raw ? 'ENTER AN EXECUTOR ADDRESS — NAMES DO NOT RESOLVE IN THE DEMO' : 'ENTER AN EXECUTOR ADDRESS'); return; }
       data = msIface.encodeFunctionData('setExecutor', [ethers.getAddress(raw)]);
       desc = `setExecutor(${raw.slice(0,10)}...)`;
@@ -7815,7 +7883,7 @@ function doAdminPropose(action, val) {
       desc = `removeOwner(${o.addr.slice(0,10)}...)`;
     }
     else if (action === 'addOwner') {
-      const raw = (document.getElementById('admin-add-owner')?.value || '').trim();
+      const raw = (S.adminAddOwner || '').trim();
       if (!ethers.isAddress(raw)) { flash(raw ? 'ENTER AN OWNER ADDRESS — NAMES DO NOT RESOLVE IN THE DEMO' : 'ENTER AN ADDRESS'); return; }
       const addr = ethers.getAddress(raw);
       if (addr === ethers.ZeroAddress || addr.toLowerCase() === SENTINEL.toLowerCase()) { flash('INVALID OWNER ADDRESS'); return; }
@@ -7824,7 +7892,7 @@ function doAdminPropose(action, val) {
       desc = `addOwner(${addr.slice(0,10)}...)`;
       // Held until the proposal executes, the way production holds it — a label
       // belongs to an owner the vault has, not to one it has been asked to add.
-      v._pendingLabel = { addr: addr.toLowerCase(), label: (document.getElementById('admin-add-label')?.value || '').trim() };
+      v._pendingLabel = { addr: addr.toLowerCase(), label: (S.adminAddLabel || '').trim() };
     }
     else return;
 
@@ -7832,6 +7900,7 @@ function doAdminPropose(action, val) {
     v.queue.push({ nonce: n, target, callData: data, rawValue: "0", value: "0", token: "",
       dataLabel: selectorToLabel(data), eta: 0, approvals: ap });
     v.nonce = n + 1;
+    clearAdminFields();
     flash(`PROPOSE: ${desc}`);
     S.view = "DASH";
     render();
@@ -9782,8 +9851,7 @@ async function reloadVault(vi) {
 }
 
 async function loadVaultByAddress() {
-  const input = document.getElementById('load-addr');
-  const raw = input?.value?.trim();
+  const raw = (S.loadAddr || '').trim();
   if(!raw) { flash('ENTER AN ADDRESS OR NAME'); return; }
   // Only name-shaped input gets the RESOLVING spinner and the "not found"
   // wording; anything else is a malformed address, and saying so is clearer.
@@ -9802,6 +9870,7 @@ async function loadVaultByAddress() {
   if(existing !== -1) {
     hideLoading();
     S.sel = existing;
+    S.loadAddr = '';
     render();
     return;
   }
@@ -9811,6 +9880,7 @@ async function loadVaultByAddress() {
     if(vData) {
       S.vaults.push(vData);
       S.sel = S.vaults.length - 1;
+      S.loadAddr = '';
       S.nt = vData.threshold;
       setNd(vData.delay);
       hideLoading();
@@ -9833,9 +9903,17 @@ async function loadVaultByAddress() {
 async function renameVault() {
   const v = S.vaults[S.sel];
   if(!v) return;
-  const name = document.getElementById('admin-vault-name')?.value?.trim();
+  const rn = renameState(v);
+  const name = rn.text.trim();
   if(!name) { flash('ENTER A NAME'); return; }
+  // Says so rather than reporting a rename that renamed nothing. The button is
+  // already reading NO CHANGE; this is the same answer for the Enter key, which
+  // does not go through it.
+  if(!rn.dirty) { flash('NO CHANGE'); return; }
   v.name = name;
+  // The draft is the saved name now, and holding it would leave the field
+  // claiming an edit is outstanding when none is.
+  S.rename = null;
   if(!S.demoMode && v.dbId) {
     await dbUpdateWalletName(v.dbId, name);
   }
@@ -12804,7 +12882,7 @@ async function prodAdminPropose(action, val) {
         break;
       }
       case 'setExecutor': {
-        const addr = document.getElementById('admin-executor-input')?.value?.trim();
+        const addr = (S.adminExec || '').trim();
         if(!addr || !ethers.isAddress(addr)) { flash('INVALID ADDRESS'); return; }
         // Audit M-3. cancelQueued is onlySelf, so a cancel has to be routed
         // through execute() — where it is queued for `delay` like anything
@@ -12898,19 +12976,20 @@ async function prodAdminPropose(action, val) {
           const txId = await dbProposeTx(v.dbId, nonce, target, '0', data, txHash, v.threshold, connectedAddress, desc);
           if(txId) await dbAddSig(txId, connectedAddress, sig);
         }
+        clearAdminFields();
         flash(`PROPOSE: ${desc}`);
         await reloadQueue(S.sel);
         return;
       }
       case 'addOwner': {
-        const raw = document.getElementById('admin-add-owner')?.value?.trim();
+        const raw = (S.adminAddOwner || '').trim();
         if(!raw) { flash('ENTER AN ADDRESS'); return; }
         const addr = await resolveName(raw);
         // Contract requires _owner > SENTINEL (address(1)); reject 0x0 / 0x1.
         if(addr === ethers.ZeroAddress || addr.toLowerCase() === SENTINEL.toLowerCase()) { flash('INVALID OWNER ADDRESS'); return; }
         const ownerList = v.loadedOwners || v.owners.map(o => o.addr);
         if(ownerList.some(o => o.toLowerCase() === addr.toLowerCase())) { flash('ALREADY AN OWNER'); return; }
-        const addLabel = document.getElementById('admin-add-label')?.value?.trim() || '';
+        const addLabel = (S.adminAddLabel || '').trim();
         data = msIface.encodeFunctionData('addOwner', [addr]);
         desc = `addOwner(${addr.slice(0,10)}...)`;
         // Store label so it can be applied after execution
@@ -12954,6 +13033,7 @@ async function prodAdminPropose(action, val) {
       if(txId) await dbAddSig(txId, connectedAddress, sig);
     }
 
+    clearAdminFields();
     flash(`PROPOSE: ${desc}`);
     await reloadQueue(S.sel);
   } catch(e) {
@@ -13410,8 +13490,16 @@ function pollTick() {
     const eta = +el.dataset.tlEta, delay = +el.dataset.tlDelay;
     if (delay > 0) el.style.width = Math.round(Math.min(1, Math.max(0, (NOW() - (eta - delay)) / delay)) * 100) + "%";
   });
+  // An overlay is not inside .content — the dialogs are appended after it, so
+  // this guard could not see a field in one, and a timelock maturing anywhere in
+  // the queue rebuilt the page out from under somebody mid-type. The top up
+  // dialog and the Safe clone one now hold their fields in state and would
+  // survive that, but the custom-token address in the top up dialog does not,
+  // and a field being wiped by a two-second timer is not a thing to leave to
+  // whether each dialog happens to remember.
   const hasFocused = document.querySelector(
-    '.txb input:focus, .txb textarea:focus, .content input:focus, .content textarea:focus, .content select:focus'
+    '.txb input:focus, .txb textarea:focus, .content input:focus, .content textarea:focus, .content select:focus,' +
+    '.ovl-card input:focus, .ovl-card textarea:focus, .ovl-card select:focus'
   );
   if (anyReady && !hasFocused) render();
 }
