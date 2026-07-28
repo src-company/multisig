@@ -1420,7 +1420,16 @@ function fastPathVoidsTimelock(v) {
 // onlySelf, so a cancel raised as an ordinary proposal is itself queued for the
 // full delay and matures no earlier than what it means to stop. Saying so is
 // the honest answer; offering a button is not.
-function canForwardCancel(v) {
+function canForwardCancel(v) { return hasForwarder(v); }
+// Does this vault have an executor that forward() can actually be sent to?
+//
+// The same question for all three routes that run through one — cancel,
+// instant execute, accelerate — and the same hazard behind each: a contract
+// call to an address with no code does not revert. It is an ordinary
+// transaction to an empty account, so it mines with status 1 and the route
+// reports success having done nothing. Named apart from the cancel wording
+// because two of the three callers are not cancelling.
+function hasForwarder(v) {
   if(S.demoMode) return true;
   if(!v || !v.isTimelockExecutor) return false;
   const ex = v.executor;
@@ -3714,15 +3723,26 @@ const IMPL_SLOTS = [
   '0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3', // OZ legacy
 ];
 
+// Bounded, like every other foreign read in this file. This is a third-party
+// host on the far side of a CSP allowance, and a bare fetch() has no deadline of
+// its own: a connection that opens and then stops has nothing to interrupt it,
+// so the CUSTOM tab sat at LOADING ABI… for the life of the page — S.cxLoading
+// is only ever cleared by this call returning. Two attempts, so the budget is
+// per attempt rather than per lookup, and a slow full_match still leaves the
+// partial_match one a chance.
+const SOURCIFY_TIMEOUT_MS = 8000;
 async function sourcifyAbi(chainId, addr) {
   for(const match of ['full_match', 'partial_match']) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), SOURCIFY_TIMEOUT_MS);
     try {
-      const res = await fetch(`${SOURCIFY_REPO}/${match}/${chainId}/${addr}/metadata.json`);
+      const res = await fetch(`${SOURCIFY_REPO}/${match}/${chainId}/${addr}/metadata.json`, { signal: ctl.signal });
       if(res.ok) {
         const json = await res.json();
         return (json.output && json.output.abi) || [];
       }
     } catch(_) {}
+    finally { clearTimeout(timer); }
   }
   return null;
 }
@@ -4223,8 +4243,30 @@ let _renderScheduled = false;
 function render(){
   if(_renderScheduled) return;
   _renderScheduled = true;
-  requestAnimationFrame(() => { _renderScheduled = false; renderNow(); });
+  requestAnimationFrame(() => {
+    _renderScheduled = false;
+    // A throw inside renderNow() never reaches the assignment at the end of it,
+    // so #app keeps whatever it held — an empty div on a first paint — and every
+    // later render throws in the same place. The page is then blank, permanently,
+    // with the failure reported nowhere a person is looking: an uncaught error in
+    // an animation-frame callback is a console line and nothing else. That is how
+    // one undefined identifier in one branch of one card took the whole interface
+    // down (`ct.connectedAddress`, in the sign branch of the queue).
+    //
+    // Nothing is swallowed. The error is logged in full and said out loud once,
+    // because the honest report to somebody looking at a vault is that this
+    // interface stopped drawing — not silence.
+    try { renderNow(); }
+    catch(e) {
+      console.error('render:', e);
+      if(!_renderFailed) {
+        _renderFailed = true;
+        try { flash('THIS INTERFACE HIT AN ERROR WHILE DRAWING AND MAY BE SHOWING STALE STATE — RELOAD THE PAGE. YOUR VAULT AND ITS QUEUE ARE ON CHAIN AND ARE UNAFFECTED.', 12000); } catch(_) {}
+      }
+    }
+  });
 }
+let _renderFailed = false;
 function renderNow(){
   const v = S.vaults[S.sel] || null;
   const mob = _vw <= 640;
@@ -4896,7 +4938,9 @@ ${/* Topping up is the one action here that needs no signature, no quorum and no
       // attempt, but only after a wallet prompt the operator had no reason to
       // expect to fail. Only a confirmed contract flips this; while the chain
       // has not answered, and for an EOA or a 7702 delegation, signing leads.
-      const mustApprove = cannotSign(ct.connectedAddress, S.chainId);
+      // `you` is this card's signer — the connected account, or DEMO_YOU in the
+      // demo, where there is no chain to ask and nothing to ask it about.
+      const mustApprove = !S.demoMode && cannotSign(you, S.chainId);
       const apLabel = mustApprove ? 'APPROVE ON-CHAIN' : 'APPROVE ON-CHAIN INSTEAD';
       const apWhy = mustApprove
         ? 'This wallet is a contract account. It has no key to sign with, so it authorises by registering approval in the vault itself. Costs gas and is publicly visible.'
@@ -5611,12 +5655,18 @@ async function openTopUp(){
   if(S.demoMode){ flash('CONNECT A WALLET TO TOP UP'); return; }
   if(!window._connectedAddress || !window._signer){ flash('CONNECT WALLET FIRST'); return; }
   if(!v.address || !ethers.isAddress(v.address)){ flash('NO VAULT ADDRESS'); return; }
-  S.topup = { sym:'ETH', bals:null, loading:true, sending:false, err:null, showCustom:false, txHash:null };
+  // The dialog instance this read belongs to, not merely "a dialog is open".
+  // Closing and reopening — or reopening against a different vault, or after a
+  // chain switch — makes a new one, and the previous read was landing its
+  // balances in whichever dialog happened to be up when it finished. That is a
+  // MAX button offering another chain's balance of a token this one does not
+  // hold, on the one screen whose whole job is to say how much you can send.
+  const t = S.topup = { sym:'ETH', bals:null, loading:true, sending:false, err:null, showCustom:false, txHash:null };
   render();
   try {
     const bals = await fetchTopUpBalances(window._connectedAddress, vaultTokens(v));
-    if(S.topup){ S.topup.bals = bals; S.topup.loading = false; render(); }
-  } catch(_){ if(S.topup){ S.topup.loading = false; render(); } }
+    if(S.topup === t){ t.bals = bals; t.loading = false; render(); }
+  } catch(_){ if(S.topup === t){ t.loading = false; render(); } }
 }
 function closeTopUp(){ S.topup = null; render(); }
 function selectTopUpToken(sym){ if(S.topup){ S.topup.sym = sym; S.topup.showCustom = false; S.topup.err = null; render(); } }
@@ -5631,12 +5681,17 @@ function fillTopUpMax(amountStr, dec, avail, unit){
   el.value = amountStr; onTopUpAmount(amountStr, dec, avail, unit); el.focus();
 }
 async function addTopUpCustom(){
-  const v = S.vaults[S.sel]; if(!v || !S.topup) return;
+  const v = S.vaults[S.sel];
+  // Same instance check as openTopUp, and for the same reason: two awaits sit
+  // between the click and the write, and the dialog can be closed, reopened, or
+  // reopened against another vault across either of them.
+  const t0 = S.topup;
+  if(!v || !t0) return;
   const parsed = parseTokenAddr(document.getElementById('topup-custom-addr')?.value);
   if(parsed.err){ flash(parsed.err); return; }
   const addr = parsed.addr;
   const existing = vaultTokens(v).find(t => t.address && t.address.toLowerCase() === addr.toLowerCase());
-  if(existing){ S.topup.sym = existing.symbol; S.topup.showCustom = false; render(); return; }
+  if(existing){ t0.sym = existing.symbol; t0.showCustom = false; render(); return; }
   flash('FETCHING TOKEN…');
   try {
     const meta = await fetchTokenMeta(addr);
@@ -5645,9 +5700,11 @@ async function addTopUpCustom(){
     // is the same token you will later want to send out, and both pickers read
     // this one list.
     const saved = saveCustomToken(S.chainId, v.address, meta);
-    if(S.topup){
-      S.topup.sym = meta.symbol; S.topup.showCustom = false;
-      try { S.topup.bals = await fetchTopUpBalances(window._connectedAddress, vaultTokens(v)); } catch(_){}
+    if(S.topup === t0){
+      t0.sym = meta.symbol; t0.showCustom = false;
+      let bals = null;
+      try { bals = await fetchTopUpBalances(window._connectedAddress, vaultTokens(v)); } catch(_){}
+      if(S.topup === t0 && bals) t0.bals = bals;
       render();
     }
     flash(saved ? `ADDED ${meta.symbol} · ${meta.decimals} DEC · SAVED` : `ADDED ${meta.symbol} · COULD NOT SAVE LOCALLY`);
@@ -6552,7 +6609,7 @@ ${/* Two spellings of one fact, because the line has two jobs. Beside a column i
         <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;min-width:0">${signerIdentHtml(o,v.chain)}${o.you?'<span class="signer-you">YOU</span>':""}</div>
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-shrink:0${mob?";width:100%":""}">
-          <input class="inp owner-lbl-in" maxlength="64" style="margin:0;${mob?"flex:1":"width:120px"};font-size:11px;letter-spacing:1px;border-bottom-color:var(--ln)" placeholder="LABEL" aria-label="Label for ${esc(shortAddr(o.addr))}" value="${isYouLbl?"":esc(o.label||'')}" onchange="updateOwnerLabel(${S.sel},${oi},this.value)">
+          <input class="inp owner-lbl-in" maxlength="64" style="margin:0;${mob?"flex:1":"width:120px"};font-size:11px;letter-spacing:1px;border-bottom-color:var(--ln)" placeholder="LABEL" aria-label="Label for ${esc(shortAddr(o.addr))}" value="${isYouLbl?"":esc(o.label||'')}" onchange="updateOwnerLabel(${S.sel},'${jstr(o.addr)}',this.value)">
 ${/* You cannot propose removing yourself from here, and the row still has to
              reserve the slot: without it the one label field that has no REMOVE
              beside it stretches to the row's edge and the whole column reads as
@@ -6561,7 +6618,7 @@ ${/* You cannot propose removing yourself from here, and the row still has to
              the real button at every breakpoint, and hidden from assistive tech,
              which should hear an owner with no remove action rather than a
              mysterious second "REMOVE". */''}
-          ${!o.you?`<button class="btn btn-danger btn-sm" onclick="doAdminPropose('removeOwner',${oi})">REMOVE</button>`:`<span class="btn btn-sm" style="visibility:hidden" aria-hidden="true">REMOVE</span>`}
+          ${!o.you?`<button class="btn btn-danger btn-sm" onclick="doAdminPropose('removeOwner','${jstr(o.addr)}')">REMOVE</button>`:`<span class="btn btn-sm" style="visibility:hidden" aria-hidden="true">REMOVE</span>`}
         </div>
     </div>`}).join("")}
     <div class="sep"></div>
@@ -7333,12 +7390,14 @@ function doAdminPropose(action, val) {
       desc = `enableForward(${!v.fastPath})`;
     }
     else if (action === 'removeOwner') {
-      const o = v.owners[val];
-      if (!o) { flash('INVALID OWNER'); return; }
+      // `val` is the owner's address — see the note on the production branch.
+      const oi = v.owners.findIndex(x => x.addr && x.addr.toLowerCase() === String(val).toLowerCase());
+      const o = v.owners[oi];
+      if (!o) { flash('THAT OWNER IS NO LONGER ON THIS VAULT'); return; }
       if (v.ownerCount <= v.threshold) { flash('LOWER THRESHOLD FIRST'); return; }
       // prevOwner is the linked-list predecessor, as on chain: the sentinel for
       // the head of the list, otherwise the owner listed before this one.
-      const prev = val === 0 ? SENTINEL : v.owners[val - 1].addr;
+      const prev = oi === 0 ? SENTINEL : v.owners[oi - 1].addr;
       data = msIface.encodeFunctionData('removeOwner', [prev, o.addr]);
       desc = `removeOwner(${o.addr.slice(0,10)}...)`;
     }
@@ -9160,7 +9219,12 @@ async function loadVaultHistory(vi) {
       const act = selectorToLabel(t.call_data);
       const hv = weiStr(t.value);
       const ethVal = (hv !== null && hv !== '0') ? ethers.formatEther(BigInt(hv)) : null;
-      const desc = t.description || (ethVal ? `${groupInt(ethVal)} ETH → ${t.target.slice(0,8)}...` : act);
+      // `target` is read defensively for the same reason `value` is above: this
+      // map runs over rows the anon role writes, and one unusable field threw
+      // out of the map and cost the vault its entire history rather than one
+      // row's recipient.
+      const to = typeof t.target === 'string' ? t.target.slice(0,8) + '...' : 'AN ADDRESS';
+      const desc = t.description || (ethVal ? `${groupInt(ethVal)} ETH → ${to}` : act);
       const split = splitAmountDesc(desc);
       const ts = t.executed_at || t.cancelled_at;
       const age = ts ? fmtAge(new Date(ts)) : '';
@@ -9345,12 +9409,27 @@ async function renameVault() {
   render();
 }
 
-async function updateOwnerLabel(vi, oi, label) {
+// Addressed by the owner, not by their position in the list.
+//
+// A position is only meaningful against the list that was on screen when the row
+// was drawn, and reloadVault reassigns v.owners at the top and renders at the
+// bottom — with an executor read, a balance load, a queue load, a history load
+// and a SLOW enumeration in between. For those seconds the DOM holds rows whose
+// indexes describe the previous owner set, and this fires on blur, which is
+// exactly when somebody typing a label lets go of the field. Straight after an
+// addOwner or removeOwner executed — the one moment the list actually shifts —
+// index 2 was a different person by the time the label got there, and the label
+// is the name a co-signer reads beside an address.
+async function updateOwnerLabel(vi, addr, label) {
   const v = S.vaults[vi];
-  if(!v || !v.owners[oi]) return;
-  v.owners[oi].label = label;
+  if(!v || !addr) return;
+  const o = v.owners.find(x => x.addr && x.addr.toLowerCase() === String(addr).toLowerCase());
+  // The owner this label was typed against is no longer one. Saying so beats
+  // filing it against whoever now stands where they did.
+  if(!o) { flash('THAT OWNER IS NO LONGER ON THIS VAULT — LABEL NOT SAVED'); render(); return; }
+  o.label = label;
   if(!S.demoMode && v.dbId) {
-    await dbUpdateOwnerLabel(v.dbId, v.owners[oi].addr, label);
+    await dbUpdateOwnerLabel(v.dbId, o.addr, label);
   }
 }
 
@@ -10763,6 +10842,17 @@ async function prodUnsign(vi, nonce) {
   // Check if this was an on-chain approval — if so, revoke it on-chain
   const mySig = tx.signatures?.find(s => s.signer.toLowerCase() === connectedAddress.toLowerCase());
   const wasOnchainApproval = mySig && (mySig.sigType === 'approval' || mySig.sigType === 'sender');
+  // An on-chain approval can only be withdrawn on chain. Without a signer this
+  // used to fall straight past the revoke, delete the row, and then report
+  // "REVOKED (ON-CHAIN)" — a claim about the vault's own storage that nothing
+  // had touched. The approval stayed live and usable by anyone packing a sender
+  // slot for this owner, and the one interface that could have said so said the
+  // opposite. Refuse instead: the local row is the record of the on-chain fact,
+  // and removing it while the fact stands is what makes the two disagree.
+  if(wasOnchainApproval && !signer) {
+    flash('THIS IS AN ON-CHAIN APPROVAL — CONNECT YOUR WALLET TO REVOKE IT. REMOVING IT HERE WOULD NOT UNDO IT ON CHAIN.', 6000);
+    return;
+  }
   if(wasOnchainApproval && signer) {
     // This branch sends a transaction, so it needs the same chain check every
     // other sending path gets from requireSigner — a revoke aimed at whatever
@@ -10876,6 +10966,26 @@ function verifySigs(sigs, domain, types, msg, owners) {
   try { digest = ethers.TypedDataEncoder.hash(domain, types, msg); }
   catch(e) { console.warn('Proposal cannot be hashed, so no signature on it can be verified:', e.message); }
   for(const s of sigs) {
+    // Shape first, and outside the per-signature try below, which is where this
+    // used to be missing: `signer` arrives from a row the anon role writes, and
+    // one that is not a string threw here rather than in the try — out of
+    // verifySigs, out of loadVaultQueue, and out of the queue for every OTHER
+    // proposal on the vault along with it. A row that cannot name a signer is a
+    // row no signature can be attributed to; skip it and judge the rest.
+    // Deliberately only a type check, not ethers.isAddress. `signer` arrives
+    // from a row the anon role writes, and rejecting one for its capitalisation
+    // would drop a real signature: an address's checksum is not part of its
+    // value, and a co-signer using another client may well have stored a
+    // lowercased or mis-cased one — the same reasoning senderSlot() spells out.
+    // Anything that is not an address still fails the recovery comparison below
+    // and is dropped there, which is where it should be decided. What must not
+    // happen is a throw: this sits OUTSIDE the per-signature try, so a row whose
+    // signer is not a string took verifySigs, loadVaultQueue, and the whole
+    // vault's queue down with it rather than costing one row its signature.
+    if(!s || typeof s.signer !== 'string') {
+      console.warn('Ignoring a signature row whose signer is not a string:', s && s.signer);
+      continue;
+    }
     const key = s.signer.toLowerCase();
     if(seen.has(key)) continue;
     // Sender/approval sigs (on-chain approvals) — trust them, contract validates
@@ -11099,6 +11209,16 @@ async function prodFastExecute(vi, nonce) {
   const v = S.vaults[vi];
   const tx = v.queue.find(t => t.nonce === nonce);
   if(!tx) return;
+  // The same refusal prodCancel makes, for the same reason. This route sends
+  // forward() to v.executor, and a call to an address holding no code mines
+  // successfully and does nothing — so without one the transaction would be
+  // paid for, reported as sent, and the proposal would still be sitting in the
+  // queue. The button is gated on v.fastPath, which cannot be true without a
+  // TimelockExecutor, but a stale render and a deep link both reach past it.
+  if(!hasForwarder(v)) {
+    flash('NO TIMELOCK EXECUTOR ON THIS VAULT — THERE IS NO INSTANT ROUTE. SUBMIT IT AND LET THE TIMELOCK RUN.');
+    return;
+  }
 
   try {
     const { sigs } = collectSigs(tx, v, connectedAddress);
@@ -11826,6 +11946,16 @@ async function prodAccelerate(vi, nonce) {
   const v = S.vaults[vi];
   const tx = v.queue.find(t => t.nonce === nonce);
   if(!tx) return;
+  // Refused before the first signature rather than after the last one. This
+  // route ends in forward() on v.executor, so with no executor it can never
+  // land — and the shape of that failure is the expensive one: every owner is
+  // asked to sign, unanimously, for a bundle that has nowhere to go, and the
+  // transaction that finally carries it mines successfully against an empty
+  // account and accelerates nothing.
+  if(!hasForwarder(v)) {
+    flash('NO TIMELOCK EXECUTOR ON THIS VAULT — A QUEUED PROPOSAL CANNOT BE ACCELERATED. IT HAS TO WAIT OUT ITS TIMELOCK.');
+    return;
+  }
 
   const target = tx.target;
   const value = tx.rawValue ? BigInt(tx.rawValue) : ethers.parseEther(tx.value || '0');
@@ -12354,9 +12484,16 @@ async function prodAdminPropose(action, val) {
         break;
       }
       case 'removeOwner': {
-        const idx = val;
-        const ownerAddr = v.owners[idx]?.addr;
-        if(!ownerAddr) { flash('INVALID OWNER'); return; }
+        // `val` is the owner's address, not their row number. A row number only
+        // means something against the owner list that was on screen when the row
+        // was drawn, and reloadVault reassigns v.owners at the top and renders at
+        // the bottom — with five loads in between. In those seconds the REMOVE
+        // buttons on screen describe the previous owner set, and the one moment
+        // that set actually shifts is the moment an addOwner or removeOwner
+        // executes. Index 2 was a different person by the time the click landed,
+        // and what this builds is a proposal to remove them.
+        const ownerAddr = (v.owners.find(o => o.addr && o.addr.toLowerCase() === String(val).toLowerCase()) || {}).addr;
+        if(!ownerAddr) { flash('THAT OWNER IS NO LONGER ON THIS VAULT — NOTHING PROPOSED'); return; }
         if(v.ownerCount <= v.threshold) { flash('LOWER THRESHOLD FIRST'); return; }
         // prevOwner is the linked-list predecessor from getOwners() order; the
         // contract requires _owners[prevOwner] == ownerAddr, so it must be exact.
@@ -12561,13 +12698,15 @@ async function _onWalletConnect() {
       // Consumed once. A later account switch comes back through here, and by
       // then the link is history, not a standing instruction.
       const claimed = _deepLinkChain; _deepLinkChain = null;
-      if(!claimed && walletChain !== S.chainId && CHAINS[walletChain]) {
-        S.chainId = walletChain;
-        lsSet('ms_chain', String(S.chainId));
-        provider = makeProvider(S.chainId);
-        S.latestBlock = 0;
-        fetchBlock();
-      }
+      // Through adoptChain, not by hand. This is the one place a chain change
+      // was open-coded, and it was missing the two things adoptChain exists to
+      // keep in step: the block tick's interval and the wallet provider's
+      // polling interval, both of which are properties of the chain. Connecting
+      // a wallet sitting on MegaETH from a page opened on Ethereum therefore
+      // left a 12-second cadence on a one-second chain — the counter advanced in
+      // jumps of twelve and a mined receipt was reported up to twelve seconds
+      // after it existed, which is the exact bug chainPollMs was written for.
+      if(!claimed && walletChain !== S.chainId && CHAINS[walletChain]) adoptChain(walletChain);
       S.walletChain = walletChain;
     } catch(_) {}
   }

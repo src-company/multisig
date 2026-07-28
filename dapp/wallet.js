@@ -461,8 +461,22 @@ async function connectWithWallet(walletKey) {
         window.location.reload();
       }
     };
-    walletProvider.on('accountsChanged', _walletEventHandlers.accountsChanged);
-    walletProvider.on('chainChanged', _walletEventHandlers.chainChanged);
+    // Not allowed to abort the connection. By this line the signer, the address
+    // and the provider are all installed, so a throw here — a provider with no
+    // `.on`, which EIP-1193 requires and not every injected object honours —
+    // landed in the catch below having connected the wallet and told nobody: the
+    // saved choice was never written, the app's onConnect never ran, so the
+    // header said connected and the vault list stayed empty, with no error on
+    // screen and no way back but a reload. Losing the events is a real cost (a
+    // chain or account change goes unnoticed until something asks) and it is the
+    // smaller one, so it is reported and carried.
+    try {
+      walletProvider.on('accountsChanged', _walletEventHandlers.accountsChanged);
+      walletProvider.on('chainChanged', _walletEventHandlers.chainChanged);
+    } catch (e) {
+      console.error('wallet events not registered — chain and account changes will go unnoticed:', e);
+      _walletEventHandlers = null;
+    }
 
     _lsSet('ms_wallet', walletKey);
     if (walletKey.startsWith('eip6963_')) {
