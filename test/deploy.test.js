@@ -50,6 +50,12 @@ const NEEDED = [
   'syncCreateNet', 'toggleClone', 'deployGasEstimate',
   'buildInitcode', 'expectedCloneCode', 'classifyVaultCode', 'mineVanitySalt',
   '_sameAddr', '_findResume', '_resumeValid', '_resumeLeft',
+  // Lifted rather than stubbed. The overlay's address line is the only place the
+  // vault address can be taken off the screen before anything is signed, and a
+  // stub would assert that renderDeployOverlay calls *something* there — the
+  // point is that what it calls escapes the address into an onclick, which is
+  // the real copyBtn/jstr pair or it is nothing.
+  'jstr', 'copyBtn',
   'renderDeployOverlay',
 ];
 
