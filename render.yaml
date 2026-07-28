@@ -78,7 +78,19 @@ services:
     # installing it, and a deploy that can fail on an npm registry hiccup is a
     # deploy that can fail for reasons that have nothing to do with this project.
     staticPublishPath: ./dist
-    buildCommand: "node build.js"
+    # The tests run before the build, and a failing one fails the deploy.
+    #
+    # A push to main deploys. That is the whole release process, and it means the
+    # only thing standing between a bad commit and every owner's signing screen
+    # is whether somebody remembered to run `node --test` first. They are two
+    # seconds and need no package tree — the same reason the build itself is one
+    # Node script — so there is no cost to making them mandatory and a
+    # considerable one to leaving them optional.
+    #
+    # `&&`, not `;`: a non-zero exit from the tests must stop the build, and a
+    # build that does not run leaves the previous dist/ serving. The last good
+    # deploy stays up rather than being replaced by a broken one.
+    buildCommand: "node --test && node build.js"
     headers:
       # frame-ancestors is the one CSP directive a <meta> tag cannot carry —
       # browsers ignore it there — so the pages' own policies cannot express it
