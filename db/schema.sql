@@ -24,6 +24,24 @@ CREATE TABLE IF NOT EXISTS wallets (
 -- Add columns if migrating from older schema
 ALTER TABLE wallets ADD COLUMN IF NOT EXISTS name text;
 
+-- One vault is one row, however the address is cased.
+--
+-- The UNIQUE above is on the address as a *string*, and an Ethereum address has
+-- no canonical case — EIP-55 checksums are a mixed-case spelling of the same
+-- twenty bytes, and clients disagree about whether to store the checksummed or
+-- the lowercased form. So the constraint let the same vault be registered twice,
+-- once per spelling, each row with its own id, its own queue and its own
+-- signatures. Two owners of one vault could then be coordinating in different
+-- places, each seeing a queue the other did not.
+--
+-- Everything that looks a vault up already compares case-insensitively
+-- (dbFindWallet's ilike, register_wallet's lower(), is_wallet_owner) precisely
+-- because this constraint could not be relied on. This makes the storage agree
+-- with the lookups, and the case-sensitive constraint is dropped rather than
+-- left alongside: keeping both would enforce the weaker one for no benefit.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_wallets_chain_addr_ci ON wallets (chain_id, lower(address));
+ALTER TABLE wallets DROP CONSTRAINT IF EXISTS wallets_chain_id_address_key;
+
 CREATE INDEX IF NOT EXISTS idx_wallets_chain ON wallets (chain_id);
 
 CREATE TABLE IF NOT EXISTS owners (
@@ -101,6 +119,15 @@ CREATE TABLE IF NOT EXISTS transactions (
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS queue_tx text;
 -- Migration for databases created before the constraint was dropped.
 ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_wallet_id_nonce_key;
+
+-- A digest identifies a proposal WITHIN its vault and nonce, not globally.
+-- See propose_tx for why the global version was a denial of service: it let one
+-- anonymous request take a (chain_id, tx_hash) pair and make a specific
+-- proposal — a cancel companion, say — permanently unrecordable by its real
+-- owners. Created before the old constraint is dropped so the table is never
+-- momentarily unprotected.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tx_identity ON transactions (chain_id, wallet_id, nonce, tx_hash);
+ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_chain_id_tx_hash_key;
 
 CREATE INDEX IF NOT EXISTS idx_tx_wallet_status ON transactions (wallet_id, status);
 -- Was served by the dropped UNIQUE; the queue and the prune both filter on it.
@@ -552,7 +579,12 @@ BEGIN
 
   INSERT INTO wallets (chain_id, address, deployer, salt, name, threshold, owner_count, delay, executor, nonce, created_block, created_tx)
   VALUES (p_chain_id, p_address, p_deployer, p_salt, p_name, p_threshold, array_length(p_owners, 1), p_delay, p_executor, p_nonce, p_block, p_tx)
-  ON CONFLICT (chain_id, address) DO UPDATE SET
+  -- Inferred from idx_wallets_chain_addr_ci, matching the case-insensitive
+  -- lookup a dozen lines above. Targeting (chain_id, address) instead would
+  -- miss whenever the caller's spelling differed from the stored one — the
+  -- SELECT would find the row, the upsert would not, and the INSERT would hit
+  -- the case-insensitive index as a raw unique violation rather than an update.
+  ON CONFLICT (chain_id, lower(address)) DO UPDATE SET
     threshold = EXCLUDED.threshold, delay = EXCLUDED.delay, executor = EXCLUDED.executor,
     owner_count = EXCLUDED.owner_count, nonce = GREATEST(wallets.nonce, EXCLUDED.nonce),
     name = COALESCE(EXCLUDED.name, wallets.name)
@@ -602,19 +634,41 @@ BEGIN
 
   INSERT INTO transactions (wallet_id, chain_id, nonce, target, value, call_data, tx_hash, threshold, proposed_by, description)
   VALUES (p_wallet_id, p_chain_id, p_nonce, p_target, p_value, p_call_data, p_tx_hash, p_threshold, p_proposed_by, p_description)
-  ON CONFLICT (chain_id, tx_hash) DO NOTHING
+  ON CONFLICT (chain_id, wallet_id, nonce, tx_hash) DO NOTHING
   RETURNING id INTO t_id;
 
-  -- The only conflict left is the digest, which is the proposal's identity — so
-  -- the existing row IS this proposal and the caller may sign it. Targeted at
-  -- that constraint rather than left bare: a bare ON CONFLICT would swallow any
-  -- future constraint too, and hand back whatever the fallback happened to find.
+  -- The only conflict left is the digest under this vault and nonce, which IS
+  -- this proposal's identity — so the existing row is this proposal and the
+  -- caller may sign it. Targeted at that constraint rather than left bare: a
+  -- bare ON CONFLICT would swallow any future constraint too, and hand back
+  -- whatever the fallback happened to find.
+  --
+  -- The conflict target is (chain_id, wallet_id, nonce, tx_hash) and not
+  -- (chain_id, tx_hash), because the narrow version was globally exclusive
+  -- across every vault on a chain and this function is anon-callable. Owner
+  -- addresses are readable by anon, so anyone could name a real owner of any
+  -- registered vault, POST a row carrying the digest of a proposal somebody
+  -- else was about to raise, and take that (chain_id, tx_hash) pair. The
+  -- victim's propose_tx then conflicted, failed the wallet+nonce re-match
+  -- below, and raised — permanently, because the digest is deterministic. Their
+  -- proposal could never be coordinated through this database at all.
+  --
+  -- Worth spelling out what that was worth attacking: a cancel companion's
+  -- digest is entirely predictable (the vault as target, zero value,
+  -- cancelQueued(hash) as calldata, the live nonce), so whoever queued a
+  -- dangerous proposal could pre-squat the digest of the brake meant to stop
+  -- it. The on-chain approve() path was unaffected, but the in-app cancel was
+  -- dead before anyone reached for it.
+  --
+  -- Nothing is lost by narrowing. An EIP-712 digest already commits to the
+  -- verifying contract and the nonce, so one digest cannot legitimately belong
+  -- to two vaults or two nonces; and the client never reads tx_hash anyway — it
+  -- re-derives every digest from the row's own fields (see proposalDigest), so
+  -- a row lying about its hash was already inert.
   IF t_id IS NULL THEN
-    -- Matched on the wallet and nonce as well as the hash. A digest commits to
-    -- the verifying contract and the nonce, so a row that carries this hash
-    -- under a different wallet or nonce was not produced by hashing this
-    -- proposal — it was squatted, and attaching signatures to it would file
-    -- them against a row the queue will never read.
+    -- Kept as the belt to the constraint's braces. With the wider constraint
+    -- this can only find the row the conflict just hit, but the lookup states
+    -- the invariant the RAISE below depends on rather than assuming it.
     SELECT id INTO t_id FROM transactions
     WHERE chain_id = p_chain_id AND tx_hash = p_tx_hash
       AND wallet_id = p_wallet_id AND nonce = p_nonce
@@ -1007,9 +1061,120 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- drops. roles.sql remains the file that CREATES the roles and grants
 -- everything else; this only puts back what this file just took away, and only
 -- if the role is already there.
+-- The same hazard, one section further down the file and worse, because it is
+-- silent in the other direction: the three views above are DROPPED and recreated
+-- on every run (see the note at the VIEWS heading — CREATE OR REPLACE VIEW
+-- cannot reorder a column list, so replacing them is not an option). DROP VIEW
+-- takes their grants with it exactly as DROP FUNCTION does.
+--
+-- So re-applying this file alone revoked anon's SELECT on my_wallets, tx_summary
+-- and tx_history — which is every read the dashboard makes. dbMyWallets returns
+-- null and the vault list empties; dbGetPending and dbGetRecentTerminal fail and
+-- the queue empties. An operator following the drift banner ("re-apply
+-- db/schema.sql") to fix one problem would have created a worse one, and the
+-- only way back was to notice that roles.sql had to be run again too.
+--
+-- Found by running this file against a database that already had roles.sql
+-- applied and then reading the views as anon, which is what the deployment
+-- actually does and what no earlier check here did.
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
     EXECUTE 'GRANT EXECUTE ON FUNCTION mark_executed(uuid, bigint, text, text) TO anon';
     EXECUTE 'GRANT EXECUTE ON FUNCTION mark_queued(uuid, bigint, bigint, text, text) TO anon';
+    EXECUTE 'GRANT SELECT ON my_wallets, tx_summary, tx_history TO anon';
   END IF;
 END $$;
+
+-- ── THE INTERNAL HELPERS ARE NOT AN API ──────────────────────────
+-- A newly created function is EXECUTE-able by PUBLIC. That is PostgreSQL's
+-- default and it is the opposite of what every one of these wants.
+--
+-- roles.sql intends to cover this twice — `REVOKE EXECUTE ON ALL FUNCTIONS IN
+-- SCHEMA public FROM PUBLIC` for what exists, and `ALTER DEFAULT PRIVILEGES ...
+-- REVOKE ALL ON FUNCTIONS FROM PUBLIC` for what comes later. Neither reaches a
+-- function this file creates AFTER roles.sql last ran, which is the normal order
+-- of events: roles.sql is a one-time setup step and schema.sql is re-applied
+-- whenever the client says the database has drifted. Checked rather than
+-- assumed — pg_default_acl came back empty on a database where roles.sql had
+-- run, so the second line records nothing and the protection was never there.
+--
+-- The result was reachable, not theoretical: with schema.sql applied over a
+-- roles.sql database, `SET ROLE anon; SELECT rate_gate('...', 1, '1 hour')`
+-- succeeded. rate_gate takes the bucket name as an argument, so anyone could
+-- name another vault's bucket and spend its budget — turning the limiter into
+-- the denial of service it exists to prevent, which is precisely what roles.sql
+-- warns about two lines above its own grant list.
+--
+-- Revoked from PUBLIC rather than from anon: anon holds no explicit grant on
+-- any of these, so removing the default is all that is needed, and it leaves
+-- every deliberate grant elsewhere untouched.
+DO $$
+DECLARE f record;
+BEGIN
+  FOR f IN
+    SELECT p.oid::regprocedure AS sig
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public'
+      AND p.proname IN ('is_wallet_owner','is_wallet_writer','rate_gate','rate_sweep','client_ip')
+  LOOP
+    EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC', f.sig);
+  END LOOP;
+END $$;
+
+-- ── SECURITY DEFINER HARDENING ───────────────────────────────────
+-- Every write function in this file is SECURITY DEFINER, which means it runs as
+-- the role that owns it — on Render that is the database owner, which holds
+-- CREATEDB and CREATEROLE. None of them pinned a search_path, so the schema each
+-- unqualified `owners`, `transactions`, `wallets` resolves to was decided by
+-- whatever search_path the CALLER happened to have. Anyone able to create an
+-- object in a schema earlier in that path could shadow a table — or a function
+-- these call, is_wallet_writer among them — and have their version run as the
+-- owner.
+--
+-- Not reachable today, and said plainly rather than left implied: anon and
+-- authenticator hold no CREATE on this database or on public, so neither can put
+-- an object anywhere to be found first, and PostgREST does not let a request set
+-- search_path. This is the second lock on a door that is already bolted — worth
+-- fitting because the bolt is a grant, and grants are one ALTER away from
+-- changing, while this holds regardless of who is later allowed to create what.
+--
+-- pg_temp is named LAST on purpose. It is searched first when it is not listed,
+-- and every caller can create temporary objects — so leaving it implicit is the
+-- one version of this hazard that anon really could reach.
+--
+-- Written as a loop over the catalog rather than a clause on each definition so
+-- that it cannot be forgotten: a function added to this file later is pinned by
+-- the next run of it, whether or not whoever wrote it remembered.
+DO $$
+DECLARE f record;
+BEGIN
+  FOR f IN
+    SELECT p.oid::regprocedure AS sig
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public' AND p.prosecdef
+      AND (p.proconfig IS NULL OR NOT (p.proconfig @> ARRAY['search_path=public, pg_temp']))
+  LOOP
+    EXECUTE format('ALTER FUNCTION %s SET search_path = public, pg_temp', f.sig);
+  END LOOP;
+END $$;
+
+-- Views run with the privileges of their OWNER unless told otherwise, and the
+-- owner here is the database owner, who bypasses row-level security. So each of
+-- these three reads its base tables with RLS switched off and hands the result
+-- to whoever asked.
+--
+-- That leaks nothing today: every policy on those tables is `USING (true)` for
+-- SELECT, so a caller reading the tables directly sees exactly the same rows.
+-- It is the coupling that is wrong — it means the RLS policies are load-bearing
+-- for direct reads and decorative through the views, and the day anyone narrows
+-- one (per-owner visibility, say, or hiding a vault's queue from non-owners)
+-- these three would go on serving everything, silently, because nothing about
+-- tightening a policy makes a view stop bypassing it.
+--
+-- security_invoker makes them honest: the caller's own privileges and the
+-- caller's own policies. anon already holds SELECT on every base table these
+-- touch, so nothing changes today — which is the point of doing it while
+-- nothing changes.
+ALTER VIEW my_wallets SET (security_invoker = true);
+ALTER VIEW tx_summary SET (security_invoker = true);
+ALTER VIEW tx_history SET (security_invoker = true);
