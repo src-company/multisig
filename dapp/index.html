@@ -1217,17 +1217,25 @@ const MULTISIG_ABI = [
   'function executor() view returns (address)',
   'function getOwners() view returns (address[])',
   'function isOwner(address) view returns (bool)',
-  'function execute(address,uint256,bytes,bytes) payable',
-  'function executeQueued(address,uint256,bytes,uint32) payable',
-  'function approve(bytes32,bool) payable',
-  'function cancelQueued(bytes32) payable',
-  'function addOwner(address) payable',
-  'function removeOwner(address,address) payable',
-  'function setDelay(uint32) payable',
-  'function setExecutor(address) payable',
-  'function setThreshold(uint256) payable',
-  'function batch(address[],uint256[],bytes[]) payable',
-  'function delegateCall(address,bytes) payable',
+  // The write functions carry their parameter names, verbatim from
+  // src/Multisig.sol, underscores and all. Selectors do not depend on names, so
+  // nothing that reads these positionally changes — what changes is that the
+  // CUSTOM tab now offers this ABI for a self-call, and an argument field
+  // labelled `arg0` is not a description of anything. removeOwner is the reason
+  // it matters: its first argument is the owner BEFORE the one being removed in
+  // the linked list, and getting the two the wrong way round is an
+  // InvalidConfig() revert that reads like nothing in particular.
+  'function execute(address target,uint256 value,bytes data,bytes sigs) payable',
+  'function executeQueued(address target,uint256 value,bytes data,uint32 _nonce) payable',
+  'function approve(bytes32 hash,bool ok) payable',
+  'function cancelQueued(bytes32 hash) payable',
+  'function addOwner(address _owner) payable',
+  'function removeOwner(address prevOwner,address _owner) payable',
+  'function setDelay(uint32 _delay) payable',
+  'function setExecutor(address _executor) payable',
+  'function setThreshold(uint256 _threshold) payable',
+  'function batch(address[] targets,uint256[] values,bytes[] datas) payable',
+  'function delegateCall(address target,bytes data) payable',
   'function queued(bytes32) view returns (uint256)',
   'function approved(address,bytes32) view returns (bool)',
   'function DOMAIN_SEPARATOR() view returns (bytes32)',
@@ -3887,9 +3895,41 @@ function extractWriteFns(abi) {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// Is this target the vault the proposal is being built from? Only the selected
+// vault counts. Every state-changing function on the wallet except `execute`,
+// `approve` and `executeQueued` is `onlySelf`, so the wallet's own ABI is
+// useful for a self-call and actively misleading anywhere else: offered against
+// another vault it would present addOwner() as something you could call on it,
+// which reverts Unauthorized() every time.
+function isSelfCallTarget(addr) {
+  const v = S.vaults[S.sel];
+  return !!(v && v.address && ethers.isAddress(addr)
+    && v.address.toLowerCase() === String(addr).toLowerCase());
+}
+
+// The wallet's own write functions, in the shape a Sourcify ABI arrives in, so
+// everything downstream — the function pills, the typed argument fields,
+// encodeCxCall() — reads them without knowing where they came from.
+function multisigWriteFns() {
+  const out = [];
+  msIface.forEachFunction(f => {
+    if(f.stateMutability === 'view' || f.stateMutability === 'pure') return;
+    out.push({ type: 'function', name: f.name, stateMutability: f.stateMutability,
+      inputs: f.inputs.map(p => ({ name: p.name, type: p.type })) });
+  });
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 async function fetchContractAbi(addr) {
   const key = S.chainId + ':' + addr.toLowerCase();
   if(_abiCache[key] !== undefined) return _abiCache[key];
+  // A vault is a minimal proxy: 45 bytes of delegating runtime at its own
+  // address, and nothing at that address for Sourcify to have verified. So the
+  // one contract this app ships the full ABI for was the one the CUSTOM tab
+  // called an UNVERIFIED CONTRACT, and told you to hand-encode calldata for.
+  // The implementation slot probe below does not save it either — a clone
+  // stores the implementation in its code, not in an EIP-1967 slot.
+  if(isSelfCallTarget(addr)) { _abiCache[key] = multisigWriteFns(); return _abiCache[key]; }
   if(Object.keys(_abiCache).length >= _ABI_CACHE_MAX) {
     const first = Object.keys(_abiCache)[0]; delete _abiCache[first];
   }
@@ -6392,8 +6432,17 @@ function renderTxBuilder(v,mob){
     const isUnverified = S.cxAddr && Array.isArray(S.cxAbi) && S.cxAbi.length === 0;
     const selFn = hasFns && S.cxFn != null ? S.cxAbi[S.cxFn] : null;
     const encoded = selFn ? encodeCxCall() : null;
+    // A self-call is not an unverified contract, and saying so was the least
+    // helpful thing this tab could say about the one address in the proposal
+    // whose source is in this repository. The functions offered here are the
+    // vault's own, and they are `onlySelf` — a proposal targeting the vault is
+    // how they are reached at all, which is worth saying where someone is about
+    // to reach for raw calldata to do it.
+    const isSelf = isSelfCallTarget(S.cxTarget);
     let abiStatus = '';
     if(S.cxLoading) abiStatus = `<div style="font-size:10px;color:var(--d);letter-spacing:2px;margin:-8px 0 12px;animation:pulse 2s infinite">LOADING ABI...</div>`;
+    else if(isSelf && hasFns) abiStatus = `<div style="font-size:10px;color:var(--a);margin:-8px 0 4px;letter-spacing:2px">SELF-CALL &middot; THE VAULT'S OWN ${S.cxAbi.length} FUNCTION${S.cxAbi.length>1?'S':''}</div>`
+      + `<div style="font-size:9px;color:var(--d);letter-spacing:1px;line-height:1.6;margin:0 0 12px">THESE ARE <b>onlySelf</b> &mdash; A PROPOSAL TARGETING THE VAULT IS THE ONLY WAY TO REACH THEM. THRESHOLD, DELAY AND OWNERS HAVE A FORM OF THEIR OWN UNDER <b>ADMIN</b>; SEVERAL SELF-CALLS IN ONE PROPOSAL IS WHAT <b>BATCH</b> BUILDS, AND IT ENCODES THE <b>batch()</b> SELF-CALL FOR YOU.</div>`;
     else if(isUnverified) abiStatus = `<div style="font-size:10px;color:var(--d);margin:-8px 0 12px">UNVERIFIED CONTRACT — USE RAW CALLDATA</div>`;
     else if(hasFns) abiStatus = `<div style="font-size:10px;color:var(--g);margin:-8px 0 4px;letter-spacing:2px">CONTRACT VERIFIED &middot; ${S.cxAbi.length} WRITE FN${S.cxAbi.length>1?'S':''}</div>`;
     let fnPills = '';
@@ -8842,9 +8891,17 @@ async function loadTokenBalances(walletAddr, ethBalance) {
 
 // Build a user-facing error for a failed critical write. `label` is shown in
 // the flash; the underlying PostgREST error is attached for the console.
+// The label is the house sentence; the detail is what makes the refusal
+// actionable. The detail used to be attached and never shown — dbDetail has no
+// reader — so a database with a specific, nameable objection to a payload said
+// only PROPOSAL NOT SAVED, and the reason went to the console. A proposer who
+// had just spent a signing prompt on it was told nothing they could act on.
+// Bounded, because a PostgREST error carries the whole failing row.
 function dbError(label, err) {
   const detail = err && (err.message || err.status);
-  return Object.assign(new Error(label), { shortMessage: label, dbDetail: detail });
+  const short = detail ? String(detail).replace(/\s+/g, ' ').trim().slice(0, 140) : '';
+  return Object.assign(new Error(short ? `${label} — ${short.toUpperCase()}` : label),
+    { shortMessage: short ? `${label} — ${short.toUpperCase()}` : label, dbDetail: detail });
 }
 
 // `chainId` is optional and defaults to the chain the app is pointed at, which is
@@ -8908,6 +8965,27 @@ async function dbMyWallets(ownerAddr) {
     seen.add(k);
     return true;
   });
+}
+
+// Mirrors the tx_calldata_fmt ceiling in db/schema.sql. There is nowhere to read
+// that number from at runtime, so the two are changed together and this comment
+// is the link between them.
+//
+// Checked BEFORE signing, which is the whole reason it exists on this side at
+// all. The database write is the last step of proposing and the signature is the
+// step before it, so an oversized payload was refused only after the wallet
+// prompt had been answered: the signature was discarded, the proposal never
+// existed, and every retry cost another prompt. Nothing on chain objects to a
+// large payload — the vault would execute it — but a proposal no co-signer can
+// be shown is not a proposal.
+//
+// Characters, not bytes: the column is text, so it holds two per byte plus 0x.
+const CALLDATA_MAX_CHARS = 65536;
+function calldataTooBig(d) {
+  const n = (d || '').length;
+  if(n <= CALLDATA_MAX_CHARS) return '';
+  const bytes = Math.floor((n - 2) / 2), max = Math.floor((CALLDATA_MAX_CHARS - 2) / 2);
+  return `CALLDATA IS ${bytes} BYTES AND THE COORDINATION RECORD HOLDS ${max}. THE VAULT WOULD EXECUTE IT, BUT NO CO-SIGNER COULD BE SHOWN IT. SPLIT IT ACROSS PROPOSALS.`;
 }
 
 async function dbProposeTx(wId, nonce, target, value, callData, txHash, thresh, proposedBy, desc) {
@@ -12880,6 +12958,7 @@ async function prodSubmitCustom() {
   if(!target) { flash('ENTER TARGET'); return; }
   if(d !== '0x' && !/^0x[0-9a-fA-F]*$/.test(d)) { flash('INVALID CALLDATA — MUST BE HEX (0x...)'); return; }
   if(d !== '0x' && d.length % 2 !== 0) { flash('INVALID CALLDATA — ODD LENGTH'); return; }
+  const oversize = calldataTooBig(d); if(oversize) { flash(oversize, 9000); return; }
 
   try {
     const resolvedTarget = assertPreviewed(target, await resolveName(target), S.chainId);
@@ -12942,6 +13021,10 @@ async function prodSubmitBatch() {
     }
 
     const batchData = msIface.encodeFunctionData('batch', [targets, values, datas]);
+    // The legs are each within the ceiling and the batch that wraps them need
+    // not be — the encoding is what gets stored, so it is the encoding that is
+    // measured, and before the prompt rather than after it.
+    const oversize = calldataTooBig(batchData); if(oversize) { flash(oversize, 9000); return; }
     const target = v.address;
     const value = '0';
 
