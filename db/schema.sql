@@ -217,6 +217,15 @@ CREATE INDEX IF NOT EXISTS idx_config_wallet ON config_log (wallet_id, created_a
 --
 -- Wrapped in DO/EXCEPTION rather than IF NOT EXISTS because ADD CONSTRAINT has
 -- no such clause, and this file must apply twice in a row without error.
+--
+-- Which has a consequence worth stating plainly, because it is the opposite of
+-- what re-applying this file looks like it does: the loop swallows
+-- duplicate_object, so a constraint that ALREADY EXISTS IS LEFT EXACTLY AS IT
+-- WAS. Editing an expression above and re-running this file changes nothing.
+-- Any constraint whose expression is revised has to be dropped first, here,
+-- where the two other migrations of this kind already sit.
+ALTER TABLE transactions DROP CONSTRAINT IF EXISTS tx_calldata_fmt;  -- 16384 -> 65536 chars
+
 DO $$
 DECLARE
   ADDR  CONSTANT text := '^0x[0-9a-fA-F]{40}$';
@@ -244,10 +253,20 @@ BEGIN
     ('transactions','tx_nonce_sane',   'nonce >= 0'),
     ('transactions','tx_target_fmt',   format('target ~ %L', ADDR)),
     ('transactions','tx_value_int',    'value >= 0 AND value = trunc(value)'),
-    -- Even-length hex. 16KB of calldata is a batch of roughly eighty transfers;
-    -- nothing this app builds comes close, and the cap is what stops the column
-    -- being used as free storage.
-    ('transactions','tx_calldata_fmt', 'call_data ~ ''^0x([0-9a-fA-F]{2})*$'' AND length(call_data) <= 16384'),
+    -- Even-length hex, with a ceiling that stops the column being used as free
+    -- storage. The ceiling counts CHARACTERS, because that is what a text column
+    -- stores: two per byte, plus the leading 0x. The previous 16384 was written
+    -- as "16KB of calldata" and was in fact 8KB of it, and 8KB is not the
+    -- comfortable headroom that reasoning assumed — a single self-call batch
+    -- registering six tokens, each leg carrying an inline SVG, encodes to 9.9KB
+    -- and was refused. 65536 characters is 32KB of calldata, which is the number
+    -- the original note meant to leave room for, doubled.
+    --
+    -- What actually bounds storage is not this: propose_tx caps a vault at
+    -- 20,000 rows outright, and the rate limit is keyed on vault AND client_ip.
+    -- This is the per-row shape check, and a shape check set below what the app
+    -- legitimately builds is a bug rather than a defence.
+    ('transactions','tx_calldata_fmt', 'call_data ~ ''^0x([0-9a-fA-F]{2})*$'' AND length(call_data) <= 65536'),
     ('transactions','tx_hash_fmt',     format('tx_hash ~ %L', HASH)),
     ('transactions','tx_threshold_sane','threshold >= 0'),
     ('transactions','tx_desc_len',     'description IS NULL OR length(description) <= 512'),
