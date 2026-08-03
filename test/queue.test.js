@@ -109,6 +109,10 @@ const sandbox = {
   copyBtn: () => '',
   signerIdentHtml: o => `<span>${esc(o.addr)}</span>`,
   txExplorerLink: () => '',
+  // Both outbound links off a queue card are stubbed here for the same reason:
+  // what they build is asserted where it is built (decode.test.js), and this
+  // suite is asking whether the card draws at all.
+  txDecodeLink: () => '',
   renderSlowOutbound: () => '',
   renderTxBuilder: () => '<div id="txb"></div>',
   renderSim: () => '',

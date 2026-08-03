@@ -103,9 +103,15 @@ zero-width and non-breaking spaces and mixed scripts, and a name whose whole pur
 is to be read before signing must not be able to look like a different name.
 
 **CUSTOM** — raw target, ETH value with a live wei preview, and a calldata field.
+A verified target is fetched from Sourcify and offered as a function picker with
+typed argument fields; an unverified one leaves the raw field, which is the only
+description of the call anyone gets. Either way the encoded bytes are shown, and
+**DECODE** hands them to the decoder below.
 
 **BATCH** — several calls, each with target, value and calldata, added and removed
-dynamically, encoded as a single `batch()` self-call.
+dynamically, encoded as a single `batch()` self-call. **DECODE** sits on each call's
+own header rather than on the batch: a batch is signed once and executes as *n*
+separate calls, and the reason to check one of them is that the others looked fine.
 
 ## Simulation
 
@@ -180,6 +186,40 @@ it was produced so a stale one never reads as fresher than it is.
 
 A simulation that reverts blocks nothing. The proposal can still be created, signed
 and submitted; the panel exists to be read before signing, not to decide.
+
+## Decoding calldata
+
+Simulation answers what a call would *do*. **DECODE** answers what it *says*. It sits
+beside SIMULATE on every queued proposal that carries a payload, on the CUSTOM tab's
+calldata, and on each call in a BATCH, and it opens
+[calldata.swiss-knife.xyz](https://calldata.swiss-knife.xyz/decoder) with the
+payload, the target and the chain id — which decodes against the target's verified
+ABI, falls back to a public selector database when the target is unverified, and
+unwraps the nested calls inside a multicall.
+
+This is the way out of the honest dead end the classifier leaves. A proposal whose
+selector this interface does not recognise is labelled as exactly that — *nothing
+here can tell you what it does* — and until now the only next step was a block
+explorer.
+
+Three things worth knowing:
+
+- **Nothing is sent until you click.** These are links, not background requests. No
+  payload leaves the page on its own, and the referrer is withheld when one does:
+  handing a third party the bytes is the signer's decision, and the page they were
+  on is not part of it.
+- **The address and the chain are hints.** A payload decodes by selector without
+  them, which is what the builder needs while a target is still being typed. A
+  half-typed address is left out of the URL rather than sent as garbage that would
+  point the ABI lookup at nothing.
+- **The builder reads the field, not the render.** Its DECODE is a button rather
+  than a link because the calldata box and the argument fields change without
+  redrawing the page, and a tool for checking bytes must never show yesterday's
+  bytes. A posted proposal's payload is fixed on chain, so there DECODE is an
+  ordinary link — copyable and middle-clickable.
+
+A payload with no 4-byte selector — a plain ETH transfer, an empty field — offers
+nothing to decode, and no link is drawn for it.
 
 ## Admin
 

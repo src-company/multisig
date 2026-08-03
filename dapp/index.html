@@ -125,6 +125,11 @@ button:active{transform:scale(.97)}
      .reject-link destructive, and arms before it fires. */
 .alt-link,.reject-link,.sim-btn{background:transparent;border:1px solid var(--ln);color:var(--d);font-size:9px;font-weight:700;letter-spacing:2px;padding:6px 12px;cursor:pointer;font-family:var(--f);text-transform:uppercase;transition:border-color .15s,color .15s}
 .alt-link:hover,.sim-btn:hover{border-color:var(--a);color:var(--a)}
+/* The decoder link wears the .sim-btn box but is a real <a> where the payload
+   it points at is fixed (a posted proposal), so it can be copied, middle-clicked
+   and read before it is followed. An anchor brings an underline and inline
+   layout with it; the box has to sit on the row like its button peers. */
+a.sim-btn{display:inline-flex;align-items:center;gap:4px;text-decoration:none}
 .reject-link:hover{border-color:var(--r);color:var(--r)}
 .reject-link.armed{border-color:var(--r);color:var(--r);background:color-mix(in srgb,var(--r) 8%,transparent)}
 /* Peer of the above for undoing your own signature: destructive tone, no box.
@@ -3966,6 +3971,29 @@ function encodeCxCall() {
   } catch(e) { return null; }
 }
 
+// An encode that failed is only worth saying out loud once someone has typed
+// something: a freshly picked function with empty parameters has not failed,
+// it has not been filled in yet.
+function cxEncodeFailed() {
+  const fn = S.cxAbi && S.cxFn != null ? S.cxAbi[S.cxFn] : null;
+  return !!fn && !encodeCxCall() && !!fn.inputs.length && Object.keys(S.cxArgs).length > 0;
+}
+
+// The encoded preview under CALLDATA was a render-time value on inputs that do
+// not re-render, so it showed the bytes for the arguments as they stood several
+// keystrokes ago — and now there is a DECODE beside it that reads the live
+// fields, which would have made the two disagree on screen. Patched in place
+// the way onBatchData() patches its hex hint: the field and its caret are never
+// touched, only the two nodes that describe it.
+function syncCxPreview() {
+  const box = document.getElementById('cx-encoded');
+  const err = document.getElementById('cx-encode-err');
+  if(!box && !err) return;
+  const d = encodeCxCall();
+  if(box) { box.textContent = d || ''; box.style.display = d ? 'block' : 'none'; }
+  if(err) err.style.display = cxEncodeFailed() ? 'block' : 'none';
+}
+
 function parseCxArg(raw, type) {
   if(type.endsWith('[]')) {
     if(!raw) return [];
@@ -4309,6 +4337,93 @@ function txExplorerLink(tx, v) {
   else if(v && v.address && ethers.isAddress(v.address)) { href = `${base}/address/${v.address}`; tip = 'View vault on explorer'; }
   else return '';
   return `<a class="tx-explorer" href="${href}" target="_blank" rel="noopener" title="${tip}" onclick="event.stopPropagation()">↗ EXPLORER</a>`;
+}
+
+// ── CALLDATA DECODER (SWISS-KNIFE) ────────────────────────────────
+// txKind() names the calls this interface knows and says plainly when it does
+// not — "NOTHING IN THIS INTERFACE CAN TELL YOU WHAT IT DOES" is an honest note
+// and a dead end at the same time. This is the way out of it: swiss-knife takes
+// a payload, decodes it against the target's verified ABI, falls back to a
+// public selector database when the target is unverified, and unwraps the
+// nested calls inside a multicall — which is exactly the shape a batch takes.
+//
+// Nothing is sent anywhere until a signer clicks: these are links and window
+// opens, not fetches, so no CSP connect-src entry is needed and no payload
+// leaves the page on its own. noreferrer on top of noopener because handing a
+// third party the calldata is the signer's decision, and the page they were on
+// is not part of that decision.
+const SWISSKNIFE_DECODER = 'https://calldata.swiss-knife.xyz/decoder';
+
+// The address and the chain are hints, not requirements. The builder needs to
+// offer this while a payload is being typed and no target has been entered yet
+// — the decoder still decodes by selector — so an absent or half-typed address
+// is simply left out of the URL rather than sent as garbage that would point
+// the ABI lookup at nothing. Anything that is not clean, even-length hex with
+// at least a 4-byte selector is not calldata, and returns no URL at all, so no
+// caller has to decide what a broken decoder link should say.
+function swissKnifeUrl(callData, target, chainId) {
+  const d = typeof callData === 'string' ? callData.trim() : '';
+  if(!/^0x[0-9a-fA-F]*$/.test(d) || d.length < 10 || d.length % 2 !== 0) return '';
+  const q = new URLSearchParams({ calldata: d });
+  const t = typeof target === 'string' ? target.trim() : '';
+  if(ethers.isAddress(t)) { try { q.set('address', ethers.getAddress(t)); } catch(_) {} }
+  const cid = Number(chainId);
+  if(Number.isInteger(cid) && cid > 0) q.set('chainId', String(cid));
+  return `${SWISSKNIFE_DECODER}?${q}`;
+}
+
+// Which chain's ABIs the decoder should be reading. A demo vault carries a
+// chain name and no connection at all, so its id comes off the name; production
+// reads the connected chain, which is the one the proposal executes on.
+function decoderChainId(v) {
+  if(S.demoMode) return v && v.chain ? chainIdOfName(v.chain) : 0;
+  return S.chainId;
+}
+
+const DECODE_TITLE = 'Decode this calldata on calldata.swiss-knife.xyz — opens in a new tab';
+
+// A posted proposal's bytes are fixed on chain, so its decoder link is a real
+// link: copyable, middle-clickable, and still correct however long the card
+// sits there. Target rather than displayTo — an ERC-20 transfer's recipient
+// lives inside the calldata, and the contract being called is the token.
+function txDecodeLink(tx, v) {
+  const href = swissKnifeUrl(tx.callData, tx.target, decoderChainId(v));
+  if(!href) return '';
+  return `<a class="sim-btn" href="${esc(href)}" target="_blank" rel="noopener noreferrer" title="${DECODE_TITLE}" onclick="event.stopPropagation()">DECODE &#8599;</a>`;
+}
+
+// The builder's decoder is a button instead, and deliberately so. Its fields
+// change under oninput handlers that do not redraw — see onBatchData(), and the
+// cx-data textarea, and the argument inputs behind encodeCxCall() — so an href
+// baked into the markup at the last render would hand the decoder whatever was
+// in the box several keystrokes ago. A tool for checking bytes is the one place
+// that can never show yesterday's bytes, so the live value is read at the
+// moment of the click and nothing is rendered that could go stale.
+function decodeBtnHtml(onclick) {
+  return `<button class="sim-btn" onclick="${onclick}" title="${DECODE_TITLE}">DECODE &#8599;</button>`;
+}
+
+function openDecoder(callData, target) {
+  const d = typeof callData === 'string' ? callData.trim() : '';
+  if(!d || d === '0x') { flash('NOTHING TO DECODE — THE CALLDATA IS EMPTY'); return; }
+  const url = swissKnifeUrl(d, target, decoderChainId(S.vaults[S.sel]));
+  if(!url) { flash('CANNOT DECODE — CALLDATA MUST BE HEX (0x...) CARRYING AT LEAST A 4-BYTE SELECTOR'); return; }
+  window.open(url, '_blank', 'noopener');
+}
+
+// CUSTOM reads through getCxCalldata(), which is the same call submitCustom()
+// makes: whether the payload came from the ABI form or was pasted raw, the
+// decoder is handed the exact bytes that would be proposed. It flashes its own
+// message when the parameters do not encode, and returns null to say so.
+function decodeCustom() {
+  const d = getCxCalldata();
+  if(d === null) return;
+  openDecoder(d, S.cxTarget || document.getElementById('cx-target')?.value || '');
+}
+
+function decodeBatchCall(i) {
+  const c = S.batch[i];
+  if(c) openDecoder(c.d, c.t);
 }
 
 // ── RENDER ────────────────────────────────────────────────────────
@@ -5209,6 +5324,14 @@ ${/* margin-left:auto puts the explorer link on the row's trailing edge, which i
         return `<div class="tx-foot">
           <div class="tx-foot-diag">
             <button class="sim-btn" onclick="simulateProposal(${S.sel},${tx.nonce})" title="Dry-run this proposal against current chain state (from = the vault)">${tx._sim&&!tx._sim.loading?'RE-SIMULATE':'SIMULATE'}</button>
+            ${/* Beside SIMULATE because they answer the two halves of the same
+                 question — what this payload SAYS, and what it would DO. The
+                 kind badge above is this interface's reading of the bytes;
+                 a signer who wants the bytes themselves, argument by argument,
+                 has nowhere to go without leaving the page for a block
+                 explorer. Empty calldata renders nothing: a plain ETH transfer
+                 has no payload to decode. */''}
+            ${txDecodeLink(tx, v)}
             ${canReject?`<button class="reject-link${armed?' armed':''}" onclick="armReject(${S.sel},${tx.nonce})" title="Sign a no-op to consume this nonce so later transactions can proceed">${rlabel}</button>`:''}
           </div>
           ${actionBtn?`<div class="tx-foot-act">${actionBtn}</div>`:''}
@@ -6286,16 +6409,20 @@ function renderTxBuilder(v,mob){
     if(selFn) {
       const fnSig = selFn.name+'('+selFn.inputs.map(p=>p.type).join(',')+')';
       const params = selFn.inputs.length ? selFn.inputs.map((inp, i) =>
-        `<label class="lbl" for="cx-arg-${i}">${esc(inp.name||'arg'+i)} <span class="dim">${esc(inp.type)}</span></label><input class="inp" id="cx-arg-${i}" placeholder="${esc(inp.type)}" value="${esc(S.cxArgs[i]||'')}" oninput="S.cxArgs[${i}]=this.value">`
+        `<label class="lbl" for="cx-arg-${i}">${esc(inp.name||'arg'+i)} <span class="dim">${esc(inp.type)}</span></label><input class="inp" id="cx-arg-${i}" placeholder="${esc(inp.type)}" value="${esc(S.cxArgs[i]||'')}" oninput="S.cxArgs[${i}]=this.value;syncCxPreview()">`
       ).join('') : '<div style="font-size:10px;color:var(--d);margin:8px 0 12px;letter-spacing:2px">NO PARAMETERS</div>';
-      const preview = encoded
-        ? `<label class="lbl">CALLDATA <span class="dim">${esc(fnSig)}</span></label><div style="font-size:10px;color:var(--d);word-break:break-all;max-height:48px;overflow-y:auto;line-height:1.6;margin-bottom:12px;padding:8px;border:1px solid var(--ln)">${esc(encoded)}</div>`
-        : '';
-      const encodeFail = !encoded && selFn.inputs.length && Object.keys(S.cxArgs).length
-        ? '<div style="font-size:10px;color:var(--r);margin-bottom:12px;letter-spacing:1px">ENCODE ERROR — CHECK PARAMS</div>' : '';
+      // Both nodes are always drawn and toggled by display, so syncCxPreview()
+      // has something to patch on every keystroke — see it for why the preview
+      // could not stay a render-time value.
+      const preview = `<div class="fhead" style="align-items:center"><label class="lbl">CALLDATA <span class="dim">${esc(fnSig)}</span></label>${decodeBtnHtml('decodeCustom()')}</div>`
+        + `<div id="cx-encoded" style="font-size:10px;color:var(--d);word-break:break-all;max-height:48px;overflow-y:auto;line-height:1.6;margin-bottom:12px;padding:8px;border:1px solid var(--ln);display:${encoded?'block':'none'}">${esc(encoded||'')}</div>`;
+      const encodeFail = `<div id="cx-encode-err" style="font-size:10px;color:var(--r);margin-bottom:12px;letter-spacing:1px;display:${cxEncodeFailed()?'block':'none'}">ENCODE ERROR — CHECK PARAMS</div>`;
       rightCol = `${params}${selFn.stateMutability==='payable'?'<div style="font-size:10px;color:var(--g);margin:-8px 0 12px;letter-spacing:1px">PAYABLE</div>':''}${preview}${encodeFail}<button class="btn btn-fill btn-w btn-big" style="margin-top:${mob?8:16}px" onclick="submitCustom()">SIGN + SUBMIT</button>`;
     } else {
-      rightCol = `<label class="lbl" for="cx-data">CALLDATA</label><textarea class="inp" id="cx-data" placeholder="0x..." oninput="S.cxData=this.value">${esc(S.cxData)}</textarea><button class="btn btn-fill btn-w btn-big" style="margin-top:${mob?8:16}px" onclick="submitCustom()">SIGN + SUBMIT</button>`;
+      // Pasted bytes are exactly the case the decoder exists for: an unverified
+      // target has no ABI form to fill in, so this box is the only description
+      // of the call anyone gets, and nothing here can say what it does.
+      rightCol = `<div class="fhead" style="align-items:center"><label class="lbl" for="cx-data">CALLDATA</label>${decodeBtnHtml('decodeCustom()')}</div><textarea class="inp" id="cx-data" placeholder="0x..." oninput="S.cxData=this.value">${esc(S.cxData)}</textarea><button class="btn btn-fill btn-w btn-big" style="margin-top:${mob?8:16}px" onclick="submitCustom()">SIGN + SUBMIT</button>`;
     }
     body=`<div class="grid2">
       <div>
@@ -6309,7 +6436,11 @@ function renderTxBuilder(v,mob){
       </div></div>`;
   }else{
     body=S.batch.map((c,i)=>`<div class="batch-call">
-      <div class="call-hdr"><span>CALL ${String(i+1).padStart(2,"0")}</span>${S.batch.length>1?`<button class="x-btn" onclick="S.batch.splice(${i},1);render()" aria-label="Remove call ${i+1}" title="Remove this call">&#10005;</button>`:""}</div>
+${/* Per call, not per batch. A batch is signed as one proposal but executes as
+       n separate calls, and the whole reason to check one is that the others
+       looked fine — so the decoder is offered on the row whose bytes it reads,
+       beside the control that deletes that same row. */''}
+      <div class="call-hdr"><span>CALL ${String(i+1).padStart(2,"0")}</span><span style="display:flex;align-items:center;gap:6px;margin-left:auto">${decodeBtnHtml(`decodeBatchCall(${i})`)}${S.batch.length>1?`<button class="x-btn" onclick="S.batch.splice(${i},1);render()" aria-label="Remove call ${i+1}" title="Remove this call">&#10005;</button>`:""}</span></div>
       <div class="grid3">
         <div><label class="lbl" for="batch-t-in-${i}">TARGET</label><input class="inp" id="batch-t-in-${i}" aria-describedby="batch-t-${i}" data-bi="${i}" data-bf="t" placeholder="0x... or a name" value="${esc(shortAddr(c.t))}" onfocus="this.value=S.batch[${i}].t" onblur="this.value=shortAddr(S.batch[${i}].t)" oninput="onBatchTarget(${i},this.value)"><div id="batch-t-${i}" style="font-size:9px;letter-spacing:1px;margin-top:-12px;margin-bottom:8px;min-height:11px">${(()=>{const s=_addrState(c.t);return s.txt?`<span style="color:${s.color}">${ethers.isAddress((c.t||'').trim())?'✓':s.txt}</span>`:''})()}</div></div>
         <div><label class="lbl" for="batch-v-in-${i}">VALUE (ETH)</label><input class="inp" id="batch-v-in-${i}" data-bi="${i}" data-bf="v" placeholder="0" value="${esc(c.v)}" oninput="S.batch[${i}].v=this.value;this.nextElementSibling.textContent=this.value?toUnits(this.value,18)+' WEI':''"><div style="font-size:10px;color:var(--d);margin-top:-12px;margin-bottom:8px;word-break:break-all">${c.v?toUnits(c.v,18)+' WEI':''}</div></div>
