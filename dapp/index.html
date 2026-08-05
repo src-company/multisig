@@ -17,7 +17,7 @@
      provider is initialised with an rpcMap for the one chain it is given, so
      chain reads stay on the RPC hosts listed here; letting the fallback
      through would put a vault's traffic on a host that is not one of them. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://multisig-postgrest.onrender.com https://repo.sourcify.dev https://*.publicnode.com https://1rpc.io https://*.drpc.org https://api.coinbase.com https://mainnet.base.org https://sepolia.base.org https://arb1.arbitrum.io https://mainnet.optimism.io https://mainnet.megaeth.com https://rpc-megaeth-mainnet.globalstake.io https://api.dotmega.domains https://keys.coinbase.com https://rpc.wallet.coinbase.com https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org; img-src 'self' data: https://explorer-api.walletconnect.com; frame-src https://verify.walletconnect.com https://verify.walletconnect.org; upgrade-insecure-requests">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://multisig-postgrest.onrender.com https://sourcify.dev https://*.publicnode.com https://1rpc.io https://*.drpc.org https://api.coinbase.com https://mainnet.base.org https://sepolia.base.org https://arb1.arbitrum.io https://mainnet.optimism.io https://mainnet.megaeth.com https://rpc-megaeth-mainnet.globalstake.io https://api.dotmega.domains https://keys.coinbase.com https://rpc.wallet.coinbase.com https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org; img-src 'self' data: https://explorer-api.walletconnect.com; frame-src https://verify.walletconnect.com https://verify.walletconnect.org; upgrade-insecure-requests">
 <title>multisig</title>
 <meta name="description" content="Multichain multisig with an embedded timelock. A mandatory delay between queuing and execution, so a compromised key or a social-engineered signature can be seen and cancelled before it lands.">
 <!-- Unfurl metadata. Vault links get passed between co-signers and pasted into
@@ -3143,6 +3143,7 @@ const S = {
   cxTarget: '',
   cxValue: '',
   cxAbi: null,
+  cxAbiErr: false,       // the ABI lookup did not resolve — not the same as "unverified"
   cxFn: null,
   cxArgs: {},
   cxAddr: '',
@@ -3858,7 +3859,15 @@ function pgAttrs(){ return S.priv ? ' tabindex="0" title="Hover or tap to reveal
 const _abiCache = {};
 const _ABI_CACHE_MAX = 200;
 let _cxDebounce = null;
-const SOURCIFY_REPO = 'https://repo.sourcify.dev/contracts';
+// Sourcify API v2. The v1 repository this used to read —
+// repo.sourcify.dev/contracts/{full,partial}_match/… — now answers 307 to
+// sourcify.dev/server/repository/…, and that redirect is fatal here twice over:
+// the hop leaves the one host connect-src allows, so CSP kills the fetch before
+// it lands, and the destination is in v1 brownout and answers 503 anyway. Both
+// failures land in the same `catch`, which is why every verified contract came
+// back looking exactly like an unverified one. v2 is a single request that
+// covers what full_match and partial_match used to need two for.
+const SOURCIFY_API = 'https://sourcify.dev/server/v2/contract';
 // Proxy implementation storage slots
 const IMPL_SLOTS = [
   '0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc', // EIP-1967
@@ -3870,23 +3879,39 @@ const IMPL_SLOTS = [
 // its own: a connection that opens and then stops has nothing to interrupt it,
 // so the CUSTOM tab sat at LOADING ABI… for the life of the page — S.cxLoading
 // is only ever cleared by this call returning. Two attempts, so the budget is
-// per attempt rather than per lookup, and a slow full_match still leaves the
-// partial_match one a chance.
+// per attempt rather than per lookup, and one slow response still leaves a
+// second a chance.
 const SOURCIFY_TIMEOUT_MS = 8000;
+const SOURCIFY_TRIES = 2;
+// Three answers, not two. `null` is "Sourcify did not tell us", which is not
+// the same sentence as "this contract is not verified", and the caller must not
+// cache one as the other: an outage that reads as UNVERIFIED sends someone to
+// hand-write calldata against a contract whose ABI was there all along.
+//   Array — verified; its ABI
+//   false — answered, and has no verified source on this chain (404)
+//   null  — could not be determined: offline, timed out, blocked, 5xx
 async function sourcifyAbi(chainId, addr) {
-  for(const match of ['full_match', 'partial_match']) {
+  let known = null;
+  for(let i = 0; i < SOURCIFY_TRIES; i++) {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), SOURCIFY_TIMEOUT_MS);
     try {
-      const res = await fetch(`${SOURCIFY_REPO}/${match}/${chainId}/${addr}/metadata.json`, { signal: ctl.signal });
+      const res = await fetch(`${SOURCIFY_API}/${chainId}/${addr}?fields=abi`, { signal: ctl.signal });
+      // 404 is the answer for both an unverified address and a chain Sourcify
+      // does not index. Either way there is nothing more to ask it for, so it
+      // is definitive and retrying it only spends the second attempt.
+      if(res.status === 404) return false;
       if(res.ok) {
         const json = await res.json();
-        return (json.output && json.output.abi) || [];
+        // Verified but no ABI (a contract with none, or a field we were not
+        // given) is still a "yes" — it just has no functions to offer.
+        known = Array.isArray(json.abi) ? json.abi : [];
+        break;
       }
     } catch(_) {}
     finally { clearTimeout(timer); }
   }
-  return null;
+  return known;
 }
 
 function extractWriteFns(abi) {
@@ -3951,8 +3976,9 @@ async function fetchContractAbi(addr) {
     }
 
     // If proxy detected, fetch implementation ABI
+    let implAbi = null;
     if(implAddr) {
-      const implAbi = await sourcifyAbi(S.chainId, implAddr);
+      implAbi = await sourcifyAbi(S.chainId, implAddr);
       if(implAbi && implAbi.length) {
         const fns = extractWriteFns(implAbi);
         _abiCache[key] = fns;
@@ -3967,11 +3993,18 @@ async function fetchContractAbi(addr) {
       return fns;
     }
 
+    // Nothing to offer — but there are two reasons for that, and only one of
+    // them is a fact about the contract. If either lookup came back unresolved
+    // this is an outage, so say so and cache nothing: a `[]` written here is
+    // read as UNVERIFIED for the life of the page, and the next lookup of an
+    // address the user is about to retype would never reach the network again.
+    if(directAbi === null || (implAddr && implAbi === null)) return null;
+
     _abiCache[key] = [];
     return [];
   } catch(e) {
     console.error('Fetch ABI:', e);
-    return []; // Network error — don't cache, allow retry
+    return null; // Network error — don't cache, allow retry
   }
 }
 
@@ -3980,16 +4013,24 @@ function onCxTargetChange(val) {
   clearTimeout(_cxDebounce);
   updateCxTargetStatus(val);
   if(!val || !ethers.isAddress(val)) {
-    if(S.cxAbi !== null || S.cxLoading) { S.cxAbi = null; S.cxFn = null; S.cxArgs = {}; S.cxAddr = ''; S.cxLoading = false; }
+    if(S.cxAbi !== null || S.cxLoading) { S.cxAbi = null; S.cxAbiErr = false; S.cxFn = null; S.cxArgs = {}; S.cxAddr = ''; S.cxLoading = false; }
     return;
   }
   const addr = ethers.getAddress(val);
-  if(addr === S.cxAddr) return;
-  S.cxLoading = true; S.cxAbi = null; S.cxFn = null; S.cxArgs = {}; S.cxAddr = addr; render();
+  // Same address, same answer — except when the last answer was "we could not
+  // find out". That one is worth asking again, and re-entering the target is
+  // the only way the user has to ask.
+  if(addr === S.cxAddr && !S.cxAbiErr) return;
+  S.cxLoading = true; S.cxAbi = null; S.cxAbiErr = false; S.cxFn = null; S.cxArgs = {}; S.cxAddr = addr; render();
   _cxDebounce = setTimeout(async () => {
     const fns = await fetchContractAbi(addr);
     if(S.cxAddr !== addr) return;
-    S.cxAbi = fns; S.cxLoading = false;
+    // null is "the lookup did not resolve". It still leaves the raw-calldata
+    // path — there is no ABI form to draw either way — but it must not be
+    // spelled UNVERIFIED, because nobody has established that.
+    S.cxAbiErr = fns === null;
+    S.cxAbi = fns === null ? [] : fns;
+    S.cxLoading = false;
     render();
   }, 500);
 }
@@ -4048,6 +4089,7 @@ function resetCxState() {
   S.cxTarget = '';
   S.cxValue = '';
   S.cxAbi = null;
+  S.cxAbiErr = false;
   S.cxFn = null;
   S.cxArgs = {};
   S.cxAddr = '';
@@ -6429,7 +6471,8 @@ function renderTxBuilder(v,mob){
       </div></div>`;
   }else if(S.txMode==="CUSTOM"){
     const hasFns = Array.isArray(S.cxAbi) && S.cxAbi.length > 0;
-    const isUnverified = S.cxAddr && Array.isArray(S.cxAbi) && S.cxAbi.length === 0;
+    const isUnverified = S.cxAddr && Array.isArray(S.cxAbi) && S.cxAbi.length === 0 && !S.cxAbiErr;
+    const abiUnresolved = S.cxAddr && S.cxAbiErr;
     const selFn = hasFns && S.cxFn != null ? S.cxAbi[S.cxFn] : null;
     const encoded = selFn ? encodeCxCall() : null;
     // A self-call is not an unverified contract, and saying so was the least
@@ -6443,6 +6486,7 @@ function renderTxBuilder(v,mob){
     if(S.cxLoading) abiStatus = `<div style="font-size:10px;color:var(--d);letter-spacing:2px;margin:-8px 0 12px;animation:pulse 2s infinite">LOADING ABI...</div>`;
     else if(isSelf && hasFns) abiStatus = `<div style="font-size:10px;color:var(--a);margin:-8px 0 4px;letter-spacing:2px">SELF-CALL &middot; THE VAULT'S OWN ${S.cxAbi.length} FUNCTION${S.cxAbi.length>1?'S':''}</div>`
       + `<div style="font-size:9px;color:var(--d);letter-spacing:1px;line-height:1.6;margin:0 0 12px">THESE ARE <b>onlySelf</b> &mdash; A PROPOSAL TARGETING THE VAULT IS THE ONLY WAY TO REACH THEM. THRESHOLD, DELAY AND OWNERS HAVE A FORM OF THEIR OWN UNDER <b>ADMIN</b>; SEVERAL SELF-CALLS IN ONE PROPOSAL IS WHAT <b>BATCH</b> BUILDS, AND IT ENCODES THE <b>batch()</b> SELF-CALL FOR YOU.</div>`;
+    else if(abiUnresolved) abiStatus = `<div style="font-size:10px;color:var(--y);margin:-8px 0 12px">SOURCE LOOKUP UNAVAILABLE &mdash; NOT THE SAME AS UNVERIFIED. RE-ENTER THE TARGET TO RETRY, OR USE RAW CALLDATA</div>`;
     else if(isUnverified) abiStatus = `<div style="font-size:10px;color:var(--d);margin:-8px 0 12px">UNVERIFIED CONTRACT — USE RAW CALLDATA</div>`;
     else if(hasFns) abiStatus = `<div style="font-size:10px;color:var(--g);margin:-8px 0 4px;letter-spacing:2px">CONTRACT VERIFIED &middot; ${S.cxAbi.length} WRITE FN${S.cxAbi.length>1?'S':''}</div>`;
     let fnPills = '';
