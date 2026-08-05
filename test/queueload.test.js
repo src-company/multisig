@@ -105,6 +105,17 @@ const NEEDED = [
   'WBTC_ICON', 'CBBTC_ICON', 'WSTETH_ICON', 'MEGA_ICON',
   'ETH_ONLY', 'PROD_TOKENS',
   'TERMINAL_RECHECK', 'verifySigs',
+  // The verified-ABI side. loadVaultQueue labels every row through
+  // selectorToLabel() and then sets the background prefetch going, so both the
+  // index those read and the errand that fills it are lifted whole rather than
+  // stubbed — a name that goes missing from either fails at lift, which is the
+  // point of grab() throwing. The prefetch runs against this suite's stub
+  // provider, gets nothing back, and asks the network for nothing.
+  '_selIndex', 'abiTypeSig', 'indexAbiSelectors', 'verifiedFn', 'fnLabel',
+  'SOURCIFY_API', 'SOURCIFY_TIMEOUT_MS', 'SOURCIFY_TRIES', 'sourcifyAbi',
+  'IMPL_SLOTS', '_abiCache', '_ABI_CACHE_MAX', 'extractWriteFns',
+  'isSelfCallTarget', 'multisigWriteFns', 'fetchContractAbi',
+  '_abiPrefetched', 'ABI_PREFETCH_MAX', 'prefetchQueueAbis',
   // the subjects
   'proposalDigest', 'approvalPairsFor', 'chainCheckQueue', 'sigsFor', 'loadVaultQueue',
 ];

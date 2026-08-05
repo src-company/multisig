@@ -3269,11 +3269,23 @@ const SELECTOR_LABELS = {
   [SEL.depositTo]: 'SLOW TRANSFER',
   [SEL.wnsRegister]: 'CLAIM NAME',    [SEL.wnsSetPrimary]:'SET PRIMARY NAME',
 };
-function selectorToLabel(callData) {
+// The target is optional, and only ever narrows the answer: given one whose
+// verified ABI has been read, the four bytes get the name the contract gives
+// them instead of being spelled back as themselves.
+function selectorToLabel(callData, target) {
   if(!callData || callData === '0x') return 'TRANSFER';
   const sel = selOf(callData);
   if(!sel) return 'CALL';
-  return SELECTOR_LABELS[sel] || `CALL ${sel}`;
+  if(SELECTOR_LABELS[sel]) return SELECTOR_LABELS[sel];
+  const vfn = verifiedFn(target, sel);
+  return vfn ? `CALL ${fnLabel(vfn)}` : `CALL ${sel}`;
+}
+// A function name out of a third-party ABI, reduced to what a Solidity
+// identifier can actually be. Every sink these labels reach escapes them, so
+// this is not what stops markup getting through — it is what stops a name that
+// is not a name reaching a sink at all.
+function fnLabel(fn) {
+  return String((fn && fn.name) || '').replace(/[^A-Za-z0-9_$]/g, '').slice(0, 40) || '?';
 }
 
 // ── PROPOSAL CLASSIFICATION ───────────────────────────────────────
@@ -3480,7 +3492,7 @@ function txKind(tx, v) {
           note:`CLAIMS ${full} FOR THIS VAULT AND POINTS REVERSE RESOLUTION AT IT, ATOMICALLY — AFTER THIS THE NAME RESOLVES TO THIS ADDRESS AND THIS ADDRESS ANSWERS WITH THE NAME. THE SUBDOMAIN IS FREE; THE ONLY COST IS THE GAS TO EXECUTE. THE NAME BECOMES AN NFT THE VAULT HOLDS. IT GRANTS NOBODY ANY POWER OVER THE VAULT AND MOVES NOTHING OUT OF IT.`
             + (odd ? ` THIS LABEL USES CHARACTERS THIS INTERFACE WOULD NOT CLAIM — IT MAY CONTAIN INVISIBLE OR MIXED-SCRIPT CHARACTERS AND MAY NOT BE THE NAME IT APPEARS TO BE. READ THE CALLDATA BEFORE SIGNING.` : '') };
       }
-      const parts = datas.map((cd, i) => (!cd || cd === '0x') && BigInt(values[i]) > 0n ? 'ETH TRANSFER' : selectorToLabel(cd));
+      const parts = datas.map((cd, i) => (!cd || cd === '0x') && BigInt(values[i]) > 0n ? 'ETH TRANSFER' : selectorToLabel(cd, targets[i]));
       return { label:`BATCH · ${targets.length} CALLS`, tone:'code',
         note:`${parts.join(' + ')} — EXECUTED ATOMICALLY, SO EITHER EVERY CALL LANDS OR THE WHOLE PROPOSAL REVERTS AND NOTHING DOES.` };
     }
@@ -3496,6 +3508,14 @@ function txKind(tx, v) {
   // a nonce burn that reports success. Say so, because nothing downstream will.
   if(self && sel && !isKnownMultisigSelector(sel)) return { label:'SELF-CALL · SILENT NO-OP', tone:'danger', warn:true,
     note:`THE VAULT HAS NO FUNCTION WITH SELECTOR ${sel}, AND ITS FALLBACK RETURNS SUCCESS INSTEAD OF REVERTING. THIS WOULD CONSUME NONCE ${tx.nonce != null ? tx.nonce : 'ITS NONCE'}, EMIT ExecutionSuccess, AND CHANGE NOTHING — A MISTYPED GOVERNANCE CALL THAT LOOKS EXECUTED EVERYWHERE AFTERWARDS. CHECK THE FUNCTION NAME BEFORE SIGNING.` };
+  // Last resort, and the target's own published source is consulted before the
+  // interface gives up: a contract that shipped its ABI can at least say what
+  // its function is called, and "UNRECOGNISED FUNCTION" beside a call whose
+  // name was a lookup away is a dead end this does not have to be. The warning
+  // stays either way — a name is not an account of what the code does, and
+  // nothing here has read it.
+  const vfn = verifiedFn(tx.target, sel);
+  if(vfn) return { label:`CALL ${fnLabel(vfn)}`, tone:'code', warn:true, note:verifiedCallNote(vfn, data) };
   return { label:`CALL ${sel || '?'}`, tone:'code', warn:true,
     note:`UNRECOGNISED FUNCTION. NOTHING IN THIS INTERFACE CAN TELL YOU WHAT IT DOES — READ THE TARGET CONTRACT AND THE CALLDATA, OR SIMULATE IT, BEFORE SIGNING.` };
 }
@@ -3956,7 +3976,8 @@ async function fetchContractAbi(addr) {
   // stores the implementation in its code, not in an EIP-1967 slot.
   if(isSelfCallTarget(addr)) { _abiCache[key] = multisigWriteFns(); return _abiCache[key]; }
   if(Object.keys(_abiCache).length >= _ABI_CACHE_MAX) {
-    const first = Object.keys(_abiCache)[0]; delete _abiCache[first];
+    const first = Object.keys(_abiCache)[0];
+    delete _abiCache[first]; delete _selIndex[first]; _abiPrefetched.delete(first);
   }
   try {
     const code = await provider.getCode(addr);
@@ -3981,6 +4002,10 @@ async function fetchContractAbi(addr) {
       implAbi = await sourcifyAbi(S.chainId, implAddr);
       if(implAbi && implAbi.length) {
         const fns = extractWriteFns(implAbi);
+        // Indexed off the whole ABI, not the write functions the builder offers:
+        // the classifier has to name whatever a proposal actually carries, and a
+        // proposal can carry a selector this app would never have offered.
+        indexAbiSelectors(key, implAbi);
         _abiCache[key] = fns;
         return fns;
       }
@@ -3989,6 +4014,7 @@ async function fetchContractAbi(addr) {
     // Fall back to direct ABI
     if(directAbi && directAbi.length) {
       const fns = extractWriteFns(directAbi);
+      indexAbiSelectors(key, directAbi);
       _abiCache[key] = fns;
       return fns;
     }
@@ -4006,6 +4032,130 @@ async function fetchContractAbi(addr) {
     console.error('Fetch ABI:', e);
     return null; // Network error — don't cache, allow retry
   }
+}
+
+// ── VERIFIED SELECTORS ────────────────────────────────────────────
+// The same ABIs, indexed the other way round: selector to fragment, per chain
+// and address. txKind() classifies a proposal while the queue is drawing and
+// cannot await anything, so what it needs has to already be here — see
+// prefetchQueueAbis(), which is what puts it here.
+//
+// This never overrides a branch of txKind(). Those branches are what this
+// interface knows and is prepared to warn about; this only replaces the
+// sentence at the end of them that had nothing at all to say.
+const _selIndex = {};
+// The canonical form a selector is hashed from, which is not the form an ABI
+// stores: a tuple arrives as type "tuple" with its members beside it, and
+// hashing that word instead of the members it stands for produces four bytes
+// that match nothing.
+function abiTypeSig(p) {
+  const t = String((p && p.type) || '');
+  return t.startsWith('tuple')
+    ? '(' + ((p.components || []).map(abiTypeSig).join(',')) + ')' + t.slice(5)
+    : t;
+}
+function indexAbiSelectors(key, abi) {
+  const idx = {};
+  for(const item of abi) {
+    if(!item || item.type !== 'function' || typeof item.name !== 'string') continue;
+    try {
+      const sig = item.name + '(' + (item.inputs || []).map(abiTypeSig).join(',') + ')';
+      idx[ethers.id(sig).slice(0, 10)] = { name: item.name, sig, inputs: item.inputs || [], item };
+    } catch(_) {}
+  }
+  _selIndex[key] = idx;
+}
+
+// A four-byte match against a published ABI is a claim about one contract on
+// one chain, so it is only ever looked up under both. Selectors collide across
+// unrelated contracts, and a name borrowed from the wrong one would be this
+// interface inventing a description — the thing the note it replaces exists to
+// avoid.
+function verifiedFn(target, sel) {
+  if(!sel || !target || S.demoMode) return null;
+  const idx = _selIndex[S.chainId + ':' + String(target).toLowerCase()];
+  return (idx && idx[sel]) || null;
+}
+
+// One decoded argument, in the shortest form that is still checkable against
+// what the signer expected. Numbers stay exact — an amount is the whole point
+// of reading the argument — and anything with no compact form is left as the
+// value itself rather than summarised into something that could mislead.
+function fmtAbiArg(val, type) {
+  try {
+    if(type === 'address' && ethers.isAddress(val)) return shortAddr(ethers.getAddress(val));
+    if(type === 'bool') return val ? 'TRUE' : 'FALSE';
+    if(typeof val === 'bigint') return val.toString();
+    if(type === 'string') { const s = String(val); return '"' + (s.length > 40 ? s.slice(0, 40) + '…' : s) + '"'; }
+    if(typeof val === 'string' && val.startsWith('0x') && val.length > 22) return val.slice(0, 12) + '…' + val.slice(-6);
+    if(Array.isArray(val) || (val && typeof val.length === 'number' && typeof val !== 'string')) {
+      const arr = Array.from(val);
+      return '[' + arr.length + (arr.length === 1 ? ' ITEM' : ' ITEMS') + ']';
+    }
+    return String(val);
+  } catch(_) { return '?'; }
+}
+
+// What a verified target's own ABI says this call is. `note` is emitted as
+// trusted HTML, and every value in here — the function name included — comes
+// from a third-party ABI and a proposal row, so all of it is escaped at the
+// point it enters rather than at a sink that will not do it.
+function verifiedCallNote(fn, data) {
+  const sig = esc(fn.sig);
+  let args = null;
+  try {
+    const dec = new ethers.Interface([fn.item]).decodeFunctionData(fn.sig, data);
+    args = fn.inputs.map((p, i) => `${esc((p.name || 'ARG' + i).toUpperCase())} ${esc(fmtAbiArg(dec[i], p.type))}`);
+  } catch(_) {}
+  // The name is read off the target's published source, and that is all it is:
+  // proof of what the function is called, not of what it does with what it is
+  // given. Nothing here has read that source, so the sentence stops there.
+  const head = `<b>${sig}</b> — READ FROM THE TARGET'S VERIFIED SOURCE ON SOURCIFY.`;
+  if(!args) return `${head} ITS ARGUMENTS DO NOT DECODE AGAINST THAT SIGNATURE, SO THE CALLDATA IS NOT THE SHAPE THE NAME IMPLIES — READ THE BYTES BEFORE SIGNING.`;
+  return `${head}${args.length ? ' ' + args.join(' · ') + '.' : ' NO ARGUMENTS.'}`
+    + ` THE NAME IS WHAT THE CONTRACT CALLS THIS FUNCTION, NOT AN ACCOUNT OF WHAT IT DOES — READ THE TARGET CONTRACT, OR SIMULATE IT, BEFORE SIGNING.`;
+}
+
+// Fetching is a background errand: txKind() has already drawn by the time an
+// ABI lands, so the queue is redrawn once the batch of them settles. Capped,
+// because a queue of unrelated targets should not turn one render into a burst
+// of third-party requests, and only for what this interface could not name on
+// its own — the vault's own functions ship in this file.
+const _abiPrefetched = new Set();
+const ABI_PREFETCH_MAX = 8;
+function prefetchQueueAbis(v) {
+  if(S.demoMode || !provider || !v || !Array.isArray(v.queue)) return;
+  const want = new Map();
+  const consider = (target, callData) => {
+    const sel = selOf(callData);
+    if(!sel || SELECTOR_LABELS[sel] || !target || !ethers.isAddress(target)) return;
+    if(v.address && String(target).toLowerCase() === v.address.toLowerCase()) return;
+    const a = ethers.getAddress(target);
+    if(!verifiedFn(a, sel)) want.set(a.toLowerCase(), a);
+  };
+  for(const tx of v.queue) {
+    consider(tx.target, tx.callData);
+    // A batch names its own targets inside its calldata, and those are the
+    // calls a co-signer actually has to read — the outer one is just `batch`.
+    if(selOf(tx.callData) === SEL.batch) {
+      try {
+        const [targets, , datas] = msIface.decodeFunctionData('batch', tx.callData);
+        targets.forEach((t, i) => consider(t, datas[i]));
+      } catch(_) {}
+    }
+  }
+  // Capped before they are marked, not after: an address dropped by the cap has
+  // not been asked about, and marking it would mean it never is.
+  const jobs = [...want.values()]
+    .filter(a => !_abiPrefetched.has(S.chainId + ':' + a.toLowerCase()))
+    .slice(0, ABI_PREFETCH_MAX);
+  if(!jobs.length) return;
+  jobs.forEach(a => _abiPrefetched.add(S.chainId + ':' + a.toLowerCase()));
+  Promise.all(jobs.map(a => fetchContractAbi(a)
+    // An unresolved lookup is not an answer, so it must not be remembered as
+    // one: forget it, and the next queue load asks again.
+    .then(r => { if(r === null) _abiPrefetched.delete(S.chainId + ':' + a.toLowerCase()); })
+    .catch(() => {}))).then(() => render());
 }
 
 function onCxTargetChange(val) {
@@ -7551,7 +7701,7 @@ function submitCustom() {
     addTxDemo({ nonce: nextNonce(v), target: t, callData: d || '0x', rawValue: wei.toString(),
       value: val, token: wei > 0n ? 'ETH' : '',
       displayValue: wei > 0n ? groupInt(val) : '0', displayToken: wei > 0n ? 'ETH' : '',
-      dataLabel: selectorToLabel(d) });
+      dataLabel: selectorToLabel(d, t) });
   } else {
     guardSubmit(prodSubmitCustom)();
   }
@@ -8122,7 +8272,7 @@ function doAdminPropose(action, val) {
 
     const n = nextNonce(v);
     v.queue.push({ nonce: n, target, callData: data, rawValue: "0", value: "0", token: "",
-      dataLabel: selectorToLabel(data), eta: 0, approvals: ap });
+      dataLabel: selectorToLabel(data, target), eta: 0, approvals: ap });
     v.nonce = n + 1;
     clearAdminFields();
     flash(`PROPOSE: ${desc}`);
@@ -9879,7 +10029,7 @@ async function loadVaultQueue(vi) {
       v.owners.forEach(o => approvals[o.addr] = false);
       validSigs.forEach(s => { const k = addrKey[s.signer.toLowerCase()]; if(k) approvals[k] = true; });
 
-      const dataLabel = selectorToLabel(t.call_data);
+      const dataLabel = selectorToLabel(t.call_data, t.target);
 
       const ethVal = rawValue !== '0' ? ethers.formatEther(BigInt(rawValue)) : '0';
       const value = ethVal === '0' ? '0' : ethVal;
@@ -9961,6 +10111,14 @@ async function loadVaultQueue(vi) {
         dbPruneTx(id).catch(e => console.error('Prune stale tx:', e));
       }
     }
+
+    // Background: read the published ABIs of whatever this queue points at that
+    // this interface cannot name on its own, so the next draw can say what the
+    // call is rather than showing four bytes. Last, and inside its own guard,
+    // for the reason the prune above is a `.catch()` — the queue is already
+    // correct without any of this, and an errand that only improves a label
+    // must not be able to cost the load that produced it.
+    try { prefetchQueueAbis(v); } catch(e) { console.error('Prefetch ABIs:', e); }
   } catch(e) {
     console.error('loadVaultQueue:', e);
   }
@@ -9972,7 +10130,7 @@ async function loadVaultHistory(vi) {
   try {
     const rows = await dbGetHistory(v.dbId, 50);
     v.history = rows.map(t => {
-      const act = selectorToLabel(t.call_data);
+      const act = selectorToLabel(t.call_data, t.target);
       const hv = weiStr(t.value);
       const ethVal = (hv !== null && hv !== '0') ? ethers.formatEther(BigInt(hv)) : null;
       // `target` is read defensively for the same reason `value` is above: this

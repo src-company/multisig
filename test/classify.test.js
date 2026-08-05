@@ -99,6 +99,9 @@ const NEEDED = [
   'wnsLabelValid', 'wnsIdentityBatch',
   'isStakeCall', 'isGuardHookAddr', 'executorRisk', 'fastPathVoidsTimelock',
   'NO_WITHDRAWAL', 'lockedDest', '_msSelectors', 'isKnownMultisigSelector',
+  // the verified-ABI index: what the classifier consults before it gives up
+  '_selIndex', 'abiTypeSig', 'indexAbiSelectors', 'verifiedFn', 'fnLabel',
+  'fmtAbiArg', 'verifiedCallNote',
   'SELECTOR_LABELS', 'selectorToLabel',
   // the subjects
   'txKind', 'isCancelTx', 'nextNonce', 'POLICY_SELECTORS', 'pendingPolicyChanges',
@@ -131,6 +134,7 @@ const {
   wnsRegIface, weinsIface, SEL, FACTORY, IMPLEMENTATION, TIMELOCK_EXECUTOR,
   WSTETH_ADDRESS, WEINS, WNS_ID_REGISTRAR, WNS_ID_PARENT, wnsSubId,
   MAX_SAFE_THRESHOLD, DELAY_SANE_MAX,
+  indexAbiSelectors, verifiedFn, abiTypeSig, fmtAbiArg,
 } = sandbox;
 
 // Deliberately none of these carry 0x1111 in their top or bottom 16 bits — that
@@ -535,6 +539,123 @@ test('an unknown selector aimed at somebody else says nothing here can tell you 
   assert.equal(k.label, 'CALL 0xdeadbeef');
   assert.equal(k.warn, true);
   assert.match(k.note, /UNRECOGNISED FUNCTION/);
+});
+
+// ── the verified ABI ──────────────────────────────────────────────
+//
+// The dead end above has one way out: a target that published its source. The
+// classifier reads the selector out of an index built from that ABI, which is
+// filled in the background by prefetchQueueAbis() and read synchronously here.
+// What is asserted below is where the naming stops — a name is what the
+// contract calls the function, and nothing in this app has read what it does.
+
+const LISTING_ABI = [
+  { type: 'function', name: 'delist', stateMutability: 'nonpayable',
+    inputs: [{ name: 'id', type: 'uint256' }, { name: 'to', type: 'address' }], outputs: [] },
+  { type: 'function', name: 'freeze', stateMutability: 'nonpayable',
+    inputs: [{ name: 'on', type: 'bool' }], outputs: [] },
+  // Same four bytes as ERC-20 approve, under a name of its own. Verified source
+  // is not a licence to relabel a call this interface already warns about.
+  { type: 'function', name: 'approve', stateMutability: 'nonpayable',
+    inputs: [{ type: 'address' }, { type: 'uint256' }], outputs: [] },
+];
+const listingIface = new ethers.Interface(LISTING_ABI);
+const indexAt = (addr, abi) => indexAbiSelectors(`1:${addr.toLowerCase()}`, abi || LISTING_ABI);
+
+test('a verified target names its own function and decodes what it was given', () => {
+  indexAt(BOB);
+  const data = listingIface.encodeFunctionData('delist', [42n, ALICE]);
+  const k = txKind(prop({ target: BOB, callData: data }), vault());
+  assert.equal(k.label, 'CALL delist');
+  assert.match(k.note, /delist\(uint256,address\)/);
+  assert.match(k.note, /ID 42/);
+  assert.match(k.note, /TO 0x2222…2222/);
+  // Named, not explained. The warning is the point of the sentence.
+  assert.equal(k.warn, true);
+  assert.match(k.note, /NOT AN ACCOUNT OF WHAT IT DOES/);
+});
+
+test('a name read off one contract is not lent to the same selector on another', () => {
+  // Selectors collide across unrelated contracts, and this index is the only
+  // thing standing between "the four bytes matched" and "the interface told a
+  // co-signer what they were signing".
+  indexAt(BOB);
+  const data = listingIface.encodeFunctionData('freeze', [true]);
+  assert.equal(txKind(prop({ target: BOB, callData: data }), vault()).label, 'CALL freeze');
+  assert.equal(txKind(prop({ target: ALICE, callData: data }), vault()).label, `CALL ${selOf(data)}`);
+  // And not on another chain either: the index is keyed by both, because the
+  // same address is a different contract on a different chain.
+  assert.ok(verifiedFn(BOB, selOf(data)));
+  sandbox.S.chainId = 8453;
+  assert.equal(verifiedFn(BOB, selOf(data)), null);
+  assert.equal(txKind(prop({ target: BOB, callData: data }), vault()).label, `CALL ${selOf(data)}`);
+  sandbox.S.chainId = 1;
+});
+
+test('a verified name never displaces a branch this interface already knows', () => {
+  indexAt(TOKEN);
+  const data = erc20Iface.encodeFunctionData('approve', [BOB, 2n ** 256n - 1n]);
+  const k = txKind(prop({ target: TOKEN, callData: data }), vault());
+  assert.equal(k.label, 'ERC20 APPROVE');
+  assert.match(k.note, /UNLIMITED AMOUNT/);
+});
+
+test('a self-call the wallet has no function for stays a silent no-op, whatever an ABI says', () => {
+  indexAt(VAULT);
+  const data = listingIface.encodeFunctionData('freeze', [true]);
+  const k = txKind(prop({ target: VAULT, callData: data, nonce: 3 }), vault());
+  assert.equal(k.label, 'SELF-CALL · SILENT NO-OP');
+});
+
+test('calldata that does not fit the signature it matched is reported, not decoded anyway', () => {
+  indexAt(BOB);
+  const data = listingIface.encodeFunctionData('delist', [1n, ALICE]).slice(0, 42);
+  const k = txKind(prop({ target: BOB, callData: data }), vault());
+  assert.equal(k.label, 'CALL delist');
+  assert.match(k.note, /DO NOT DECODE AGAINST THAT SIGNATURE/);
+});
+
+test('a function name out of a third-party ABI cannot reach a label as markup', () => {
+  // Sourcify serves compiler metadata, so a name here should always be a
+  // Solidity identifier. Should is not a guarantee worth a stored XSS.
+  const evil = [{ type: 'function', name: '<img src=x onerror=alert(1)>', inputs: [], outputs: [] }];
+  indexAt(BOB, evil);
+  const sel = ethers.id('<img src=x onerror=alert(1)>()').slice(0, 10);
+  const k = txKind(prop({ target: BOB, callData: sel }), vault());
+  assert.ok(!/[<>]/.test(k.label), `raw markup reached the label: ${k.label}`);
+  assert.ok(!k.note.includes('<img'), 'raw markup reached the note');
+  indexAt(BOB);
+});
+
+test('a batch names each member off the contract that member calls', () => {
+  indexAt(BOB);
+  const inner = listingIface.encodeFunctionData('freeze', [false]);
+  const data = msIface.encodeFunctionData('batch', [[BOB, ALICE], [0n, 0n], [inner, inner]]);
+  const k = txKind(prop({ target: VAULT, callData: data }), vault());
+  // Same bytes, two targets: named at the one that published an ABI for it.
+  assert.match(k.note, new RegExp(`CALL freeze \\+ CALL ${selOf(inner)}`));
+});
+
+test('a selector is hashed from the canonical signature, tuples expanded', () => {
+  assert.equal(abiTypeSig({ type: 'uint256' }), 'uint256');
+  assert.equal(abiTypeSig({ type: 'tuple', components: [{ type: 'address' }, { type: 'uint256' }] }), '(address,uint256)');
+  assert.equal(abiTypeSig({ type: 'tuple[]', components: [{ type: 'bool' }] }), '(bool)[]');
+  // Round-trip against ethers' own hashing, which is what a chain would use.
+  const abi = [{ type: 'function', name: 'list', inputs: [
+    { name: 'o', type: 'tuple', components: [{ name: 'a', type: 'address' }, { name: 'p', type: 'uint256' }] }], outputs: [] }];
+  indexAt(BOB, abi);
+  const data = new ethers.Interface(abi).encodeFunctionData('list', [[ALICE, 5n]]);
+  assert.equal(txKind(prop({ target: BOB, callData: data }), vault()).label, 'CALL list');
+  indexAt(BOB);
+});
+
+test('an argument is shown in a form a signer can check, and never as an invention', () => {
+  assert.equal(fmtAbiArg(ALICE, 'address'), '0x2222…2222');
+  assert.equal(fmtAbiArg(true, 'bool'), 'TRUE');
+  assert.equal(fmtAbiArg(10n ** 30n, 'uint256'), '1000000000000000000000000000000');
+  assert.equal(fmtAbiArg('hi', 'string'), '"hi"');
+  assert.match(fmtAbiArg('x'.repeat(60), 'string'), /…"$/);
+  assert.equal(fmtAbiArg([1n, 2n, 3n], 'uint256[]'), '[3 ITEMS]');
 });
 
 // ── the untrusted row ─────────────────────────────────────────────
