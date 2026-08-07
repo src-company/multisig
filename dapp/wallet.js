@@ -540,9 +540,35 @@ window.connectWallet = async function() {
 
 // --- Name resolution ---
 const _ethRpcs = ['https://ethereum.publicnode.com','https://1rpc.io/eth','https://eth.drpc.org'];
-const _ethMainProvider = new ethers.FallbackProvider(
-  _ethRpcs.map((url, i) => ({ provider: new ethers.JsonRpcProvider(url, 1, {staticNetwork:true}), priority: i + 1, stallTimeout: 2000 })), 1, { quorum: 1 }
-);
+
+// A FallbackProvider is not self-healing, and this one names the connected
+// account: ethers marks a backend with `_lastFatalError` the first time its
+// getBlockNumber throws, never clears it, and once every backend carries one the
+// provider answers "no runners?!" to everything from then on. Built once and
+// held forever — which is what this was — that meant a single blip while the
+// page was open, a sleeping laptop or a dropped tunnel, silently killed .wei,
+// .gwei and .eth resolution for the rest of the session.
+//
+// It killed only those three. Basenames and MegaNames are read through the
+// app's own providers via window.localNames, and those DO rebuild on a wedge
+// (see makeProvider in index.html), so the account kept its Basename and lost
+// its mainnet name — the header reading as someone's Base identity everywhere,
+// permanently, with a reload the only way back. Same wedge check as the app's,
+// for the same reason and in the same shape.
+let _ethProvider = null;
+function _ethRpc() {
+  if (_ethProvider && !_ethProvider._wedged) return _ethProvider;
+  const p = new ethers.FallbackProvider(
+    _ethRpcs.map((url, i) => ({ provider: new ethers.JsonRpcProvider(url, 1, {staticNetwork:true}), priority: i + 1, stallTimeout: 2000 })), 1, { quorum: 1 }
+  );
+  const perform = typeof p._perform === 'function' ? p._perform.bind(p) : null;
+  if (perform) p._perform = async req => {
+    try { return await perform(req); }
+    catch (e) { if (/no runners/i.test((e && e.message) || '')) p._wedged = true; throw e; }
+  };
+  _ethProvider = p;
+  return p;
+}
 
 // The chain-local namespaces — Basenames on Base, MegaNames on MegaETH — are
 // owned by the app, which holds their resolvers, caches and rate budget. This
@@ -555,8 +581,8 @@ function _localNs() { return window.localNames || []; }
 // re-resolving — an account with both a .eth and a Basename would otherwise
 // flicker back to its hex address and re-fetch on every switch, and this app
 // switches chains constantly.
-let _nameOf = { addr: null, eth: null, local: {}, asked: {} };
-function _blankNames(addr) { return { addr: addr || null, eth: null, local: {}, asked: {} }; }
+let _nameOf = { addr: null, eth: null, ethAsked: false, local: {}, asked: {} };
+function _blankNames(addr) { return { addr: addr || null, eth: null, ethAsked: false, local: {}, asked: {} }; }
 function _shortAddr(a) { return a.slice(0, 6) + '...' + a.slice(-4); }
 function _applyWalletName() {
   const addr = _connectedAddress;
@@ -589,39 +615,58 @@ function _resolveAllLocalNames(addr) {
   for (const ns of _localNs()) _resolveLocalName(addr, ns.chainId);
 }
 
-// Name the connected wallet: .wei, then .gwei, then ENS, then the chain-local
-// namespaces. Each mainnet step only runs if the one before it came back empty,
-// so the preferred name always wins — except on a chain that has a namespace of
-// its own, where that one is asked for straight away because it is what will be
-// displayed there whatever mainnet says.
+// Ask mainnet what this account is called: .wei, then .gwei, then ENS. Each
+// step only runs if the one before it came back empty, so the preferred name
+// always wins.
 //
-// The mainnet chain runs on those chains too. It is what the account is called
-// the moment the app moves off them, and this app moves between chains as a
-// matter of course; finding it out during the switch would cost a round trip
-// with the header already repainted.
+// Once per account, hit or miss — and un-asked when a step did not ANSWER,
+// which is the same rule _resolveLocalName follows and for the same reason. The
+// two are not the same outcome: mainnet saying "no name" is an answer worth
+// keeping, mainnet not answering is a question that was never put. Collapsing
+// them meant one hiccup at the moment of connecting cost the account its
+// mainnet name for the whole session, and the header fell through to whatever
+// chain-local namespace was reachable — reading as a Basename on every chain,
+// with nothing to retry it. The local namespaces already got a second chance on
+// every network switch; this is the mainnet one.
+//
+// Runs on the chain-local chains too. It is what the account is called the
+// moment the app moves off them, and this app moves between chains as a matter
+// of course; finding it out during the switch would cost a round trip with the
+// header already repainted.
+function _resolveEthName(addr) {
+  if (!addr || _nameOf.addr !== addr || _nameOf.eth || _nameOf.ethAsked) return;
+  _nameOf.ethAsked = true;
+  (async () => {
+    let name = null;
+    // Any step that threw. A name found by a later one still wins outright —
+    // it is a name this address really holds — but a run that ends empty with a
+    // step unanswered is not "this account has no mainnet name".
+    let silent = false;
+    for (const registry of [WEINS, GWEINS]) {
+      try {
+        const n = await new ethers.Contract(registry, WEINS_ABI, _ethRpc()).reverseResolve(addr);
+        if (n) { name = n; break; }
+      } catch (e) { silent = true; }
+    }
+    if (!name) {
+      try {
+        const n = await _ethRpc().lookupAddress(addr);
+        if (n) name = n;
+      } catch (e) { silent = true; }
+    }
+    if (_nameOf.addr !== addr) return;       // account changed under us — drop it
+    if (name) { _nameOf.eth = String(name).toLowerCase(); _applyWalletName(); return; }
+    if (silent) _nameOf.ethAsked = false;
+    _resolveAllLocalNames(addr);             // nothing on mainnet — try the rest
+  })().catch(() => {});
+}
+
+// Name the connected wallet. The chain being displayed is asked straight away
+// alongside mainnet, because on a chain with a namespace of its own that is
+// what will be shown whatever mainnet says.
 function resolveWeiName(addr) {
   _nameOf = _blankNames(addr);
-  try {
-    const apply = name => {
-      if (_nameOf.addr !== addr) return;      // account changed — drop it
-      _nameOf.eth = String(name).toLowerCase();
-      _applyWalletName();
-    };
-    const tryEns = () => {
-      _ethMainProvider.lookupAddress(addr).then(ensName => {
-        if (ensName) apply(ensName);
-        else _resolveAllLocalNames(addr);     // nothing on mainnet — try the rest
-      }).catch(() => _resolveAllLocalNames(addr));
-    };
-    const tryNS = (registry, next) => {
-      const ns = new ethers.Contract(registry, WEINS_ABI, _ethMainProvider);
-      ns.reverseResolve(addr).then(name => {
-        if (name) apply(name);
-        else next();
-      }).catch(next);
-    };
-    tryNS(WEINS, () => tryNS(GWEINS, tryEns));
-  } catch (e) {}
+  try { _resolveEthName(addr); } catch (e) {}
   _resolveLocalName(addr, _targetChainId);
 }
 window.resolveWeiName = resolveWeiName;
@@ -629,8 +674,15 @@ window.resolveWeiName = resolveWeiName;
 // The app moved to another chain. Re-pick the name from what is already known,
 // and go and find that chain's own name if arriving there is the first time it
 // has been worth asking for.
+//
+// Mainnet is retried on the same beat, and only if it was never answered — a
+// confirmed "no mainnet name" is asked once and remembered. A switch is the
+// natural place for it: it is the one moment the header is going to repaint
+// anyway, and an account that lost its .wei name to a blip at connect time gets
+// it back on the next network click rather than on a reload.
 function onTargetChainChanged() {
   if (!_connectedAddress) return;
+  _resolveEthName(_connectedAddress);
   _resolveLocalName(_connectedAddress, _targetChainId);
   _applyWalletName();
 }
