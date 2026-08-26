@@ -5211,11 +5211,24 @@ function renderDash(v,mob){
   let needsSig=0,readyExec=0,pendingSubmit=0,elsewhere=0;
   const firstWith={sign:-1,exec:-1,submit:-1};
   const hereHas={sign:false,exec:false,submit:false};
+  // The selected vault's state, kept from the pass that is being made anyway.
+  //
+  // txSt was being recomputed for the same proposal in three places: here, again
+  // on the card, and again once per OWNER in the signers roster below — so the
+  // roster alone was O(owners x queue) calls, and txSt counts signatures with
+  // Object.values(approvals), which is itself O(owners). That makes the section
+  // O(owners squared x queue) on a page that repaints on every poll tick. A
+  // hundred-owner vault with ten proposals is a hundred thousand property reads
+  // per tick, for an answer that does not depend on the owner it is asked about.
+  // The answer is a pure function of (tx, vault) and the vault does not change
+  // mid-render, so it is computed once and read back.
+  const stFor=new Map();
   const vaultFlags=S.vaults.map((vt,vi)=>{
     const here=vi===S.sel;
     let rdy=false,needsYou=false;
     vt.queue.forEach(tx=>{
       const st=txSt(tx,vt);
+      if(here)stFor.set(tx,st);
       // Each proposal falls in at most one bucket — txSt's branches are
       // exclusive and st.instant implies st.queue — so counting `elsewhere`
       // off a single flag counts proposals, not bucket memberships.
@@ -5333,7 +5346,7 @@ ${/* Topping up is the one action here that needs no signature, no quorum and no
        desktop padding spent 113px of an 844px viewport saying nothing and pushed
        SIGNERS — the only content on the screen — to the bottom edge. */''}
   ${v.queue.length===0&&!S.showTx?`<div style="padding:${mob?"26px 0":"48px 0"};text-align:center;font-size:13px;color:var(--d);letter-spacing:2px">NO PENDING TRANSACTIONS</div>`:v.queue.map((tx,i)=>{
-    const s=txSt(tx,v),isCancel=isCancelTx(tx,v);
+    const s=stFor.get(tx)||txSt(tx,v),isCancel=isCancelTx(tx,v);
     const isQueued=tx.eta>0;
     const blocked=!isQueued&&!isCancel&&i!==firstUnqueued;
     const dv=tx.displayValue||tx.value,dt=tx.displayToken||tx.token;
@@ -5464,8 +5477,7 @@ ${/* Topping up is the one action here that needs no signature, no quorum and no
       // whether a threshold nobody here controls has been reached.
       actionBtn=`<button class="unsign-link" onclick="doUnsign(${S.sel},${tx.nonce})">UNSIGN</button>`;
     }else if(s.queue){
-      const ac=Object.values(tx.approvals).filter(Boolean).length;
-      const unanimous=ac===v.ownerCount;
+      const unanimous=acCount===v.ownerCount;
       const unsignLink=signedByYou?`<button class="unsign-link" onclick="doUnsign(${S.sel},${tx.nonce})">UNSIGN</button>`:'';
       if(s.instant){
         actionBtn=`<div style="display:flex;flex-direction:column;${mob?"width:100%":"align-items:flex-end"}"><button class="btn btn-green" ${mob?"style='width:100%'":""} onclick="doSubmit(${S.sel},${tx.nonce})">EXECUTE</button>${unsignLink}</div>`;
@@ -5598,7 +5610,7 @@ ${/* Name first, then the address it stands for, then the annotations. YOU sits
     v.queue.forEach(tx=>{
       const has=!!tx.approvals[o.addr];
       if(has)signed++;
-      else if(txSt(tx,v).sign)awaited++;
+      else if((stFor.get(tx)||txSt(tx,v)).sign)awaited++;
     });
     const stand=!v.queue.length?""
       :awaited?`<span class="signer-stand await" title="${awaited} proposal${awaited>1?"s are":" is"} still collecting signatures and this owner has not signed ${awaited>1?"them":"it"} yet">${awaited} AWAITING</span>`

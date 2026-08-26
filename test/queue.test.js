@@ -256,3 +256,48 @@ test('every owner is listed, whether or not they have signed', () => {
   assert.ok(html.includes(THEM), 'and so is the owner being waited on');
   assert.match(html, /1 AWAITING/, 'the owner holding it up is named as such');
 });
+
+// ── how many times it asks ────────────────────────────────────────
+
+test('each proposal is judged once per paint, however many owners are looking at it', () => {
+  // txSt is a pure function of (proposal, vault) and the vault does not change
+  // mid-render, but it was being called from three places: the pass that counts
+  // work across every vault, again on the card, and again once per OWNER in the
+  // signers roster. That last one is the expensive shape — O(owners x queue)
+  // calls, each of which counts signatures with Object.values(approvals) and is
+  // therefore itself O(owners), so the roster alone was O(owners squared x
+  // queue) on a page that repaints on every poll tick.
+  //
+  // Counted rather than timed: a timing assertion on a shared runner is a flake,
+  // and the claim worth pinning is not "it is fast" but "it does not ask the
+  // same question again for every owner".
+  const owners = Array.from({ length: 12 }, (_, i) =>
+    ({ addr: '0x' + String(i + 1).padStart(40, '0'), label: '', you: i === 0 }));
+  const queue = Array.from({ length: 6 }, (_, i) => proposal({
+    nonce: 40 + i,
+    approvals: Object.fromEntries(owners.map(o => [o.addr, false])),
+  }));
+  vault(null, { owners, ownerCount: owners.length, threshold: 2, queue });
+
+  const real = sandbox.txSt;
+  let calls = 0;
+  sandbox.txSt = (tx, v) => { calls++; return real(tx, v); };
+  try { draw(); } finally { sandbox.txSt = real; }
+
+  assert.equal(calls, queue.length,
+    `txSt ran ${calls} times for ${queue.length} proposals and ${owners.length} owners — the answer is being recomputed per owner`);
+});
+
+test('the roster still says which owners the queue is waiting on', () => {
+  // The counting test above would also pass if the roster stopped asking
+  // altogether, so the thing it optimises has to be asserted separately.
+  const A = '0x' + '1'.repeat(40), B = '0x' + '2'.repeat(40);
+  const owners = [{ addr: A, label: '', you: true }, { addr: B, label: '', you: false }];
+  vault(null, {
+    owners, ownerCount: 2, threshold: 2,
+    queue: [proposal({ nonce: 40, approvals: { [A]: true, [B]: false } })],
+  });
+  const html = draw();
+  assert.match(html, /1 AWAITING/, 'the owner holding the queue up is no longer named');
+  assert.match(html, /1\/1 SIGNED/, 'the owner who has signed lost their standing');
+});
