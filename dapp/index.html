@@ -13742,10 +13742,19 @@ function handleDeepLink() {
   const link = parseDeepLink(location.hash.slice(1));
   if(!link) return false;
 
-  S.chainId = link.chainId;
-  lsSet('ms_chain', String(S.chainId));
-  provider = makeProvider(S.chainId);
-  fetchBlock();
+  // Through adoptChain, not by hand — the same correction _onWalletConnect
+  // already carries, for the same reason. A chain change is more than a
+  // provider swap: the block tick's interval and the wallet provider's
+  // receipt-polling interval are both properties of the chain, and this was
+  // open-coding the swap without either. A link is the one route into this app
+  // that routinely lands on a chain the page did NOT open on — that is what a
+  // shared vault link is — so opening a MegaETH or Arbitrum vault from a
+  // browser whose last chain was Ethereum left a 12-second cadence on a
+  // one-second chain: the block counter advancing in jumps of twelve, and a
+  // mined receipt reported up to twelve seconds after it existed. It also
+  // leaves the previous chain's block number in the footer until the first
+  // fetch answers, which adoptChain clears.
+  adoptChain(link.chainId);
   // Sync wallet target chain so auto-reconnect uses the deep-linked chain
   walletSwitchChain({
     chainId: link.chainId,

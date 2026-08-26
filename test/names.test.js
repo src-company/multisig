@@ -222,3 +222,32 @@ test('a cached name is scoped to the ordering that produced it', () => {
   assert.equal(keys.size, 3, 'each ordering gets its own cache entry');
   assert.equal(_onKey(ADDR, base), _onKey(ADDR.toLowerCase(), base), 'and it is case-insensitive');
 });
+
+// ── the chain a followed link lands on ────────────────────────────
+
+test('following a link adopts its chain rather than open-coding the swap', () => {
+  // A chain change is more than pointing `provider` somewhere else. adoptChain()
+  // also reschedules the block tick and retunes the wallet provider's
+  // receipt-polling interval, both of which are properties of the chain — twelve
+  // seconds on Ethereum, one on MegaETH — and it clears the block number so the
+  // footer does not keep showing the previous chain's.
+  //
+  // A link is the one route into this app that routinely lands somewhere the
+  // page did not open on; that is what a shared vault link IS. handleDeepLink
+  // was the second place to open-code the swap (the first was _onWalletConnect,
+  // which was corrected), so opening a MegaETH vault from a browser whose last
+  // chain was Ethereum left a 12-second cadence on a one-second chain: a counter
+  // advancing in jumps of twelve, and a mined receipt reported up to twelve
+  // seconds after it existed.
+  //
+  // Structural, because the behavioural version would need most of the app
+  // stood up around it. What it pins is the one thing that went wrong: the
+  // assignment happening anywhere but inside adoptChain.
+  const body = grab('handleDeepLink');
+  assert.match(body, /adoptChain\(link\.chainId\)/,
+    'handleDeepLink no longer routes its chain change through adoptChain');
+  assert.doesNotMatch(body, /^\s*S\.chainId\s*=/m,
+    'handleDeepLink assigns S.chainId directly again — the tick and the wallet poll interval go stale with it');
+  assert.doesNotMatch(body, /provider\s*=\s*makeProvider\(/,
+    'handleDeepLink rebuilds the provider by hand again, which is the half of the swap that looks complete');
+});
