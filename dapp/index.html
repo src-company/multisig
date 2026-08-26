@@ -2720,7 +2720,17 @@ class PgQuery {
   // values are hex, and ilike without % or _ is just a case-blind =.
   ilike(col, val) { this._params.append(col, `ilike.${val}`); return this; }
   in(col, arr) { this._params.append(col, `in.(${arr.join(',')})`); return this; }
-  order(col, opts) { this._params.append('order', `${col}.${opts && opts.ascending === false ? 'desc' : 'asc'}`); return this; }
+  // Merged into ONE `order` parameter rather than appended as a second one.
+  // PostgREST spells a multi-column sort as `order=a.asc,b.asc`; two separate
+  // `order=` parameters are not that, and only one of them survives — so a
+  // chained call would silently drop the tie-break it was added for. A single
+  // order() is byte-for-byte what it was before.
+  order(col, opts) {
+    const dir = opts && opts.ascending === false ? 'desc' : 'asc';
+    const prev = this._params.get('order');
+    this._params.set('order', (prev ? prev + ',' : '') + `${col}.${dir}`);
+    return this;
+  }
   // Ordering for an embedded resource. PostgREST spells it as a parameter of the
   // embedded name rather than as part of the parent's `order`, so it cannot be
   // expressed through order() above.
@@ -9242,7 +9252,20 @@ async function dbGetPending(wId) {
   const q = () => sb.from('tx_summary')
     .eq('wallet_id', wId)
     .in('status', ['proposed', 'executing', 'queued'])
-    .order('nonce', { ascending: true });
+    // Nonce, then id — and the second half is not decoration. A nonce is
+    // contested, not owned (the UNIQUE constraint that made it exclusive was
+    // dropped so a companion could coexist with the proposal it acts on), so
+    // two different proposals can legitimately sit at the same one. Only the
+    // first of them is drawn unblocked, and it is the only one this queue
+    // offers a SIGN, SUBMIT or REJECT on — the rest render as CONTESTED with no
+    // controls. With `nonce` as the sole sort key, which of them that is comes
+    // back to whatever the planner returned, which is not stable between
+    // requests and certainly not between owners: two co-signers could each be
+    // shown a different one of the pair as the actionable proposal and sign
+    // opposite payloads, and neither would ever reach quorum. `id` is a uuid
+    // and arbitrary, but it is the SAME arbitrary answer for everybody.
+    .order('nonce', { ascending: true })
+    .order('id', { ascending: true });
   const { data, error } = await q().select('*,' + SIG_EMBED).orderOn('signatures', 'signer');
   if(!error) return { rows: data || [], sigs: true };
   console.warn('Proposals with their signatures:', error, '— reading the signatures separately instead');
@@ -10101,6 +10124,16 @@ async function loadVaultQueue(vi) {
         rejectSigners: rejectSigs[t.nonce] || null
       });
     }
+    // Back into nonce order before it is shown. The rows arrive sorted, but a
+    // retired proposal the vault turned out to still be holding is appended to
+    // the end of the batch above — it comes from a second query, ordered by
+    // when it was retired — so it was drawn last however low its nonce was: a
+    // queued proposal at #5, still maturing, sitting underneath #7 and #8 in a
+    // list whose whole organising idea is that the vault executes nonces in
+    // order. That row is the one on the card that says the record and the chain
+    // disagree, which is the last one to bury at the bottom of the queue.
+    // Stable, so contested nonces keep the tie-break dbGetPending just fixed.
+    queue.sort((a, b) => a.nonce - b.nonce);
     v.queue = queue;
 
     // Background: retire superseded rows so they don't reappear. Recorded as

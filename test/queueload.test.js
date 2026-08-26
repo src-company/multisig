@@ -798,3 +798,44 @@ test('a proposal whose queued call failed is neither pruned nor hidden', async (
     'an unreadable answer was treated as the vault disclaiming the proposal');
   assert.deepEqual(db.pruned, [], 'a proposal was pruned on the strength of a call that failed');
 });
+
+// ── the order the cards come out in ───────────────────────────────
+
+test('a resurrected proposal takes its place by nonce, not at the end of the queue', async () => {
+  // The live rows arrive sorted by nonce; the retired ones arrive sorted by when
+  // they were retired, from a second query, and are appended to the batch. So a
+  // proposal the vault turned out to still be holding was drawn LAST however low
+  // its nonce was — #3, still maturing, sitting underneath #6 and #7 in a list
+  // whose whole organising idea is that the vault executes nonces in order.
+  //
+  // It is the one row on the card that says the record and the chain disagree,
+  // which makes the bottom of the queue the worst place for it.
+  resetChain();
+  const v = vault({ nonce: 5 });
+  const buried = row({ nonce: 3, status: 'cancelled' });   // below the live nonce, so still holdable
+  chain.queued.set(proposalDigest(v, buried).toLowerCase(), 99999);
+  const later = [row({ nonce: 6 }), row({ nonce: 7 })];
+  for (const t of later) t.signatures = [sign(v, t, A)];
+  const q = await load(v, { pending: later, terminal: [buried] });
+  assert.deepEqual(q.map(t => t.nonce), [3, 6, 7],
+    'the resurrected proposal was drawn after proposals with higher nonces');
+  assert.equal(q[0].orphanedFrom, 'cancelled');
+});
+
+test('two proposals contesting one nonce keep the order the database handed back', async () => {
+  // A nonce is contested, not owned — the UNIQUE constraint that made it
+  // exclusive was dropped so a companion could coexist with the proposal it acts
+  // on. Only the FIRST of a contested pair is drawn unblocked, and it is the only
+  // one the queue offers a SIGN or a SUBMIT on, so which one leads has to be the
+  // same answer for every owner. dbGetPending orders by (nonce, id) for that
+  // reason; the sort here must not undo it, which a comparator that is not
+  // stable, or one that sorts on anything but the nonce, would.
+  resetChain();
+  const v = vault({ nonce: 4 });
+  const first = row({ nonce: 4, target: A });
+  const second = row({ nonce: 4, target: B });
+  for (const t of [first, second]) t.signatures = [sign(v, t, A)];
+  const q = await load(v, { pending: [first, second] });
+  assert.deepEqual(q.map(t => t.dbId), [first.id, second.id],
+    'the contested pair came back in a different order than the database gave them');
+});
