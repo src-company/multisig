@@ -286,6 +286,74 @@ function injectWalletModal() {
 
 // --- Modal ---
 let _walletFocusReturn = null;
+// The poll that keeps the sheet current while an extension that has not
+// announced yet still might, and the keys already drawn in it.
+let _sheetTimer = null, _sheetOnAnnounce = null;
+const _sheetDrawn = new Set();
+function _stopSheetPoll() {
+  if (_sheetTimer) { clearInterval(_sheetTimer); _sheetTimer = null; }
+  if (_sheetOnAnnounce) { window.removeEventListener('eip6963:announceProvider', _sheetOnAnnounce); _sheetOnAnnounce = null; }
+}
+
+function _walletRowHtml(w) {
+  return `<button type="button" class="wallet-option" data-wallet-key="${_esc(w.key)}">${w.icon ? `<span class="wallet-option-icon" aria-hidden="true">${w.icon}</span>` : ''}<span class="wallet-option-name">${_esc(w.name)}</span></button>`;
+}
+
+// Draw the sheet's body from whatever has announced by now.
+//
+// Append-only, and that is the whole design. A redraw would be the obvious way
+// to fold in a late-announcing extension, and it is the wrong one here: it
+// destroys the row the pointer is over and the row the keyboard is on, and it
+// moves every row below the insertion point — on the one sheet in this app where
+// picking the wrong row is picking the wrong account. So nothing already on
+// screen ever moves. A wallet that announces after the sheet is open arrives at
+// the bottom of the list, which is where it actually turned up.
+//
+// Returns false once the sheet is gone, which is what stops the poll.
+function _paintWalletSheet(firstPaint) {
+  const modal = document.getElementById('walletModal');
+  const container = document.getElementById('walletOptions');
+  if (!modal || !container || !modal.classList.contains('active')) return false;
+  const closeBtn = modal.querySelector('.wallet-modal-close');
+  // Only ever on the first paint, and only from the close button — the one
+  // place focus is put by opening the sheet. A later paint that moved it would
+  // take the keyboard off whatever the visitor had chosen.
+  const takeFocus = () => {
+    if (!firstPaint) return;
+    const first = container.querySelector('.wallet-option');
+    if (first && document.activeElement === closeBtn) first.focus();
+  };
+
+  if (_connectedAddress) {
+    if (!firstPaint) return true;             // the disconnect view has nothing to grow
+    container.innerHTML = `<div class="wallet-addr-display">${_esc(_connectedAddress)}</div>
+      <button type="button" class="wallet-option disconnect" onclick="disconnectWallet()"><span class="wallet-option-name">Disconnect</span></button>`;
+    takeFocus();
+    return true;
+  }
+
+  const fresh = detectWallets().filter(w => !_sheetDrawn.has(w.key));
+  if (!fresh.length) {
+    if (firstPaint) container.innerHTML = '<div data-sheet-empty style="padding:16px;text-align:center;font-size:11px;letter-spacing:2px;color:var(--d)">NO WALLETS DETECTED</div>';
+    return true;
+  }
+  const note = container.querySelector('[data-sheet-empty]');
+  if (note) note.remove();
+  for (const w of fresh) _sheetDrawn.add(w.key);
+  // The handlers are bound to the nodes that were just added, found by their
+  // position rather than by a marker attribute, so the rows above keep the ones
+  // they already carry and nothing is bound twice.
+  const before = container.querySelectorAll('[data-wallet-key]').length;
+  container.insertAdjacentHTML('beforeend', fresh.map(_walletRowHtml).join(''));
+  const rows = container.querySelectorAll('[data-wallet-key]');
+  for (let i = before; i < rows.length; i++) {
+    const el = rows[i];
+    el.addEventListener('click', () => connectWithWallet(el.dataset.walletKey));
+  }
+  takeFocus();
+  return true;
+}
+
 function showWalletModal() {
   injectWalletModal();
   _walletFocusReturn = document.activeElement;
@@ -295,28 +363,42 @@ function showWalletModal() {
   const closeBtn = document.querySelector('.wallet-modal-close');
   if (closeBtn) closeBtn.focus();
   window.dispatchEvent(new Event('ms:overlay-change'));
-  setTimeout(() => {
-    const wallets = detectWallets();
-    const container = document.getElementById('walletOptions');
-    if (_connectedAddress) {
-      container.innerHTML = `<div class="wallet-addr-display">${_esc(_connectedAddress)}</div>
-        <button type="button" class="wallet-option disconnect" onclick="disconnectWallet()"><span class="wallet-option-name">Disconnect</span></button>`;
-      const first = container.querySelector('.wallet-option');
-      if (first && document.activeElement === closeBtn) first.focus();
-    } else {
-      container.innerHTML = wallets.length > 0 ? wallets.map(w =>
-        `<button type="button" class="wallet-option" data-wallet-key="${_esc(w.key)}">${w.icon ? `<span class="wallet-option-icon" aria-hidden="true">${w.icon}</span>` : ''}<span class="wallet-option-name">${_esc(w.name)}</span></button>`
-      ).join('') : '<div style="padding:16px;text-align:center;font-size:11px;letter-spacing:2px;color:var(--d)">NO WALLETS DETECTED</div>';
-      container.querySelectorAll('[data-wallet-key]').forEach(el => {
-        el.addEventListener('click', () => connectWithWallet(el.dataset.walletKey));
-      });
-      const firstOpt = container.querySelector('.wallet-option');
-      if (firstOpt && document.activeElement === closeBtn) firstOpt.focus();
-    }
-  }, 200);
+
+  // Painted now, not on a timer.
+  //
+  // This was a fixed 200ms sleep before the body was filled in at all, and every
+  // visitor paid all of it every time — on the app's front door, on a sheet that
+  // opened empty and then had wallets appear in it. A fixed wait is the wrong
+  // shape here for exactly the reason _awaitSavedProvider gives: an extension
+  // announces in response to the request event and registers that listener when
+  // its content script runs, usually before this page's scripts and occasionally
+  // after. So the wait cannot be skipped and it cannot be a constant either.
+  //
+  // Ask immediately, draw what has already answered, keep asking on a short
+  // cadence, and stop at the deadline. The 700ms survives as a ceiling rather
+  // than as a price: an extension slow to inject is given exactly as long as it
+  // had before, and the ordinary case — everything already announced, which is
+  // every visitor who has been on the page for more than a frame — costs nothing.
+  _stopSheetPoll();
+  _sheetDrawn.clear();
+  _paintWalletSheet(true);
+  // A connected sheet is the disconnect button and nothing else, so there is
+  // nothing for an announcement to add to it.
+  if (_connectedAddress) return;
+
+  const started = Date.now();
+  _sheetOnAnnounce = () => { if (!_paintWalletSheet(false)) _stopSheetPoll(); };
+  window.addEventListener('eip6963:announceProvider', _sheetOnAnnounce);
+  _sheetTimer = setInterval(() => {
+    if (!_paintWalletSheet(false) || Date.now() - started >= ANNOUNCE_DEADLINE_MS) return _stopSheetPoll();
+    window.dispatchEvent(new Event('eip6963:requestProvider'));
+  }, ANNOUNCE_RETRY_MS);
 }
 
 window.closeWalletModal = function() {
+  // Before the class comes off, so the poll stops on this call rather than on
+  // its next tick noticing the sheet has gone.
+  _stopSheetPoll();
   const modal = document.getElementById('walletModal');
   if (modal) modal.classList.remove('active');
   document.body.classList.remove('modal-open');
