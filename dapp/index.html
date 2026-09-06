@@ -2524,6 +2524,32 @@ const USDM_ICON = `<svg width="14" height="14" viewBox="0 0 256 256" xmlns="http
 
 const ETH_ONLY = [{ symbol:'ETH', address:ethers.ZeroAddress, decimals:18, icon:ETH_ICON }];
 
+// Robinhood Chain's own assets. These had no marks and fell through to
+// placeholderIcon, which draws the first three characters of the ticker — so
+// USDG and USDe, the chain's two stablecoins, both came out as a circle reading
+// "USD". Two different assets rendering as the same glyph in the same picker is
+// worse than no glyph at all, and it is the send picker, where the row that gets
+// clicked is the one the transfer is denominated in.
+const USDG_ICON = `<svg width="14" height="14" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><circle cx="16" cy="16" r="16" fill="#0BA36B"/><circle cx="16" cy="16" r="12.4" fill="none" stroke="#FFF" stroke-width="1.1" opacity=".55"/><text x="16" y="16.4" font-family="Arial,Helvetica,sans-serif" font-size="15" font-weight="700" fill="#FFF" text-anchor="middle" dominant-baseline="central">G</text></svg>`;
+const USDE_ICON = `<svg width="14" height="14" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><circle cx="16" cy="16" r="16" fill="#171717"/><path d="M16 6l9 10-9 10L7 16 16 6z" fill="#FFF"/><path d="M16 10.6l5.6 5.4-5.6 5.4-5.6-5.4 5.6-5.4z" fill="#171717"/></svg>`;
+
+// A tokenised equity is not a coin, and at 14px it should not look like one.
+// Every other mark in this file is a disc; these are rounded squares in a flat
+// slate, so the asset CLASS is legible at icon size even when the four letters
+// inside are not — which at 14px they are not, and neither is anything else's.
+// The ticker carries it at full size in the review card and the holdings table.
+//
+// Sanitised and length-clamped rather than trusted: this builds an SVG text node
+// from a symbol, and the symbols it is called with today are constants in the
+// table below, but a helper that interpolates a string into markup should not be
+// the one place that assumes its caller. Same rule placeholderIcon already
+// follows, and esc() is not reachable this early.
+function equityIcon(sym){
+  const t = String(sym || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 4).toUpperCase() || '?';
+  const fs = t.length >= 4 ? 9.2 : t.length === 3 ? 12 : t.length === 2 ? 15 : 17;
+  return `<svg width="14" height="14" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><rect width="32" height="32" rx="7" fill="#37455A"/><text x="16" y="17" font-family="Arial,Helvetica,sans-serif" font-size="${fs}" font-weight="700" fill="#FFF" text-anchor="middle" dominant-baseline="central">${t}</text></svg>`;
+}
+
 const PROD_TOKENS = {
   1: [
     { symbol:'ETH',    address:ethers.ZeroAddress,                              decimals:18, icon:ETH_ICON },
@@ -2595,13 +2621,13 @@ const PROD_TOKENS = {
   4663: [
     { symbol:'ETH',    address:ethers.ZeroAddress,                              decimals:18, icon:ETH_ICON },
     { symbol:'WETH',   address:'0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73',   decimals:18, icon:ETH_ICON },
-    { symbol:'USDG',   address:'0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168',   decimals:6,  icon:null },
-    { symbol:'USDe',   address:'0x5d3a1Ff2b6BAb83b63cd9AD0787074081a52ef34',   decimals:18, icon:null },
+    { symbol:'USDG',   address:'0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168',   decimals:6,  icon:USDG_ICON },
+    { symbol:'USDe',   address:'0x5d3a1Ff2b6BAb83b63cd9AD0787074081a52ef34',   decimals:18, icon:USDE_ICON },
     { symbol:'cbBTC',  address:'0xCEC185eB182c47d1bA1EFc84e6959e18cd620Be4',   decimals:8,  icon:CBBTC_ICON },
-    { symbol:'NVDA',   address:'0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC',   decimals:18, icon:null },
-    { symbol:'SPY',    address:'0x117cc2133c37B721F49dE2A7a74833232B3B4C0C',   decimals:18, icon:null },
-    { symbol:'SPCX',   address:'0x4a0E65A3EcceC6dBe60AE065F2e7bb85Fae35eEa',   decimals:18, icon:null },
-    { symbol:'GME',    address:'0x1b0E319c6A659F002271B69dB8A7df2F911c153E',   decimals:18, icon:null },
+    { symbol:'NVDA',   address:'0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC',   decimals:18, icon:equityIcon('NVDA') },
+    { symbol:'SPY',    address:'0x117cc2133c37B721F49dE2A7a74833232B3B4C0C',   decimals:18, icon:equityIcon('SPY') },
+    { symbol:'SPCX',   address:'0x4a0E65A3EcceC6dBe60AE065F2e7bb85Fae35eEa',   decimals:18, icon:equityIcon('SPCX') },
+    { symbol:'GME',    address:'0x1b0E319c6A659F002271B69dB8A7df2F911c153E',   decimals:18, icon:equityIcon('GME') },
   ],
 };
 
@@ -2770,7 +2796,15 @@ function curTok(v){
 const CHAINLINK_FEEDS = {
   1: {
     'ETH':    '0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419',
+    // Described on-chain as "BTC / USD", not WBTC/USD, which is why it also
+    // prices cbBTC through PRICE_ALIAS below — one bitcoin feed, three wrappers.
     'WBTC':   '0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c',
+    // New. wstETH was in five chains' token lists and in no chain's feed table,
+    // so a wstETH position showed a balance and a blank where its dollars go —
+    // on mainnet too, where the asset originates. Chainlink's own description
+    // for this one is "wstETH/ETH/USD": it composes the two legs, so it answers
+    // in dollars per wstETH like every other row here rather than in ETH.
+    'wstETH': '0x8B6851156023f4f5A66F68BEA80851c3D905Ac93',
   },
   8453: {
     'ETH':    '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70',
@@ -2790,9 +2824,11 @@ const CHAINLINK_FEEDS = {
     'ETH':    '0x13e3Ee699D1909E989722E753853AE30b17e08c5',
     'WBTC':   '0x718A5788b89454aAE3A028AE9c111A29Be6c2a6F',
   },
-  // No 4326 entry: Chainlink publishes no feeds on MegaETH. ETH is the same
-  // asset there as anywhere, so its price comes off mainnet's feed instead —
-  // see ethUsdFallback() below.
+  // No 4326 or 4663 entry: Chainlink publishes no feeds on MegaETH or Robinhood
+  // Chain. Their assets are the same assets as anywhere, so the prices come off
+  // mainnet's feeds instead — see mainnetUsdFallback() and PRICE_ALIAS below,
+  // which is what gets WBTC and wstETH quoted on MegaETH and cbBTC on Robinhood
+  // rather than showing a balance with an empty dollar column beside it.
 };
 
 // A mixed-case address whose EIP-55 checksum does not verify is not something
@@ -2837,24 +2873,52 @@ const CHAINLINK_FEEDS = {
 // on a chain with no local feed each of them missed an empty cache in the same
 // tick and sent its own request to mainnet for the one number they all wanted.
 // The request in flight is shared as well as the answer it produces.
-let _ethUsd = { at: 0, price: 0 };
-let _ethUsdInflight = null;
-function ethUsdFallback(){
-  if(_ethUsd.price > 0 && Date.now() - _ethUsd.at < 120000) return Promise.resolve(_ethUsd.price);
-  if(_ethUsdInflight) return _ethUsdInflight;
+// One asset, two wrappers: a token with no feed of its own takes the price of
+// the thing it IS. WETH is ETH, and cbBTC is bitcoin exactly as WBTC is. This is
+// applied AFTER a chain's own feeds, so a chain that publishes a real cbBTC feed
+// (Base does) is read from it and never reaches this table.
+const PRICE_ALIAS = { WETH: 'ETH', cbBTC: 'WBTC' };
+
+// Mainnet's feeds, for the chains that have none of their own. Used to be
+// ETH-only and named for it, which quietly decided that ETH was the one asset
+// worth quoting: a MegaETH vault holding WBTC and wstETH, or a Robinhood vault
+// holding cbBTC, showed balances with an empty dollar column beside them while
+// the ETH row above had one. The asset is the same asset wherever it is held, so
+// the price is too.
+//
+// All of mainnet's feeds in one batch rather than the one symbol a caller asked
+// for: there are three, they are read together in a single aggregate3, and a
+// cache keyed on "all of them" is a cache the next caller can actually use.
+let _mUsd = { at: 0, px: null };
+let _mUsdInflight = null;
+function mainnetUsdFallback(){
+  if(_mUsd.px && Date.now() - _mUsd.at < 120000) return Promise.resolve(_mUsd.px);
+  if(_mUsdInflight) return _mUsdInflight;
+  const keys = Object.keys(CHAINLINK_FEEDS[1] || {});
   const p = (async () => {
     try {
-      const feed = new ethers.Contract(CHAINLINK_FEEDS[1].ETH, CHAINLINK_ABI, mainnetRpc());
-      const answer = Number(await feed.latestAnswer()) / 1e8;
-      if(answer > 0){ _ethUsd = { at: Date.now(), price: answer }; return answer; }
-    } catch(e){ console.warn('Mainnet ETH price:', e && e.message); }
-    return 0;
+      const iface = new ethers.Interface(CHAINLINK_ABI);
+      const data = iface.encodeFunctionData('latestAnswer');
+      const mc = new ethers.Contract(MC3, MC3_ABI, mainnetRpc());
+      const res = await mc.aggregate3(keys.map(k => ({ target: CHAINLINK_FEEDS[1][k], allowFailure: true, callData: data })));
+      const px = {};
+      res.forEach((r, i) => {
+        if(!r.success) return;
+        const a = Number(iface.decodeFunctionResult('latestAnswer', r.returnData)[0]) / 1e8;
+        if(a > 0) px[keys[i]] = a;
+      });
+      // Cached only if something answered. An empty object is not a price list,
+      // and caching one would blank every dollar figure for two minutes on the
+      // strength of a single bad read.
+      if(Object.keys(px).length){ _mUsd = { at: Date.now(), px }; return px; }
+    } catch(e){ console.warn('Mainnet price fallback:', e && e.message); }
+    return {};
   })();
-  _ethUsdInflight = p;
-  // Cleared on settle, not on success: a failed read returns 0 and must not
+  _mUsdInflight = p;
+  // Cleared on settle, not on success: a failed read returns {} and must not
   // become the answer every later caller is handed for the rest of the session.
-  p.then(() => { if(_ethUsdInflight === p) _ethUsdInflight = null; },
-         () => { if(_ethUsdInflight === p) _ethUsdInflight = null; });
+  p.then(() => { if(_mUsdInflight === p) _mUsdInflight = null; },
+         () => { if(_mUsdInflight === p) _mUsdInflight = null; });
   return p;
 }
 
@@ -9608,10 +9672,18 @@ async function loadTokenBalances(walletAddr, ethBalance) {
   const latestAnswerData = clIface.encodeFunctionData('latestAnswer');
   let balances, prices = {};
 
-  // Started here, awaited at the end: a chain with no ETH feed of its own gets
-  // mainnet's, and it costs no time because it runs beside this chain's reads
-  // rather than after them.
-  const ethUsdPromise = feeds['ETH'] ? null : ethUsdFallback();
+  // Started here, awaited at the end: whatever this chain cannot price itself is
+  // priced off mainnet, and it costs no time because it runs beside this chain's
+  // reads rather than after them.
+  //
+  // Which assets those are is asked rather than assumed. A symbol needs mainnet
+  // when this chain publishes no feed for it AND mainnet publishes one, either
+  // under that symbol or under the asset it is a wrapper for. On mainnet itself
+  // the list comes out empty and no request is made.
+  const _priceKey = sym => (feeds[sym] ? sym : (PRICE_ALIAS[sym] || sym));
+  const needMainnet = ['ETH', ...erc20Tokens.map(t => t.symbol)]
+    .some(sym => !feeds[sym] && (CHAINLINK_FEEDS[1] || {})[_priceKey(sym)]);
+  const mainUsdPromise = needMainnet ? mainnetUsdFallback() : null;
 
   try {
     const mc = getMC3();
@@ -9659,8 +9731,15 @@ async function loadTokenBalances(walletAddr, ethBalance) {
   }
 
   if(ethBalance == null) ethBalance = await provider.getBalance(walletAddr);
-  if(ethUsdPromise && !prices['ETH']) prices['ETH'] = await ethUsdPromise;
+  // Merged under mainnet's own keys, and only where this chain said nothing: a
+  // local feed always wins, because it is the one that speaks for this chain.
+  if(mainUsdPromise){
+    const m = await mainUsdPromise;
+    for(const k of Object.keys(m)) if(!prices[k]) prices[k] = m[k];
+  }
   const ethPrice = prices['ETH'] || 0;
+  // The price for a symbol: its own feed first, then the asset it wraps.
+  const priceOf = sym => prices[sym] || prices[PRICE_ALIAS[sym]] || 0;
   // USDm (MegaUSD) is dollar-pegged like the rest of these, so it is quoted at
   // par rather than left without a price on a chain that has no feeds.
   // USDG (Global Dollar) and USDe (Ethena) are dollar-pegged like the rest and
@@ -9693,14 +9772,9 @@ async function loadTokenBalances(walletAddr, ethBalance) {
     let usd = 0;
     if(stableSymbols.has(t.symbol)) {
       usd = amount;
-    } else if(prices[t.symbol]) {
-      usd = amount * prices[t.symbol];
-    } else if(t.symbol === 'WETH' && ethPrice > 0) {
-      // Same asset as the ETH row above, so it is quoted off the same number —
-      // which on a chain with no local feed is mainnet's, via ethUsdFallback.
-      // Last branch, not first: a chain that does publish a WETH feed should be
-      // read from it rather than from this.
-      usd = amount * ethPrice;
+    } else {
+      const px = priceOf(t.symbol);
+      if(px > 0) usd = amount * px;
     }
     holdings.push({token:t.symbol, balance:fmtBal(balances[i].bal, t.decimals), usd: usd > 0 ? fmtUsd(usd) : '', raw: balances[i].bal.toString(), decimals: t.decimals});
   });

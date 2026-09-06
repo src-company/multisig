@@ -103,6 +103,10 @@ const NEEDED = [
   'MEGA_M', 'MEGA_DOT_R', 'MEGA_DOT_L', 'MEGA_RING',
   'ETH_ICON', 'USDC_ICON', 'USDT_ICON', 'USDM_ICON', 'DAI_ICON',
   'WBTC_ICON', 'CBBTC_ICON', 'WSTETH_ICON', 'MEGA_ICON',
+  // Robinhood Chain's own marks, and the generator its tokenised equities are
+  // drawn by — equityIcon is called at table-construction time, not at render,
+  // so it is as required for PROD_TOKENS to evaluate as the constants above it.
+  'USDG_ICON', 'USDE_ICON', 'equityIcon',
   'ETH_ONLY', 'PROD_TOKENS',
   'TERMINAL_RECHECK', 'canonicalSigV', 'verifySigs',
   // The verified-ABI side. loadVaultQueue labels every row through
