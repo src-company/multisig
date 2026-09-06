@@ -237,10 +237,10 @@ OVERVIEW:`
 <p>Deploy a vault, a CREATE2 clone with the same address on every chain. Or delegate an <strong>existing EOA</strong> to the same implementation under EIP-7702, which keeps the address you already have and adds batching, ERC-1271 signing, an optional delay and optional co-signers to it. A clone is a new account under shared custody; a delegation adds capability to an account that stays under one key. Delegating costs one transaction and moves nothing. See <a href="#contract">CONTRACT</a>.</p>
 
 <h2>CHAINS</h2>
-<p>Ethereum, Base, MegaETH, Arbitrum, Optimism. Same contract, same address via CREATE2. Testnets: Sepolia, Base Sepolia.</p>
+<p>Ethereum, Base, MegaETH, Arbitrum, Optimism, Robinhood Chain. Same contract, same address via CREATE2. Testnets: Sepolia, Base Sepolia.</p>
 
 <h2>TOKENS</h2>
-<p>ETH (18 decimals), USDC (6), USDT (6), DAI (18), WBTC (8, cbBTC on Base), wstETH (18). On MegaETH: MEGA (18), USDm (18), USDT0 (6), WBTC (8), wstETH (18). Native ETH transfers in and ERC-721/1155 callbacks are handled by the fallback function. The app converts human-readable amounts to raw token units.</p>
+<p>ETH (18 decimals), USDC (6), USDT (6), DAI (18), WBTC (8, cbBTC on Base), wstETH (18). On MegaETH: MEGA (18), USDm (18), USDT0 (6), WBTC (8), wstETH (18). On Robinhood Chain: WETH (18), USDG (6), USDe (18), cbBTC (8), and the tokenised equities NVDA, SPY, SPCX and GME (18 each, not 6 &mdash; they are share-denominated but carry eighteen decimals). These are natively issued rather than bridged, and each was confirmed against Robinhood's own explorer for symbol, decimals and holder count before being written down. Native ETH transfers in and ERC-721/1155 callbacks are handled by the fallback function. The app converts human-readable amounts to raw token units.</p>
 `,
 
 CONTRACT:`
@@ -426,7 +426,7 @@ AUDITS:`
 
 <h2>WHEN TIMING IS CRITICAL</h2>
 <div class="sig">WHY A PROPOSAL CAN BE FORCED INTO THE QUEUE</div>
-<div class="desc">Both execution routes accept the same signatures, so someone who sees your bundle before it lands can submit it down the queueing route instead. Your proposal is queued rather than executed now, and the nonce is consumed. It is not blocked and not lost: it executes when the delay elapses, and the trick cannot be repeated once the entry is queued. To recover, accelerate it. To avoid it, submit through a private RPC, since the attack needs your bundle to be public first. On Base, Arbitrum and OP there is no public mempool to read.</div>
+<div class="desc">Both execution routes accept the same signatures, so someone who sees your bundle before it lands can submit it down the queueing route instead. Your proposal is queued rather than executed now, and the nonce is consumed. It is not blocked and not lost: it executes when the delay elapses, and the trick cannot be repeated once the entry is queued. To recover, accelerate it. To avoid it, submit through a private RPC, since the attack needs your bundle to be public first. On Base, Arbitrum, OP, MegaETH and Robinhood Chain there is no public mempool to read.</div>
 <div class="sig">THE TWO ROUTES THAT CANNOT BE FORCED</div>
 <div class="desc">Cancelling is protected: the bundle is exactly threshold slots, so binding one to the submitter leaves a copier one short. For guaranteed emergency <em>action</em>, use a separate multisig as the executor rather than the fast path.</div>
 <div class="sig">THE COUNCIL PATTERN</div>

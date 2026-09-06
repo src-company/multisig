@@ -78,7 +78,7 @@ function grab(name) {
 
 const NEEDED = [
   'MULTISIG_ABI', 'EIP712_DOMAIN', 'EIP712_TYPES',
-  'senderSlot', 'sigSlot', 'pickSigs', 'packSigs', 'packSigsBound',
+  'canonicalSigV', 'senderSlot', 'sigSlot', 'pickSigs', 'packSigs', 'packSigsBound',
   'senderSig', 'verifySigs', 'collectSigs',
 ];
 
@@ -97,7 +97,7 @@ const VAULT = '0x5555555555555555555555555555555555555555';
 // back — so a signature lifted onto another proposal recovers to nothing, which
 // is the one property of the real thing this suite is built on.
 const fakeSig = (addr, digest) =>
-  '0x' + addr.slice(2).toLowerCase() + digest.slice(2).toLowerCase() + '00'.repeat(13);
+  '0x' + addr.slice(2).toLowerCase() + digest.slice(2).toLowerCase() + '00'.repeat(12) + '1b';
 
 const sandbox = {
   console: { ...console, warn() {}, error() {} },
@@ -195,6 +195,40 @@ test('an ECDSA slot must be exactly 65 bytes, and names the signer when it is no
   }
 });
 
+// ── the v byte is the slot's TYPE, not a detail of the curve ───────
+
+// ethers normalises v ∈ {0x00, 0x01, 0xfe, 0xff} to 27/28 and recovers the SAME
+// address, so recovery alone cannot tell a canonical signature from one of
+// these. The vault does not normalise: execute() reads `sigs[o+64] == 0` as
+// "this slot is an approval, the first 32 bytes are an owner address", and
+// ecrecover returns address(0) for any v that is not 27 or 28. Either way the
+// bundle reverts while every screen says the quorum is there.
+//
+// Two ways to arrive at one: a hardware signer that returns the low convention,
+// or an anonymous rewrite of a published row's last byte — `signatures` is
+// anon-writable with ON CONFLICT DO UPDATE. Pointed at a cancel companion, the
+// second jams the brake.
+const revV = (sig, v) => sig.slice(0, 130) + v;
+
+test('a non-canonical v byte cannot reach a bundle even if it gets past the queue', () => {
+  // sigSlot is the last point before the bytes become calldata. A slot the
+  // vault would read as the wrong TYPE is refused here too, and says so.
+  for (const v of ['00', '01', 'ff']) {
+    assert.throws(() => sigSlot({ signer: A, sig: revV(fakeSig(A, DIGEST), v) }),
+      /Non-canonical signature v byte from 0x1111/,
+      `sigSlot packed a slot whose v byte was 0x${v}`);
+  }
+  assert.equal(sigSlot(signed(A)), fakeSig(A, DIGEST).slice(2), 'the canonical slot still packs');
+});
+
+test('an approval slot still ends in 00, because there the byte means what it says', () => {
+  // The same byte, the opposite requirement: senderSlot builds the slot the
+  // contract reads as "not a signature", so 00 is exactly right and the check
+  // above must not reach it.
+  assert.equal(senderSlot(A).slice(128), '00');
+  assert.equal(sigSlot({ signer: A, sigType: 'approval', sig: '0xdeadbeef' }), senderSlot(A));
+});
+
 test('a packed bundle is the slots in order, and nothing between them', () => {
   const sigs = [signed(A), signed(B)];
   const packed = packSigs(sigs);
@@ -287,6 +321,18 @@ test('a chain that will not answer binds anyway, because the worst case is a rev
 });
 
 // ── which stored signatures count ─────────────────────────────────
+
+test('a signature whose v byte is not 27 or 28 is not counted, however it recovers', () => {
+  const good = signed(A);
+  assert.equal(verifySigs([good], domain, EIP712_TYPES, MSG, OWNERS).length, 1,
+    'the canonical signature is the control and must still count');
+
+  for (const v of ['00', '01', 'fe', 'ff', '02', '1d']) {
+    const row = { signer: A, sig: revV(fakeSig(A, DIGEST), v) };
+    assert.equal(verifySigs([row], domain, EIP712_TYPES, MSG, OWNERS).length, 0,
+      `a v byte of 0x${v} was counted toward the threshold`);
+  }
+});
 
 test('a signature is counted only when it recovers to the owner the row names', () => {
   const good = signed(A);

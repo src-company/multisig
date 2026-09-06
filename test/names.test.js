@@ -65,7 +65,7 @@ const NEEDED = [
 // behaviour worth asserting is lifted from the dapp instead of written here.
 const sandbox = {
   S: { chainId: 1 },
-  CHAINS: { 1: {}, 8453: {}, 42161: {}, 10: {}, 11155111: {}, 84532: {}, 4326: {} },
+  CHAINS: { 1: {}, 8453: {}, 42161: {}, 10: {}, 11155111: {}, 84532: {}, 4326: {}, 4663: {} },
   _OWNER_STATE_COLOR: { address: 'var(--g)', name: 'var(--a)', invalid: 'var(--r)', dup: 'var(--r)', empty: 'var(--d)' },
   ethers: {
     isAddress: a => /^0x[0-9a-fA-F]{40}$/.test(String(a)) && !/^0x[0-9a-f]*[A-F]/.test(String(a).slice(0, 2)),

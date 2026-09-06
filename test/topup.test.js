@@ -66,7 +66,7 @@ function grab(name) {
 }
 
 const NEEDED = [
-  'stripCommas', 'toUnits', '_amtTrim', '_amtDisp',
+  'stripCommas', 'toUnits', '_amtTrim', '_amtDisp', 'pctOfAmount',
   'TOPUP_GAS', 'topUpSpendable', 'fillTopUpPct', 'onTopUpAmount',
 ];
 

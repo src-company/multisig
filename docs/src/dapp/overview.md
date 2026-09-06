@@ -26,7 +26,7 @@ build pipeline.
 
 ## Chains
 
-Seven networks, with the same wallet address on each via CREATE2:
+Eight networks, with the same wallet address on each via CREATE2:
 
 | Network      | Chain ID   | Explorer                          |
 |--------------|------------|-----------------------------------|
@@ -35,6 +35,7 @@ Seven networks, with the same wallet address on each via CREATE2:
 | Arbitrum     | 42161      | arbiscan.io                       |
 | OP Mainnet   | 10         | optimistic.etherscan.io           |
 | MegaETH      | 4326       | mega.etherscan.io                 |
+| Robinhood    | 4663       | robinhoodchain.blockscout.com     |
 | Sepolia      | 11155111   | sepolia.etherscan.io (testnet)    |
 | Base Sepolia | 84532      | sepolia.basescan.org (testnet)    |
 
@@ -54,6 +55,7 @@ explicitly so a human-readable amount always converts to the right raw units.
 | Arbitrum   | ETH, USDC, USDT, DAI, WBTC, wstETH              |
 | OP Mainnet | ETH, USDC, USDT, DAI, WBTC, wstETH              |
 | MegaETH    | ETH, MEGA, USDm, USDT0, WBTC, wstETH            |
+| Robinhood  | ETH, WETH, USDG, USDe, cbBTC, NVDA, SPY, SPCX, GME |
 | Testnets   | ETH                                             |
 
 Decimals: ETH/DAI/wstETH/MEGA/USDm 18, USDC/USDT/USDT0 6, WBTC/cbBTC 8 — USDm is

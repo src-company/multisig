@@ -65,7 +65,7 @@ function grab(name) {
 }
 
 const NEEDED = [
-  'stripCommas', 'toUnits', '_amtTrim',
+  'stripCommas', 'toUnits', '_amtTrim', 'pctOfAmount',
   'onTxAmount', 'fillTxPct', 'onStakeAmount', 'fillStakePct',
 ];
 
@@ -132,11 +132,25 @@ test('a quarter of 1000 units of a 0-decimal token is 250, not 25', () => {
   assert.equal(fillTx(0.25, '400', 0, 400), '100');
 });
 
-test('a 0-decimal fill is a whole number, because the token has no smaller part', () => {
-  // 25% of 10 is 2.5 units of something that cannot be divided. toFixed(0)
-  // rounds it, and the rounded figure is the one the vault can actually send.
-  assert.equal(fillTx(0.25, '10', 0, 10), '3');
+test('a 0-decimal fill is a whole number, and never more than the share asked for', () => {
+  // 25% of 10 is 2.5 units of something that cannot be divided, so the figure
+  // has to move — and it moves DOWN. This used to round to 3, which is 30% of
+  // the holding under a button labelled 25%.
+  //
+  // Rounding to nearest is defensible for a display and wrong for this: the
+  // figure written here is not an estimate of the fill, it IS the fill — it
+  // goes straight into the amount field, into the proposal, and into what every
+  // co-signer signs, and nothing downstream re-derives it from the percentage
+  // that was clicked. A control that says "at most this share" may only err in
+  // the direction that keeps that true. The cost of the old direction grew as
+  // balances got smaller: 50% of a 5-unit holding filled 3, and 50% of 3
+  // filled 2, which is 67% of everything the vault held.
+  assert.equal(fillTx(0.25, '10', 0, 10), '2');
   assert.equal(fillTx(0.25, '9', 0, 9), '2');
+  assert.equal(fillTx(0.5, '5', 0, 5), '2');
+  assert.equal(fillTx(0.5, '3', 0, 3), '1');
+  // And a share too small to be represented at all is nothing, not a unit.
+  assert.equal(fillTx(0.25, '1', 0, 1), '0');
 });
 
 test('a fill keeps every digit the token can carry and drops only the padding', () => {

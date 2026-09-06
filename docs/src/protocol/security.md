@@ -120,7 +120,9 @@ is queued, and it can be accelerated to recover. For a cancellation it is fatal,
 above. Three things narrow it further:
 
 1. **Submit through a private RPC.** The attack needs the bundle to be public
-   first, and on Base, Arbitrum and OP Mainnet there is no public mempool to read.
+   first, and on every chain here but Ethereum — Base, Arbitrum, OP Mainnet,
+   MegaETH and Robinhood Chain, all sequenced rollups — there is no public
+   mempool to read.
 2. **Spend one slot on a sender slot.** A `v = 0` slot naming the submitter can
    only be filled by that submitter, so a copied bundle is inert. This needs no
    contract change and is what the interface does. It is *complete* for

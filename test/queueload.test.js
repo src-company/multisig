@@ -104,7 +104,7 @@ const NEEDED = [
   'ETH_ICON', 'USDC_ICON', 'USDT_ICON', 'USDM_ICON', 'DAI_ICON',
   'WBTC_ICON', 'CBBTC_ICON', 'WSTETH_ICON', 'MEGA_ICON',
   'ETH_ONLY', 'PROD_TOKENS',
-  'TERMINAL_RECHECK', 'verifySigs',
+  'TERMINAL_RECHECK', 'canonicalSigV', 'verifySigs',
   // The verified-ABI side. loadVaultQueue labels every row through
   // selectorToLabel() and then sets the background prefetch going, so both the
   // index those read and the errand that fills it are lifted whole rather than
@@ -132,7 +132,7 @@ const STRANGER = '0x9999999999999999999999999999999999999999';
 // signature lifted onto another proposal recovers to nobody — which is the one
 // property of the real thing every assertion below rests on.
 const fakeSig = (addr, digest) =>
-  '0x' + addr.slice(2).toLowerCase() + digest.slice(2).toLowerCase() + '00'.repeat(13);
+  '0x' + addr.slice(2).toLowerCase() + digest.slice(2).toLowerCase() + '00'.repeat(12) + '1b';
 
 // ── the chain ─────────────────────────────────────────────────────
 // What the vault would answer, per test. `queued` maps a digest to its eta —

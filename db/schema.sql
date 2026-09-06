@@ -152,6 +152,35 @@ CREATE TABLE IF NOT EXISTS signatures (
 
 CREATE INDEX IF NOT EXISTS idx_sigs_tx ON signatures (tx_id);
 
+-- One signer is one signature, however the address is cased.
+--
+-- The same reasoning as idx_wallets_chain_addr_ci above, and the same defect:
+-- the UNIQUE is on the signer as a *string*, while everything that reads it
+-- folds case — is_wallet_writer, remove_signature, and tx_summary's join onto
+-- owners. So `0xAbCd…` and `0xabcd…` were two rows for one signer, and
+-- add_signature's ON CONFLICT (tx_id, signer) could not see the first from the
+-- second: the second call inserted beside it instead of replacing it.
+--
+-- That is not a cosmetic duplicate. tx_summary counts signature rows and folds
+-- case on the join, so both rows match the one owner and sig_count reports two.
+-- `ready` is derived from that count against the threshold (see the view), so a
+-- proposal announces quorum at half the signatures it actually has. This client
+-- happens to survive it — verifySigs dedupes on lower(signer) before it packs
+-- anything for the chain — but the stored state is wrong and the view's own
+-- contract is what other clients read.
+--
+-- Duplicates are cleared before the index is built rather than after, because a
+-- CREATE UNIQUE INDEX that fails here takes the rest of this file down with it.
+-- The newest row per (tx_id, lower(signer)) is the one kept: add_signature's
+-- update semantics are last-write-wins, so that is the row a caller who signed
+-- twice believes is stored.
+DELETE FROM signatures s USING signatures dup
+ WHERE s.tx_id = dup.tx_id
+   AND lower(s.signer) = lower(dup.signer)
+   AND (s.signed_at, s.id) < (dup.signed_at, dup.id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sigs_tx_signer_ci ON signatures (tx_id, lower(signer));
+ALTER TABLE signatures DROP CONSTRAINT IF EXISTS signatures_tx_id_signer_key;
+
 CREATE TABLE IF NOT EXISTS approvals (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   wallet_id     uuid NOT NULL REFERENCES wallets ON DELETE CASCADE,
@@ -164,6 +193,24 @@ CREATE TABLE IF NOT EXISTS approvals (
   updated_at    timestamptz NOT NULL DEFAULT now(),
   UNIQUE (wallet_id, owner, tx_hash)
 );
+
+-- One owner's stance on one digest is one row, however the address is cased.
+--
+-- Same defect as idx_sigs_tx_signer_ci, and here it inverts a boolean rather
+-- than inflating a count. record_approval upserts on (wallet_id, owner,
+-- tx_hash); an owner who approved as `0xAbCd…` and later revoked as `0xabcd…`
+-- did not update that row, they inserted a second one beside it. The revocation
+-- is stored, the approval survives untouched, and idx_approvals_hash — which is
+-- partial on `approved = true` — still indexes the owner as approving. The
+-- record says both at once, and the half of it that any reader sees is whichever
+-- row they reach first.
+DELETE FROM approvals a USING approvals dup
+ WHERE a.wallet_id = dup.wallet_id
+   AND a.tx_hash = dup.tx_hash
+   AND lower(a.owner) = lower(dup.owner)
+   AND (a.updated_at, a.id) < (dup.updated_at, dup.id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_approvals_owner_ci ON approvals (wallet_id, lower(owner), tx_hash);
+ALTER TABLE approvals DROP CONSTRAINT IF EXISTS approvals_wallet_id_owner_tx_hash_key;
 
 CREATE INDEX IF NOT EXISTS idx_approvals_hash ON approvals (tx_hash) WHERE approved = true;
 
@@ -585,6 +632,19 @@ BEGIN
     RAISE EXCEPTION 'Owner list too long';
   END IF;
 
+  -- No address twice, however it is cased. idx_owners_unique is on the raw
+  -- string, so ['0xAbCd…','0xabcd…'] was not a conflict — it was two current
+  -- rows for one owner. tx_summary joins signatures onto owners with lower() on
+  -- both sides, so one signature then matched both rows and sig_count counted
+  -- it twice: a proposal announcing quorum at half the signatures it holds. An
+  -- exact repeat instead raised a bare unique violation from inside the insert
+  -- loop below, which is the same malformed input failing in a way that says
+  -- nothing about what was wrong with it. No vault has a duplicate owner — the
+  -- contract cannot hold one — so this is refused by name on both paths.
+  IF (SELECT count(DISTINCT lower(o)) FROM unnest(p_owners) AS o) <> array_length(p_owners, 1) THEN
+    RAISE EXCEPTION 'Owner list contains the same address twice';
+  END IF;
+
   -- Deployer must be in the owner list (case-insensitive)
   IF NOT (SELECT lower(p_deployer) = ANY(SELECT lower(unnest(p_owners)))) THEN
     RAISE EXCEPTION 'Deployer must be an owner';
@@ -640,19 +700,77 @@ BEGIN
     name = COALESCE(EXCLUDED.name, wallets.name)
   RETURNING id INTO w_id;
 
+  -- Reconcile the owner set rather than replacing it wholesale.
+  --
+  -- This used to retire every current row and insert a fresh one per owner,
+  -- which is the opposite of what sync_wallet_state does a few hundred lines
+  -- below, and wrong in the same two ways that function's comment describes.
+  --
+  -- It destroyed labels. update_owner_label writes onto the current row; the
+  -- next re-registration retired that row and inserted a replacement whose
+  -- label came from p_labels — and p_labels is NULL on the path that matters,
+  -- because loadSingleVaultData auto-registers a vault it reached by address
+  -- with no labels to hand. So opening a vault by deep link could silently wipe
+  -- every co-signer's hand-typed label ("TREASURER", "COLD KEY") for everyone,
+  -- permanently, with nothing on screen to say it had happened. Note the
+  -- wallets upsert above already takes care not to do this to `name`, via
+  -- COALESCE(EXCLUDED.name, wallets.name); labels had no equivalent.
+  --
+  -- And it accumulated one dead row per owner per call, forever. That is the
+  -- fuel for the multi-row revive that idx_owners_unique rejects — see
+  -- sync_wallet_state — so a vault re-registered a few times could reach a
+  -- state where its owner set could never be repaired again.
+  --
+  -- So: retire only the owners who are actually gone, revive or update the rest
+  -- in place, and treat an absent label as "leave what is stored" rather than
+  -- "set it to nothing". An explicitly empty string still clears it.
   UPDATE owners SET is_current = false, removed_at = now()
-  WHERE wallet_id = w_id AND is_current = true;
+  WHERE wallet_id = w_id AND is_current = true
+    AND NOT (lower(address) = ANY(SELECT lower(unnest(p_owners))));
 
   FOR i IN 1..array_length(p_owners, 1) LOOP
-    INSERT INTO owners (wallet_id, address, label, position, is_current, added_block)
-    VALUES (w_id, p_owners[i],
-            CASE WHEN p_labels IS NOT NULL AND i <= array_length(p_labels, 1) THEN NULLIF(p_labels[i], '') ELSE NULL END,
-            i - 1, true, p_block);
+    UPDATE owners SET
+      position = i - 1,
+      label = CASE WHEN p_labels IS NOT NULL AND i <= array_length(p_labels, 1)
+                   THEN NULLIF(p_labels[i], '') ELSE label END
+    WHERE wallet_id = w_id AND lower(address) = lower(p_owners[i]) AND is_current = true;
+
+    IF NOT FOUND THEN
+      -- Not currently an owner. Revive the most recently retired row for this
+      -- address if there is one — it carries the label this owner last had —
+      -- and only insert when there is genuinely nothing to revive. One row,
+      -- chosen by id, for the same reason as in sync_wallet_state.
+      UPDATE owners SET
+        is_current = true, removed_at = NULL, position = i - 1, added_block = p_block,
+        label = CASE WHEN p_labels IS NOT NULL AND i <= array_length(p_labels, 1)
+                     THEN NULLIF(p_labels[i], '') ELSE label END
+      WHERE id = (
+        SELECT id FROM owners
+        WHERE wallet_id = w_id AND lower(address) = lower(p_owners[i]) AND is_current = false
+        ORDER BY removed_at DESC NULLS LAST, id DESC LIMIT 1
+      );
+
+      IF NOT FOUND THEN
+        INSERT INTO owners (wallet_id, address, label, position, is_current, added_block)
+        VALUES (w_id, p_owners[i],
+                CASE WHEN p_labels IS NOT NULL AND i <= array_length(p_labels, 1) THEN NULLIF(p_labels[i], '') ELSE NULL END,
+                i - 1, true, p_block);
+      END IF;
+    END IF;
   END LOOP;
 
-  INSERT INTO config_log (wallet_id, event, block_number, tx_hash, threshold, delay, executor, owner_count)
-  VALUES (w_id, 'init', p_block, p_tx, p_threshold, p_delay, p_executor, array_length(p_owners, 1))
-  ON CONFLICT DO NOTHING;
+  -- A vault is initialised once. The ON CONFLICT DO NOTHING that used to stand
+  -- here could never fire — config_log's only unique constraint is its own
+  -- generated primary key — so it read as de-duplication that did not exist,
+  -- and every re-registration appended another 'init' to the journal. The
+  -- config history is the one off-chain record of how a vault's policy changed
+  -- over time; a vault shown initialising four times is that record disagreeing
+  -- with itself. `existed` was already computed above, and it is the actual
+  -- answer to the question the clause was reaching for.
+  IF NOT existed THEN
+    INSERT INTO config_log (wallet_id, event, block_number, tx_hash, threshold, delay, executor, owner_count)
+    VALUES (w_id, 'init', p_block, p_tx, p_threshold, p_delay, p_executor, array_length(p_owners, 1));
+  END IF;
 
   RETURN w_id;
 END;
@@ -671,6 +789,24 @@ BEGIN
     RAISE EXCEPTION 'Not an owner';
   END IF;
   PERFORM rate_gate('propose:' || p_wallet_id::text || ':' || client_ip(), 60, interval '1 minute');
+
+  -- The chain id is not the caller's to choose; p_wallet_id already determines
+  -- it. This was the one place the multichain scoping was taken on trust, and
+  -- it is load-bearing: idx_tx_identity is (chain_id, wallet_id, nonce,
+  -- tx_hash), so a wrong chain_id defeats the de-duplication that IS this
+  -- table's identity story, and dbGetTxByHash filters on chain_id, so the row
+  -- lands somewhere the client that wrote it cannot read it back.
+  --
+  -- The client passes its ambient S.chainId, which is module state rather than
+  -- a property of the vault — during a chain switch it can briefly be the chain
+  -- the app has left. Two owners proposing the same payload either side of that
+  -- moment produce the same wallet, nonce and digest under two chain ids, the
+  -- ON CONFLICT below does not fire, and the pair splits their signatures
+  -- across two rows that neither can bring to quorum. The database knows the
+  -- right answer; it should not accept a different one.
+  IF p_chain_id IS DISTINCT FROM (SELECT chain_id FROM wallets WHERE id = p_wallet_id) THEN
+    RAISE EXCEPTION 'Chain id does not match this vault';
+  END IF;
 
   -- A ceiling on how much of this database one vault can occupy. Proposals are
   -- never deleted — they go terminal and stay as history — so without this the
@@ -755,9 +891,28 @@ BEGIN
   END IF;
   PERFORM rate_gate('sig:' || w_id::text || ':' || client_ip(), 120, interval '1 minute');
 
+  -- Terminal proposals do not take new signatures. remove_signature already
+  -- restricts itself to these three statuses, on the reasoning that history is
+  -- not edited after the fact — but the guard was only on the way out. A
+  -- signature added to a cancelled, executed or stale proposal was accepted and
+  -- could then never be withdrawn, which is that same hazard reached from the
+  -- other side: a row appears against a settled proposal, in the record every
+  -- co-signer reads, and the owner it names cannot take it back.
+  IF NOT EXISTS (
+    SELECT 1 FROM transactions
+    WHERE id = p_tx_id AND status IN ('proposed', 'executing', 'queued')
+  ) THEN
+    RAISE EXCEPTION 'Proposal is no longer open for signatures';
+  END IF;
+
+  -- Conflict target is the expression index, not the dropped constraint: an
+  -- address has no canonical case, so `0xAbCd…` arriving after `0xabcd…` has to
+  -- replace that signer's row rather than insert a second one beside it. See
+  -- idx_sigs_tx_signer_ci.
   INSERT INTO signatures (tx_id, signer, sig_type, signature)
   VALUES (p_tx_id, p_signer, p_sig_type, p_signature)
-  ON CONFLICT (tx_id, signer) DO UPDATE SET
+  ON CONFLICT (tx_id, lower(signer)) DO UPDATE SET
+    signer = EXCLUDED.signer,
     signature = EXCLUDED.signature, sig_type = EXCLUDED.sig_type, signed_at = now();
 
   SELECT count(*) INTO cnt FROM signatures WHERE tx_id = p_tx_id;
@@ -991,9 +1146,20 @@ BEGIN
     RAISE EXCEPTION 'Not an owner';
   END IF;
   PERFORM rate_gate('appr:' || p_wallet_id::text || ':' || client_ip(), 60, interval '1 minute');
+  -- The chain id is not the caller's to choose. It is fully determined by the
+  -- wallet this approval is against, so a value that disagrees with the stored
+  -- one is either a client whose ambient chain moved under it mid-call or a
+  -- caller filing a row where it will not be found. See propose_tx.
+  IF p_chain_id IS DISTINCT FROM (SELECT chain_id FROM wallets WHERE id = p_wallet_id) THEN
+    RAISE EXCEPTION 'Chain id does not match this vault';
+  END IF;
+  -- Conflict target is the expression index. See idx_approvals_owner_ci: on the
+  -- case-sensitive constraint a revocation cased differently from the approval
+  -- inserted a second row rather than clearing the first.
   INSERT INTO approvals (wallet_id, chain_id, owner, tx_hash, approved, block_number, approval_tx, updated_at)
   VALUES (p_wallet_id, p_chain_id, p_owner, p_tx_hash, p_approved, p_block_number, p_approval_tx, now())
-  ON CONFLICT (wallet_id, owner, tx_hash) DO UPDATE SET
+  ON CONFLICT (wallet_id, lower(owner), tx_hash) DO UPDATE SET
+    owner = EXCLUDED.owner,
     approved = EXCLUDED.approved, block_number = EXCLUDED.block_number,
     approval_tx = EXCLUDED.approval_tx, updated_at = now();
 END;
@@ -1029,6 +1195,13 @@ BEGIN
   END IF;
   IF array_length(p_owners, 1) > 100 THEN
     RAISE EXCEPTION 'Owner list too long';
+  END IF;
+
+  -- Same duplicate check as register_wallet, for the same reason: this function
+  -- also inserts p_owners directly, and two spellings of one address become two
+  -- current rows that tx_summary counts as two owners.
+  IF (SELECT count(DISTINCT lower(o)) FROM unnest(p_owners) AS o) <> array_length(p_owners, 1) THEN
+    RAISE EXCEPTION 'Owner list contains the same address twice';
   END IF;
 
   -- Capture prior state so we can journal what actually changed. This is the
@@ -1085,8 +1258,23 @@ BEGIN
       -- unique index only covers current rows, so a re-add would otherwise
       -- accumulate a retired row per cycle. This is also the path that repairs
       -- a vault whose owner set was rewritten by an anonymous caller.
+      --
+      -- Exactly one row, chosen by id — the unqualified UPDATE flipped EVERY
+      -- retired row for the address at once, and an owner can easily have more
+      -- than one of those: register_wallet retires and re-inserts, so each
+      -- re-registration leaves another behind. Two retired rows revived
+      -- together are two current rows for one owner, which idx_owners_unique
+      -- rejects. That aborts the whole call — the wallet UPDATE and the config
+      -- journal with it — and dbSyncWalletState swallows the error, so the
+      -- deterministic result was a vault whose owner set could never be
+      -- repaired again, silently. The most recently retired row is the one
+      -- revived: it carries the label this owner last had.
       UPDATE owners SET is_current = true, removed_at = NULL, position = i - 1
-      WHERE wallet_id = p_wallet_id AND lower(address) = lower(p_owners[i]) AND is_current = false;
+      WHERE id = (
+        SELECT id FROM owners
+        WHERE wallet_id = p_wallet_id AND lower(address) = lower(p_owners[i]) AND is_current = false
+        ORDER BY removed_at DESC NULLS LAST, id DESC LIMIT 1
+      );
       IF NOT FOUND THEN
         INSERT INTO owners (wallet_id, address, position, is_current)
         VALUES (p_wallet_id, p_owners[i], i - 1, true);

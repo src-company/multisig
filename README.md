@@ -218,7 +218,7 @@ Safe's remaining overhead buys gas refunds, `safeTxGas` metering, an arbitrary n
 | Multisig (implementation) | [`0xD54cb65224410F3Ff97a8E72f363f224419f4FB0`](https://contractscan.xyz/contract/0xD54cb65224410F3Ff97a8E72f363f224419f4FB0) |
 | TimelockExecutor | [`0x00000000a72A30AdBf38e14d36BCE2610ec3973F`](https://contractscan.xyz/contract/0x00000000a72A30AdBf38e14d36BCE2610ec3973F) |
 
-Deployed via [SafeSummoner](https://contractscan.xyz/contract/0x00000000004473e1f31C8266612e7FD5504e6f2a) on Ethereum, Base, MegaETH, Arbitrum, Optimism, Sepolia, and Base Sepolia.
+Deployed via [SafeSummoner](https://contractscan.xyz/contract/0x00000000004473e1f31C8266612e7FD5504e6f2a) on Ethereum, Base, MegaETH, Arbitrum, Optimism, Robinhood Chain, Sepolia, and Base Sepolia.
 
 Every wallet is the same 45-byte clone, so its runtime code can be checked against the audited build directly:
 

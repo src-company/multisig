@@ -130,6 +130,10 @@ try{var d=localStorage.getItem('dark');if(d==='1'||(d===null&&matchMedia('(prefe
   <button class="net-btn" data-chain="42161" onclick="switchNet(42161)">arbitrum</button>
   <span class="net-sep"></span>
   <button class="net-btn" data-chain="10" onclick="switchNet(10)">optimism</button>
+  <span class="net-sep"></span>
+  <button class="net-btn" data-chain="4326" onclick="switchNet(4326)">megaeth</button>
+  <span class="net-sep"></span>
+  <button class="net-btn" data-chain="4663" onclick="switchNet(4663)">robinhood</button>
   <span class="net-sep net-testnet"></span>
   <button class="net-btn net-testnet" data-chain="11155111" onclick="switchNet(11155111)">sepolia</button>
   <span class="net-sep net-testnet"></span>
@@ -167,12 +171,14 @@ const CHAINS = {
   8453:     { name:'base',         explorer:'https://basescan.org' },
   42161:    { name:'arbitrum',     explorer:'https://arbiscan.io' },
   10:       { name:'optimism',     explorer:'https://optimistic.etherscan.io' },
+  4326:     { name:'megaeth',      explorer:'https://mega.etherscan.io' },
+  4663:     { name:'robinhood',    explorer:'https://robinhoodchain.blockscout.com' },
   11155111: { name:'sepolia',      explorer:'https://sepolia.etherscan.io' },
   84532:    { name:'base sepolia', explorer:'https://sepolia.basescan.org' },
 };
 
 const HEX_CHAINS = {
-  1:'0x1', 8453:'0x2105', 42161:'0xa4b1', 10:'0xa',
+  1:'0x1', 8453:'0x2105', 42161:'0xa4b1', 10:'0xa', 4326:'0x10e6', 4663:'0x1237',
   11155111:'0xaa36a7', 84532:'0x14a34'
 };
 

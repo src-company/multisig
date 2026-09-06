@@ -65,7 +65,7 @@ const NEEDED = [
 const sandbox = {
   console,
   S: { chainId: 1, cf: null, deploy: null },
-  CHAINS: { 1: {}, 8453: {}, 4326: {}, 42161: {}, 10: {}, 11155111: {}, 84532: {} },
+  CHAINS: { 1: {}, 8453: {}, 4326: {}, 4663: {}, 42161: {}, 10: {}, 11155111: {}, 84532: {} },
   MULTISIG_ABI: [],
   provider: null,
   render: () => {},
@@ -374,4 +374,16 @@ test('the review says when the address it exists to show is missing', () => {
   }));
   assert.match(unmined, /could not be mined/, 'the one thing this screen is for is missing, and it says so');
   assert.match(unmined, /DEPLOY/, 'and it is still a deploy the operator may choose to make');
+});
+
+test('the CHAINS stub covers every chain NETS offers, so a new one fails here first', () => {
+  // NETS is lifted from the dapp and grows whenever a chain is added; the
+  // CHAINS stub above is hand-written and does not. Nothing in this suite drives
+  // a specific chain id today, so a missing entry would sit here silently until
+  // some later test walked NETS and read CHAINS[id] as undefined. This is the
+  // line that says so at the time the chain is added, in the file that has to
+  // be edited.
+  const missing = NETS.map(n => n.id).filter(id => !sandbox.CHAINS[id]);
+  assert.deepEqual(missing, [],
+    `NETS offers ${missing.join(', ')}, which the CHAINS stub in this file does not have`);
 });

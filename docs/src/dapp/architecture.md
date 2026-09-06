@@ -16,7 +16,7 @@ site, but nothing about the app requires that host.
 
 `index.html` carries its own CSP in a `<meta>` tag. `default-src 'self'` and
 `connect-src` enumerated: the PostgREST service, Sourcify, the RPC hosts for the
-seven supported chains, and the Coinbase price endpoint. Fonts come from Google
+eight supported chains, and the Coinbase price endpoint. Fonts come from Google
 Fonts and are the only external style and font sources.
 
 WalletConnect is the one feature that needs third-party hosts, and it needs three:
@@ -47,7 +47,7 @@ The **chains**: a required namespace is all-or-nothing, so requiring the chain t
 page happens to be on means a wallet that has never heard of MegaETH refuses the
 whole session, and a session pinned to one chain can never follow the app to
 another. Mainnet is the single required chain — the one every wallet knows — and all
-seven are offered as optional, each with its RPC.
+eight are offered as optional, each with its RPC.
 
 A chain id read back from a wallet is normalised rather than parsed as hex: an
 injected wallet answers `eth_chainId` with a hex string as EIP-1193 says, and

@@ -87,7 +87,7 @@ const NEEDED = [
   // addresses and constants the classifier compares against
   'FACTORY', 'IMPLEMENTATION', 'TIMELOCK_EXECUTOR', 'WSTETH_ADDRESS',
   'WEINS', 'WNS_ID_REGISTRAR', 'WNS_ID_PARENT', 'WNS_ID_SUFFIX',
-  'MAX_SAFE_THRESHOLD', 'DELAY_SANE_MAX',
+  'MAX_SAFE_THRESHOLD', 'DELAY_SANE_MAX', 'SLOW_ADDRESS',
   // ABIs, interfaces, selectors — the real decoders, not stand-ins
   'MULTISIG_ABI', 'msIface', 'TIMELOCK_EXECUTOR_ABI', 'tlIface',
   'ERC20_ABI', 'erc20Iface', 'SLOW_ABI', 'slowIface',
@@ -133,7 +133,7 @@ const {
   isKnownMultisigSelector, selOf, msIface, erc20Iface, slowIface, tlIface,
   wnsRegIface, weinsIface, SEL, FACTORY, IMPLEMENTATION, TIMELOCK_EXECUTOR,
   WSTETH_ADDRESS, WEINS, WNS_ID_REGISTRAR, WNS_ID_PARENT, wnsSubId,
-  MAX_SAFE_THRESHOLD, DELAY_SANE_MAX,
+  MAX_SAFE_THRESHOLD, DELAY_SANE_MAX, SLOW_ADDRESS,
   indexAbiSelectors, verifiedFn, abiTypeSig, fmtAbiArg,
 } = sandbox;
 
@@ -156,6 +156,60 @@ const vault = o => Object.assign({
 const prop = o => Object.assign({ target: ALICE, rawValue: '0', callData: '0x', nonce: 7 }, o);
 
 const ms = (fn, args) => msIface.encodeFunctionData(fn, args);
+
+// ── four bytes are not a contract ─────────────────────────────────
+//
+// The rule the WNS and executor branches already ran on, applied to the three
+// branches that were matching on the selector alone. A selector says which
+// function is being asked for; only the target says which code answers.
+
+test('a depositTo aimed anywhere but SLOW is not a SLOW transfer', () => {
+  const args = [TOKEN, BOB, 1000n, 604800, '0x'];
+  const good = txKind(prop({ target: SLOW_ADDRESS, callData: slowIface.encodeFunctionData('depositTo', args) }), vault());
+  assert.match(good.label, /^SLOW · /, 'the real SLOW contract must still read as SLOW');
+  assert.equal(good.tone, 'slow');
+
+  // Same four bytes, an attacker's contract, and 100 ETH riding on it.
+  const k = txKind(prop({
+    target: BOB, rawValue: '100000000000000000000',
+    callData: slowIface.encodeFunctionData('depositTo', args),
+  }), vault());
+  assert.equal(k.label, 'SLOW · UNKNOWN CONTRACT');
+  assert.equal(k.tone, 'danger');
+  assert.ok(k.warn, 'a stranger holding SLOW\'s selector must be flagged');
+  // The old note promised the vault could reverse it. It could not.
+  assert.ok(!/REVERSE IT AT ANY POINT/.test(k.note), 'the note still promises a reversal that cannot happen');
+});
+
+test('an enableForward aimed anywhere but the executor is not the fast path', () => {
+  const on = tlIface.encodeFunctionData('enableForward', [true]);
+  const good = txKind(prop({ target: TIMELOCK_EXECUTOR, callData: on }), vault());
+  assert.equal(good.label, 'EXECUTOR FAST PATH');
+
+  const k = txKind(prop({ target: BOB, callData: on }), vault());
+  assert.equal(k.label, 'EXECUTOR FAST PATH · UNKNOWN CONTRACT');
+  assert.equal(k.tone, 'danger');
+  assert.ok(k.warn);
+});
+
+test('a self-call carrying a token selector is a nonce burn, not a transfer', () => {
+  // The vault has no transfer(), approve(), depositTo() or enableForward(), so
+  // each of these lands on the fallback, reports success and moves nothing.
+  // Every one of them used to return from its own branch before the no-op check
+  // could run.
+  const cases = [
+    ['transfer',   erc20Iface.encodeFunctionData('transfer', [BOB, 1000000n])],
+    ['approve',    erc20Iface.encodeFunctionData('approve', [BOB, 2n ** 256n - 1n])],
+    ['depositTo',  slowIface.encodeFunctionData('depositTo', [TOKEN, BOB, 1n, 60, '0x'])],
+    ['enableForward', tlIface.encodeFunctionData('enableForward', [true])],
+  ];
+  for (const [name, callData] of cases) {
+    const k = txKind(prop({ target: VAULT, callData }), vault());
+    assert.equal(k.label, 'SELF-CALL · SILENT NO-OP', `a self-call carrying ${name} read as something else`);
+    assert.equal(k.tone, 'danger');
+    assert.ok(k.warn);
+  }
+});
 
 // ── plain value movement ──────────────────────────────────────────
 
@@ -295,12 +349,30 @@ test('a timelock past a month is called extreme, and says whether anything could
   // Audit M-2. Past this, every proposal that would shorten the delay again is
   // itself queued behind it.
   const long = DELAY_SANE_MAX + 1;
-  const withExec = txKind(prop({ target: VAULT, callData: ms('setDelay', [long]) }), vault());
-  assert.equal(withExec.label, 'SET TIMELOCK · EXTREME');
-  assert.equal(withExec.warn, true);
-  assert.match(withExec.note, /UNANIMOUS FAST-PATH FORWARD/);
-  const noExec = txKind(prop({ target: VAULT, callData: ms('setDelay', [long]) }), vault({ executor: ethers.ZeroAddress }));
-  assert.match(noExec.note, /THIS IS PERMANENT/);
+  const set = o => txKind(prop({ target: VAULT, callData: ms('setDelay', [long]) }), vault(o));
+
+  // An executor AND the fast path actually enabled is the one case where a
+  // unanimous forward really can walk it back.
+  const canUndo = set({ fastPath: true });
+  assert.equal(canUndo.label, 'SET TIMELOCK · EXTREME');
+  assert.equal(canUndo.warn, true);
+  assert.match(canUndo.note, /UNANIMOUS FAST-PATH FORWARD/);
+
+  // No executor at all: nothing to forward through.
+  assert.match(set({ executor: ethers.ZeroAddress }).note, /THIS IS PERMANENT/);
+
+  // An executor whose fast path is OFF. This used to be told a unanimous
+  // forward could undo it, because the test was executor-presence only — but
+  // forward() reverts Unauthorized() for anything but cancelQueued until
+  // forwardEnabled is set, and turning it on is itself a proposal that would
+  // serve the new delay first. So it is exactly as permanent as having no
+  // executor, and has to say so.
+  const fpOff = set({ fastPath: false });
+  assert.equal(fpOff.label, 'SET TIMELOCK · EXTREME');
+  assert.doesNotMatch(fpOff.note, /UNANIMOUS FAST-PATH FORWARD/,
+    'a vault with the fast path off was promised a recovery route it does not have');
+  assert.match(fpOff.note, /THIS IS PERMANENT/);
+
   // Exactly at the ceiling is not past it.
   const at = txKind(prop({ target: VAULT, callData: ms('setDelay', [DELAY_SANE_MAX]) }), vault());
   assert.equal(at.label, 'SET TIMELOCK');

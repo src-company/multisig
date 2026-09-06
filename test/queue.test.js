@@ -59,6 +59,7 @@ function grab(name) {
 // asserting against its own idea of the states rather than the app's.
 const NEEDED = [
   'renderDash', 'txSt', 'fmtEta', 'canForwardCancel', 'hasForwarder', 'isCancelTx',
+  'rejectArmKey',
   'vaultDot', 'ownerIdent', 'thresholdNote', 'delayNote',
 ];
 
@@ -300,4 +301,22 @@ test('the roster still says which owners the queue is waiting on', () => {
   const html = draw();
   assert.match(html, /1 AWAITING/, 'the owner holding the queue up is no longer named');
   assert.match(html, /1\/1 SIGNED/, 'the owner who has signed lost their standing');
+});
+
+test('the reject confirmation is armed per vault, not per nonce', () => {
+  // Arming REJECT on one vault's #12 and then pressing REJECT on ANOTHER
+  // vault's #12 used to find the guard already armed and fire on the first
+  // press, skipping the confirmation entirely and burning a live nonce on a
+  // no-op. Every other press-again guard in the app is keyed by identity; this
+  // one was keyed on a number two vaults can both have.
+  const A = { address: '0xaaaa000000000000000000000000000000000001' };
+  const B = { address: '0xbbbb000000000000000000000000000000000002' };
+  sandbox.S.vaults = [A, B];
+  const kA = sandbox.rejectArmKey(0, 12);
+  const kB = sandbox.rejectArmKey(1, 12);
+  assert.notEqual(kA, kB, 'the same nonce on two vaults produced one key');
+  assert.equal(kA, sandbox.rejectArmKey(0, 12), 'the key must be stable for one vault and nonce');
+  assert.notEqual(sandbox.rejectArmKey(0, 12), sandbox.rejectArmKey(0, 13),
+    'two nonces on one vault produced one key');
+  sandbox.S.vaults = [];
 });

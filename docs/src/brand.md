@@ -47,7 +47,7 @@ Take whichever fits the hole. These are written to be used verbatim.
 > must approve before funds move. Unlike most multisigs, the timelock is built
 > into the wallet itself rather than bolted on, so a queued transaction is
 > visible — and cancellable — before it executes. It is free, unowned, immutable
-> and live on five chains.
+> and live on six chains.
 
 **Long (109 words)**
 
@@ -113,7 +113,7 @@ appoint one, and can remove it.
 | **The timelock is part of the wallet** | Most multisigs need a second contract wired in front to get a delay. Here `delay` is a field on the wallet. Fewer moving parts, one thing to audit. |
 | **One file** | The wallet and its factory are 275 lines of Solidity in a single file. You can read the whole thing in an afternoon, which is the only real way to trust it. |
 | **One storage slot** | Delay, nonce, threshold, owner count and executor are packed together. That is where most of the gas saving comes from. |
-| **Same address on every chain** | Deployed with CREATE2, so a wallet has one address across Ethereum, Base, MegaETH, Arbitrum and OP Mainnet. |
+| **Same address on every chain** | Deployed with CREATE2, so a wallet has one address across Ethereum, Base, MegaETH, Arbitrum, OP Mainnet and Robinhood Chain. |
 | **Works on a normal wallet too** | Under EIP-7702, an existing EOA can take on multisig behaviour without moving funds to a new address, while its owner keeps the original key. |
 | **Nobody can change it** | The contracts are immutable. There is no admin key, no upgrade path, and no proxy we control. |
 | **It costs nothing** | No token, no fee, no revenue. A public good by [src_co](https://github.com/src-company). |
@@ -286,7 +286,7 @@ integration directory:
 | **Licence** | MIT |
 | **Maker** | src_co |
 | **First commit** | 2026-03-31 |
-| **Mainnets** | Ethereum, Base, MegaETH, Arbitrum, OP Mainnet |
+| **Mainnets** | Ethereum, Base, MegaETH, Arbitrum, OP Mainnet, Robinhood Chain |
 | **Testnets** | Sepolia, Base Sepolia |
 | **Source size** | 275 lines, one file (wallet + factory) |
 | **Test coverage** | 100% |

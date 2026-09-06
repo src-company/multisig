@@ -528,8 +528,28 @@ async function connectWithWallet(walletKey) {
       accountsChanged: accts => {
         _onAccountsChanged(accts).catch(e => { console.error('accountsChanged:', e); window.location.reload(); });
       },
-      chainChanged: hex => {
-        const id = typeof hex === 'string' ? parseInt(hex, 16) : Number(hex);
+      chainChanged: raw => {
+        // Base 16 only if it SAYS base 16.
+        //
+        // The parameter was named `hex` and parsed as `parseInt(hex, 16)`, but
+        // the event does not promise hex. WalletConnect answers out of its own
+        // session state and emits a decimal string, so `'8453'` was read as
+        // 0x8453 and Base arrived as chain 33875 — the identical misreading
+        // that connectWithWallet and walletSwitchChain use BigInt() to avoid,
+        // and that normChainId exists for on the app side. Mainnet is the one
+        // value where both readings agree, which is what kept it hidden.
+        //
+        // What it cost: _targetChainId and S.walletChain both take the bogus
+        // number, CHAINS[33875] misses, and the app tells the operator their
+        // wallet is on an unsupported chain and refuses to sign — permanently,
+        // because nothing on the signing path re-reads the wallet. Mid-deploy
+        // it fails a step whose wallet had in fact arrived.
+        //
+        // BigInt handles '0x2105', '8453' and 8453 alike and throws on anything
+        // else, which is the reload case below.
+        let id;
+        try { id = Number(BigInt(typeof raw === 'string' ? raw.trim() : raw)); }
+        catch (_) { id = NaN; }
         if (!Number.isFinite(id) || id <= 0) { window.location.reload(); return; }
         // Keep the switch target in step with where the wallet actually is, so a
         // later auto-reconnect or preflight does not try to drag it back to a

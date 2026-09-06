@@ -197,11 +197,30 @@ test('an amount is scaled by the token\'s own decimals', () => {
   assert.equal(toUnits('1.000001', 6), '1000001');
 });
 
-test('a fraction longer than the token can hold is truncated, never rounded up', () => {
-  // Rounding up would move more than the operator typed, out of a vault, with
-  // everybody's signature on it.
-  assert.equal(toUnits('1.9999999', 6), '1999999');
-  assert.equal(toUnits('0.0000009', 6), '0');
+test('a fraction longer than the token can hold is refused, not quietly shortened', () => {
+  // This used to truncate — 1.9999999 at 6 decimals displayed as 1999999 — on
+  // the reasoning that truncating beats rounding up, which is true as far as it
+  // goes. But neither is what happens next: this figure is only ever shown
+  // under the amount field, and the submit path scales the SAME input with
+  // ethers.parseUnits, which throws "too many decimals for format" on it.
+  //
+  // So the echo was displaying a number the proposal could never carry, and the
+  // operator learnt the amount was unusable only after the wallet prompt. The
+  // job of this line is to say what the chain will receive; when the answer is
+  // "nothing, this cannot be scaled", INVALID is that answer. Every caller
+  // already checks for it.
+  assert.equal(toUnits('1.9999999', 6), 'INVALID');
+  assert.equal(toUnits('0.0000009', 6), 'INVALID');
+  // Exactly as many digits as the token holds is still fine.
+  assert.equal(toUnits('1.999999', 6), '1999999');
+});
+
+test('a half-typed amount is not called invalid mid-keystroke', () => {
+  // parseUnits accepts a trailing point, so the echo should not contradict it
+  // while somebody is still typing the fraction.
+  assert.equal(toUnits('1.', 6), '1000000');
+  assert.equal(toUnits(' 1.5 ', 6), '1500000');
+  assert.equal(toUnits('.5', 6), '500000');
 });
 
 test('commas are for reading and are stripped before anything is scaled', () => {

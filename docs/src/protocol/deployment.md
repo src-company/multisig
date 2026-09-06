@@ -151,8 +151,8 @@ another account, or at the same account on another chain.
 
 Deployed via
 [SafeSummoner](https://contractscan.xyz/contract/0x00000000004473e1f31C8266612e7FD5504e6f2a)
-on Ethereum, Base, MegaETH, Arbitrum, Optimism, Sepolia and Base Sepolia — the
-same three addresses on every one; see [the dapp's chain
+on Ethereum, Base, MegaETH, Arbitrum, Optimism, Robinhood Chain, Sepolia and
+Base Sepolia — the same three addresses on every one; see [the dapp's chain
 list](../dapp/overview.md#chains).
 
 > **Warning:** none of these three singletons has a withdrawal path, and the
