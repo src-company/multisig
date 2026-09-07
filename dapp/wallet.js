@@ -332,6 +332,16 @@ function _paintWalletSheet(firstPaint) {
     return true;
   }
 
+  // A reopened sheet starts from an empty list, and has to say so in the DOM as
+  // well as in _sheetDrawn. showWalletModal clears that set on every open, so
+  // every wallet counts as fresh again — and this function only ever appends,
+  // deliberately, so that a late announcement cannot move a row out from under
+  // the pointer. Those two together meant a sheet that was opened, dismissed and
+  // opened again appended a second full set of rows beneath the first, and a
+  // third on the next open. The connected branch above never showed it because
+  // it assigns innerHTML rather than appending.
+  if (firstPaint) container.innerHTML = '';
+
   const fresh = detectWallets().filter(w => !_sheetDrawn.has(w.key));
   if (!fresh.length) {
     if (firstPaint) container.innerHTML = '<div data-sheet-empty style="padding:16px;text-align:center;font-size:11px;letter-spacing:2px;color:var(--d)">NO WALLETS DETECTED</div>';

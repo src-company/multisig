@@ -83,12 +83,21 @@ const mkRow = key => ({
 function makeContainer() {
   const c = {
     rows: [], plain: [], empty: null,
-    rebuilds: 0, appends: 0,
+    rebuilds: 0, clears: 0, appends: 0,
     get innerHTML() { return ''; },
     set innerHTML(html) {
-      // A wholesale rebuild. Counted rather than forbidden: the first paint of a
-      // CONNECTED sheet is one, legitimately — it is a fixed two-line body with
-      // nothing for an announcement to add. Every other rebuild is the bug.
+      // Two different things assign here and only one of them is a rebuild.
+      //
+      // Assigning '' is the first paint emptying a body that a PREVIOUS open
+      // left behind. It moves nothing, because at that point nothing from this
+      // open is on screen yet, and without it the append-only draw below lays a
+      // second full set of rows under the first — which is what a reopened sheet
+      // used to do.
+      //
+      // Assigning content is a wholesale rebuild. The first paint of a CONNECTED
+      // sheet is one, legitimately: a fixed two-line body with nothing for an
+      // announcement to add. On any later paint either of them is the bug.
+      if (html === '') { c.clears++; c.rows = []; c.plain = []; c.empty = null; return; }
       c.rebuilds++;
       c.rows = []; c.plain = [];
       c.empty = /data-sheet-empty/.test(html) ? { remove() { c.empty = null; } } : null;
@@ -318,4 +327,47 @@ test('an announced name and key are escaped before they reach the row', () => {
   assert.ok(html.includes('data-wallet-key="a&quot;b"'), 'a quote in the key was not escaped');
   assert.ok(!html.includes('<img'), 'a wallet name reached the row as markup');
   assert.ok(html.includes('&lt;img src=x onerror=alert(1)&gt;'), 'the name was not escaped, it was dropped');
+});
+
+test('a sheet opened, dismissed and opened again holds one row per wallet', () => {
+  // The reported defect. _sheetDrawn is cleared on every open, so every wallet
+  // counts as fresh again — and the draw is append-only by design, so without
+  // emptying the body first the second open laid a complete second set of rows
+  // beneath the first, and the third a set beneath that. It never showed on the
+  // connected sheet, which assigns its body instead of appending to it.
+  reset();
+  announce('u1', 'Rabby');
+  announce('u2', 'Frame');
+
+  showWalletModal();
+  const first = keys();
+  assert.deepEqual(first, ['eip6963_u1', 'eip6963_u2', 'coinbase', 'walletconnect']);
+
+  for (let open = 2; open <= 4; open++) {
+    sandbox._stopSheetPoll();             // what closeWalletModal does first
+    modal.active = false;                 // ...then the class comes off
+    modal.active = true;                  // reopened
+    showWalletModal();
+    assert.deepEqual(keys(), first, `open ${open} did not hold one row per wallet`);
+    assert.equal(new Set(keys()).size, keys().length, `open ${open} drew a wallet twice`);
+  }
+  assert.equal(container.rebuilds, 0, 'the sheet rebuilt a body rather than emptying it');
+});
+
+test('emptying on reopen does not cost the stillness a late announcement relies on', () => {
+  // The fix empties the body on the FIRST paint of an open and never after, so
+  // the property the whole sheet is built around still holds: once a row is on
+  // screen it does not move, whatever announces later.
+  reset();
+  announce('u1', 'Rabby');
+  showWalletModal();
+  const clearsAfterOpen = container.clears;
+  const before = keys();
+
+  announce('u2', 'Frame');                // arrives while the sheet is open
+  tick();
+  assert.deepEqual(keys().slice(0, before.length), before, 'a late announcement moved a row that was already drawn');
+  assert.ok(keys().includes('eip6963_u2'), 'a late announcement never arrived');
+  assert.equal(container.clears, clearsAfterOpen, 'the sheet emptied itself on a later paint');
+  assert.equal(container.rebuilds, 0);
 });

@@ -528,6 +528,18 @@ INTERFACE:`
 <h2>SIGNING</h2>
 <p>Two paths: <strong>SIGN</strong> (off-chain EIP-712, free, filled button) or <strong>APPROVE</strong> (on-chain approve() call, costs gas, outline button). Both count toward the threshold. <strong>UNSIGN</strong> (outline) withdraws your approval by calling approve(hash, false). Filled buttons are the primary action, outlined ones are secondary or already completed.</p>
 
+<h2>SENDING WITH A DELAY (SLOW)</h2>
+<p>A transfer can be sent through <a href="https://contractscan.xyz/contract/0x000000006513B7821171C8447ec7ECdfa3b956Fd" target="_blank" rel="noopener">SLOW</a> instead of going straight to the recipient. The funds are locked in a wrapper minted to the recipient, who can claim them once the delay has passed. Until then the vault can reverse the transfer and take them back.</p>
+<p>This is a second delay, after and separate from the vault's own timelock. The timelock protects the vault from a bad transaction; SLOW protects a payment from a wrong or compromised recipient.</p>
+<p>Available on Ethereum, Base and Robinhood Chain, where the contract is deployed at one address. The panel is hidden on other chains. Delays offered are 1 hour, 6 hours, 1 day, 3 days, 7 days and 30 days.</p>
+<p>ETH is sent with the transaction. An ERC-20 needs an allowance first, so the proposal becomes a <code>batch</code>: approve, then deposit, in one atomic call. If a partial allowance is already standing it is reset to zero first, because some tokens refuse to move an allowance from one non-zero value to another.</p>
+
+<h2>TOP UP</h2>
+<p>Deposits into the vault from the connected wallet. ETH or any token in the vault's list, sent directly to the vault address. No proposal and no signatures: money moving in needs neither.</p>
+
+<h2>CUSTOM TOKENS</h2>
+<p>Any ERC-20 can be added to a vault by address. The app reads <code>symbol()</code> and <code>decimals()</code> from the contract and stores the result in your browser, per vault, so it appears in the holdings and in the token picker when you send. Decimals come from the contract rather than being assumed, since a token that reports 6 and is treated as 18 moves a millionth of the intended amount.</p>
+
 <h2>TRANSACTION LIFECYCLE</h2>
 <pre>STANDARD PATH (delay > 0)
   NEEDS SIGS → SUBMIT → ETA countdown → READY → EXECUTE
@@ -576,9 +588,18 @@ UNLOCKED (delay = 0)
 <p>When delay > 0, an INSTANT EXECUTION toggle enables the fast path at deploy time. Deployment then uses <code>createWithCalls()</code> to call enableForward(true) on the TimelockExecutor as a post-init step, with the factory as temporary executor. The network selector lists the supported chains with their chain IDs and token lists.</p>
 
 <h2>WHERE THIS RUNS</h2>
-<p>The app is one directory of static files with no build step at the far end &mdash; no server decides anything, and every write goes to a chain or to the coordination database directly. So it can be served from anywhere, and it is served from two places: <strong>multisig.software</strong> over ordinary HTTPS, and IPFS, pinned by content hash and reachable at <strong>multisig.wei.limo</strong>, <strong>multisig.wei.is</strong> and <strong>multisig.wei.domains</strong>. The <code>.wei</code> name carries the hash on-chain as its contenthash record, so those three resolve whatever it currently points at, and a copy downloaded and served locally behaves the same as either.</p>
-<p><strong>THE FOOTER NAMES THE BUILD</strong> &mdash; the CID of the bundle being executed is shown in the footer, and clicking it copies the CID rather than opening a gateway. Naming one would be picking a dependency on somebody else's infrastructure, and the public gateway this used to point at is being retired; a CID is not a location and needs none, so on the clipboard it goes into whichever gateway or node the reader already trusts. It is not compiled in, and it cannot be: a content hash names the bytes it is written into, so recording it inside them would change it. It is discovered instead. On a gateway the CID is either in the URL, or &mdash; for a name-based gateway like the three above, which resolve the contenthash and serve the result at the name &mdash; in the response headers, which is where <code>multisig.wei.limo</code> keeps it. On an ordinary host neither exists and a file written beside the app records it. Reading it back rather than baking it in is also the more honest answer: it names the bundle that actually replied, not one a build asserted was published.</p>
-<p>That hash is checkable, and checking it is the point of publishing it. <code>node build.js</code> followed by <code>ipfs add -r --cid-version 1 --ignore ipfs.json dist</code> in a clone of the repository reproduces the same CID, byte for byte, from source anyone can read. If it differs, the thing being served is not the thing in the repository.</p>
+<p>The app is static files. No server logic and no build step at the far end: every write goes straight to a chain or to the coordination database. It runs from anywhere you serve it.</p>
+<p>Two places serve it today. <strong>multisig.software</strong> over HTTPS, and IPFS, reachable at <strong>multisig.wei.limo</strong>, <strong>multisig.wei.is</strong> and <strong>multisig.wei.domains</strong>. The <code>.wei</code> name holds the content hash on-chain, so those three follow whatever it points at. A copy you download and serve yourself behaves the same.</p>
+
+<h2>THE FOOTER NAMES THE BUILD</h2>
+<p>The footer shows the CID of the bundle you are running. Click it to copy.</p>
+<p>The CID is not compiled in, and it cannot be: a content hash names the bytes it sits inside, so writing it there would change it. The app finds it at runtime instead &mdash; from the URL on a path or subdomain gateway, from the response headers on a name-based gateway like the three above, and from a file beside the app on an ordinary host.</p>
+<p>Check it against the source. In a clone of the repository:</p>
+<pre>node build.js
+ipfs add -r --cid-version 1 --ignore ipfs.json dist</pre>
+<p>That prints the same CID. A different one means what you are being served is not what is in the repository.</p>
+
+<div class="note">Links between pages carry the <code>.html</code> filename. An IPFS gateway serves the bytes stored under a name and does not guess extensions, so <code>docs</code> is a 404 there while <code>docs.html</code> is the page.</div>
 `
 };
 
