@@ -17,7 +17,7 @@
      provider is initialised with an rpcMap for the one chain it is given, so
      chain reads stay on the RPC hosts listed here; letting the fallback
      through would put a vault's traffic on a host that is not one of them. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://multisig-proposals.onrender.com https://multisig-postgrest.onrender.com https://sourcify.dev https://*.publicnode.com https://1rpc.io https://*.drpc.org https://api.coinbase.com https://mainnet.base.org https://sepolia.base.org https://arb1.arbitrum.io https://mainnet.optimism.io https://mainnet.megaeth.com https://rpc-megaeth-mainnet.globalstake.io https://rpc.mainnet.chain.robinhood.com https://api.dotmega.domains https://keys.coinbase.com https://rpc.wallet.coinbase.com https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org; img-src 'self' data: https://explorer-api.walletconnect.com; frame-src https://verify.walletconnect.com https://verify.walletconnect.org; upgrade-insecure-requests">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://multisig-proposals.onrender.com https://multisig-postgrest.onrender.com https://sourcify.dev https://*.publicnode.com https://1rpc.io https://*.drpc.org https://sepolia.gateway.tenderly.co https://api.coinbase.com https://mainnet.base.org https://sepolia.base.org https://arb1.arbitrum.io https://mainnet.optimism.io https://mainnet.megaeth.com https://rpc-megaeth-mainnet.globalstake.io https://rpc.mainnet.chain.robinhood.com https://api.dotmega.domains https://keys.coinbase.com https://rpc.wallet.coinbase.com https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org; img-src 'self' data: https://explorer-api.walletconnect.com; frame-src https://verify.walletconnect.com https://verify.walletconnect.org; upgrade-insecure-requests">
 <title>multisig</title>
 <meta name="description" content="Multichain multisig with an embedded timelock. A mandatory delay between queuing and execution, so a compromised key or a social-engineered signature can be seen and cancelled before it lands.">
 <!-- Unfurl metadata. Vault links get passed between co-signers and pasted into
@@ -1130,7 +1130,19 @@ const CHAINS = {
   8453:     { name:'Base',         rpcs:['https://base.publicnode.com','https://1rpc.io/base','https://base.drpc.org'],               explorer:'https://basescan.org',           hex:'0x2105',    blockMs:2000 },
   42161:    { name:'Arbitrum',    rpcs:['https://arbitrum-one.publicnode.com','https://1rpc.io/arb','https://arbitrum.drpc.org'],    explorer:'https://arbiscan.io',            hex:'0xa4b1',    blockMs:250 },
   10:       { name:'OP Mainnet', rpcs:['https://optimism.publicnode.com','https://1rpc.io/op','https://optimism.drpc.org'],       explorer:'https://optimistic.etherscan.io', hex:'0xa',       blockMs:2000 },
-  11155111: { name:'Sepolia',      rpcs:['https://ethereum-sepolia.publicnode.com','https://1rpc.io/sepolia','https://sepolia.drpc.org'], explorer:'https://sepolia.etherscan.io',   hex:'0xaa36a7',  blockMs:12000 },
+  // Tenderly in the third slot rather than dRPC, for the reason spelled out on
+  // Robinhood below and then found here too: dRPC's free tier refuses this chain
+  // outright. Every method — eth_chainId, eth_blockNumber, eth_getCode, eth_call,
+  // eth_getBalance — comes back "chain is not available on free plan", measured
+  // five times over five attempts with no successes. That is worse than the
+  // Robinhood case, which at least answered the handshake: this one cannot even
+  // be reached, so ethers marks it fatally on its first getBlockNumber, never
+  // clears it (see the wedge note on makeProvider), and the row spends a runner
+  // slot and a stallTimeout on a backend that was never going to answer.
+  // Tenderly answers all nine methods this app calls, and is a third operator
+  // rather than a second helping of one already here, which is the point of
+  // having a third row at all.
+  11155111: { name:'Sepolia',      rpcs:['https://ethereum-sepolia.publicnode.com','https://1rpc.io/sepolia','https://sepolia.gateway.tenderly.co'], explorer:'https://sepolia.etherscan.io',   hex:'0xaa36a7',  blockMs:12000 },
   84532:    { name:'Base Sepolia', rpcs:['https://base-sepolia.publicnode.com','https://sepolia.base.org'],                           explorer:'https://sepolia.basescan.org',   hex:'0x14a34',   blockMs:2000 },
   4326:     { name:'MegaETH',     rpcs:['https://mainnet.megaeth.com/rpc','https://rpc-megaeth-mainnet.globalstake.io','https://megaeth.drpc.org'], explorer:'https://mega.etherscan.io',      hex:'0x10e6',    blockMs:1000 },
   // Robinhood Chain: an Arbitrum Orbit rollup, ETH for gas, and the fastest
