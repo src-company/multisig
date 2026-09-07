@@ -5077,16 +5077,66 @@ function ipfsMark() {
 // fingerprint is not worth delaying a wallet for. A miss is silent — this file
 // is absent from the IPFS copy by design, and a footer with no mark is the
 // correct outcome there, not an error worth a console line.
+// Puts a CID into the footer of a page already drawn. The mark is appended
+// rather than re-rendered because it arrives after first paint and nothing else
+// on the row depends on it.
+function _showIpfsMark(cid) {
+  if(!cid || _ipfsCid || !IPFS_CID_RE.test(cid)) return;
+  _ipfsCid = cid;
+  document.querySelectorAll('.footer-r').forEach(el => {
+    if(!el.querySelector('.ipfs-mark')) el.insertAdjacentHTML('beforeend', ipfsMark());
+  });
+}
+
+// The CID when the URL does not carry one. Reading it out of the URL covers the
+// two gateway shapes that put it there and misses the one this app is actually
+// published under: a name-based gateway resolves a contenthash server-side and
+// serves the result at the name, so multisig.wei.limo is IPFS all the way down
+// and its URL says nothing about which bundle answered. The footer was blank
+// there for exactly that reason.
+//
+// The gateway will say, though, and every shape of it says so in a header:
+//
+//   x-ipfs-cid      the root, directly            (.limo and friends)
+//   x-ipfs-roots    root first, then its children (kubo, ipfs.io)
+//   x-ipfs-path     /ipfs/<root>/index.html       (kubo, ipfs.io)
+//
+// Asked of this page's own URL, which is same-origin, so every header is
+// readable without the gateway opting into exposing any of them. HEAD, because
+// the body is already here — measured 200 on .limo, ipfs.io, kubo and Render.
+// The answer is also better than the sidecar it falls back to: it names the
+// bundle the gateway actually served, not one a build recorded.
+function _ipfsCidFromHeaders(res) {
+  const direct = res.headers.get('x-ipfs-cid');
+  if(direct && IPFS_CID_RE.test(direct.trim())) return direct.trim();
+  // Roots is ordered outermost-first, so the root directory leads.
+  const roots = res.headers.get('x-ipfs-roots');
+  if(roots) {
+    const first = roots.split(',')[0].trim();
+    if(IPFS_CID_RE.test(first)) return first;
+  }
+  const path = res.headers.get('x-ipfs-path');
+  const m = path && path.match(/^\/ipfs\/([^\/?#]+)/);
+  return m && IPFS_CID_RE.test(m[1]) ? m[1] : '';
+}
+
+// Off http(s) there is no gateway and no sidecar to ask, so neither runs.
 if(!_ipfsCid && /^https?:$/.test(location.protocol)) {
-  fetch('./ipfs.json', { cache: 'no-cache' })
-    .then(r => r.ok ? r.json() : null)
-    .then(j => {
-      if(j && typeof j.cid === 'string' && IPFS_CID_RE.test(j.cid)) {
-        _ipfsCid = j.cid;
-        document.querySelectorAll('.footer-r').forEach(el => {
-          if(!el.querySelector('.ipfs-mark')) el.insertAdjacentHTML('beforeend', ipfsMark());
-        });
-      }
+  // Deliberately not awaited and deliberately not chained into the render path:
+  // a build fingerprint is not worth delaying a wallet for, and a footer that
+  // gains it a moment late is the correct behaviour rather than a compromise.
+  fetch(location.href, { method: 'HEAD', cache: 'no-store' })
+    .then(res => _ipfsCidFromHeaders(res))
+    .catch(() => '')
+    .then(cid => {
+      if(cid) return _showIpfsMark(cid);
+      // No gateway headers: an ordinary host, where the pin recorded the CID in
+      // a file instead. Absent from the IPFS copy by design, so a 404 here is
+      // the expected answer on the half of the deployment that has headers.
+      return fetch('./ipfs.json', { cache: 'no-cache' })
+        .then(r => r.ok ? r.json() : null)
+        .then(j => { if(j && typeof j.cid === 'string') _showIpfsMark(j.cid); })
+        .catch(() => {});
     })
     .catch(() => {});
 }
