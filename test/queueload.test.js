@@ -108,7 +108,7 @@ const NEEDED = [
   // so it is as required for PROD_TOKENS to evaluate as the constants above it.
   'USDG_ICON', 'USDE_ICON', 'equityIcon',
   'ETH_ONLY', 'PROD_TOKENS',
-  'TERMINAL_RECHECK', 'canonicalSigV', 'verifySigs',
+  'canonicalSigV', 'verifySigs',
   // The verified-ABI side. loadVaultQueue labels every row through
   // selectorToLabel() and then sets the background prefetch going, so both the
   // index those read and the errand that fills it are lifted whole rather than
@@ -121,7 +121,7 @@ const NEEDED = [
   'isSelfCallTarget', 'multisigWriteFns', 'fetchContractAbi',
   '_abiPrefetched', 'ABI_PREFETCH_MAX', 'prefetchQueueAbis',
   // the subjects
-  'proposalDigest', 'approvalPairsFor', 'chainCheckQueue', 'sigsFor', 'loadVaultQueue',
+  'queueRef', 'findQueueTx', 'prodSign', 'prodApprove', 'txSt', 'proposalDigest', 'approvalPairsFor', 'chainCheckQueue', 'sigsFor', 'loadVaultQueue',
 ];
 
 const VAULT = '0x5555555555555555555555555555555555555555';
@@ -615,7 +615,7 @@ test('a cancel companion counts only the signatures made over its own digest', a
   // The companion: a self-call carrying cancelQueued, at the LIVE nonce.
   const companion = row({
     nonce: 5, target: VAULT, value: '0',
-    call_data: msIface.encodeFunctionData('cancelQueued', ['0x' + 'ab'.repeat(32)]),
+    call_data: msIface.encodeFunctionData('cancelQueued', [proposalDigest(v, t)]),
     description: 'Cancel #4',
   });
   companion.signatures = [sign(v, companion, A), sign(v, companion, B)];
@@ -635,7 +635,7 @@ test('a forged cancel companion signs for nobody', async () => {
   chain.queued.set(proposalDigest(v, t).toLowerCase(), 66666);
   const companion = row({
     nonce: 5, target: VAULT, value: '0',
-    call_data: msIface.encodeFunctionData('cancelQueued', ['0x' + 'ab'.repeat(32)]),
+    call_data: msIface.encodeFunctionData('cancelQueued', [proposalDigest(v, t)]),
     description: 'Cancel #4',
   });
   // Rows naming every owner, with bytes nobody made.
@@ -655,7 +655,7 @@ test('a companion at the wrong nonce is unusable, however well signed', async ()
   chain.queued.set(proposalDigest(v, t).toLowerCase(), 66666);
   const companion = row({
     nonce: 6, target: VAULT, value: '0',
-    call_data: msIface.encodeFunctionData('cancelQueued', ['0x' + 'ab'.repeat(32)]),
+    call_data: msIface.encodeFunctionData('cancelQueued', [proposalDigest(v, t)]),
     description: 'Cancel #4',
   });
   companion.signatures = [sign(v, companion, A), sign(v, companion, B)];
@@ -674,13 +674,13 @@ test('a companion whose shape does not match its kind is unusable', async () => 
   const wrong = [
     // right selector, aimed somewhere else
     row({ nonce: 5, target: STRANGER, value: '0', description: 'Cancel #4',
-          call_data: msIface.encodeFunctionData('cancelQueued', ['0x' + 'ab'.repeat(32)]) }),
+          call_data: msIface.encodeFunctionData('cancelQueued', [proposalDigest(v, t)]) }),
     // self-call, wrong selector
     row({ nonce: 5, target: VAULT, value: '0', description: 'Cancel #4',
           call_data: msIface.encodeFunctionData('addOwner', [STRANGER]) }),
     // right shape, carrying value
     row({ nonce: 5, target: VAULT, value: '1', description: 'Cancel #4',
-          call_data: msIface.encodeFunctionData('cancelQueued', ['0x' + 'ab'.repeat(32)]) }),
+          call_data: msIface.encodeFunctionData('cancelQueued', [proposalDigest(v, t)]) }),
   ];
   for (const w of wrong) {
     w.signatures = [sign(v, w, A), sign(v, w, B)];
@@ -692,14 +692,13 @@ test('a companion whose shape does not match its kind is unusable', async () => 
 test('a reject companion is a bare no-op self-call, and a rejected one carrying calldata is not', async () => {
   resetChain();
   const v = vault({ nonce: 5, threshold: 2 });
-  const t = row({ nonce: 4, status: 'queued' });
+  const t = row({ nonce: 5, status: 'proposed' });
   t.signatures = [sign(v, t, A)];
-  chain.queued.set(proposalDigest(v, t).toLowerCase(), 66666);
-  const good = row({ nonce: 5, target: VAULT, value: '0', call_data: '0x', description: 'Reject #4' });
+  const good = row({ nonce: 5, target: VAULT, value: '0', call_data: '0x', description: 'Reject #5' });
   good.signatures = [sign(v, good, A)];
   assert.equal((await load(v, { pending: [t, good] }))[0].rejectSigners.size, 1);
 
-  const bad = row({ nonce: 5, target: VAULT, value: '0', description: 'Reject #4',
+  const bad = row({ nonce: 5, target: VAULT, value: '0', description: 'Reject #5',
                     call_data: msIface.encodeFunctionData('addOwner', [STRANGER]) });
   bad.signatures = [sign(v, bad, A)];
   assert.equal((await load(v, { pending: [t, bad] }))[0].rejectSigners?.size || 0, 0);
@@ -714,7 +713,7 @@ test('a planted empty companion cannot mask the real one behind it', async () =>
   const t = row({ nonce: 4, status: 'queued' });
   t.signatures = [sign(v, t, A)];
   chain.queued.set(proposalDigest(v, t).toLowerCase(), 66666);
-  const cd = msIface.encodeFunctionData('cancelQueued', ['0x' + 'ab'.repeat(32)]);
+  const cd = msIface.encodeFunctionData('cancelQueued', [proposalDigest(v, t)]);
   const real = row({ nonce: 5, target: VAULT, value: '0', call_data: cd, description: 'Cancel #4' });
   real.signatures = [sign(v, real, A), sign(v, real, B)];
   const decoy = row({ nonce: 5, target: VAULT, value: '0', call_data: cd, description: 'Cancel #4' });
@@ -734,7 +733,7 @@ test('an accelerate companion is counted separately from a cancel on the same pr
                       call_data: msIface.encodeFunctionData('executeQueued', [A, 0n, '0x', 4]) });
   accel.signatures = [sign(v, accel, A), sign(v, accel, B), sign(v, accel, C)];
   const cancel = row({ nonce: 5, target: VAULT, value: '0', description: 'Cancel #4',
-                       call_data: msIface.encodeFunctionData('cancelQueued', ['0x' + 'ab'.repeat(32)]) });
+                       call_data: msIface.encodeFunctionData('cancelQueued', [proposalDigest(v, t)]) });
   cancel.signatures = [sign(v, cancel, A)];
   const q = await load(v, { pending: [t, accel, cancel] });
   assert.equal(q[0].accelSigners.size, 3);
@@ -842,4 +841,89 @@ test('two proposals contesting one nonce keep the order the database handed back
   const q = await load(v, { pending: [first, second] });
   assert.deepEqual(q.map(t => t.dbId), [first.id, second.id],
     'the contested pair came back in a different order than the database gave them');
+});
+
+test('same-nonce cancellation actions select the displayed payload in either order', async () => {
+  for(const reversed of [false, true]) {
+    resetChain();
+    const v = vault({ delay: 0 });
+    const transfer = row({ id:'transfer', nonce:5, target:STRANGER, value:'1000' });
+    const cancel = row({ id:'cancel', nonce:5, target:VAULT,
+      call_data:msIface.encodeFunctionData('cancelQueued', ['0x'+'aa'.repeat(32)]), description:'Emergency cancellation' });
+    transfer.signatures=[sign(v,transfer,B)]; cancel.signatures=[sign(v,cancel,B)];
+    await load(v,{ pending: reversed ? [cancel,transfer] : [transfer,cancel] });
+    const shown=v.queue.find(t=>t.dbId==='cancel');
+    const ref=sandbox.queueRef(v,shown);
+    assert.equal(sandbox.findQueueTx(v,5),null,'ambiguous legacy nonce must fail closed');
+    assert.equal(sandbox.findQueueTx(v,ref),shown);
+    let requested;
+    sandbox.requireSigner=()=>({addr:A,signer:{signTypedData:async(domain,types,msg)=>{
+      requested=msg; throw new Error('stop before signing');
+    }}});
+    sandbox.normalizeSigV=x=>x; sandbox.flash=()=>{};
+    await sandbox.prodSign(0,ref);
+    assert.equal(requested.target,VAULT);
+    assert.equal(requested.data,cancel.call_data);
+    assert.equal(requested.nonce,5);
+    v.queue.reverse();
+    assert.equal(sandbox.findQueueTx(v,ref),shown,'reference survives reordering');
+    const other={...v,address:STRANGER};
+    assert.equal(sandbox.findQueueTx(other,ref),null,'reference cannot cross vaults');
+    v.chainId=8453;
+    assert.equal(sandbox.findQueueTx(v,ref),null,'reference cannot cross chains');
+  }
+});
+
+test('unsigned relabeling never transfers cancellation authorization to another digest', async () => {
+  resetChain();
+  const v=vault();
+  const a=row({id:'a',nonce:3,status:'queued',target:A,value:'1'});
+  const b=row({id:'b',nonce:4,status:'queued',target:B,value:'2'});
+  chain.queued.set(digestFor(v,a),2000000000); chain.queued.set(digestFor(v,b),2000000000);
+  const companion=row({nonce:5,target:VAULT,description:'Cancel #3',
+    call_data:msIface.encodeFunctionData('cancelQueued',[digestFor(v,b)])});
+  companion.signatures=[sign(v,companion,A)];
+  let q=await load(v,{pending:[a,b,companion]});
+  assert.equal(q.find(t=>t.nonce===3).cancelSigners,null);
+  assert.ok(q.some(t=>t.dbId===companion.id),'mislabeled signed row is not silently hidden');
+  companion.description='Cancel #4';
+  q=await load(v,{pending:[a,b,companion]});
+  assert.equal(q.find(t=>t.nonce===4).cancelSigners.has(A.toLowerCase()),true);
+});
+
+test('accelerate attribution checks the complete signed tuple and reject checks its live nonce', async () => {
+  resetChain(); const v=vault();
+  const t=row({nonce:4,status:'queued',value:'1'});
+  chain.queued.set(digestFor(v,t),2000000000);
+  for(const data of [msIface.encodeFunctionData('executeQueued',[t.target,2n,'0x',4]),'0x']) {
+    const c=row({nonce:5,target:VAULT,description:data==='0x'?'Reject #4':'Accelerate #4',call_data:data});
+    c.signatures=[sign(v,c,A)];
+    const q=await load(v,{pending:[t,c]});
+    assert.equal(q[0].accelSigners,null); assert.equal(q[0].rejectSigners,null);
+  }
+});
+
+test('a live row is recovered beyond forty newer terminal rows', async () => {
+  resetChain(); const v=vault();
+  const live=row({nonce:4,status:'cancelled'});
+  chain.queued.set(digestFor(v,live),2000000000);
+  const fillers=Array.from({length:250},(_,i)=>row({nonce:3,status:'cancelled',value:String(i+1)}));
+  const q=await load(v,{terminal:[...fillers,live]});
+  assert.ok(q.some(t=>t.dbId===live.id));
+  assert.equal(chain.calls,3,'chain lookups are chunked into bounded batches');
+});
+
+test('noncanonical companion bytes cannot count toward a canonically rebuilt action',async()=>{
+  resetChain(); const v=vault();
+  const t=row({nonce:4,status:'queued'}); chain.queued.set(digestFor(v,t),2000000000);
+  for(const [description,data] of [
+    ['Cancel #4',msIface.encodeFunctionData('cancelQueued',[digestFor(v,t)])],
+    ['Accelerate #4',msIface.encodeFunctionData('executeQueued',[t.target,0n,'0x',4])]
+  ]) {
+    const c=row({nonce:5,target:VAULT,description,call_data:data+'00'});
+    c.signatures=[sign(v,c,A)];
+    const q=await load(v,{pending:[t,c]});
+    assert.equal(q[0].cancelSigners,null); assert.equal(q[0].accelSigners,null);
+    assert.ok(q.some(tx=>tx.dbId===c.id));
+  }
 });

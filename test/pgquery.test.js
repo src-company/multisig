@@ -110,12 +110,105 @@ test('the rest of the builder still spells what it always spelled', () => {
   assert.deepEqual(twice._params.getAll('select'), ['b']);
 });
 
-test('the queue asks for its tie-break', () => {
-  // The reason the merge above exists. dbGetPending decides which of a contested
-  // pair is the one every owner is offered controls on, so its sort has to be
-  // total — and it has to be the same total order for everybody, which is what
-  // `id` buys: arbitrary, but arbitrary in the same direction for every client.
-  const body = grab('dbGetPending');
-  assert.match(body, /\.order\('nonce'[^)]*\)\s*\n?\s*\.order\('id'/,
-    'dbGetPending no longer orders by (nonce, id) — which of two proposals contesting a nonce is actionable goes back to being whatever the planner returned');
+test('the queue keeps a deterministic nonce/id order after pagination', async () => {
+  const rows = [{nonce:2,id:'b'}, {nonce:1,id:'b'}, {nonce:1,id:'a'}];
+  const context = { sb: { from:()=>({ eq(){return this;}, in(){return this;} }) },
+    dbReadProposalPages: async () => ({ rows: [...rows], sigs: true }) };
+  vm.createContext(context);
+  vm.runInContext(grab('dbGetPending'), context);
+  const result = await context.dbGetPending('vault');
+  assert.deepEqual(result.rows.map(r=>r.id), ['a','b','b']);
+  assert.deepEqual(result.rows.map(r=>r.nonce), [1,1,2]);
+});
+
+function coordinationContext() {
+  const ctx={console:{error(){}},S:{chainId:1},URLSearchParams};
+  ctx.window=ctx; vm.createContext(ctx);
+  for(const name of ['PgQuery','SIG_EMBED','PROPOSAL_PAGE_SIZE','TERMINAL_COLS',
+    'dbReadProposalPages','dbGetRecentTerminal','dbSyncWalletState'])
+    vm.runInContext(grab(name),ctx);
+  vm.runInContext('globalThis.sb={from:table=>new PgQuery(table)};',ctx);
+  ctx.pgJson=JSON.parse;
+  return ctx;
+}
+
+test('terminal recovery paginates beyond the server cap using stable keys',async()=>{
+  const ctx=coordinationContext();
+  const rows=Array.from({length:1205},(_,i)=>({id:String(i).padStart(5,'0'),nonce:4,signatures:[]}));
+  const requests=[];
+  ctx.pgFetch=async path=>{
+    const params=new URLSearchParams(path.split('?')[1]); requests.push(params);
+    const cursor=(params.get('id')||'gt.').slice(3);
+    const page=rows.filter(r=>r.id>cursor).slice(0,Math.min(137,Number(params.get('limit'))));
+    return {ok:true,text:async()=>JSON.stringify(page)};
+  };
+  const result=await ctx.dbGetRecentTerminal('vault',5);
+  assert.equal(result.rows.length,1205);
+  assert.equal(new Set(result.rows.map(r=>r.id)).size,1205);
+  assert.ok(requests.length>8);
+  for(const p of requests){assert.equal(p.get('order'),'id.asc');assert.equal(p.get('nonce'),'lt.5');}
+});
+
+test('a failed later page cannot look like a complete terminal inventory',async()=>{
+  const ctx=coordinationContext();
+  ctx.pgFetch=async path=>path.includes('id=gt.')
+    ? {ok:false,status:503,text:async()=> 'unavailable'}
+    : {ok:true,text:async()=>JSON.stringify([{id:'a',nonce:4,signatures:[]}])};
+  const result=await ctx.dbGetRecentTerminal('vault',5);
+  assert.equal(result.failed,true); assert.equal(result.rows.length,0);
+});
+
+const OWNER='0x1111111111111111111111111111111111111111';
+const SQUATTER='0x2222222222222222222222222222222222222222';
+const VAULT='0x3333333333333333333333333333333333333333';
+function repairContext({owner=OWNER,firstError='Not an owner',change=null,recordChain=1}={}) {
+  const ctx=coordinationContext();ctx._connectedAddress=owner;
+  const writes=[];
+  ctx.sb.rpc=async(fn,params)=>{writes.push({...params});return writes.length===1&&firstError?{error:{message:firstError}}:{error:null};};
+  ctx.pgFetch=async path=>{
+    if(change==='account')ctx._connectedAddress=SQUATTER;
+    if(change==='chain')ctx.S.chainId=8453;
+    return {ok:true,text:async()=>JSON.stringify(path.startsWith('wallets?')
+      ? [{id:'w',address:VAULT,chain_id:recordChain}]:[{address:SQUATTER}])};
+  };
+  const state={owners:[OWNER],threshold:1,ownerCount:1,delay:0,nonce:3,executor:SQUATTER};
+  return {ctx,writes,state};
+}
+
+test('a verified chain owner can repair an initially squatted coordination record',async()=>{
+  const {ctx,writes,state}=repairContext();
+  assert.equal(await ctx.dbSyncWalletState(VAULT,'w',state),true);
+  assert.equal(writes.length,2);assert.equal(writes[0].p_caller,OWNER);assert.equal(writes[1].p_caller,SQUATTER);
+  assert.deepEqual([...writes[1].p_owners],[OWNER]);
+  assert.equal(writes[1].p_nonce,3);
+});
+
+test('ordinary owner sync still uses one request',async()=>{
+  const {ctx,writes,state}=repairContext({firstError:null});
+  assert.equal(await ctx.dbSyncWalletState(VAULT,'w',state),true);assert.equal(writes.length,1);
+});
+
+test('repair refuses nonowners, network errors, mismatched records and changed sessions',async()=>{
+  for(const opts of [{owner:SQUATTER},{firstError:'timeout'},{change:'account'},{change:'chain'},{recordChain:8453}]) {
+    const {ctx,writes,state}=repairContext(opts);
+    assert.equal(await ctx.dbSyncWalletState(VAULT,'w',state),false,JSON.stringify(opts));
+    assert.ok(writes.length<=1,'must not retry with a public writer claim');
+  }
+});
+
+test('plain signature fallback bounds URL size and paginates every signature',async()=>{
+  const ctx=coordinationContext();
+  vm.runInContext(grab('dbGetSigsByTxIds'),ctx);
+  ctx.dbError=(label)=>new Error(label);
+  const ids=Array.from({length:105},(_,i)=>`tx${String(i).padStart(4,'0')}`);
+  const sigs=ids.flatMap(tx_id=>Array.from({length:30},(_,i)=>({id:tx_id+String(i).padStart(3,'0'),tx_id,signer:OWNER,signature:'0x',sig_type:'ecdsa'})));
+  ctx.pgFetch=async path=>{
+    const p=new URLSearchParams(path.split('?')[1]);
+    const selected=p.get('tx_id').slice(4,-1).split(','); assert.ok(selected.length<=40);
+    const cursor=(p.get('id')||'gt.').slice(3);
+    const page=sigs.filter(s=>selected.includes(s.tx_id)&&s.id>cursor).slice(0,83);
+    return {ok:true,text:async()=>JSON.stringify(page)};
+  };
+  const result=await ctx.dbGetSigsByTxIds(ids);
+  for(const id of ids)assert.equal(result.get(id).length,30);
 });

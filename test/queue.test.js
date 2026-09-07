@@ -59,7 +59,7 @@ function grab(name) {
 // asserting against its own idea of the states rather than the app's.
 const NEEDED = [
   'renderDash', 'txSt', 'fmtEta', 'canForwardCancel', 'hasForwarder', 'isCancelTx',
-  'rejectArmKey',
+  'rejectArmKey', 'queueRef',
   'vaultDot', 'ownerIdent', 'thresholdNote', 'delayNote',
 ];
 
@@ -171,8 +171,8 @@ test('a proposal waiting on your signature draws, and offers to sign it', () => 
   // the call completes.
   vault(proposal());
   const html = draw();
-  assert.match(html, /doSign\(0,40\)/, 'the SIGN button is the whole point of this state');
-  assert.match(html, /doApprove\(0,40\)/, 'with the on-chain route offered beside it');
+  assert.match(html, /doSign\(0,'proposal:[^']+'\)/, 'the SIGN button is the whole point of this state');
+  assert.match(html, /doApprove\(0,'proposal:[^']+'\)/, 'with the on-chain route offered beside it');
 });
 
 test('an account that cannot sign is offered approval instead, and never SIGN', () => {
@@ -182,8 +182,8 @@ test('an account that cannot sign is offered approval instead, and never SIGN', 
   sandbox._cannotSign = true;
   try {
     const html = draw();
-    assert.match(html, /doApprove\(0,40\)/);
-    assert.doesNotMatch(html, /doSign\(0,40\)/, 'a contract account has nothing to sign with');
+    assert.match(html, /doApprove\(0,'proposal:[^']+'\)/);
+    assert.doesNotMatch(html, /doSign\(0,'proposal:[^']+'\)/, 'a contract account has nothing to sign with');
     assert.match(html, /CANNOT SIGN/);
   } finally { sandbox._cannotSign = false; }
 });
@@ -208,21 +208,21 @@ test('the demo never asks a chain whether the demo account has code', () => {
 test('a proposal you have already signed offers only to undo that', () => {
   vault(proposal({ approvals: { [YOU]: true, [THEM]: false } }));
   const html = draw();
-  assert.match(html, /doUnsign\(0,40\)/);
-  assert.doesNotMatch(html, /doSign\(0,40\)/, 'there is nothing left for you to sign');
+  assert.match(html, /doUnsign\(0,'proposal:[^']+'\)/);
+  assert.doesNotMatch(html, /doSign\(0,'proposal:[^']+'\)/, 'there is nothing left for you to sign');
 });
 
 test('a proposal at quorum is submitted, not signed again', () => {
   vault(proposal({ approvals: { [YOU]: true, [THEM]: true } }));
   const html = draw();
-  assert.match(html, /doSubmit\(0,40\)/);
+  assert.match(html, /doSubmit\(0,'proposal:[^']+'\)/);
 });
 
 test('a matured proposal offers execute, and the cancel it can still be stopped with', () => {
   vault(proposal({ eta: Math.floor(Date.now() / 1000) - 60, approvals: { [YOU]: true, [THEM]: true } }));
   const html = draw();
-  assert.match(html, /doExecute\(0,40\)/);
-  assert.match(html, /doCancel\(0,40\)/, 'the brake is offered right up to the moment it runs');
+  assert.match(html, /doExecute\(0,'proposal:[^']+'\)/);
+  assert.match(html, /doCancel\(0,'proposal:[^']+'\)/, 'the brake is offered right up to the moment it runs');
 });
 
 test('a vault with no executor says so rather than offering a cancel that cannot work', () => {
@@ -232,7 +232,7 @@ test('a vault with no executor says so rather than offering a cancel that cannot
   vault(proposal({ eta: Math.floor(Date.now() / 1000) + 3600, approvals: { [YOU]: true, [THEM]: true } }),
     { executor: sandbox.ethers.ZeroAddress, isTimelockExecutor: false });
   const html = draw();
-  assert.doesNotMatch(html, /doCancel\(0,40\)/);
+  assert.doesNotMatch(html, /doCancel\(0,'proposal:[^']+'\)/);
   assert.match(html, /CANNOT CANCEL/);
 });
 
