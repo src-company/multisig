@@ -557,6 +557,12 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
 .reset-btn{background:transparent;border:none;color:var(--d);font-size:9px;letter-spacing:2px;padding:4px 0}
 .docs-link{color:var(--d);font-size:9px;letter-spacing:2px;text-decoration:none}
 .docs-link:hover{color:var(--a)}
+/* The IPFS fingerprint. Same ink as the links it sits beside — var(--d), full
+   strength on hover — rather than a fixed grey, because the two themes invert
+   (light ink on blue, teal ink on white) and any single literal colour is
+   unreadable in one of them. */
+.ipfs-mark{color:var(--d);font-size:9px;letter-spacing:2px;text-decoration:none;white-space:nowrap}
+.ipfs-mark:hover,.ipfs-mark:focus-visible{color:var(--a)}
 
 /* colophon — the SRC_CO mark, below the bottom rule and outside the functional
    footer row, because it is a credit and not a control. Held at .7 so it reads
@@ -2340,9 +2346,34 @@ async function buildSlowOutbound({ tokenInfo, toAddr, amountRaw, delaySec, vault
     return { target: SLOW_ADDRESS, value: '0', data: depositData,
       desc: `SLOW ${dLabel} · ${tokenInfo.symbol} → ${toAddr.slice(0,8)}...` };
   }
-  // Insufficient allowance: approve(exact) + deposit, atomic via multisig batch.
+  // Insufficient allowance: approve + deposit, atomic via multisig batch.
+  //
+  // The zero-first reset is not ceremony. USDT refuses to move an allowance from
+  // one non-zero value to another — `require(!((_value != 0) && (allowed[msg
+  // .sender][_spender] != 0)))` — and USDT is in this app's own token list on
+  // two of the three chains SLOW is deployed to. Verified against the deployed
+  // mainnet contract with a state override: with allowed[vault][SLOW] at 0 the
+  // approve succeeds, at 1 and at 500 it reverts.
+  //
+  // The window is narrow — a deposit pulls exactly `amount`, so the batch below
+  // normally leaves the allowance back at zero — but a partial one that does
+  // survive (set by hand through CUSTOM, or left by a token that pulls less than
+  // it was approved for) makes every later SLOW send of that token revert. That
+  // is worse here than a failed transaction usually is: the proposal it bricks
+  // has already been signed by every owner and has already spent its nonce, so
+  // recovering means re-collecting the whole quorum.
+  //
+  // Emitted only when there is something to reset, so the ordinary path stays
+  // two calls rather than three.
   const approveData = erc20Iface.encodeFunctionData('approve', [SLOW_ADDRESS, amountRaw]);
-  const batchData = msIface.encodeFunctionData('batch', [[token, SLOW_ADDRESS], [0n, 0n], [approveData, depositData]]);
+  const targets = [], datas = [];
+  if(allowance > 0n){
+    targets.push(token);
+    datas.push(erc20Iface.encodeFunctionData('approve', [SLOW_ADDRESS, 0n]));
+  }
+  targets.push(token, SLOW_ADDRESS);
+  datas.push(approveData, depositData);
+  const batchData = msIface.encodeFunctionData('batch', [targets, targets.map(() => 0n), datas]);
   return { target: vaultAddr, value: '0', data: batchData, batched: true,
     desc: `SLOW ${dLabel} · APPROVE + ${tokenInfo.symbol} → ${toAddr.slice(0,8)}...` };
 }
@@ -4999,11 +5030,79 @@ if(location.pathname !== appPath()) {
   try { history.replaceState(history.state, '', appPath() + location.search + location.hash); } catch(_) {}
 }
 
+// ── IPFS ──────────────────────────────────────────────────────────
+// This page is pinned to IPFS as well as served over HTTPS, and is reached in
+// three shapes:
+//
+//   https://multisig.software/            a normal host, both spellings answer
+//   https://ipfs.io/ipfs/<cid>/           path gateway, origin shared with all
+//                                         other content on that gateway
+//   https://<cid>.ipfs.dweb.link/         subdomain gateway, its own origin
+//
+// The CID is deliberately not written into this file, because it cannot be: it
+// is the hash of the bundle this file is part of, so embedding it would change
+// the thing it names. It does not need to be. When a gateway serves this page
+// the CID is already in the URL, and reading it back from there is not merely
+// cheaper than a build-time constant, it is the honest answer — it names the
+// bundle actually executing, not one a build asserted was published. Off a
+// gateway there is no CID to read, and ipfs.json beside this file carries the
+// one that was pinned; it is excluded from the hash at pin time, so recording a
+// CID in it cannot change that CID.
+const IPFS_CID_RE = /^ba[a-z2-7]{20,}$/;
+function ipfsCidFromUrl() {
+  // Subdomain gateway first: there the CID is an origin, which is the shape
+  // worth having, because it is the only one where this app's localStorage is
+  // not shared with every other site the gateway serves.
+  const sub = location.hostname.split('.')[0];
+  if(location.hostname.includes('.ipfs.') && IPFS_CID_RE.test(sub)) return sub;
+  const m = location.pathname.match(/^\/ipfs\/([^\/]+)/);
+  return m && IPFS_CID_RE.test(m[1]) ? m[1] : '';
+}
+let _ipfsCid = ipfsCidFromUrl();
+
+// The bundle this page came out of, shown as a fingerprint rather than a version
+// number: two builds with the same CID are the same bytes, which is the only
+// claim worth making in a footer. Head and tail, because the middle of a base32
+// hash carries no meaning a reader can use and the ends are what get compared
+// against a pin. Absent rather than guessed when there is no CID to show.
+function ipfsMark() {
+  if(!_ipfsCid) return '';
+  const short = _ipfsCid.slice(0, 8) + '\u2026' + _ipfsCid.slice(-4);
+  return `<span style="color:var(--ln)">&middot;</span><a class="ipfs-mark" href="https://ipfs.io/ipfs/${esc(_ipfsCid)}/" target="_blank" rel="noopener" title="IPFS ${esc(_ipfsCid)} \u2014 the pinned bundle this page was built from">IPFS ${esc(short)}</a>`;
+}
+
+// Served from an ordinary host, the CID is not in the URL to be read, so it is
+// read from the file the pin recorded it in. Deliberately not awaited by
+// anything: the footer draws without it and gains it when it arrives, because a
+// fingerprint is not worth delaying a wallet for. A miss is silent — this file
+// is absent from the IPFS copy by design, and a footer with no mark is the
+// correct outcome there, not an error worth a console line.
+if(!_ipfsCid && /^https?:$/.test(location.protocol)) {
+  fetch('./ipfs.json', { cache: 'no-cache' })
+    .then(r => r.ok ? r.json() : null)
+    .then(j => {
+      if(j && typeof j.cid === 'string' && IPFS_CID_RE.test(j.cid)) {
+        _ipfsCid = j.cid;
+        document.querySelectorAll('.footer-r').forEach(el => {
+          if(!el.querySelector('.ipfs-mark')) el.insertAdjacentHTML('beforeend', ipfsMark());
+        });
+      }
+    })
+    .catch(() => {});
+}
+
 // How the sibling pages are linked to. Same argument as appPath(): `.html` is
 // how a page happened to be requested, not part of where it lives, and the host
 // answers both spellings. Off http(s) the filename is the only thing that
 // resolves, so there it stays.
-const PAGE_EXT = /^https?:$/.test(location.protocol) ? '' : '.html';
+//
+// An IPFS gateway is that second kind of host even though it speaks https. It
+// serves the bytes stored under a name and does no extension guessing, so
+// `docs` is a 404 on every gateway while `docs.html` is the page — which is why
+// the extension is kept whenever this copy is being served from one. Measured:
+// /ipfs/<cid>/docs returns 404 on ipfs.io and on a local kubo gateway, and
+// /ipfs/<cid>/docs.html returns 200 on both.
+const PAGE_EXT = (/^https?:$/.test(location.protocol) && !_ipfsCid) ? '' : '.html';
 const DOCS_URL = 'docs' + PAGE_EXT, BRAND_URL = 'brand' + PAGE_EXT;
 
 // How a vault is spelled in the links this app hands out. An address is always
@@ -5387,6 +5486,7 @@ ${/* This control copies the shareable URL, not the address it sits beside \u201
              the rule the left half already uses it sat flush against RELOAD at
              8px and read as a fifth link. */''}
         <span style="color:var(--ln)">&middot;</span><span>${_todayStr}</span>
+        ${ipfsMark()}
       </div>
     </div>
     <div class="hbar" aria-hidden="true">${ASC200}</div>

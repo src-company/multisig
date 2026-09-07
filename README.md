@@ -10,16 +10,42 @@
 
 Minimal k-of-n multisig wallet with optional timelock, executor module, pre/post transaction guards, onchain approvals, batched execution, and delegatecall. Two deployment paths: factory clones and EIP-7702 EOA delegation. All mutable state (`delay`, `nonce`, `threshold`, `ownerCount`, `executor`) is packed into a single storage slot.
 
+**Use it:** [multisig.software](https://www.multisig.software) &middot;
+[docs](https://www.multisig.software/docs). The same build is pinned to IPFS and
+served from [multisig.wei.limo](https://multisig.wei.limo) — see
+[Hosted on IPFS](#hosted-on-ipfs) for the CID and how to verify it.
+
 ![Explainer](explainer.svg)
 
 ![Architecture](diagram.svg)
 
 ## Usage
 
+Contracts:
+
 ```bash
 forge build
 forge test
 ```
+
+Dapp — static, no package tree. Serve `dapp/` and open it, or build `dist/`:
+
+```bash
+node build.js          # dapp/ -> dist/, comments stripped, transform proved
+node --test test/*.test.js
+```
+
+Coordination database — Postgres plus PostgREST, applied in this order:
+
+```bash
+psql -v ON_ERROR_STOP=1 -f db/schema.sql   # tables, RPCs, views, RLS
+psql -v ON_ERROR_STOP=1 -f db/roles.sql    # authenticator + anon grants
+MULTISIG_TEST_PG=1 node --test test/schema.test.js
+```
+
+Everything anonymous browsers can reach goes through `SECURITY DEFINER`
+functions that do their own owner checks, so those RPCs are the only
+enforcement point. [`render.yaml`](render.yaml) is the deployment blueprint.
 
 ## Factory Deployment
 
@@ -242,21 +268,64 @@ Findings and their dispositions are tracked in [`SECURITY.md`](SECURITY.md). The
 
 ## Interface
 
-The dapp in [`dapp/`](dapp/) is static — open `dapp/index.html` over any HTTP
-server and it runs. Nothing is compiled, bundled or transpiled, and no package
-tree is involved; ethers is vendored beside it.
+The dapp in [`dapp/`](dapp/) is static. Open `dapp/index.html` over any HTTP
+server and it runs — nothing is compiled, bundled or transpiled, and there is no
+package tree. ethers is vendored beside it.
 
-What gets deployed is built by [`build.js`](build.js), which is `node build.js`
-with no dependencies and writes `dist/`. It removes comments and the whitespace
-that laid them out, and nothing else: no renaming, no reordering, no rewriting.
-`dapp/index.html` is 236 KB gzipped as written and 121 KB with the prose taken
-out, on a page that also ships a 505 KB signing library — so the source keeps the
-reasoning next to the code it is about, and a visitor does not download it.
+It runs on all eight deployed chains, reads balances and Chainlink prices per
+chain, and coordinates proposals and signatures off-chain through a self-hosted
+PostgREST database ([`db/`](db/)). Links are hash-based — `#1/0xVAULT` opens a
+vault and `#1/0xVAULT/tx/7` opens a single proposal — so a link survives being
+moved between hosts.
 
-The build proves the transform before it writes anything. The stripped text must
-hold exactly the same string, template and regex literals, in the same order, as
-the text it came from, and every script must still parse; a build that cannot
-show both throws and leaves the previous `dist/` alone.
+### Hosted on IPFS
+
+| | |
+|---|---|
+| CID (v1) | `bafybeiaqci4xd7576xkct47izwuir2dovp3p5k5zoqgolbxxlp3oqddg4a` |
+| Gateway | [multisig.wei.limo](https://multisig.wei.limo) |
+| Also resolves | [multisig.wei.is](https://multisig.wei.is) · [multisig.wei.domains](https://multisig.wei.domains) |
+| Any public gateway | `https://ipfs.io/ipfs/<cid>/` |
+
+The CID is reproducible from this repository, so the pinned bundle can be checked
+against the source rather than trusted:
+
+```bash
+node build.js
+ipfs add -r --cid-version 1 -Q --ignore ipfs.json dist
+# bafybeiaqci4xd7576xkct47izwuir2dovp3p5k5zoqgolbxxlp3oqddg4a
+```
+
+`--ignore ipfs.json` is load-bearing. The footer shows the CID of the bundle it
+is running, and a CID cannot be written into the thing it names — recording it
+would change it. So `dist/ipfs.json` is excluded from the hash: on a gateway the
+page reads its CID out of its own URL, which is the honest answer because it
+names the bytes actually executing, and on an ordinary host it reads
+`ipfs.json`, which is why that file exists and why it must not count toward the
+hash.
+
+CIDv1 rather than CIDv0, so subdomain gateways give the app an origin of its own.
+On a path gateway (`ipfs.io/ipfs/<cid>/`) every site shares the gateway's origin,
+and this app keeps per-vault settings in `localStorage`.
+
+Sibling pages are linked as `docs.html` rather than `docs` whenever the app is
+served from a gateway: IPFS returns the bytes stored under a name and does no
+extension guessing, so the extensionless spelling an ordinary host accepts is a
+404 there.
+
+### The build
+
+[`build.js`](build.js) writes `dist/`. It is `node build.js` with no
+dependencies. It removes comments and the whitespace that laid them out, and
+nothing else — no renaming, no reordering, no rewriting. `dapp/index.html` is
+236 KB gzipped as written and 121 KB with the prose taken out, on a page that
+also ships a 505 KB signing library, so the source keeps its reasoning beside the
+code it explains and a visitor does not download it.
+
+The build proves the transform before writing. The stripped text must hold
+exactly the same string, template and regex literals, in the same order, as the
+text it came from, and every script must still parse. A build that cannot show
+both throws and leaves the previous `dist/` alone.
 
 ## Brand and press
 
