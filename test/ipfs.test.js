@@ -116,3 +116,40 @@ test('the CID pattern accepts a base32 v1 and rejects what is not one', () => {
     assert.ok(!IPFS_CID_RE.test(bad), `${JSON.stringify(bad)} must not read as a CIDv1`);
   }
 });
+
+// ── sibling page links ────────────────────────────────────────────
+
+test('sibling pages are linked by a filename that exists, on every host', () => {
+  // The regression: PAGE_EXT dropped the extension whenever the protocol was
+  // http(s) and the URL carried no CID. That is true on multisig.wei.limo — a
+  // name-based gateway resolves the contenthash and serves at the name, so the
+  // URL never carries one — and an IPFS gateway does no extension guessing, so
+  // every DOCS and BRAND link there was a 404. It cannot be decided from a
+  // response header either: these constants are read while the first frame is
+  // built, and a header is a round trip.
+  const sandbox2 = { location: { protocol: 'https:', hostname: 'multisig.wei.limo', pathname: '/', href: 'https://multisig.wei.limo/' } };
+  sandbox2.globalThis = sandbox2; sandbox2.window = sandbox2;
+  vm.createContext(sandbox2);
+  vm.runInContext(grab('PAGE_EXT') + '\n' + grab('DOCS_URL') + '\nglobalThis.PAGE_EXT = PAGE_EXT; globalThis.DOCS_URL = DOCS_URL; globalThis.BRAND_URL = BRAND_URL;', sandbox2);
+
+  assert.equal(sandbox2.PAGE_EXT, '.html', 'the extension must not depend on the host: only .html resolves on a gateway, and both spellings resolve everywhere else');
+  for (const url of [sandbox2.DOCS_URL, sandbox2.BRAND_URL]) {
+    assert.match(url, /\.html$/, `${url} is spelled without the extension and will 404 on every IPFS gateway`);
+    assert.ok(fs.existsSync(path.join(ROOT, 'dapp', url)), `${url} is linked but there is no such file to serve`);
+  }
+});
+
+test('the extensionless spellings still have somewhere to land', () => {
+  // Links handed out by earlier builds, and anything typed by hand, spell these
+  // without the extension. _redirects catches those on gateways that honour it.
+  const red = fs.readFileSync(path.join(ROOT, 'dapp', '_redirects'), 'utf8');
+  const rules = red.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'))
+    .map(l => l.split(/\s+/));
+  for (const [from, to, status] of rules) {
+    assert.ok(fs.existsSync(path.join(ROOT, 'dapp', to.replace(/^\//, ''))), `_redirects sends ${from} to ${to}, which does not exist`);
+    assert.equal(status, '200', `${from} should rewrite (200) rather than redirect, so the tidy URL survives`);
+  }
+  for (const page of ['docs', 'brand']) {
+    assert.ok(rules.some(r => r[0] === '/' + page), `_redirects does not cover /${page}`);
+  }
+});

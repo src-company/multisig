@@ -282,7 +282,7 @@ moved between hosts.
 
 | | |
 |---|---|
-| CID (v1) | `bafybeidychtwe3axrh7diqdfpxxdpmknmigo4pyfszkrbcnxpweg3danua` |
+| CID (v1) | `bafybeif7dyl2zz6ls5mopd3rgaoue7j26xp6rt5vmf5wqd3ziyxeoh5rqu` |
 | Gateway | [multisig.wei.limo](https://multisig.wei.limo) |
 | Also resolves | [multisig.wei.is](https://multisig.wei.is) · [multisig.wei.domains](https://multisig.wei.domains) |
 | Any public gateway | `https://ipfs.io/ipfs/<cid>/` |
@@ -293,7 +293,7 @@ against the source rather than trusted:
 ```bash
 node build.js
 ipfs add -r --cid-version 1 -Q --ignore ipfs.json dist
-# bafybeidychtwe3axrh7diqdfpxxdpmknmigo4pyfszkrbcnxpweg3danua
+# bafybeif7dyl2zz6ls5mopd3rgaoue7j26xp6rt5vmf5wqd3ziyxeoh5rqu
 ```
 
 `--ignore ipfs.json` is load-bearing. The footer shows the CID of the bundle it
@@ -308,10 +308,14 @@ CIDv1 rather than CIDv0, so subdomain gateways give the app an origin of its own
 On a path gateway (`ipfs.io/ipfs/<cid>/`) every site shares the gateway's origin,
 and this app keeps per-vault settings in `localStorage`.
 
-Sibling pages are linked as `docs.html` rather than `docs` whenever the app is
-served from a gateway: IPFS returns the bytes stored under a name and does no
-extension guessing, so the extensionless spelling an ordinary host accepts is a
-404 there.
+Sibling pages are always linked as `docs.html`, never `docs`. An IPFS gateway
+returns the bytes stored under a name and does no extension guessing, so the
+extensionless spelling an ordinary host accepts is a 404 there — and which of
+the two applies cannot be decided while the page is being built, because a
+name-based gateway (`multisig.wei.limo`) puts nothing in the URL to read. Both
+spellings answer on `multisig.software`, so the filename is the one that works
+everywhere. `dapp/_redirects` catches extensionless links already handed out, on
+gateways that honour it.
 
 ### The build
 

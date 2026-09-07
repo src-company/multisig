@@ -5141,18 +5141,25 @@ if(!_ipfsCid && /^https?:$/.test(location.protocol)) {
     .catch(() => {});
 }
 
-// How the sibling pages are linked to. Same argument as appPath(): `.html` is
-// how a page happened to be requested, not part of where it lives, and the host
-// answers both spellings. Off http(s) the filename is the only thing that
-// resolves, so there it stays.
+// How the sibling pages are linked to: always by filename.
 //
-// An IPFS gateway is that second kind of host even though it speaks https. It
-// serves the bytes stored under a name and does no extension guessing, so
-// `docs` is a 404 on every gateway while `docs.html` is the page — which is why
-// the extension is kept whenever this copy is being served from one. Measured:
-// /ipfs/<cid>/docs returns 404 on ipfs.io and on a local kubo gateway, and
-// /ipfs/<cid>/docs.html returns 200 on both.
-const PAGE_EXT = (/^https?:$/.test(location.protocol) && !_ipfsCid) ? '' : '.html';
+// Both spellings answer on multisig.software — /docs and /docs.html are each a
+// 200 there — and only one of them answers on an IPFS gateway, which serves the
+// bytes stored under a name and does no extension guessing. So `docs` was a
+// prettier URL that 404'd on half the deployment, and `docs.html` is a slightly
+// worse-looking one that works on all of it.
+//
+// This deliberately does not ask the gateway detection below whether it is on
+// IPFS. That answer comes from a response header, which is a round trip, and
+// these constants are read while the first frame is being built. The previous
+// attempt keyed off the CID in the URL, which is present on a path or subdomain
+// gateway and absent on a name-based one — and a name-based gateway is what
+// multisig.wei.limo is, so the links there were still extensionless and still
+// 404'd. A constant cannot get that wrong.
+//
+// Extensionless links already handed out stay working through dapp/_redirects,
+// which origin-isolated gateways honour.
+const PAGE_EXT = '.html';
 const DOCS_URL = 'docs' + PAGE_EXT, BRAND_URL = 'brand' + PAGE_EXT;
 
 // How a vault is spelled in the links this app hands out. An address is always

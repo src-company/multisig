@@ -1,0 +1,14 @@
+# Extensionless sibling pages, for gateways that honour _redirects (IPIP-290).
+#
+# In-app links are spelled docs.html and brand.html, because that is the only
+# spelling an IPFS gateway resolves. This file is for the other direction: links
+# already handed out by earlier builds, and anything typed or pasted by hand,
+# which spell them without the extension. 200 rather than 301 so the address bar
+# keeps the tidy form rather than being rewritten to the file.
+#
+# Only origin-isolated gateways apply this — a path gateway serves the file at
+# its name and nothing else — which is why it is a safety net and not the fix.
+/docs    /docs.html   200
+/docs/   /docs.html   200
+/brand   /brand.html  200
+/brand/  /brand.html  200
