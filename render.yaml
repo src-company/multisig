@@ -57,10 +57,36 @@ services:
       # fails, add an env var PORT with the same value.
       - key: PGRST_SERVER_PORT
         value: "3000"
-      # Only used if you later mint authenticated JWTs. Unused while the app
-      # runs purely as anon (no Authorization header), but harmless to have.
+      # Shared only with the proposal verifier. Never expose this to the dapp.
       - key: PGRST_JWT_SECRET
         generateValue: true
+
+  # ── Signed proposal admission ───────────────────────────────────
+  # Apply db/schema.sql and db/roles.sql before switching the dapp to this API.
+  # See api/README.md for deployment order and the remaining anonymous RPCs.
+  - type: web
+    name: multisig-proposals
+    runtime: node
+    plan: starter
+    buildCommand: node --test test/proposals.test.js
+    startCommand: node api/proposals.cjs
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: PGRST_URL
+        value: https://multisig-postgrest.onrender.com
+      - key: PGRST_JWT_SECRET
+        fromService:
+          type: web
+          name: multisig-postgrest
+          envVarKey: PGRST_JWT_SECRET
+      - key: PROPOSAL_ORIGINS
+        value: https://www.multisig.software,https://multisig.software,https://multisig-dapp.onrender.com
+      # Server-controlled RPC allowlist. Replace with trusted provider URLs in
+      # the dashboard if desired; requests cannot supply a provider or owner set.
+      - key: PROPOSAL_RPC_URLS
+        value: '{"1":"https://ethereum.publicnode.com","8453":"https://base.publicnode.com","42161":"https://arbitrum-one.publicnode.com","10":"https://optimism.publicnode.com","11155111":"https://ethereum-sepolia.publicnode.com","84532":"https://base-sepolia.publicnode.com","4326":"https://mainnet.megaeth.com/rpc","4663":"https://rpc.mainnet.chain.robinhood.com"}'
 
   # ── Static dapp ─────────────────────────────────────────────────
   - type: web

@@ -17,7 +17,7 @@
      provider is initialised with an rpcMap for the one chain it is given, so
      chain reads stay on the RPC hosts listed here; letting the fallback
      through would put a vault's traffic on a host that is not one of them. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://multisig-postgrest.onrender.com https://sourcify.dev https://*.publicnode.com https://1rpc.io https://*.drpc.org https://api.coinbase.com https://mainnet.base.org https://sepolia.base.org https://arb1.arbitrum.io https://mainnet.optimism.io https://mainnet.megaeth.com https://rpc-megaeth-mainnet.globalstake.io https://rpc.mainnet.chain.robinhood.com https://api.dotmega.domains https://keys.coinbase.com https://rpc.wallet.coinbase.com https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org; img-src 'self' data: https://explorer-api.walletconnect.com; frame-src https://verify.walletconnect.com https://verify.walletconnect.org; upgrade-insecure-requests">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://multisig-proposals.onrender.com https://multisig-postgrest.onrender.com https://sourcify.dev https://*.publicnode.com https://1rpc.io https://*.drpc.org https://api.coinbase.com https://mainnet.base.org https://sepolia.base.org https://arb1.arbitrum.io https://mainnet.optimism.io https://mainnet.megaeth.com https://rpc-megaeth-mainnet.globalstake.io https://rpc.mainnet.chain.robinhood.com https://api.dotmega.domains https://keys.coinbase.com https://rpc.wallet.coinbase.com https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org; img-src 'self' data: https://explorer-api.walletconnect.com; frame-src https://verify.walletconnect.com https://verify.walletconnect.org; upgrade-insecure-requests">
 <title>multisig</title>
 <meta name="description" content="Multichain multisig with an embedded timelock. A mandatory delay between queuing and execution, so a compromised key or a social-engineered signature can be seen and cancelled before it lands.">
 <!-- Unfurl metadata. Vault links get passed between co-signers and pasted into
@@ -2480,8 +2480,7 @@ async function prodReverseSlow(vi, transferId){
       : `REVERSE SLOW · ${fmtAmount(entry.amount, entry.decimals)} ${entry.symbol} ↩ HELD IN SLOW${needsApproval ? ' · WITHDRAWAL NEEDS GUARDIAN' : ''}`;
 
     if(v.dbId){
-      const txId = await dbProposeTx(v.dbId, nonce, target, value, batchData, txHash, v.threshold, connectedAddress, desc);
-      if(txId) await dbAddSig(txId, connectedAddress, sig);
+      await dbProposeTx(v.dbId, nonce, target, value, batchData, txHash, v.threshold, connectedAddress, desc, sig);
     }
     flash(`REVERSE TX #${nonce} CREATED`);
     await reloadQueue(vi);
@@ -2929,9 +2928,10 @@ const DEMO_TOKENS = {ETHEREUM:["ETH","USDC","USDT","DAI","WBTC","wstETH"],BASE:[
 // Minimal PostgREST client — a small fluent query builder covering just
 // what this app uses (.from/.select/.eq/.in/.order/.limit/.maybeSingle
 // and .rpc), so the db* helpers below stay compact.
-// Every request runs as the `anon` role: no Authorization header is
-// sent (matches roles.sql). Reads are RLS-gated SELECTs; writes go
-// through the SECURITY DEFINER functions via .rpc().
+// Direct PostgREST requests run as anon. Proposal creation uses a separate
+// verifier that checks the owner signature before calling a restricted RPC.
+// The verifier credential never reaches this browser.
+const PROPOSAL_API_URL = 'https://multisig-proposals.onrender.com';
 const PGRST_URL = 'https://multisig-postgrest.onrender.com'; // ← set to your Render PostgREST URL
 
 // Resilient fetch: per-attempt timeout + bounded retry with exponential
@@ -2964,7 +2964,7 @@ function pgJson(text) {
   return JSON.parse(String(text).replace(_PG_BIGNUM, '$1"$2"$3"$4"'));
 }
 
-async function pgFetch(path, init) {
+async function pgFetch(path, init, baseUrl = PGRST_URL) {
   let lastErr = null;
   for(let attempt = 0; attempt < PG_MAX_ATTEMPTS; attempt++) {
     if(attempt > 0) {
@@ -2975,7 +2975,7 @@ async function pgFetch(path, init) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), PG_TIMEOUT_MS);
     try {
-      const res = await fetch(`${PGRST_URL}/${path}`, { ...init, signal: ctrl.signal });
+      const res = await fetch(`${baseUrl}/${path}`, { ...init, signal: ctrl.signal });
       clearTimeout(timer);
       if(!res.ok && PG_RETRY_STATUS.has(res.status) && attempt < PG_MAX_ATTEMPTS - 1) {
         lastErr = { status: res.status, message: `HTTP ${res.status}` };
@@ -3531,8 +3531,8 @@ const DECIMALS = { ETH: 18, WETH: 18, USDC: 6, USDT: 6, USDT0: 6, USDm: 18, MEGA
 function stripCommas(s) { return String(s).replace(/,/g, '').trim(); }
 
 // A proposal's `value` reaches this interface from a row anyone can write:
-// propose_tx() runs as the anon role and checks only that the address the row
-// *claims* proposed it is an owner. The column is `numeric`, which accepts
+// Legacy propose_tx() accepted a claimed owner address without proof. Keep
+// validating those rows even though new proposals require a verified signature. The column is `numeric`, which accepts
 // 1.5 and -1 and 1e40, and every render path that touches a proposal hands it
 // straight to BigInt() — where BigInt('1.5') throws. One such row would empty
 // the whole queue on load, and reach txKind() on render if it got that far.
@@ -9935,27 +9935,27 @@ function calldataTooBig(d) {
   return `CALLDATA IS ${bytes} BYTES AND THE COORDINATION RECORD HOLDS ${max}. THE VAULT WOULD EXECUTE IT, BUT NO CO-SIGNER COULD BE SHOWN IT. SPLIT IT ACROSS PROPOSALS.`;
 }
 
-async function dbProposeTx(wId, nonce, target, value, callData, txHash, thresh, proposedBy, desc) {
-  const { data, error } = await sb.rpc('propose_tx', {
-    p_wallet_id: wId, p_chain_id: S.chainId, p_nonce: nonce,
-    p_target: target, p_value: value.toString(), p_call_data: callData,
-    p_tx_hash: txHash, p_threshold: thresh, p_proposed_by: proposedBy,
-    p_description: desc
-  });
-  if(error) { console.error('DB propose:', error); throw dbError('PROPOSAL NOT SAVED', error); }
-  // The current propose_tx cannot return nothing: it either hands back an id or
-  // raises, and a nonce that already holds a proposal is fine — a nonce is
-  // contested, not owned, which is why UNIQUE (wallet_id, nonce) was dropped.
-  //
-  // So a null id with no error does not mean what it used to say. It means the
-  // deployed function is older than this client: the previous one ended in a
-  // bare ON CONFLICT DO NOTHING, which swallowed that unique violation and
-  // returned nothing, and the message it produced — "NONCE IN USE" — sent
-  // everyone hunting for a nonce collision that was not the problem. Name the
-  // real cause, because the fix is to re-apply db/schema.sql and nothing the
-  // operator does in this interface will help.
-  if(!data) { markSchemaStale('propose_tx returned no id'); throw dbError('PROPOSAL NOT SAVED — THE COORDINATION DATABASE IS RUNNING AN OLDER SCHEMA THAN THIS APP. RE-APPLY db/schema.sql.', null); }
-  return data;
+async function dbProposeTx(wId, nonce, target, value, callData, txHash, thresh, proposedBy, desc, signature, sigType = 'ecdsa') {
+  if(!signature) throw dbError('PROPOSAL NOT SAVED — SIGN THE TRANSACTION FIRST', null);
+  // This endpoint checks the exact signature and current on-chain ownership.
+  // Its restricted SQL call commits the proposal and first signature together.
+  const res = await pgFetch('proposals', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify({
+      p_wallet_id: wId, p_chain_id: S.chainId, p_nonce: nonce,
+      p_target: target, p_value: value.toString(), p_call_data: callData,
+      p_tx_hash: txHash, p_threshold: thresh, p_proposed_by: proposedBy,
+      p_description: desc, p_signature: signature, p_sig_type: sigType
+    })
+  }, PROPOSAL_API_URL);
+  const text = await res.text();
+  let result;
+  try { result = JSON.parse(text); } catch(_) {}
+  if(!res.ok) throw dbError('PROPOSAL NOT SAVED', { message: result?.message || `HTTP ${res.status}` });
+  if(typeof result !== 'string' || !/^[0-9a-f-]{36}$/i.test(result))
+    throw dbError('PROPOSAL NOT SAVED — INVALID VERIFIER RESPONSE', null);
+  return result;
 }
 
 async function dbAddSig(txId, signerAddr, signature, sigType) {
@@ -10910,7 +10910,7 @@ async function loadVaultQueue(vi) {
 
       // A proposal nobody can be shown to have raised is not shown.
       //
-      // propose_tx() authenticates its caller by a string the caller supplies —
+      // Legacy propose_tx() authenticated its caller by a supplied string —
       // is_wallet_owner(wallet, p_proposed_by) against an owner list that is
       // public on chain and anon-readable here — so one unauthenticated HTTP
       // request puts a row in this queue naming any owner as its author. It
@@ -10930,9 +10930,8 @@ async function loadVaultQueue(vi) {
       // wrote the row. So: drop only what the chain positively disclaims AND no
       // owner has signed.
       //
-      // A genuine proposal is unsigned for the width of one await — dbProposeTx
-      // then dbAddSig — so a second client polling in that window will not see
-      // it, and will on the next poll. Nothing is lost; it arrives late.
+      // The verifier now stores the first signature atomically. Keep this
+      // check for legacy rows and later anonymous signature removal.
       if(!validSigs.length && onchainQueued[t.id] === 0) {
         console.warn('Hiding unsigned proposal (no valid owner signature, not queued on chain):', t.id, t.target);
         continue;
@@ -12653,11 +12652,10 @@ async function prodSign(vi, nonce) {
       await dbAddSig(tx.dbId, connectedAddress, sig);
     } else if(v.dbId) {
       const txHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg);
-      const txId = await dbProposeTx(v.dbId, nonce, target, value.toString(), data, txHash, v.threshold, connectedAddress);
+      const txId = await dbProposeTx(v.dbId, nonce, target, value.toString(), data, txHash, v.threshold, connectedAddress, undefined, sig);
       if(txId) {
         tx.dbId = txId;
         tx.txHash = txHash;
-        await dbAddSig(txId, connectedAddress, sig);
       }
     }
 
@@ -12700,8 +12698,8 @@ async function prodApprove(vi, nonce) {
     if(tx.dbId) {
       await dbAddSig(tx.dbId, connectedAddress, approvalSig, 'approval');
     } else if(v.dbId) {
-      const txId = await dbProposeTx(v.dbId, nonce, target, value.toString(), data, hash, v.threshold, connectedAddress);
-      if(txId) { tx.dbId = txId; tx.txHash = hash; await dbAddSig(txId, connectedAddress, approvalSig, 'approval'); }
+      const txId = await dbProposeTx(v.dbId, nonce, target, value.toString(), data, hash, v.threshold, connectedAddress, undefined, approvalSig, 'approval');
+      if(txId) { tx.dbId = txId; tx.txHash = hash; }
     }
 
     // Track in approvals table
@@ -13269,9 +13267,10 @@ async function prodCancel(vi, nonce) {
       sigs.push({signer: connectedAddress, sig, sigType: 'ecdsa'});
       if(v.dbId) {
         if(!existingTxId) {
-          existingTxId = await dbProposeTx(v.dbId, cancelNonce, v.address, '0', cancelData, cancelTxHash, v.threshold, connectedAddress, `Cancel #${nonce}`);
+          existingTxId = await dbProposeTx(v.dbId, cancelNonce, v.address, '0', cancelData, cancelTxHash, v.threshold, connectedAddress, `Cancel #${nonce}`, sig);
+        } else {
+          await dbAddSig(existingTxId, connectedAddress, sigs[sigs.length-1].sig);
         }
-        if(existingTxId) await dbAddSig(existingTxId, connectedAddress, sigs[sigs.length-1].sig);
       }
     } else if(!callerIsOwner) {
       // The same refusal prodReject already carries. Without it a non-owner —
@@ -13403,9 +13402,10 @@ async function prodReject(vi, nonce) {
       sigs.push({signer: connectedAddress, sig, sigType: 'ecdsa'});
       if(v.dbId) {
         if(!existingTxId) {
-          existingTxId = await dbProposeTx(v.dbId, rejectNonce, v.address, '0', rejectData, rejectTxHash, v.threshold, connectedAddress, `Reject #${nonce}`);
+          existingTxId = await dbProposeTx(v.dbId, rejectNonce, v.address, '0', rejectData, rejectTxHash, v.threshold, connectedAddress, `Reject #${nonce}`, sig);
+        } else {
+          await dbAddSig(existingTxId, connectedAddress, sigs[sigs.length-1].sig);
         }
-        if(existingTxId) await dbAddSig(existingTxId, connectedAddress, sigs[sigs.length-1].sig);
       }
     } else if(!callerIsOwner) {
       flash('ONLY OWNERS CAN REJECT'); return;
@@ -13955,9 +13955,10 @@ async function prodAccelerate(vi, nonce) {
       // Store sig in DB
       if(v.dbId) {
         if(!existingTxId) {
-          existingTxId = await dbProposeTx(v.dbId, accelNonce, v.address, '0', accelData, accelTxHash, v.ownerCount, connectedAddress, `Accelerate #${nonce}`);
+          existingTxId = await dbProposeTx(v.dbId, accelNonce, v.address, '0', accelData, accelTxHash, v.ownerCount, connectedAddress, `Accelerate #${nonce}`, sig);
+        } else {
+          await dbAddSig(existingTxId, connectedAddress, sig);
         }
-        if(existingTxId) await dbAddSig(existingTxId, connectedAddress, sig);
       }
     } else if(!callerIsOwner) {
       // As in prodCancel and prodReject. An accelerate needs every owner's
@@ -14080,8 +14081,7 @@ async function prodSubmitTransfer() {
     const txHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg);
 
     if(v.dbId) {
-      const txId = await dbProposeTx(v.dbId, nonce, target, value, data, txHash, v.threshold, connectedAddress, desc);
-      if(txId) await dbAddSig(txId, connectedAddress, sig);
+      await dbProposeTx(v.dbId, nonce, target, value, data, txHash, v.threshold, connectedAddress, desc, sig);
     }
 
     flash(`TX #${nonce} CREATED`);
@@ -14138,8 +14138,7 @@ async function prodSubmitName() {
     const txHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg);
 
     if(v.dbId) {
-      const txId = await dbProposeTx(v.dbId, nonce, p.target, '0', p.data, txHash, v.threshold, connectedAddress, p.desc);
-      if(txId) await dbAddSig(txId, connectedAddress, sig);
+      await dbProposeTx(v.dbId, nonce, p.target, '0', p.data, txHash, v.threshold, connectedAddress, p.desc, sig);
     }
 
     flash(`TX #${nonce} CREATED`);
@@ -14179,8 +14178,7 @@ async function prodSubmitStake() {
     const txHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg);
 
     if(v.dbId) {
-      const txId = await dbProposeTx(v.dbId, nonce, target, value, data, txHash, v.threshold, connectedAddress, desc);
-      if(txId) await dbAddSig(txId, connectedAddress, sig);
+      await dbProposeTx(v.dbId, nonce, target, value, data, txHash, v.threshold, connectedAddress, desc, sig);
     }
 
     flash(`TX #${nonce} CREATED`);
@@ -14228,8 +14226,7 @@ async function prodSubmitCustom() {
     const desc = fnName ? `${fnName}() → ${resolvedTarget.slice(0,8)}...` : undefined;
 
     if(v.dbId) {
-      const txId = await dbProposeTx(v.dbId, nonce, resolvedTarget, value, d, txHash, v.threshold, connectedAddress, desc);
-      if(txId) await dbAddSig(txId, connectedAddress, sig);
+      await dbProposeTx(v.dbId, nonce, resolvedTarget, value, d, txHash, v.threshold, connectedAddress, desc, sig);
     }
 
     flash(`TX #${nonce} CREATED`);
@@ -14284,8 +14281,7 @@ async function prodSubmitBatch() {
     const txHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg);
 
     if(v.dbId) {
-      const txId = await dbProposeTx(v.dbId, nonce, target, value, batchData, txHash, v.threshold, connectedAddress, `Batch (${calls.length} calls)`);
-      if(txId) await dbAddSig(txId, connectedAddress, sig);
+      await dbProposeTx(v.dbId, nonce, target, value, batchData, txHash, v.threshold, connectedAddress, `Batch (${calls.length} calls)`, sig);
     }
 
     flash(`BATCH TX #${nonce} CREATED`);
@@ -14437,8 +14433,7 @@ async function prodAdminPropose(action, val) {
         const sig = normalizeSigV(await signer.signTypedData(domain, EIP712_TYPES, msg));
         const txHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg);
         if(v.dbId) {
-          const txId = await dbProposeTx(v.dbId, nonce, target, '0', data, txHash, v.threshold, connectedAddress, desc);
-          if(txId) await dbAddSig(txId, connectedAddress, sig);
+          await dbProposeTx(v.dbId, nonce, target, '0', data, txHash, v.threshold, connectedAddress, desc, sig);
         }
         clearAdminFields();
         flash(`PROPOSE: ${desc}`);
@@ -14495,8 +14490,7 @@ async function prodAdminPropose(action, val) {
     const txHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg);
 
     if(v.dbId) {
-      const txId = await dbProposeTx(v.dbId, nonce, target, '0', data, txHash, v.threshold, connectedAddress, desc);
-      if(txId) await dbAddSig(txId, connectedAddress, sig);
+      await dbProposeTx(v.dbId, nonce, target, '0', data, txHash, v.threshold, connectedAddress, desc, sig);
     }
 
     clearAdminFields();

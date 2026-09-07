@@ -776,103 +776,96 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+-- Remove the legacy unsigned endpoint, including its old anonymous grant.
+DROP FUNCTION IF EXISTS propose_tx(uuid, int, int, text, numeric, text, text, smallint, text, text);
 CREATE OR REPLACE FUNCTION propose_tx(
   p_wallet_id uuid, p_chain_id int, p_nonce int,
   p_target text, p_value numeric, p_call_data text,
   p_tx_hash text, p_threshold smallint, p_proposed_by text,
-  p_description text DEFAULT NULL
+  p_description text DEFAULT NULL, p_signature text DEFAULT NULL,
+  p_sig_type sig_type DEFAULT 'ecdsa'
 ) RETURNS uuid AS $$
 DECLARE
   t_id uuid;
+  existing transactions%ROWTYPE;
 BEGIN
-  IF NOT is_wallet_writer(p_wallet_id, p_proposed_by) THEN
-    RAISE EXCEPTION 'Not an owner';
+  -- Only the verifier receives this role's JWT. It verifies the exact payload
+  -- and current ownership on chain; the anonymous DB owner list is not proof.
+  IF coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb->>'role', '') <> 'proposal_writer' THEN
+    RAISE EXCEPTION 'A verified proposer signature is required' USING ERRCODE = '42501';
   END IF;
-  PERFORM rate_gate('propose:' || p_wallet_id::text || ':' || client_ip(), 60, interval '1 minute');
-
-  -- The chain id is not the caller's to choose; p_wallet_id already determines
-  -- it. This was the one place the multichain scoping was taken on trust, and
-  -- it is load-bearing: idx_tx_identity is (chain_id, wallet_id, nonce,
-  -- tx_hash), so a wrong chain_id defeats the de-duplication that IS this
-  -- table's identity story, and dbGetTxByHash filters on chain_id, so the row
-  -- lands somewhere the client that wrote it cannot read it back.
-  --
-  -- The client passes its ambient S.chainId, which is module state rather than
-  -- a property of the vault — during a chain switch it can briefly be the chain
-  -- the app has left. Two owners proposing the same payload either side of that
-  -- moment produce the same wallet, nonce and digest under two chain ids, the
-  -- ON CONFLICT below does not fire, and the pair splits their signatures
-  -- across two rows that neither can bring to quorum. The database knows the
-  -- right answer; it should not accept a different one.
+  IF p_signature IS NULL OR p_signature !~ '^0x[0-9a-fA-F]{130}$'
+     OR p_sig_type IS NULL OR p_sig_type NOT IN ('ecdsa', 'approval') THEN
+    RAISE EXCEPTION 'A verified proposer signature is required';
+  END IF;
+  IF p_proposed_by IS NULL OR p_tx_hash IS NULL THEN
+    RAISE EXCEPTION 'A proposer and transaction hash are required';
+  END IF;
   IF p_chain_id IS DISTINCT FROM (SELECT chain_id FROM wallets WHERE id = p_wallet_id) THEN
     RAISE EXCEPTION 'Chain id does not match this vault';
   END IF;
-
-  -- A ceiling on how much of this database one vault can occupy. Proposals are
-  -- never deleted — they go terminal and stay as history — so without this the
-  -- row count for a single vault is bounded only by how long someone is willing
-  -- to keep POSTing. Two orders of magnitude above any real vault's lifetime
-  -- traffic, and it is the count that is capped rather than the rate, because a
-  -- rate limit alone just makes filling the disk take longer.
+  -- Normalize representations before the identity constraint is consulted.
+  p_target := lower(p_target); p_call_data := lower(p_call_data);
+  p_tx_hash := lower(p_tx_hash); p_proposed_by := lower(p_proposed_by);
+  PERFORM rate_gate('propose:' || p_wallet_id::text || ':' || p_proposed_by, 60, interval '1 minute');
   IF (SELECT count(*) FROM transactions WHERE wallet_id = p_wallet_id) >= 20000 THEN
     RAISE EXCEPTION 'Too many transactions recorded for this vault';
   END IF;
 
-  INSERT INTO transactions (wallet_id, chain_id, nonce, target, value, call_data, tx_hash, threshold, proposed_by, description)
-  VALUES (p_wallet_id, p_chain_id, p_nonce, p_target, p_value, p_call_data, p_tx_hash, p_threshold, p_proposed_by, p_description)
-  ON CONFLICT (chain_id, wallet_id, nonce, tx_hash) DO NOTHING
-  RETURNING id INTO t_id;
-
-  -- The only conflict left is the digest under this vault and nonce, which IS
-  -- this proposal's identity — so the existing row is this proposal and the
-  -- caller may sign it. Targeted at that constraint rather than left bare: a
-  -- bare ON CONFLICT would swallow any future constraint too, and hand back
-  -- whatever the fallback happened to find.
-  --
-  -- The conflict target is (chain_id, wallet_id, nonce, tx_hash) and not
-  -- (chain_id, tx_hash), because the narrow version was globally exclusive
-  -- across every vault on a chain and this function is anon-callable. Owner
-  -- addresses are readable by anon, so anyone could name a real owner of any
-  -- registered vault, POST a row carrying the digest of a proposal somebody
-  -- else was about to raise, and take that (chain_id, tx_hash) pair. The
-  -- victim's propose_tx then conflicted, failed the wallet+nonce re-match
-  -- below, and raised — permanently, because the digest is deterministic. Their
-  -- proposal could never be coordinated through this database at all.
-  --
-  -- Worth spelling out what that was worth attacking: a cancel companion's
-  -- digest is entirely predictable (the vault as target, zero value,
-  -- cancelQueued(hash) as calldata, the live nonce), so whoever queued a
-  -- dangerous proposal could pre-squat the digest of the brake meant to stop
-  -- it. The on-chain approve() path was unaffected, but the in-app cancel was
-  -- dead before anyone reached for it.
-  --
-  -- Nothing is lost by narrowing. An EIP-712 digest already commits to the
-  -- verifying contract and the nonce, so one digest cannot legitimately belong
-  -- to two vaults or two nonces; and the client never reads tx_hash anyway — it
-  -- re-derives every digest from the row's own fields (see proposalDigest), so
-  -- a row lying about its hash was already inert.
-  IF t_id IS NULL THEN
-    -- Kept as the belt to the constraint's braces. With the wider constraint
-    -- this can only find the row the conflict just hit, but the lookup states
-    -- the invariant the RAISE below depends on rather than assuming it.
-    SELECT id INTO t_id FROM transactions
-    WHERE chain_id = p_chain_id AND tx_hash = p_tx_hash
-      AND wallet_id = p_wallet_id AND nonce = p_nonce
-    LIMIT 1;
-    IF t_id IS NULL THEN
-      RAISE EXCEPTION 'Transaction hash already registered against a different proposal';
+  -- Old deployments accepted arbitrary tx_hash values. Lock and compare the
+  -- full payload, so a pre-existing poisoned digest cannot receive a genuine
+  -- signature over different fields. Do not silently treat it as this proposal.
+  SELECT * INTO existing FROM transactions
+    WHERE chain_id = p_chain_id AND wallet_id = p_wallet_id AND nonce = p_nonce
+      AND lower(tx_hash) = p_tx_hash
+    ORDER BY proposed_at, id LIMIT 1 FOR UPDATE;
+  IF FOUND THEN
+    IF lower(existing.target) IS DISTINCT FROM p_target OR existing.value IS DISTINCT FROM p_value
+       OR lower(existing.call_data) IS DISTINCT FROM p_call_data THEN
+      RAISE EXCEPTION 'Stored proposal conflicts with the signed transaction';
     END IF;
-    -- Terminal rows are not revivable: an identical digest means an identical
-    -- nonce, and a nonce that reached a terminal state has been consumed on
-    -- chain. Reviving would show a proposal that can only ever revert.
-    IF (SELECT status FROM transactions WHERE id = t_id) NOT IN ('proposed', 'executing') THEN
-      RAISE EXCEPTION 'That proposal is already executed, cancelled or superseded';
+    t_id := existing.id;
+  ELSE
+    INSERT INTO transactions (wallet_id, chain_id, nonce, target, value, call_data, tx_hash, threshold, proposed_by, description)
+    VALUES (p_wallet_id, p_chain_id, p_nonce, p_target, p_value, p_call_data, p_tx_hash, p_threshold, p_proposed_by, p_description)
+    ON CONFLICT (chain_id, wallet_id, nonce, tx_hash) DO NOTHING
+    RETURNING id INTO t_id;
+    IF t_id IS NULL THEN
+      SELECT * INTO existing FROM transactions
+        WHERE chain_id = p_chain_id AND wallet_id = p_wallet_id AND nonce = p_nonce AND tx_hash = p_tx_hash
+        FOR UPDATE;
+      IF NOT FOUND OR lower(existing.target) IS DISTINCT FROM p_target OR existing.value IS DISTINCT FROM p_value
+         OR lower(existing.call_data) IS DISTINCT FROM p_call_data THEN
+        RAISE EXCEPTION 'Stored proposal conflicts with the signed transaction';
+      END IF;
+      t_id := existing.id;
     END IF;
   END IF;
+  IF (SELECT status FROM transactions WHERE id = t_id) NOT IN ('proposed', 'executing', 'queued') THEN
+    RAISE EXCEPTION 'That proposal is already executed, cancelled or superseded';
+  END IF;
 
+  -- The first proof and proposal commit together, or neither does. This does
+  -- not call add_signature: that legacy RPC checks the mutable DB owner list.
+  INSERT INTO signatures (tx_id, signer, sig_type, signature)
+  VALUES (t_id, p_proposed_by, p_sig_type, lower(p_signature))
+  ON CONFLICT (tx_id, lower(signer)) DO UPDATE SET
+    signature = EXCLUDED.signature, sig_type = EXCLUDED.sig_type, signed_at = now();
   RETURN t_id;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+-- Also secure schema-only migrations. Never expose the new overload between
+-- applying schema.sql and roles.sql, even on a fresh database.
+REVOKE ALL ON FUNCTION propose_tx(uuid, int, int, text, numeric, text, text, smallint, text, text, text, sig_type) FROM PUBLIC;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    REVOKE ALL ON FUNCTION propose_tx(uuid, int, int, text, numeric, text, text, smallint, text, text, text, sig_type) FROM anon;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'proposal_writer') THEN
+    GRANT EXECUTE ON FUNCTION propose_tx(uuid, int, int, text, numeric, text, text, smallint, text, text, text, sig_type) TO proposal_writer;
+  END IF;
+END $$;
 
 CREATE OR REPLACE FUNCTION add_signature(
   p_tx_id uuid, p_signer text, p_signature text,

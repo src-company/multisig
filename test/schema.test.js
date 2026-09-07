@@ -45,6 +45,13 @@ test('the schema applies, is idempotent, and its RPCs behave', { skip: ON ? fals
     // survive being re-run, which is why every statement in it is guarded.
     apply();
     apply();
+    // Simulate a legacy unsigned overload still carrying anonymous access.
+    psql(['-d', DB, '-c', `CREATE FUNCTION propose_tx(uuid,int,int,text,numeric,text,text,smallint,text,text)
+      RETURNS uuid LANGUAGE sql AS 'SELECT gen_random_uuid()';
+      GRANT EXECUTE ON FUNCTION propose_tx(uuid,int,int,text,numeric,text,text,smallint,text,text) TO anon;`]);
+    // Schema-only reapplication must neither reopen anon insertion nor remove
+    // the verifier's grant. Run the same assertions after this deployment path.
+    psql(['-d', DB, '-v', 'ON_ERROR_STOP=1', '-q', '-f', path.join(ROOT, 'db/schema.sql')]);
 
     // Both streams: psql writes RAISE NOTICE to stderr, and the assertions
     // report through NOTICE so they can also be read when this file is run by
