@@ -561,7 +561,7 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
    strength on hover — rather than a fixed grey, because the two themes invert
    (light ink on blue, teal ink on white) and any single literal colour is
    unreadable in one of them. */
-.ipfs-mark{color:var(--d);font-size:9px;letter-spacing:2px;text-decoration:none;white-space:nowrap}
+.ipfs-mark{background:transparent;border:none;padding:4px 0;font-family:inherit;cursor:pointer;color:var(--d);font-size:9px;letter-spacing:2px;text-decoration:none;white-space:nowrap}
 .ipfs-mark:hover,.ipfs-mark:focus-visible{color:var(--a)}
 
 /* colophon — the SRC_CO mark, below the bottom rule and outside the functional
@@ -5035,7 +5035,7 @@ if(location.pathname !== appPath()) {
 // three shapes:
 //
 //   https://multisig.software/            a normal host, both spellings answer
-//   https://ipfs.io/ipfs/<cid>/           path gateway, origin shared with all
+//   https://<gw>/ipfs/<cid>/              path gateway, origin shared with all
 //                                         other content on that gateway
 //   https://<cid>.ipfs.dweb.link/         subdomain gateway, its own origin
 //
@@ -5068,7 +5068,14 @@ let _ipfsCid = ipfsCidFromUrl();
 function ipfsMark() {
   if(!_ipfsCid) return '';
   const short = _ipfsCid.slice(0, 8) + '\u2026' + _ipfsCid.slice(-4);
-  return `<span style="color:var(--ln)">&middot;</span><a class="ipfs-mark" href="https://ipfs.io/ipfs/${esc(_ipfsCid)}/" target="_blank" rel="noopener" title="IPFS ${esc(_ipfsCid)} \u2014 the pinned bundle this page was built from">IPFS ${esc(short)}</a>`;
+  // Copies rather than links out. It used to point at ipfs.io, which is retiring
+  // — a scheduled brownout from 2026-09-01 that ends in shutdown on 2026-09-21,
+  // served as a 429 that grows longer every hour — and hardcoding any other
+  // public gateway only moves the same dependency somewhere else. A CID is not
+  // a location and does not need one: on the clipboard it goes into whichever
+  // gateway, node or `ipfs get` the reader already trusts, and it is the form
+  // they need to check this build against the repository anyway.
+  return `<span style="color:var(--ln)">&middot;</span><button class="ipfs-mark" onclick="copyText('${jstr(_ipfsCid)}','BUILD CID COPIED')" aria-label="Copy this build's IPFS CID to the clipboard" title="IPFS ${esc(_ipfsCid)} \u2014 the pinned bundle this page is running. Click to copy.">IPFS ${esc(short)}</button>`;
 }
 
 // Served from an ordinary host, the CID is not in the URL to be read, so it is
