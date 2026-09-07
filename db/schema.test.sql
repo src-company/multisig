@@ -8,12 +8,11 @@
 --
 --   MULTISIG_TEST_PG=1 node --test test/schema.test.js
 --
--- Why this exists. Everything in this database is reachable by an anonymous
--- HTTP request — propose_tx, add_signature, cancel_tx and register_wallet all
--- authenticate by a string the caller supplies, because PostgREST has no
--- session here and Postgres cannot recover a secp256k1 signature. So the RPCs
--- are the only place the rules live, and until this file they were the only
--- part of the system with no test at all.
+-- Proposal insertion is restricted to the verifier role. Crypto and chain
+-- verification run in test/proposals.test.js; these tests exercise the SQL
+-- trust boundary, atomic write, migration, and remaining coordination RPCs.
+-- Run only on a scratch database: the verifier fixtures intentionally use
+-- synthetic signatures after assuming the trusted backend identity.
 --
 -- Each block below is a defect that was live, written as the thing that must
 -- now be true instead. Re-runnable: every vault gets a fresh address, so this
@@ -27,6 +26,18 @@ BEGIN
   IF cond THEN RAISE NOTICE 'PASS  %', label;
   ELSE RAISE EXCEPTION 'FAIL  %', label; END IF;
 END $f$ LANGUAGE plpgsql;
+
+-- Fault injection: prove a failure storing the first signature rolls back the
+-- new proposal too. This trigger exists only in this scratch-database suite.
+CREATE FUNCTION test_signature_failure() RETURNS trigger AS $$
+BEGIN
+  IF NEW.signature = '0x' || repeat('ff',65) THEN
+    RAISE EXCEPTION 'injected signature write failure';
+  END IF;
+  RETURN NEW;
+END $$ LANGUAGE plpgsql;
+CREATE TRIGGER test_signature_failure BEFORE INSERT ON signatures
+FOR EACH ROW EXECUTE FUNCTION test_signature_failure();
 
 DO $$
 DECLARE
@@ -69,16 +80,73 @@ EXCEPTION WHEN OTHERS THEN
   PERFORM t_ok(msg LIKE '%same address twice%', 'case-variant duplicate owners refused by name');
 END;
 
--- 4. propose_tx rejects a chain id that is not the vault's
+-- 4. Only the trusted verifier can insert, with an atomic first signature.
+PERFORM t_ok(NOT has_function_privilege('anon', 'propose_tx(uuid,integer,integer,text,numeric,text,text,smallint,text,text,text,sig_type)', 'EXECUTE'),
+             'anonymous callers have no proposal insertion grant');
+PERFORM t_ok(to_regprocedure('propose_tx(uuid,integer,integer,text,numeric,text,text,smallint,text,text)') IS NULL,
+             'legacy unsigned proposal overload is removed');
+PERFORM t_ok(has_function_privilege('proposal_writer', 'propose_tx(uuid,integer,integer,text,numeric,text,text,smallint,text,text,text,sig_type)', 'EXECUTE'),
+             'verifier has the proposal insertion grant');
+PERFORM t_ok(NOT has_table_privilege('proposal_writer', 'transactions', 'INSERT'),
+             'verifier cannot insert directly into tables');
+PERFORM t_ok(NOT has_function_privilege('proposal_writer', 'sync_wallet_state(uuid,text,smallint,smallint,integer,text,integer,text[])', 'EXECUTE'),
+             'verifier has no unrelated write RPC');
 BEGIN
-  PERFORM propose_tx(w, 8453, 0, V, 0::numeric, '0x', '0x' || repeat('de',32), 2::smallint, A, NULL);
+  PERFORM propose_tx(w, 1, 0, V, 0::numeric, '0x', '0x' || repeat('de',32), 2::smallint, A, NULL);
+  RAISE EXCEPTION 'UNCAUGHT unsigned proposal accepted';
+EXCEPTION WHEN insufficient_privilege THEN
+  PERFORM t_ok(true, 'unsigned proposal refused without verifier identity');
+END;
+-- Even a caller setting fake JWT claims cannot bypass the EXECUTE grant.
+PERFORM set_config('request.jwt.claims', '{"role":"proposal_writer"}', true);
+SET LOCAL ROLE anon;
+BEGIN
+  PERFORM propose_tx(w, 1, 0, V, 0::numeric, '0x', '0x' || repeat('de',32), 2::smallint, A, NULL, '0x' || repeat('11',65), 'ecdsa');
+  RAISE EXCEPTION 'UNCAUGHT anonymous caller reached trusted insertion';
+EXCEPTION WHEN insufficient_privilege THEN
+  PERFORM t_ok(true, 'direct anonymous call denied even with claimed verifier role');
+END;
+RESET ROLE;
+SET LOCAL ROLE proposal_writer;
+BEGIN
+  PERFORM propose_tx(w, 1, 0, V, 0::numeric, '0x', '0x' || repeat('de',32), 2::smallint, A, NULL);
+  RAISE EXCEPTION 'UNCAUGHT verifier inserted without first signature';
+EXCEPTION WHEN OTHERS THEN
+  GET STACKED DIAGNOSTICS msg = MESSAGE_TEXT;
+  PERFORM t_ok(msg LIKE '%signature is required%', 'verifier cannot omit the first signature');
+END;
+-- Chain identity still comes from the wallet record.
+BEGIN
+  PERFORM propose_tx(w, 8453, 0, V, 0::numeric, '0x', '0x' || repeat('de',32), 2::smallint, A, NULL, '0x' || repeat('11',65), 'ecdsa');
   RAISE EXCEPTION 'UNCAUGHT propose_tx accepted a foreign chain id';
 EXCEPTION WHEN OTHERS THEN
   GET STACKED DIAGNOSTICS msg = MESSAGE_TEXT;
   PERFORM t_ok(msg LIKE '%Chain id does not match%', 'propose_tx refuses a foreign chain id');
 END;
-t := propose_tx(w, 1, 0, V, 0::numeric, '0x', '0x' || repeat('de',32), 2::smallint, A, NULL);
+t := propose_tx(w, 1, 0, V, 0::numeric, '0x', '0x' || repeat('de',32), 2::smallint, A, NULL, '0x' || repeat('11',65), 'ecdsa');
+RESET ROLE;
 PERFORM t_ok(t IS NOT NULL, 'propose_tx accepts the vault''s own chain id');
+PERFORM t_ok((SELECT count(*) FROM signatures WHERE tx_id=t) = 1, 'proposal commits with its first signature');
+PERFORM t_ok(propose_tx(w, 1, 0, V, 0::numeric, '0x', '0x' || repeat('DE',32), 2::smallint, A, NULL, '0x' || repeat('11',65), 'ecdsa') = t,
+             'identical signed retry and hash case variant reuse the same proposal');
+BEGIN
+  PERFORM propose_tx(w, 1, 0, B, 5::numeric, '0x', '0x' || repeat('de',32), 2::smallint, A, NULL, '0x' || repeat('11',65), 'ecdsa');
+  RAISE EXCEPTION 'UNCAUGHT poisoned existing digest accepted';
+EXCEPTION WHEN OTHERS THEN
+  GET STACKED DIAGNOSTICS msg = MESSAGE_TEXT;
+  PERFORM t_ok(msg LIKE '%conflicts with the signed transaction%', 'pre-existing digest cannot redirect a signed proposal');
+END;
+
+
+BEGIN
+  PERFORM propose_tx(w, 1, 1, V, 0::numeric, '0x', '0x' || repeat('dc',32), 2::smallint, A, NULL, '0x' || repeat('ff',65), 'ecdsa');
+  RAISE EXCEPTION 'UNCAUGHT first signature failure accepted';
+EXCEPTION WHEN OTHERS THEN
+  GET STACKED DIAGNOSTICS msg = MESSAGE_TEXT;
+  PERFORM t_ok(msg = 'injected signature write failure', 'first signature write failure reaches the caller');
+END;
+PERFORM t_ok(NOT EXISTS(SELECT 1 FROM transactions WHERE wallet_id=w AND nonce=1),
+             'first signature failure leaves no unsigned proposal behind');
 
 -- 5. one signer is one signature row, however cased
 PERFORM add_signature(t, A, '0x' || repeat('11',65), 'ecdsa');
@@ -130,3 +198,6 @@ PERFORM t_ok((SELECT threshold FROM wallets WHERE id=w) = 2,
 
 RAISE NOTICE '--- all regression checks passed ---';
 END $$;
+
+DROP TRIGGER test_signature_failure ON signatures;
+DROP FUNCTION test_signature_failure();

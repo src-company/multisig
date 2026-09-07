@@ -57,6 +57,32 @@ const { PgQuery } = sandbox;
 // that reads it, and it interpolates exactly this.
 const qs = q => String(q._params);
 
+test('proposal submission sends its first signature atomically to the verifier', async () => {
+  const id = '11111111-1111-4111-8111-111111111111';
+  const requests = [];
+  const env = { S: { chainId: 1 }, PROPOSAL_API_URL: 'https://verifier.example',
+    dbError: (message, error) => new Error(message + (error?.message || '')),
+    pgFetch: async (...args) => { requests.push(args); return { ok: true, text: async () => JSON.stringify(id) }; } };
+  vm.createContext(env);
+  vm.runInContext(grab('dbProposeTx'), env);
+  const args = [id, 7, '0x' + '22'.repeat(20), '900719925474099312345', '0x', '0x' + '33'.repeat(32), 2, '0x' + '44'.repeat(20), 'description'];
+  await assert.rejects(env.dbProposeTx(...args), /SIGN THE TRANSACTION FIRST/);
+  assert.equal(requests.length, 0);
+  const signature = '0x' + '11'.repeat(65);
+  assert.equal(await env.dbProposeTx(...args, signature), id);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0][0], 'proposals');
+  assert.equal(requests[0][2], env.PROPOSAL_API_URL);
+  const payload = JSON.parse(requests[0][1].body);
+  assert.equal(payload.p_signature, signature);
+  assert.equal(payload.p_value, args[3]);
+  assert.equal(payload.p_sig_type, 'ecdsa');
+  await env.dbProposeTx(...args, signature, 'approval');
+  assert.equal(JSON.parse(requests[1][1].body).p_sig_type, 'approval');
+  env.pgFetch = async () => ({ ok: false, status: 403, text: async () => JSON.stringify({ message: 'Not an owner' }) });
+  await assert.rejects(env.dbProposeTx(...args, signature), /PROPOSAL NOT SAVED.*Not an owner/);
+});
+
 test('one order is one parameter, spelled as PostgREST spells it', () => {
   assert.equal(qs(new PgQuery('t').order('nonce', { ascending: true })), 'order=nonce.asc');
   assert.equal(qs(new PgQuery('t').order('sort_ts', { ascending: false })), 'order=sort_ts.desc');

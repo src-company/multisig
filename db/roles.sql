@@ -1,20 +1,31 @@
 -- MULTISIG.software — PostgREST roles & grants
 -- Run AFTER schema.sql, as the database owner, on your Render Postgres.
 --
--- This defines the two roles PostgREST needs (`authenticator` + `anon`) so
--- anonymous browsers can READ (gated by the RLS SELECT policies in
--- schema.sql) and can only WRITE through the SECURITY DEFINER functions,
--- which run their own owner checks.
+-- PostgREST uses authenticator, anon, and the restricted proposal_writer.
+-- New proposals require verification by api/proposals.cjs. Other coordination
+-- writes retain their existing anonymous RPC checks; they are not authenticated.
 
 -- ── ROLES ────────────────────────────────────────────────────────
 
 -- The login role PostgREST authenticates as. It holds no privileges of its
--- own; it only switches into `anon` (or, later, an authenticated role) per
+-- own; it switches into `anon` or the verified proposal service role per
 -- request. NOINHERIT is required so privileges apply only after SET ROLE.
 DO $$ BEGIN
   CREATE ROLE authenticator LOGIN NOINHERIT;
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
+
+-- This role is used only by api/proposals.cjs after cryptographic verification.
+DO $$ BEGIN
+  CREATE ROLE proposal_writer NOLOGIN;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+GRANT proposal_writer TO authenticator;
+GRANT USAGE ON SCHEMA public TO proposal_writer;
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM proposal_writer;
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM proposal_writer;
+GRANT EXECUTE ON FUNCTION propose_tx(uuid, int, int, text, numeric, text, text, smallint, text, text, text, sig_type) TO proposal_writer;
+REVOKE ALL ON FUNCTION propose_tx(uuid, int, int, text, numeric, text, text, smallint, text, text, text, sig_type) FROM PUBLIC;
 
 -- Set / rotate the password out of band (keep it OUT of version control):
 --   ALTER ROLE authenticator WITH PASSWORD '<strong-random-password>';
@@ -68,6 +79,7 @@ TO anon;
 -- that reader is the public. Scoping reads per-owner needs authenticated
 -- requests (see the note at the end of this file).
 
+-- Proposal insertion is separate: only proposal_writer can call propose_tx.
 -- ── WRITES (SECURITY DEFINER functions only) ─────────────────────
 -- Lock everything down first: no function is callable by default. Then
 -- expose exactly the RPC surface the dapp uses. anon has NO direct
@@ -84,7 +96,6 @@ REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION
   register_wallet(int, text, text, numeric, text[], smallint, int, text, bigint, text, text, text[], int),
-  propose_tx(uuid, int, int, text, numeric, text, text, smallint, text, text),
   add_signature(uuid, text, text, sig_type),
   mark_executed(uuid, bigint, text, text),
   -- Five arguments, matching schema.sql. This read `mark_queued(uuid, bigint,
@@ -139,8 +150,8 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON FUNCTIONS FROM PUBLIC;
 -- What remains open: an anonymous caller can still add noise to a vault's
 -- coordination rows — cancel a live proposal, strip a signature, rename a
 -- vault — and the owners' recourse is to act again and let the client's
--- chain re-check overwrite it. That is a nuisance, and it is bounded, but it
--- is not closed, and it cannot be closed here.
+-- chain re-check overwrite it. This remains a coordination integrity and
+-- availability risk; proposal admission alone does not close it.
 --
 -- Closing it needs the caller to PROVE the address instead of naming it:
 --   1. Client signs a SIWE-style challenge with the wallet it already has.
@@ -150,7 +161,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON FUNCTIONS FROM PUBLIC;
 --      `current_setting('request.jwt.claims')::json->>'address'` instead, and
 --      the RLS policies stop saying `true` and start scoping to that address.
 --
--- Step 2 is the reason this is not done yet: Postgres cannot verify a secp256k1
--- signature — pgcrypto has no ecrecover and Render's managed Postgres will not
--- load an extension that does — so it needs a small verifier service alongside
--- PostgREST, which is a change to the deployment topology and not just to SQL.
+-- api/proposals.cjs now verifies signatures for proposal admission only.
+-- Extending authentication to the remaining writes still needs a session or
+-- action-signature protocol and per-action authorization. Its service JWT is
+-- never a browser session token and must never be sent to a client.
