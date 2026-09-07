@@ -3004,6 +3004,8 @@ class PgQuery {
   // could miss a row that was plainly there. No wildcard is passed: these
   // values are hex, and ilike without % or _ is just a case-blind =.
   ilike(col, val) { this._params.append(col, `ilike.${val}`); return this; }
+  gt(col, val) { this._params.append(col, `gt.${val}`); return this; }
+  lt(col, val) { this._params.append(col, `lt.${val}`); return this; }
   in(col, arr) { this._params.append(col, `in.(${arr.join(',')})`); return this; }
   // Merged into ONE `order` parameter rather than appended as a second one.
   // PostgREST spells a multi-column sort as `order=a.asc,b.asc`; two separate
@@ -3923,6 +3925,20 @@ function isCancelTx(tx, v) {
   return tx.cancelTarget != null
     || (selOf(tx.callData) === SEL.cancelQueued
         && tx.target && tx.target.toLowerCase() === v.address.toLowerCase());
+}
+
+// Card identity includes the vault and chain and survives queue reordering.
+// Numeric references are retained only for unambiguous legacy/demo callers.
+function queueRef(v, tx) {
+  if(S.demoMode && !tx.dbId && !tx.txHash) return `demo:${tx.nonce}`;
+  return `proposal:${v.chainId ?? S.chainId}:${String(v.address).toLowerCase()}:${tx.dbId || ''}:${tx.txHash || ''}`;
+}
+function findQueueTx(v, ref) {
+  if(!v || !Array.isArray(v.queue)) return null;
+  if(!S.demoMode && v.chainId != null && v.chainId !== S.chainId) return null;
+  const matches = v.queue.filter(tx => typeof ref === 'number'
+    ? tx.nonce === ref : queueRef(v, tx) === ref);
+  return matches.length === 1 ? matches[0] : null;
 }
 
 function nextNonce(v) {
@@ -5898,11 +5914,11 @@ ${/* Topping up is the one action here that needs no signature, no quorum and no
     const T_ACCEL = `Adds your signature to bypassing the remaining timelock. Takes all ${v.ownerCount} owners — anything short of unanimous leaves the proposal waiting out its delay.`;
     const T_ACCEL_EX = `Every owner (${s.accelSigs}/${v.ownerCount}) has signed. This executes the proposal now, through the executor, without waiting out the rest of the timelock.`;
     const T_NOCANCEL = "Cancelling inside the timelock window goes through the executor's forward(). This vault has no TimelockExecutor, so there is no route: a cancel raised as an ordinary proposal is itself queued for the full delay and matures no earlier than what it would stop.";
-    const B_EXEC = `<button class="btn btn-green${bw}" title="${T_EXEC}" onclick="doExecute(${S.sel},${tx.nonce})">EXECUTE</button>`;
-    const B_CANCEL = s.cancel?`<button class="btn btn-danger${bw}" title="${T_CANCEL}" onclick="doCancel(${S.sel},${tx.nonce})">CANCEL (${s.cancelSigs||0}/${v.threshold})</button>`:'';
-    const B_CANCEL_EX = s.cancelExec?`<button class="btn btn-danger${bw}" title="${T_CANCEL_EX}" onclick="doCancel(${S.sel},${tx.nonce})">EXECUTE CANCEL <span class="btn-qual">${s.cancelSigs}/${v.threshold} VIA EXECUTOR</span></button>`:'';
-    const B_ACCEL = s.accel?`<button class="btn btn-outline${bw}" title="${T_ACCEL}" onclick="doAccelerate(${S.sel},${tx.nonce})">ACCELERATE (${s.accelSigs||0}/${v.ownerCount})</button>`:'';
-    const B_ACCEL_EX = s.accelExec?`<button class="btn btn-green${bw}" title="${T_ACCEL_EX}" onclick="doAccelerate(${S.sel},${tx.nonce})">INSTANT EXECUTE <span class="btn-qual">${s.accelSigs}/${v.ownerCount} VIA EXECUTOR</span></button>`:'';
+    const B_EXEC = `<button class="btn btn-green${bw}" title="${T_EXEC}" onclick="doExecute(${S.sel},'${jstr(queueRef(v, tx))}')">EXECUTE</button>`;
+    const B_CANCEL = s.cancel?`<button class="btn btn-danger${bw}" title="${T_CANCEL}" onclick="doCancel(${S.sel},'${jstr(queueRef(v, tx))}')">CANCEL (${s.cancelSigs||0}/${v.threshold})</button>`:'';
+    const B_CANCEL_EX = s.cancelExec?`<button class="btn btn-danger${bw}" title="${T_CANCEL_EX}" onclick="doCancel(${S.sel},'${jstr(queueRef(v, tx))}')">EXECUTE CANCEL <span class="btn-qual">${s.cancelSigs}/${v.threshold} VIA EXECUTOR</span></button>`:'';
+    const B_ACCEL = s.accel?`<button class="btn btn-outline${bw}" title="${T_ACCEL}" onclick="doAccelerate(${S.sel},'${jstr(queueRef(v, tx))}')">ACCELERATE (${s.accelSigs||0}/${v.ownerCount})</button>`:'';
+    const B_ACCEL_EX = s.accelExec?`<button class="btn btn-green${bw}" title="${T_ACCEL_EX}" onclick="doAccelerate(${S.sel},'${jstr(queueRef(v, tx))}')">INSTANT EXECUTE <span class="btn-qual">${s.accelSigs}/${v.ownerCount} VIA EXECUTOR</span></button>`:'';
     // Signatures collected toward a route this signer cannot advance — they have
     // already signed it. A tally with no button, so it carries the same
     // explanation the button would have.
@@ -5938,17 +5954,17 @@ ${/* Topping up is the one action here that needs no signature, no quorum and no
         : apTitle;
       if(mustApprove){
         actionBtn=`<div style="display:flex;gap:8px;${mob?'flex-direction:column':'align-items:center'}">
-            <button class="btn btn-fill${mob?' btn-w':''}" title="${apWhy}" onclick="doApprove(${S.sel},${tx.nonce})">${apLabel}</button>
+            <button class="btn btn-fill${mob?' btn-w':''}" title="${apWhy}" onclick="doApprove(${S.sel},'${jstr(queueRef(v, tx))}')">${apLabel}</button>
             <span class="alt-link" style="cursor:default;${mob?'width:100%':''}" title="${apWhy}">CONTRACT ACCOUNT &middot; CANNOT SIGN</span>
           </div>`;
       } else actionBtn=mob
         ?`<div style="display:flex;gap:8px;flex-direction:column">
-            <button class="btn btn-fill btn-w" onclick="doSign(${S.sel},${tx.nonce})">SIGN <span class="btn-qual">OFF-CHAIN</span></button>
-            <button class="alt-link" style="width:100%" title="${apTitle}" onclick="doApprove(${S.sel},${tx.nonce})">APPROVE ON-CHAIN INSTEAD</button>
+            <button class="btn btn-fill btn-w" onclick="doSign(${S.sel},'${jstr(queueRef(v, tx))}')">SIGN <span class="btn-qual">OFF-CHAIN</span></button>
+            <button class="alt-link" style="width:100%" title="${apTitle}" onclick="doApprove(${S.sel},'${jstr(queueRef(v, tx))}')">APPROVE ON-CHAIN INSTEAD</button>
           </div>`
         :`<div style="display:flex;gap:8px;align-items:center">
-            <button class="btn btn-fill" onclick="doSign(${S.sel},${tx.nonce})">SIGN</button>
-            <button class="alt-link" title="${apTitle}" onclick="doApprove(${S.sel},${tx.nonce})">OR APPROVE ON-CHAIN</button>
+            <button class="btn btn-fill" onclick="doSign(${S.sel},'${jstr(queueRef(v, tx))}')">SIGN</button>
+            <button class="alt-link" title="${apTitle}" onclick="doApprove(${S.sel},'${jstr(queueRef(v, tx))}')">OR APPROVE ON-CHAIN</button>
           </div>`;
     }else if(s.sign&&signedByYou){
       // You have signed and the proposal is short of quorum: there is nothing
@@ -5959,30 +5975,30 @@ ${/* Topping up is the one action here that needs no signature, no quorum and no
       // for exactly this and the s.queue branch below already uses it; the two
       // now agree, instead of the same action changing weight depending on
       // whether a threshold nobody here controls has been reached.
-      actionBtn=`<button class="unsign-link" onclick="doUnsign(${S.sel},${tx.nonce})">UNSIGN</button>`;
+      actionBtn=`<button class="unsign-link" onclick="doUnsign(${S.sel},'${jstr(queueRef(v, tx))}')">UNSIGN</button>`;
     }else if(s.queue){
       const unanimous=acCount===v.ownerCount;
-      const unsignLink=signedByYou?`<button class="unsign-link" onclick="doUnsign(${S.sel},${tx.nonce})">UNSIGN</button>`:'';
+      const unsignLink=signedByYou?`<button class="unsign-link" onclick="doUnsign(${S.sel},'${jstr(queueRef(v, tx))}')">UNSIGN</button>`:'';
       if(s.instant){
-        actionBtn=`<div style="display:flex;flex-direction:column;${mob?"width:100%":"align-items:flex-end"}"><button class="btn btn-green" ${mob?"style='width:100%'":""} onclick="doSubmit(${S.sel},${tx.nonce})">EXECUTE</button>${unsignLink}</div>`;
+        actionBtn=`<div style="display:flex;flex-direction:column;${mob?"width:100%":"align-items:flex-end"}"><button class="btn btn-green" ${mob?"style='width:100%'":""} onclick="doSubmit(${S.sel},'${jstr(queueRef(v, tx))}')">EXECUTE</button>${unsignLink}</div>`;
       }else if(isCancel){
-        actionBtn=`<button class="btn btn-danger" ${mob?"style='width:100%'":""} onclick="doSubmit(${S.sel},${tx.nonce})">EXECUTE CANCEL</button>`;
+        actionBtn=`<button class="btn btn-danger" ${mob?"style='width:100%'":""} onclick="doSubmit(${S.sel},'${jstr(queueRef(v, tx))}')">EXECUTE CANCEL</button>`;
       }else if(unanimous&&v.fastPath){
         actionBtn=mob
           ?`<div style="display:flex;gap:8px;flex-direction:column">
-              <button class="btn btn-green btn-w" onclick="doFastExecute(${S.sel},${tx.nonce})">INSTANT EXECUTE <span class="btn-qual">VIA EXECUTOR</span></button>
-              <button class="btn btn-outline btn-w" onclick="doSubmit(${S.sel},${tx.nonce})">QUEUE WITH TIMELOCK</button>
+              <button class="btn btn-green btn-w" onclick="doFastExecute(${S.sel},'${jstr(queueRef(v, tx))}')">INSTANT EXECUTE <span class="btn-qual">VIA EXECUTOR</span></button>
+              <button class="btn btn-outline btn-w" onclick="doSubmit(${S.sel},'${jstr(queueRef(v, tx))}')">QUEUE WITH TIMELOCK</button>
               ${unsignLink}
             </div>`
           :`<div style="display:flex;flex-direction:column;align-items:flex-end">
               <div style="display:flex;gap:8px">
-                <button class="btn btn-green" onclick="doFastExecute(${S.sel},${tx.nonce})">INSTANT EXECUTE</button>
-                <button class="btn btn-outline" onclick="doSubmit(${S.sel},${tx.nonce})">QUEUE</button>
+                <button class="btn btn-green" onclick="doFastExecute(${S.sel},'${jstr(queueRef(v, tx))}')">INSTANT EXECUTE</button>
+                <button class="btn btn-outline" onclick="doSubmit(${S.sel},'${jstr(queueRef(v, tx))}')">QUEUE</button>
               </div>
               ${unsignLink}
             </div>`;
       }else{
-        actionBtn=`<div style="display:flex;flex-direction:column;${mob?"width:100%":"align-items:flex-end"}"><button class="btn btn-fill" ${mob?"style='width:100%'":""} onclick="doSubmit(${S.sel},${tx.nonce})">SUBMIT</button>${unsignLink}</div>`;
+        actionBtn=`<div style="display:flex;flex-direction:column;${mob?"width:100%":"align-items:flex-end"}"><button class="btn btn-fill" ${mob?"style='width:100%'":""} onclick="doSubmit(${S.sel},'${jstr(queueRef(v, tx))}')">SUBMIT</button>${unsignLink}</div>`;
       }
     }else if(s.exec){
       actionBtn=actWrap(`${B_EXEC}${B_CANCEL_EX}${B_CANCEL}${S_CANCEL}${S_NOCANCEL}`);
@@ -6057,11 +6073,11 @@ ${/* margin-left:auto puts the explorer link on the row's trailing edge, which i
         // useful while it sits in the timelock as it is before signing.
         const canReject = i===firstUnqueued && !isQueued && !isCancel;
         const rsc = tx.rejectSigners ? tx.rejectSigners.size : 0;
-        const armed = _rejectArmed === rejectArmKey(S.sel, tx.nonce);
+        const armed = _rejectArmed === rejectArmKey(S.sel, queueRef(v, tx));
         const rlabel = armed ? 'CONFIRM &middot; SKIP NONCE?' : `REJECT &middot; SKIP NONCE${rsc?` (${rsc}/${v.threshold})`:''}`;
         return `<div class="tx-foot">
           <div class="tx-foot-diag">
-            <button class="sim-btn" onclick="simulateProposal(${S.sel},${tx.nonce})" title="Dry-run this proposal against current chain state (from = the vault)">${tx._sim&&!tx._sim.loading?'RE-SIMULATE':'SIMULATE'}</button>
+            <button class="sim-btn" onclick="simulateProposal(${S.sel},'${jstr(queueRef(v, tx))}')" title="Dry-run this proposal against current chain state (from = the vault)">${tx._sim&&!tx._sim.loading?'RE-SIMULATE':'SIMULATE'}</button>
             ${/* Beside SIMULATE because they answer the two halves of the same
                  question — what this payload SAYS, and what it would DO. The
                  kind badge above is this interface's reading of the bytes;
@@ -6070,12 +6086,12 @@ ${/* margin-left:auto puts the explorer link on the row's trailing edge, which i
                  explorer. Empty calldata renders nothing: a plain ETH transfer
                  has no payload to decode. */''}
             ${txDecodeLink(tx, v)}
-            ${canReject?`<button class="reject-link${armed?' armed':''}" onclick="armReject(${S.sel},${tx.nonce})" title="Sign a no-op to consume this nonce so later transactions can proceed">${rlabel}</button>`:''}
+            ${canReject?`<button class="reject-link${armed?' armed':''}" onclick="armReject(${S.sel},'${jstr(queueRef(v, tx))}')" title="Sign a no-op to consume this nonce so later transactions can proceed">${rlabel}</button>`:''}
           </div>
           ${actionBtn?`<div class="tx-foot-act">${actionBtn}</div>`:''}
         </div>`;
       })()}
-      ${tx._sim?renderSim(tx._sim,{ rerun:`simulateProposal(${S.sel},${tx.nonce})`, dismiss:`dismissProposalSim(${S.sel},${tx.nonce})` }):''}
+      ${tx._sim?renderSim(tx._sim,{ rerun:`simulateProposal(${S.sel},'${jstr(queueRef(v, tx))}')`, dismiss:`dismissProposalSim(${S.sel},'${jstr(queueRef(v, tx))}')` }):''}
     </div>`}).join("")}
   <div class="sec"><span>SIGNERS</span><span class="line"></span></div>
 ${/* Name first, then the address it stands for, then the annotations. YOU sits
@@ -7221,9 +7237,9 @@ ${/* Per call, not per batch. A batch is signed as one proposal but executes as
        beside the control that deletes that same row. */''}
       <div class="call-hdr"><span>CALL ${String(i+1).padStart(2,"0")}</span><span style="display:flex;align-items:center;gap:6px;margin-left:auto">${decodeBtnHtml(`decodeBatchCall(${i})`)}${S.batch.length>1?`<button class="x-btn" onclick="S.batch.splice(${i},1);render()" aria-label="Remove call ${i+1}" title="Remove this call">&#10005;</button>`:""}</span></div>
       <div class="grid3">
-        <div><label class="lbl" for="batch-t-in-${i}">TARGET</label><input class="inp" id="batch-t-in-${i}" aria-describedby="batch-t-${i}" data-bi="${i}" data-bf="t" placeholder="0x... or a name" value="${esc(shortAddr(c.t))}" onfocus="this.value=S.batch[${i}].t" onblur="this.value=shortAddr(S.batch[${i}].t)" oninput="onBatchTarget(${i},this.value)"><div id="batch-t-${i}" style="font-size:9px;letter-spacing:1px;margin-top:-12px;margin-bottom:8px;min-height:11px">${(()=>{const s=_addrState(c.t);return s.txt?`<span style="color:${s.color}">${ethers.isAddress((c.t||'').trim())?'✓':s.txt}</span>`:''})()}</div></div>
+        <div><label class="lbl" for="batch-t-in-${i}">TARGET</label><input class="inp" id="batch-t-in-${i}" aria-describedby="batch-t-${i}" data-bi="${i}" data-bf="t" placeholder="0x... or a name" value="${esc(shortAddr(c.t))}" onfocus="this.value=S.batch[${i}].t" onblur="this.value=shortAddr(S.batch[${i}].t)" oninput="onBatchTarget(${i},this.value)"><div id="batch-t-${i}" style="font-size:9px;letter-spacing:1px;margin-top:-12px;margin-bottom:8px;min-height:11px">${(()=>{const s=_addrState(c.t);return s.txt?`<span style="color:${s.color}">${ethers.isAddress((c.t||'').trim())?'✓':esc(s.txt)}</span>`:''})()}</div></div>
         <div><label class="lbl" for="batch-v-in-${i}">VALUE (ETH)</label><input class="inp" id="batch-v-in-${i}" data-bi="${i}" data-bf="v" placeholder="0" value="${esc(c.v)}" oninput="S.batch[${i}].v=this.value;this.nextElementSibling.textContent=this.value?toUnits(this.value,18)+' WEI':''"><div style="font-size:10px;color:var(--d);margin-top:-12px;margin-bottom:8px;word-break:break-all">${c.v?toUnits(c.v,18)+' WEI':''}</div></div>
-        <div><label class="lbl" for="batch-d-in-${i}">CALLDATA</label><input class="inp" id="batch-d-in-${i}" aria-describedby="batch-d-${i}" data-bi="${i}" data-bf="d" placeholder="0x..." value="${esc(c.d)}" oninput="onBatchData(${i},this.value)"><div id="batch-d-${i}" style="font-size:9px;letter-spacing:1px;margin-top:-12px;margin-bottom:8px;min-height:11px">${(()=>{const s=_hexState(c.d);return s.txt?`<span style="color:${s.color}">${s.txt}</span>`:''})()}</div></div>
+        <div><label class="lbl" for="batch-d-in-${i}">CALLDATA</label><input class="inp" id="batch-d-in-${i}" aria-describedby="batch-d-${i}" data-bi="${i}" data-bf="d" placeholder="0x..." value="${esc(c.d)}" oninput="onBatchData(${i},this.value)"><div id="batch-d-${i}" style="font-size:9px;letter-spacing:1px;margin-top:-12px;margin-bottom:8px;min-height:11px">${(()=>{const s=_hexState(c.d);return s.txt?`<span style="color:${s.color}">${esc(s.txt)}</span>`:''})()}</div></div>
       </div></div>`).join("")+
       `<button class="link-btn" onclick="S.batch.push({t:'',v:'',d:''});render()">+ ADD CALL</button>
        <button class="btn btn-fill btn-w btn-big" style="margin-top:16px" onclick="submitBatch()">SIGN + SUBMIT BATCH</button>`;
@@ -8179,8 +8195,9 @@ function demoRecord(vt, tx, status){
 // false and leaves the row in place when the vault would have reverted — the
 // proposal is still queued and still executable, which is what happens on chain.
 function demoExecute(vt, nonce, msg){
-  const tx = vt.queue.find(t => t.nonce === nonce);
+  const tx = findQueueTx(vt, nonce);
   if(!tx) return false;
+  nonce = tx.nonce;
   const reason = demoApply(vt, tx);
   if(reason){ flash(`WOULD REVERT — ${reason}`); return false; }
   if(!vt.history) vt.history = [];
@@ -8295,8 +8312,9 @@ function submitName() {
 
 function doSign(vi, nonce) {
   if (S.demoMode) {
-    const tx = S.vaults[vi].queue.find(t => t.nonce === nonce);
+    const tx = findQueueTx(S.vaults[vi], nonce);
     if (!tx) return;
+    nonce = tx.nonce;
     tx.approvals[DEMO_YOU] = true;
     flash(`SIGNED #${nonce} (OFF-CHAIN)`);
     render();
@@ -8308,8 +8326,9 @@ function doSign(vi, nonce) {
 
 function doApprove(vi, nonce) {
   if (S.demoMode) {
-    const tx = S.vaults[vi].queue.find(t => t.nonce === nonce);
+    const tx = findQueueTx(S.vaults[vi], nonce);
     if (!tx) return;
+    nonce = tx.nonce;
     tx.approvals[DEMO_YOU] = true;
     flash(`APPROVED #${nonce} (ON-CHAIN)`);
     render();
@@ -8321,8 +8340,9 @@ function doApprove(vi, nonce) {
 
 function doUnsign(vi, nonce) {
   if (S.demoMode) {
-    const tx = S.vaults[vi].queue.find(t => t.nonce === nonce);
+    const tx = findQueueTx(S.vaults[vi], nonce);
     if (!tx) return;
+    nonce = tx.nonce;
     tx.approvals[DEMO_YOU] = false;
     flash(`UNSIGNED #${nonce}`);
     render();
@@ -8334,12 +8354,13 @@ function doUnsign(vi, nonce) {
 function doSubmit(vi, nonce) {
   if (S.demoMode) {
     const vt = S.vaults[vi];
-    const tx = vt.queue.find(t => t.nonce === nonce);
+    const tx = findQueueTx(vt, nonce);
     if (!tx) return;
+    nonce = tx.nonce;
     if (tx.cancelTarget != null) {
       // The cancel itself executes; what it cancelled leaves the queue without
       // ever having run. Two rows, both true, the way the record stores them.
-      const victim = vt.queue.find(t => t.nonce === tx.cancelTarget);
+      const victim = findQueueTx(vt, tx.cancelTarget);
       if(!vt.history) vt.history = [];
       if(victim) demoRecord(vt, victim, 'cancelled');
       demoRecord(vt, tx, 'executed');
@@ -8360,7 +8381,9 @@ function doSubmit(vi, nonce) {
 
 function doExecute(vi, nonce) {
   if (S.demoMode) {
-    demoExecute(S.vaults[vi], nonce, `EXECUTED #${nonce}`);
+    const tx = findQueueTx(S.vaults[vi], nonce);
+    if(!tx) return;
+    demoExecute(S.vaults[vi], nonce, `EXECUTED #${tx.nonce}`);
     render();
   } else {
     guardSubmit(prodExecute)(vi, nonce);
@@ -8369,7 +8392,9 @@ function doExecute(vi, nonce) {
 
 function doFastExecute(vi, nonce) {
   if (S.demoMode) {
-    demoExecute(S.vaults[vi], nonce, `INSTANT EXECUTED #${nonce} VIA EXECUTOR`);
+    const tx = findQueueTx(S.vaults[vi], nonce);
+    if(!tx) return;
+    demoExecute(S.vaults[vi], nonce, `INSTANT EXECUTED #${tx.nonce} VIA EXECUTOR`);
     render();
   } else {
     guardSubmit(prodFastExecute)(vi,nonce);
@@ -8379,8 +8404,9 @@ function doFastExecute(vi, nonce) {
 function doCancel(vi, nonce) {
   if (S.demoMode) {
     const vt = S.vaults[vi];
-    const tx = vt.queue.find(t => t.nonce === nonce);
+    const tx = findQueueTx(vt, nonce);
     if (!tx) return;
+    nonce = tx.nonce;
     const n = nextNonce(vt);
     const ap = {};
     vt.owners.forEach(o => ap[o.addr] = !!o.you);
@@ -8407,7 +8433,9 @@ function doReject(vi, nonce) {
     // Skipping the nonce drops the stuck proposal so the queue advances. It is
     // not cancelled and it did not run: its nonce was consumed by the no-op
     // that replaced it, which is what 'stale' means in the ledger.
-    const tx = vt.queue.find(t => t.nonce === nonce);
+    const tx = findQueueTx(vt, nonce);
+    if(!tx) return;
+    nonce = tx.nonce;
     if(tx){ if(!vt.history) vt.history = []; demoRecord(vt, tx, 'stale'); }
     vt.queue = vt.queue.filter(t => t.nonce !== nonce);
     flash(`REJECTED #${nonce} \u2014 NONCE SKIPPED`);
@@ -8454,7 +8482,10 @@ function armReject(vi, nonce) {
 function doAccelerate(vi, nonce) {
   if (S.demoMode) {
     const vt = S.vaults[vi];
-    vt.queue = vt.queue.filter(t => t.nonce !== nonce);
+    const tx = findQueueTx(vt, nonce);
+    if(!tx) return;
+    nonce = tx.nonce;
+    vt.queue = vt.queue.filter(t => t !== tx);
     flash(`ACCELERATED #${nonce} VIA EXECUTOR`);
     render();
   } else {
@@ -9960,65 +9991,48 @@ async function dbAddSig(txId, signerAddr, signature, sigType) {
 // confirms.
 const SIG_EMBED = 'signatures(signer,signature,sig_type)';
 
+// Keyset pagination has no newest-N cutoff. A forged status cannot age a live
+// queued digest out of reconciliation. Keep each response below the API cap.
+const PROPOSAL_PAGE_SIZE = 200;
+async function dbReadProposalPages(makeQuery, columns) {
+  const rows = [];
+  let cursor = null, allEmbedded = true;
+  for(;;) {
+    const query = () => {
+      const q = makeQuery().order('id', { ascending: true }).limit(PROPOSAL_PAGE_SIZE);
+      return cursor ? q.gt('id', cursor) : q;
+    };
+    let result = await query().select(columns + ',' + SIG_EMBED).orderOn('signatures', 'signer');
+    if(result.error) {
+      allEmbedded = false;
+      result = await query().select(columns);
+    }
+    if(result.error || !Array.isArray(result.data))
+      return { rows: [], sigs: false, failed: true };
+    const page = result.data;
+    if(!page.length) break;
+    const next = page[page.length - 1].id;
+    if(!next || (cursor && next <= cursor)) return { rows: [], sigs: false, failed: true };
+    rows.push(...page);
+    cursor = next;
+    // Ask until empty rather than assuming the server honored our page size.
+  }
+  return { rows, sigs: allEmbedded };
+}
 async function dbGetPending(wId) {
-  const q = () => sb.from('tx_summary')
-    .eq('wallet_id', wId)
-    .in('status', ['proposed', 'executing', 'queued'])
-    // Nonce, then id — and the second half is not decoration. A nonce is
-    // contested, not owned (the UNIQUE constraint that made it exclusive was
-    // dropped so a companion could coexist with the proposal it acts on), so
-    // two different proposals can legitimately sit at the same one. Only the
-    // first of them is drawn unblocked, and it is the only one this queue
-    // offers a SIGN, SUBMIT or REJECT on — the rest render as CONTESTED with no
-    // controls. With `nonce` as the sole sort key, which of them that is comes
-    // back to whatever the planner returned, which is not stable between
-    // requests and certainly not between owners: two co-signers could each be
-    // shown a different one of the pair as the actionable proposal and sign
-    // opposite payloads, and neither would ever reach quorum. `id` is a uuid
-    // and arbitrary, but it is the SAME arbitrary answer for everybody.
-    .order('nonce', { ascending: true })
-    .order('id', { ascending: true });
-  const { data, error } = await q().select('*,' + SIG_EMBED).orderOn('signatures', 'signer');
-  if(!error) return { rows: data || [], sigs: true };
-  console.warn('Proposals with their signatures:', error, '— reading the signatures separately instead');
-  // The fallback's own error was discarded, so when BOTH attempts failed this
-  // returned `{ rows: [] }` — indistinguishable from a vault with nothing
-  // pending. What the owners saw during a PostgREST outage was an empty queue:
-  // not an error, not a spinner, just the absence of the matured proposal that
-  // was still sitting on chain waiting to be executed by anyone. An empty
-  // answer has to mean the service answered, which is the same rule dbMyWallets
-  // states and this function was missing.
-  const { data: plain, error: plainErr } = await q().select('*');
-  if(plainErr) { console.error('DB pending:', plainErr); return { rows: [], sigs: false, failed: true }; }
-  return { rows: plain || [], sigs: false };
+  const result = await dbReadProposalPages(() => sb.from('tx_summary')
+    .eq('wallet_id', wId).in('status', ['proposed', 'executing', 'queued']), '*');
+  result.rows.sort((a,b) => a.nonce - b.nonce || String(a.id).localeCompare(String(b.id)));
+  return result;
 }
 
-// How many retired rows are re-checked against the chain on every queue load.
-// Bounded because it rides in a multicall and a busy vault's history is not:
-// what is being looked for is a proposal that is *still queued on chain*, and
-// one of those can only have been retired recently — every earlier one has been
-// overtaken by the vault's own nonce many times over.
-const TERMINAL_RECHECK = 40;
-
-// The most recently retired proposals: cancelled, executed, or superseded.
-// Read so the chain can be asked whether they really are gone — a status in this
-// database is written by an RPC that authenticates by a claimed address, so it
-// is a claim about the vault, not the vault. See loadVaultQueue.
+// Chain nonce safely excludes rows that could never have been queued yet.
 const TERMINAL_COLS = 'id, nonce, target, value, call_data, status, description, eta, queue_tx';
-async function dbGetRecentTerminal(wId, limit) {
-  const q = () => sb.from('tx_history')
-    .eq('wallet_id', wId)
-    .order('sort_ts', { ascending: false })
-    .limit(limit || TERMINAL_RECHECK);
-  const { data, error } = await q().select(TERMINAL_COLS + ',' + SIG_EMBED).orderOn('signatures', 'signer');
-  if(!error) return { rows: data || [], sigs: true };
-  console.warn('Retired proposals with their signatures:', error, '— reading the signatures separately instead');
-  // As in dbGetPending: a failed fallback is reported, not returned as empty.
-  // These are the rows the chain is asked to contradict, so losing them
-  // silently is losing the resurrection path for an orphaned proposal.
-  const { data: plain, error: plainErr } = await q().select(TERMINAL_COLS);
-  if(plainErr) { console.error('DB recent terminal:', plainErr); return { rows: [], sigs: false, failed: true }; }
-  return { rows: plain || [], sigs: false };
+async function dbGetRecentTerminal(wId, liveNonce) {
+  return dbReadProposalPages(() => {
+    const q = sb.from('tx_history').eq('wallet_id', wId);
+    return Number.isInteger(liveNonce) ? q.lt('nonce', liveNonce) : q;
+  }, TERMINAL_COLS);
 }
 
 async function dbGetTxByHash(txHash) {
@@ -10061,26 +10075,27 @@ async function sigsFor(rows, embedded) {
 }
 
 async function dbGetSigsByTxIds(txIds) {
-  const map = new Map();
-  if(!txIds.length) return map;
-  txIds.forEach(id => map.set(id, []));
-  const { data, error } = await sb.from('signatures')
-    .select('tx_id, signer, signature, sig_type')
-    .in('tx_id', txIds)
-    .order('signer', { ascending: true });
-  // A failed read used to return the pre-seeded all-empty map, which reads as
-  // "none of these proposals has a signature" — and loadVaultQueue HIDES an
-  // unsigned proposal the chain does not hold queued. So one 400 on this single
-  // request made every not-yet-queued proposal on the vault vanish, which is
-  // the exact disappearance the embed path at dbGetPending goes to lengths to
-  // prevent. Thrown rather than returned empty: sigsFor's caller is inside
-  // loadVaultQueue's try, and a queue that cannot be judged must not be drawn
-  // as a judged one.
-  if(error) { console.error('DB signatures by tx:', error); throw dbError('SIGNATURES NOT READ', error); }
-  (data || []).forEach(s => {
-    const arr = map.get(s.tx_id);
-    if(arr) arr.push({ signer: s.signer, signature: s.signature, sig_type: s.sig_type });
-  });
+  const map = new Map(txIds.map(id => [id, []]));
+  // Bound both URL length and response size when embedded relations fail.
+  for(let offset = 0; offset < txIds.length; offset += 40) {
+    const ids = txIds.slice(offset, offset + 40);
+    let cursor = null;
+    for(;;) {
+      let q = sb.from('signatures').select('id, tx_id, signer, signature, sig_type')
+        .in('tx_id', ids).order('id', { ascending: true }).limit(PROPOSAL_PAGE_SIZE);
+      if(cursor) q = q.gt('id', cursor);
+      const { data, error } = await q;
+      if(error || !Array.isArray(data)) throw dbError('SIGNATURES NOT READ', error);
+      if(!data.length) break;
+      const next = data[data.length - 1].id;
+      if(!next || (cursor && next <= cursor)) throw dbError('SIGNATURES NOT READ', null);
+      for(const s of data) {
+        const arr = map.get(s.tx_id);
+        if(arr) arr.push({ signer: s.signer, signature: s.signature, sig_type: s.sig_type });
+      }
+      cursor = next;
+    }
+  }
   return map;
 }
 
@@ -10144,21 +10159,41 @@ async function dbPruneTx(txId) {
 // this at the bottom, which read it again: a second aggregate3 plus a second
 // getBalance against the same address, after every action, for numbers that were
 // already sitting in a local. Still falls back to reading when nothing is passed.
-async function dbSyncWalletState(vaultAddr, dbId, state) {
-  if(!dbId || !vaultAddr || !window._connectedAddress) return;
+async function dbSyncWalletState(vaultAddr, dbId, state, chainId = S.chainId) {
+  const caller = window._connectedAddress;
+  if(!dbId || !vaultAddr || !caller || chainId !== S.chainId) return false;
+  const stillOurs = () => S.chainId === chainId && window._connectedAddress === caller;
   try {
     const s = state || await multicallLoad(vaultAddr);
-    await sb.rpc('sync_wallet_state', {
-      p_wallet_id: dbId,
-      p_caller: window._connectedAddress,
-      p_threshold: Number(s.threshold),
-      p_owner_count: Number(s.ownerCount),
-      p_delay: Number(s.delay),
-      p_executor: s.executor,
-      p_nonce: Number(s.nonce),
-      p_owners: [...s.owners]
-    });
-  } catch(e) { console.error('DB sync:', e); }
+    if(!stillOurs() || !s.owners.some(o => o.toLowerCase() === caller.toLowerCase())) return false;
+    const params = {
+      p_wallet_id: dbId, p_caller: caller,
+      p_threshold: Number(s.threshold), p_owner_count: Number(s.ownerCount),
+      p_delay: Number(s.delay), p_executor: s.executor,
+      p_nonce: Number(s.nonce), p_owners: [...s.owners]
+    };
+    let result = await sb.rpc('sync_wallet_state', params);
+    if(!result.error) return true;
+    if(!stillOurs() || !/\bNot an owner\b/.test(String(result.error.message || ''))) {
+      console.error('DB sync:', result.error); return false;
+    }
+    // First-registration squatting can leave no real owner in the database's
+    // history. These RPCs authenticate by public address claims, not signatures.
+    // Recover through the existing gate only after verifying the connected
+    // account against the chain, and verifying this record's chain/address.
+    // This is coordination repair; it does not authenticate anonymous writes.
+    const { data: record, error: recordError } = await sb.from('wallets')
+      .select('id, address, chain_id').eq('id', dbId).maybeSingle();
+    if(recordError || !record || Number(record.chain_id) !== chainId ||
+       String(record.address).toLowerCase() !== vaultAddr.toLowerCase() || !stillOurs()) return false;
+    const { data: writers, error } = await sb.from('owners')
+      .select('address').eq('wallet_id', dbId).order('id', { ascending: true }).limit(1);
+    const writer = writers && writers[0] && writers[0].address;
+    if(error || !/^0x[0-9a-fA-F]{40}$/.test(writer || '') || !stillOurs()) return false;
+    result = await sb.rpc('sync_wallet_state', { ...params, p_caller: writer });
+    if(result.error) { console.error('DB coordination repair:', result.error); return false; }
+    return true;
+  } catch(e) { console.error('DB sync:', e); return false; }
 }
 
 // Reports whether the write landed, because its caller shows the operator a
@@ -10374,6 +10409,11 @@ async function loadSingleVaultData(addr, dbWallet) {
     } catch(e) { console.error('Auto-register vault:', e); }
   }
 
+  // A vault opened by address must also repair an initially forged owner set;
+  // it cannot depend on already appearing in the connected owner's dashboard.
+  if(dbW?.id && S.chainId === startedOn)
+    await dbSyncWalletState(addr, dbW.id, s, startedOn);
+
   // Phase 2: owner labels + executor check + token balances in parallel
   const [labelsRaw, fpResult, holdings, codeKind] = await Promise.all([
     dbW?.id ? dbGetOwnerLabels(dbW.id) : Promise.resolve([]),
@@ -10538,9 +10578,14 @@ async function chainCheckQueue(v, queuedTxs, pairs) {
     ...pairs.map(p => ({ target: v.address, allowFailure: true,
       callData: msIface.encodeFunctionData('approved', [p.signer, p.hash]) })),
   ];
-  let res;
-  try { res = await getMC3().aggregate3(calls); }
-  catch(e) { console.error('Queue/approval verification:', e); return out; }
+  const res = new Array(calls.length);
+  const mc = getMC3();
+  for(let offset = 0; offset < calls.length; offset += 100) {
+    try {
+      const batch = await mc.aggregate3(calls.slice(offset, offset + 100));
+      batch.forEach((answer, i) => { res[offset + i] = answer; });
+    } catch(e) { console.error('Queue/approval verification:', e); }
+  }
   queuedTxs.forEach((q, i) => {
     const r = res[i];
     if(!r || !r.success) return;
@@ -10584,7 +10629,7 @@ async function loadVaultQueue(vi) {
   const stillOurs = () => S.chainId === onChain && S.vaults[vi] === v;
   if(!stillOurs()) return;
   try {
-    // The live rows, and the recently-retired ones — because a retired row is a
+    // The live rows, and all potentially queued retired ones — because a retired row is a
     // claim, not a fact.
     //
     // Every status write in this database goes through an RPC that authenticates
@@ -10608,7 +10653,7 @@ async function loadVaultQueue(vi) {
     // retired ones too, in the same call, and put back anything it still has.
     const [live, gone] = await Promise.all([
       dbGetPending(v.dbId),
-      dbGetRecentTerminal(v.dbId, TERMINAL_RECHECK),
+      dbGetRecentTerminal(v.dbId, v.nonce),
     ]);
     // Neither read answered, so there is nothing to reconcile against. Leaving
     // the queue exactly as it is — and saying so — is the only honest move: an
@@ -10721,29 +10766,50 @@ async function loadVaultQueue(vi) {
       const want = companionShape[kind];
       const data = t.call_data || '0x';
       if(want === '' ? data !== '0x' : selOf(data) !== want) return null;
+      const claimed = t.description && t.description.slice(kind.length);
+      if(!/^(0|[1-9][0-9]*)$/.test(claimed || '')) return null;
+      const origNonce = Number(claimed);
+      let key;
+      try {
+        if(kind === 'Reject #') {
+          if(origNonce !== t.nonce) return null;
+          key = origNonce;
+        } else {
+          let hash;
+          if(kind === 'Cancel #') {
+            hash = msIface.decodeFunctionData('cancelQueued', data)[0];
+            if(msIface.encodeFunctionData('cancelQueued', [hash]).toLowerCase() !== data.toLowerCase()) return null;
+          }
+          else {
+            const [target, value, call_data, nonce] = msIface.decodeFunctionData('executeQueued', data);
+            if(msIface.encodeFunctionData('executeQueued', [target, value, call_data, nonce]).toLowerCase() !== data.toLowerCase()) return null;
+            hash = proposalDigest(v, { target, value: value.toString(), call_data, nonce: Number(nonce) });
+          }
+          const original = txs.find(x => x.nonce === origNonce &&
+            digests.get(x.id) && digests.get(x.id).toLowerCase() === String(hash).toLowerCase());
+          if(!original) return null;
+          key = digests.get(original.id);
+        }
+      } catch(_) { return null; }
       const usable = (sigMap.get(t.id) || [])
         .filter(s => { const st = s.sig_type || s.sigType; return st !== 'approval' && st !== 'sender'; });
       const msg = { target: t.target, value: 0n, data, nonce: t.nonce };
-      return new Set(
+      return { key, signers: new Set(
         verifySigs(usable, cDomain, EIP712_TYPES, msg, cOwners).map(s => String(s.signer).toLowerCase())
-      );
+      ) };
     };
     const accelSigs = {}, cancelSigs = {}, rejectSigs = {};
+    const companionRows = new Set();
     const companionInto = { 'Accelerate #': accelSigs, 'Cancel #': cancelSigs, 'Reject #': rejectSigs };
-    for(let ti = 0; ti < txs.length; ti++) {
-      const t = txs[ti];
+    for(const t of txs) {
       const kind = t.description && Object.keys(companionShape).find(k => t.description.startsWith(k));
       if(!kind) continue;
-      const origNonce = parseInt(t.description.slice(kind.length));
-      if(isNaN(origNonce)) continue;
-      const signers = companionSigners(t, kind);
-      // Several rows can now claim the same kind and nonce — the unique
-      // constraint that made a nonce exclusive is gone, because it was what
-      // stopped a companion coexisting with the proposal it acts on. Keep the
-      // strongest verified set rather than whichever row was read last, so a
-      // planted empty row cannot mask a real one behind it.
-      if(signers && signers.size >= ((companionInto[kind][origNonce] || new Set()).size))
-        companionInto[kind][origNonce] = signers;
+      const companion = companionSigners(t, kind);
+      if(!companion) continue;
+      companionRows.add(t.id);
+      const { key, signers } = companion;
+      if(signers.size >= ((companionInto[kind][key] || new Set()).size))
+        companionInto[kind][key] = signers;
     }
 
     for(let ti = 0; ti < txs.length; ti++) {
@@ -10774,8 +10840,7 @@ async function loadVaultQueue(vi) {
       // disappearance an anonymous cancel_tx would have caused, arrived at by
       // accident, and the exact direction the hide-check below spells out as the
       // one that must never be taken. It self-heals on the next good load, via
-      // the retired-row re-check, but only for as long as the row stays inside
-      // TERMINAL_RECHECK.
+      // the complete retired-row re-check.
       if(t.status === 'proposed' && t.nonce < v.nonce) {
         const held = onchainQueued[t.id];
         if(held === 0) { staleTxIds.push(t.id); continue; }
@@ -10790,7 +10855,7 @@ async function loadVaultQueue(vi) {
       }
 
       // Skip accelerate/cancel/reject companions — they aggregate sigs separately
-      if(t.description && (t.description.startsWith('Accelerate #') || t.description.startsWith('Cancel #') || t.description.startsWith('Reject #'))) continue;
+      if(companionRows.has(t.id)) continue;
 
       // Prune queued txs that are no longer queued on-chain (executed or cancelled externally)
       if(t.status === 'queued' && t.id in onchainQueued) {
@@ -10952,8 +11017,8 @@ async function loadVaultQueue(vi) {
         // re-check above. The card says so; nothing else about the proposal is
         // treated differently, because nothing else about it is different.
         orphanedFrom: t.orphanedFrom || null,
-        accelSigners: accelSigs[t.nonce] || null,
-        cancelSigners: cancelSigs[t.nonce] || null,
+        accelSigners: accelSigs[digest] || null,
+        cancelSigners: cancelSigs[digest] || null,
         rejectSigners: rejectSigs[t.nonce] || null
       });
     }
@@ -10975,8 +11040,7 @@ async function loadVaultQueue(vi) {
     // Checked once more here, and not only after the chain read: everything
     // between the two is awaited, so the switch can land in the gap. This is
     // the write, and it is the one that cannot be taken back from the UI — a
-    // pruned row leaves every owner's queue and only returns if it is still
-    // inside the 40-row TERMINAL_RECHECK window.
+    // pruned row is restored when complete reconciliation finds it queued on chain.
     if(staleTxIds.length && window._connectedAddress && stillOurs()) {
       for(const id of staleTxIds) {
         dbPruneTx(id).catch(e => console.error('Prune stale tx:', e));
@@ -12538,8 +12602,9 @@ async function prodSign(vi, nonce) {
   const w = requireSigner(); if(!w) return;
   const { signer, addr: connectedAddress } = w;
   const v = S.vaults[vi];
-  const tx = v.queue.find(t => t.nonce === nonce);
+  const tx = findQueueTx(v, nonce);
   if(!tx) return;
+  nonce = tx.nonce;
   // Neither the proposal nor the vault has a record to sign into, and the
   // branch below would have taken the signature and dropped it while
   // reporting SIGNED. See requireVaultRecord.
@@ -12608,8 +12673,9 @@ async function prodApprove(vi, nonce) {
   const w = requireSigner(); if(!w) return;
   const { signer, addr: connectedAddress } = w;
   const v = S.vaults[vi];
-  const tx = v.queue.find(t => t.nonce === nonce);
+  const tx = findQueueTx(v, nonce);
   if(!tx) return;
+  nonce = tx.nonce;
 
   try {
     // Compute the EIP-712 hash to approve on-chain
@@ -12662,8 +12728,9 @@ async function prodUnsign(vi, nonce) {
   if(!connectedAddress) return;
   const signer = window._signer;
   const v = S.vaults[vi];
-  const tx = v.queue.find(t => t.nonce === nonce);
+  const tx = findQueueTx(v, nonce);
   if(!tx) return;
+  nonce = tx.nonce;
 
   // Check if this was an on-chain approval — if so, revoke it on-chain
   const mySig = tx.signatures?.find(s => s.signer.toLowerCase() === connectedAddress.toLowerCase());
@@ -12896,8 +12963,9 @@ async function prodSubmit(vi, nonce) {
   const w = requireSigner(); if(!w) return;
   const { signer, addr: connectedAddress } = w;
   const v = S.vaults[vi];
-  const tx = v.queue.find(t => t.nonce === nonce);
+  const tx = findQueueTx(v, nonce);
   if(!tx) return;
+  nonce = tx.nonce;
 
   try {
     const target = tx.target;
@@ -13014,8 +13082,9 @@ async function prodExecute(vi, nonce) {
   const w = requireSigner(); if(!w) return;
   const { signer, addr: connectedAddress } = w;
   const v = S.vaults[vi];
-  const tx = v.queue.find(t => t.nonce === nonce);
+  const tx = findQueueTx(v, nonce);
   if(!tx) return;
+  nonce = tx.nonce;
 
   try {
     const target = tx.target;
@@ -13065,8 +13134,9 @@ async function prodFastExecute(vi, nonce) {
   const w = requireSigner(); if(!w) return;
   const { signer, addr: connectedAddress } = w;
   const v = S.vaults[vi];
-  const tx = v.queue.find(t => t.nonce === nonce);
+  const tx = findQueueTx(v, nonce);
   if(!tx) return;
+  nonce = tx.nonce;
   // The same refusal prodCancel makes, for the same reason. This route sends
   // forward() to v.executor, and a call to an address holding no code mines
   // successfully and does nothing — so without one the transaction would be
@@ -13129,8 +13199,9 @@ async function prodCancel(vi, nonce) {
   const w = requireSigner(); if(!w) return;
   const { signer, addr: connectedAddress } = w;
   const v = S.vaults[vi];
-  const tx = v.queue.find(t => t.nonce === nonce);
+  const tx = findQueueTx(v, nonce);
   if(!tx) return;
+  nonce = tx.nonce;
   if(!requireVaultRecord(v)) return;
 
   // No executor, no in-window brake — see canForwardCancel. Refused here as well
@@ -13279,8 +13350,9 @@ async function prodReject(vi, nonce) {
   const w = requireSigner(); if(!w) return;
   const { signer, addr: connectedAddress } = w;
   const v = S.vaults[vi];
-  const tx = v.queue.find(t => t.nonce === nonce);
+  const tx = findQueueTx(v, nonce);
   if(!tx) return;
+  nonce = tx.nonce;
   if(!requireVaultRecord(v)) return;
 
   const rejectNonce = nonce;   // == the stuck proposal's (and live) on-chain nonce
@@ -13636,8 +13708,9 @@ async function runSim(s) {
 }
 async function simulateProposal(vi, nonce) {
   const v = S.vaults[vi];
-  const tx = v.queue.find(t => t.nonce === nonce);
+  const tx = findQueueTx(v, nonce);
   if(!tx) return;
+  nonce = tx.nonce;
   if(S.demoMode) { tx._sim = _simStamp(demoSim(v, tx)); render(); return; }
   tx._sim = { loading:true }; render();
   tx._sim = await runSim(_simTx(v, tx));
@@ -13814,7 +13887,7 @@ function renderSim(sim, opts) {
 }
 function dismissBuilderSim(){ _builderSim = null; render(); }
 function dismissProposalSim(vi, nonce){
-  const tx = (S.vaults[vi]?.queue || []).find(t => t.nonce === nonce);
+  const tx = findQueueTx(S.vaults[vi], nonce);
   if(tx){ tx._sim = null; render(); }
 }
 
@@ -13822,8 +13895,9 @@ async function prodAccelerate(vi, nonce) {
   const w = requireSigner(); if(!w) return;
   const { signer, addr: connectedAddress } = w;
   const v = S.vaults[vi];
-  const tx = v.queue.find(t => t.nonce === nonce);
+  const tx = findQueueTx(v, nonce);
   if(!tx) return;
+  nonce = tx.nonce;
   if(!requireVaultRecord(v)) return;
   // Refused before the first signature rather than after the last one. This
   // route ends in forward() on v.executor, so with no executor it can never
