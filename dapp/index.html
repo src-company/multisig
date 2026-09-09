@@ -10571,8 +10571,33 @@ async function loadAllVaults() {
       return;
     }
     const results = await Promise.allSettled(wallets.map(w => loadSingleVaultData(w.address, { id: w.id, name: w.name })));
-    const vaults = results.filter(r => r.status === 'fulfilled' && r.value).map(r => r.value);
     results.filter(r => r.status === 'rejected').forEach(r => console.error('Load vault:', r.reason));
+    // This dashboard is assembled from my_wallets, which is a join onto the
+    // coordination table's owner rows — and an owner row is something an
+    // anonymous caller can write. So membership of this list is a claim by
+    // whoever last wrote that row, not a fact about the vault, and a vault the
+    // connected account has nothing to do with can be made to appear here.
+    //
+    // The vault itself settles it, and each one has just been read: keep it only
+    // if the owner set that came back from the chain contains this account.
+    // Costs no extra round trip — loadedOwners is that read.
+    //
+    // Fail open. An owner list that did not arrive is not evidence of anything,
+    // and dropping a real vault because an RPC was slow is a worse failure than
+    // showing an extra row: this list is how someone finds the vault holding
+    // their money. Opening a vault by address is unaffected; that path does not
+    // come through here, so a vault can still be looked at by anyone who has it.
+    const me = String(addr || '').toLowerCase();
+    const vaults = results
+      .filter(r => r.status === 'fulfilled' && r.value)
+      .map(r => r.value)
+      .filter(v => {
+        const chainOwners = Array.isArray(v.loadedOwners) ? v.loadedOwners : null;
+        if(!chainOwners || !chainOwners.length) return true;
+        const mine = chainOwners.some(o => String(o).toLowerCase() === me);
+        if(!mine) console.warn('Vault listed by the coordination record but not owned on chain:', v.address);
+        return mine;
+      });
     // Decide what to keep against S.vaults as it is NOW. This filter used to be
     // built before the await above, from a list that did not yet contain a vault
     // a deep link was still resolving in parallel — so that vault was absent
