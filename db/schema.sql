@@ -1317,6 +1317,48 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
+-- Recording what the chain did with a proposal.
+--
+-- mark_executed and mark_queued were the last two writes gated on a caller's
+-- address. They are not owner actions — the client observes the chain and writes
+-- back what it saw — so they could not be signature-gated either, and like
+-- reconcile_tx what they claim is simply askable of the chain.
+--
+-- api/proposals.cjs reads the vault's queue for the queued case, and for the
+-- executed case reads the transaction receipt and requires the vault's own
+-- ExecutionSuccess log for this exact digest. The eta, the block and the
+-- execution hash are read back rather than accepted, so none of them can be
+-- written to say something the chain does not.
+CREATE OR REPLACE FUNCTION confirm_queued(
+  p_tx_id uuid, p_eta bigint, p_block bigint, p_queue_tx text DEFAULT NULL
+) RETURNS void AS $$
+BEGIN
+  IF coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb->>'role', '') <> 'action_writer' THEN
+    RAISE EXCEPTION 'A verified confirmation is required' USING ERRCODE = '42501';
+  END IF;
+  PERFORM rate_gate('mark:' || p_tx_id::text || ':' || client_ip(), 240, interval '1 minute');
+  UPDATE transactions
+  SET status = 'queued', eta = p_eta, queued_at = now(), queued_block = p_block, queue_tx = p_queue_tx
+  WHERE id = p_tx_id AND status IN ('proposed', 'executing');
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+CREATE OR REPLACE FUNCTION confirm_executed(
+  p_tx_id uuid, p_block bigint, p_execution_tx text
+) RETURNS void AS $$
+BEGIN
+  IF coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb->>'role', '') <> 'action_writer' THEN
+    RAISE EXCEPTION 'A verified confirmation is required' USING ERRCODE = '42501';
+  END IF;
+  PERFORM rate_gate('mark:' || p_tx_id::text || ':' || client_ip(), 240, interval '1 minute');
+  UPDATE transactions
+  SET status = 'executed', executed_at = now(), executed_block = p_block, execution_tx = p_execution_tx
+  WHERE id = p_tx_id AND status IN ('proposed', 'executing', 'queued');
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+REVOKE ALL ON FUNCTION confirm_queued(uuid, bigint, bigint, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION confirm_executed(uuid, bigint, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION reconcile_tx(uuid, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION signed_remove_signature(uuid, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION signed_add_signature(uuid, text, text, sig_type) FROM PUBLIC;
@@ -1325,12 +1367,16 @@ DO $$ BEGIN
     REVOKE ALL ON FUNCTION signed_remove_signature(uuid, text) FROM anon;
     REVOKE ALL ON FUNCTION signed_add_signature(uuid, text, text, sig_type) FROM anon;
     REVOKE ALL ON FUNCTION reconcile_tx(uuid, text) FROM anon;
+    REVOKE ALL ON FUNCTION confirm_queued(uuid, bigint, bigint, text) FROM anon;
+    REVOKE ALL ON FUNCTION confirm_executed(uuid, bigint, text) FROM anon;
     REVOKE ALL ON FUNCTION register_wallet(int, text, text, numeric, text[], smallint, int, text, bigint, text, text, text[], int) FROM anon;
   END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'action_writer') THEN
     GRANT EXECUTE ON FUNCTION signed_remove_signature(uuid, text) TO action_writer;
     GRANT EXECUTE ON FUNCTION signed_add_signature(uuid, text, text, sig_type) TO action_writer;
     GRANT EXECUTE ON FUNCTION reconcile_tx(uuid, text) TO action_writer;
+    GRANT EXECUTE ON FUNCTION confirm_queued(uuid, bigint, bigint, text) TO action_writer;
+    GRANT EXECUTE ON FUNCTION confirm_executed(uuid, bigint, text) TO action_writer;
   END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'registry_writer') THEN
     GRANT EXECUTE ON FUNCTION register_wallet(int, text, text, numeric, text[], smallint, int, text, bigint, text, text, text[], int) TO registry_writer;

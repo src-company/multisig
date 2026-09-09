@@ -150,11 +150,38 @@ deployer passed to `register_wallet` is a real owner read from the chain, never
 the caller's claim. Only a name and labels come from the request, and only while
 the vault is first recorded.
 
-Still anonymous, and not yet migrated: `mark_executed`, `mark_queued`,
-`record_approval` and `sync_wallet_state`. Do not describe the whole database as
-authenticated. The first two are chain-verifiable on the same pattern as
-`reconcile_tx` — they assert something about the chain and are checked against an
-owner list — and are the obvious next step.
+`POST /confirm` records what the chain did with a proposal. Queued is a question
+about current state — is this digest in the vault's queue — so it reads
+`queued[digest]` and stores the eta the contract holds, not the one the request
+offered. Executed is a question about history, and the vault's own
+`ExecutionSuccess` log answers it: the service fetches the receipt, requires a
+successful status, and requires that log emitted by the vault for this exact
+digest. Since the vault emits it, this holds whoever sent the transaction and
+whether it arrived through an executor module. The block is read back off the
+receipt. Neither the eta, the block nor the transaction hash is taken on trust.
+
+This replaces `mark_queued` and `mark_executed`, which wrote what the chain had
+supposedly done on the strength of a named owner — enough to mark a live proposal
+executed and remove it from the queue every co-signer reads.
+
+Still anonymous: `record_approval` and `sync_wallet_state`. Do not describe the
+whole database as authenticated. `record_approval` writes a table `anon` cannot
+read and the dapp never reads; `sync_wallet_state` rewrites an owner set that the
+next page load re-derives from chain and repairs.
+
+**Reads are not authenticated at all.** Every granted table and view is readable
+by anyone, and that is unchanged: it is a property of running with no session,
+not an oversight, and closing it needs the JWT route the end of `db/roles.sql`
+describes. A read flood against a ten-connection pool is not addressed by any of
+the above.
+
+**One dependency this concentrated.** Signing, registration, renaming,
+reconciliation and confirmation now pass through this service, where they
+previously went straight to PostgREST. It is one instance with a 32-request
+ceiling, so its availability is now the availability of every write. That is a
+deliberate trade — a tampering surface for an availability dependency — and it
+wants a second instance and a failure alarm before it is load-bearing for anyone
+else.
 
 What makes that a bounded problem rather than the same one is that every column
 those RPCs touch is re-derived from chain on the next load, so the damage is

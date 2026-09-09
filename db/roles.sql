@@ -59,9 +59,13 @@ REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM action_writer;
 GRANT EXECUTE ON FUNCTION signed_remove_signature(uuid, text) TO action_writer;
 GRANT EXECUTE ON FUNCTION signed_add_signature(uuid, text, text, sig_type) TO action_writer;
 GRANT EXECUTE ON FUNCTION reconcile_tx(uuid, text) TO action_writer;
+GRANT EXECUTE ON FUNCTION confirm_queued(uuid, bigint, bigint, text) TO action_writer;
+GRANT EXECUTE ON FUNCTION confirm_executed(uuid, bigint, text) TO action_writer;
 REVOKE ALL ON FUNCTION signed_remove_signature(uuid, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION signed_add_signature(uuid, text, text, sig_type) FROM PUBLIC;
 REVOKE ALL ON FUNCTION reconcile_tx(uuid, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION confirm_queued(uuid, bigint, bigint, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION confirm_executed(uuid, bigint, text) FROM PUBLIC;
 
 -- Recording a vault. Its own role again: registration writes rows nothing else
 -- writes, and a token minted to register a vault must not reach a signature or
@@ -146,13 +150,6 @@ TO anon;
 REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION
-  mark_executed(uuid, bigint, text, text),
-  -- Five arguments, matching schema.sql. This read `mark_queued(uuid, bigint,
-  -- bigint, text)` — the signature schema.sql drops — so on a fresh database
-  -- this single GRANT statement aborted on that line and NONE of the write
-  -- functions below or above it were granted to anon. The dapp could read
-  -- everything and write nothing.
-  mark_queued(uuid, bigint, bigint, text, text),
   record_approval(uuid, int, text, text, boolean, bigint, text),
   sync_wallet_state(uuid, text, smallint, smallint, int, text, int, text[]),
   -- Read-only, and the one call that can tell an operator this file was never
@@ -209,6 +206,16 @@ REVOKE EXECUTE ON FUNCTION cancel_tx(uuid, text), prune_tx(uuid, text) FROM anon
 -- genuinely deployed multisigs can be recorded, and those cost gas to create.
 REVOKE EXECUTE ON FUNCTION
   register_wallet(int, text, text, numeric, text[], smallint, int, text, bigint, text, text, text[], int)
+FROM anon, PUBLIC;
+
+-- And the last two. mark_executed and mark_queued wrote what the chain had
+-- supposedly done on the strength of a named owner, so a live proposal could be
+-- marked executed and disappear from the queue every co-signer reads. Their
+-- replacements read the vault's queue, and for an execution the transaction
+-- receipt, requiring the vault's own ExecutionSuccess log for that exact digest.
+REVOKE EXECUTE ON FUNCTION
+  mark_executed(uuid, bigint, text, text),
+  mark_queued(uuid, bigint, bigint, text, text)
 FROM anon, PUBLIC;
 
 -- ── DEFAULTS ─────────────────────────────────────────────────────

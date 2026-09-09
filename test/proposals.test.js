@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { createECDH, createHmac } = require('node:crypto');
 const { Readable } = require('node:stream');
-const { verifyProposal, verifyMetadata, verifyAction, verifySignature, verifyReconcile, verifyRegistration, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, ACTION_TYPES, iface } = require('../api/proposals.cjs');
+const { verifyProposal, verifyMetadata, verifyAction, verifySignature, verifyReconcile, verifyRegistration, verifyConfirm, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, ACTION_TYPES, iface } = require('../api/proposals.cjs');
 
 const WALLET_ID = '11111111-1111-4111-8111-111111111111';
 const VAULT = '0x2222222222222222222222222222222222222222';
@@ -41,8 +41,11 @@ function backend(overrides = {}) {
   return { getWallet: async () => ({ chain_id: 1, address: VAULT }),
     readVault: async () => ({ isOwner: true, threshold: 2, ownerCount: 3, approved: false }),
     saveProposal: async () => WALLET_ID, saveMetadata: async () => {}, saveAction: async () => {},
+    readOwner: async () => true,
     saveSignature: async () => 2, saveReconcile: async () => {}, readVaultState: async () => ({ nonce: 9, queuedEta: 0n }),
-    saveRegistration: async () => WALLET_ID,
+    saveRegistration: async () => WALLET_ID, saveConfirm: async () => {},
+    readReceipt: async () => ({ status: 1, blockNumber: 1234, logs: [
+      { address: VAULT, topics: [EXEC_TOPIC, storedHash()] } ] }),
     readVaultRecord: async () => ({ owners: [address(1n), address(2n)], threshold: 2, delay: 0, executor: ZERO_ADDR, nonce: 5 }),
     getProposal: async () => ({ ...STORED }), ...overrides };
 }
@@ -216,9 +219,11 @@ function metaHash(m) {
 // address failing isOwner(). A mock that answers true for every signer would
 // not model that, and would pass a payload production rejects.
 function metaBackend(overrides = {}) {
-  return backend({ readVault: async (chainId, vault, signer) => ({
-    isOwner: signer === address(1n).toLowerCase(), threshold: 2, ownerCount: 3, approved: false,
-  }), ...overrides });
+  return backend({
+    readOwner: async (chainId, vault, who) => who === address(1n).toLowerCase(),
+    readVault: async (chainId, vault, signer) => ({
+      isOwner: signer === address(1n).toLowerCase(), threshold: 2, ownerCount: 3, approved: false,
+    }), ...overrides });
 }
 function metadata(overrides = {}, key = 1n) {
   const m = { wallet_id: WALLET_ID, kind: 'name', subject: ZERO_ADDR, value: 'TREASURY',
@@ -276,7 +281,8 @@ test('a metadata signature expires, in both directions', async () => {
 });
 
 test('current chain ownership gates a metadata write, whatever the database says', async () => {
-  const result = await request(metadata(), backend({ readVault: async () => ({ isOwner: false, threshold: 2, ownerCount: 3 }),
+  const result = await request(metadata(), backend({ readOwner: async () => false,
+    readVault: async () => ({ isOwner: false, threshold: 2, ownerCount: 3 }),
     saveMetadata: async () => assert.fail('non-owner wrote metadata') }), {}, '/metadata');
   assert.equal(result.status, 403);
 });
@@ -315,9 +321,11 @@ function action(overrides = {}, key = 1n) {
   return a;
 }
 function actionBackend(overrides = {}) {
-  return backend({ readVault: async (chainId, vault, signer) => ({
-    isOwner: signer === address(1n).toLowerCase(), threshold: 2, ownerCount: 3, approved: false,
-  }), ...overrides });
+  return backend({
+    readOwner: async (chainId, vault, who) => who === address(1n).toLowerCase(),
+    readVault: async (chainId, vault, signer) => ({
+      isOwner: signer === address(1n).toLowerCase(), threshold: 2, ownerCount: 3, approved: false,
+    }), ...overrides });
 }
 
 test('a signed unsign removes only the recovered signer own signature', async () => {
@@ -387,10 +395,12 @@ function sigInput(overrides = {}, key = 1n) {
   return { tx_id: WALLET_ID, signer: address(key), signature: sign(storedHash(), key), sig_type: 'ecdsa', ...overrides };
 }
 function sigBackend(overrides = {}) {
-  return backend({ readVault: async (chainId, vault, signer) => ({
-    isOwner: signer === address(1n).toLowerCase() || signer === address(2n).toLowerCase(),
-    threshold: 2, ownerCount: 3, approved: false,
-  }), ...overrides });
+  const owns = a => a === address(1n).toLowerCase() || a === address(2n).toLowerCase();
+  return backend({
+    readOwner: async (chainId, vault, who) => owns(who),
+    readVault: async (chainId, vault, signer) => ({
+      isOwner: owns(signer), threshold: 2, ownerCount: 3, approved: false,
+    }), ...overrides });
 }
 
 test('a signature verified against the stored proposal is written once', async () => {
@@ -436,6 +446,7 @@ test('an approval slot still needs the vault to say it was approved', async () =
   const slot = senderSlot(address(1n).toLowerCase());
   const input = { tx_id: WALLET_ID, signer: address(1n), signature: slot, sig_type: 'approval' };
   const denied = await request(input, sigBackend({
+    readOwner: async () => assert.fail('approval slot took the cheap ownership path'),
     readVault: async () => ({ isOwner: true, threshold: 2, ownerCount: 3, approved: false }),
     saveSignature: async () => assert.fail('unapproved slot stored') }), {}, '/signature');
   assert.equal(denied.status, 403);
@@ -582,4 +593,96 @@ test('registration fails closed when the chain cannot be read', async () => {
       saveRegistration: async () => assert.fail('recorded without a chain read') }), {}, '/register');
   assert.equal(res.status, 503);
   assert.doesNotMatch(res.body, /secret/);
+});
+
+test('dependency methods survive being destructured out of the object', async () => {
+  // The verifiers take `{ getWallet, readVault }` and call them by name, which
+  // detaches them from the object. Anything reaching shared state through `this`
+  // works in a method call and throws the moment it is passed that way — and the
+  // only place that shows up is production. Call them exactly as the verifiers do.
+  let chainIdCalls = 0;
+  const deps = dependencies({ postgrestUrl: 'https://db.example', jwtSecret: 'k'.repeat(32), rpcUrls: { 1: 'https://rpc.example' } },
+    async (url, options) => {
+      const rpc = JSON.parse(options.body);
+      if (rpc.method === 'eth_chainId') { chainIdCalls++; return { ok: true, json: async () => ({ result: '0x1' }) }; }
+      if (rpc.method === 'eth_blockNumber') return { ok: true, json: async () => ({ result: '0x123' }) };
+      const call = iface.parseTransaction({ data: rpc.params[0].data });
+      return { ok: true, json: async () => ({ result: iface.encodeFunctionResult(call.name,
+        [call.name === 'isOwner' ? true : call.name === 'threshold' ? 2 : 3]) }) };
+    });
+  const { readOwner, readVault } = deps;
+  assert.equal(await readOwner(1, VAULT, address(1n)), true);
+  assert.equal((await readVault(1, VAULT, address(1n), TX_HASH, 'ecdsa')).isOwner, true);
+  // And the chain is confirmed once, not once per call.
+  await readOwner(1, VAULT, address(2n));
+  await readOwner(1, VAULT, address(1n));
+  assert.equal(chainIdCalls, 1);
+});
+
+// ── CHAIN-CONFIRMED STATUS ────────────────────────────────────────
+const EXEC_TOPIC = iface.getEvent('ExecutionSuccess').topicHash;
+const EXEC_TX = '0x' + '7'.repeat(64);
+
+test('an execution is confirmed by the vault own log, and the block is read back', async () => {
+  const calls = [];
+  const res = await request({ tx_id: WALLET_ID, state: 'executed', tx: EXEC_TX, block: 1 },
+    backend({ saveConfirm: async w => { calls.push(w); } }), {}, '/confirm');
+  assert.equal(res.status, 204);
+  assert.equal(calls[0].fn, 'confirm_executed');
+  assert.equal(calls[0].args.p_execution_tx, EXEC_TX);
+  // 1234 from the receipt, not the 1 the caller offered.
+  assert.equal(calls[0].args.p_block, 1234);
+});
+
+test('a receipt that did not execute this proposal is refused', async () => {
+  const other = '0x' + '9'.repeat(64);
+  const cases = [
+    { status: 1, blockNumber: 5, logs: [] },                                          // no log
+    { status: 0, blockNumber: 5, logs: [{ address: VAULT, topics: [EXEC_TOPIC, storedHash()] }] }, // reverted
+    { status: 1, blockNumber: 5, logs: [{ address: TARGET, topics: [EXEC_TOPIC, storedHash()] }] },// wrong emitter
+    { status: 1, blockNumber: 5, logs: [{ address: VAULT, topics: [EXEC_TOPIC, other] }] },        // wrong digest
+    { status: 1, blockNumber: 5, logs: [{ address: VAULT, topics: [other, storedHash()] }] },      // wrong event
+    null,                                                                                          // not mined
+  ];
+  for (const receipt of cases) {
+    const res = await request({ tx_id: WALLET_ID, state: 'executed', tx: EXEC_TX },
+      backend({ readReceipt: async () => receipt,
+        saveConfirm: async () => assert.fail('unproven execution recorded') }), {}, '/confirm');
+    assert.equal(res.status, 409, JSON.stringify(receipt));
+  }
+  // And an execution claim with no transaction to check is not a claim at all.
+  const bare = await request({ tx_id: WALLET_ID, state: 'executed' },
+    backend({ saveConfirm: async () => assert.fail('execution recorded with no receipt') }), {}, '/confirm');
+  assert.equal(bare.status, 400);
+});
+
+test('a queue confirmation takes the eta from the vault, not the request', async () => {
+  const calls = [];
+  const res = await request({ tx_id: WALLET_ID, state: 'queued', eta: 1, block: 2, tx: EXEC_TX },
+    backend({ readVaultState: async () => ({ nonce: 9, queuedEta: 1788958355n }),
+      saveConfirm: async w => { calls.push(w); } }), {}, '/confirm');
+  assert.equal(res.status, 204);
+  assert.equal(calls[0].fn, 'confirm_queued');
+  assert.equal(calls[0].args.p_eta, 1788958355);
+});
+
+test('a proposal the vault has not queued cannot be marked queued', async () => {
+  const res = await request({ tx_id: WALLET_ID, state: 'queued' },
+    backend({ readVaultState: async () => ({ nonce: 9, queuedEta: 0n }),
+      saveConfirm: async () => assert.fail('unqueued proposal marked queued') }), {}, '/confirm');
+  assert.equal(res.status, 409);
+});
+
+test('confirmation rejects bad shapes and settled proposals', async () => {
+  for (const b of [{ tx_id: 'nope', state: 'executed', tx: EXEC_TX }, { tx_id: WALLET_ID, state: 'stale' },
+                   { tx_id: WALLET_ID }, null]) {
+    const res = await request(b, backend({ saveConfirm: async () => assert.fail('bad confirm stored') }), {}, '/confirm');
+    assert.equal(res.status, 400, JSON.stringify(b));
+  }
+  for (const status of ['executed', 'cancelled', 'stale']) {
+    const res = await request({ tx_id: WALLET_ID, state: 'executed', tx: EXEC_TX },
+      backend({ getProposal: async () => ({ ...STORED, status }),
+        saveConfirm: async () => assert.fail('settled proposal re-confirmed') }), {}, '/confirm');
+    assert.equal(res.status, 400, status);
+  }
 });

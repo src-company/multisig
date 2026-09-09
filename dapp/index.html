@@ -10425,13 +10425,31 @@ function dbWriteLagged(op, error) {
   flash('THE TRANSACTION LANDED ON CHAIN, BUT THE COORDINATION RECORD DID NOT UPDATE — IT WILL RESYNC ON RELOAD', 7000);
 }
 
+// Confirming an execution goes through the verifier, which fetches the receipt
+// and requires the vault's own ExecutionSuccess log for this proposal's digest.
+// No prompt: this is an observation about the chain, not an act by an owner, and
+// there is nothing for anyone to sign.
+async function dbConfirmTx(txId, state, extra) {
+  try {
+    const res = await pgFetch('confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tx_id: txId, state, ...extra }),
+    }, PROPOSAL_API_URL);
+    if(!res.ok) return { error: { status: res.status, message: await res.text() } };
+    return { error: null };
+  } catch(e) { return { error: { message: String(e && e.message || e) } }; }
+}
+
 async function dbMarkExecuted(txId, block, execTx) {
-  const { error } = await sb.rpc('mark_executed', { p_tx_id: txId, p_block: block, p_execution_tx: execTx, p_caller: window._connectedAddress });
+  const { error } = await dbConfirmTx(txId, 'executed', { tx: execTx, block });
   if(error) dbWriteLagged('mark executed', error);
 }
 
+// `eta` is no longer sent: the verifier reads the vault's queue and records the
+// eta the contract holds, which is the only one that can be right.
 async function dbMarkQueued(txId, eta, block, queueTx) {
-  const { error } = await sb.rpc('mark_queued', { p_tx_id: txId, p_eta: eta, p_block: block, p_queue_tx: queueTx || null, p_caller: window._connectedAddress });
+  const { error } = await dbConfirmTx(txId, 'queued', { tx: queueTx || null, block });
   if(error) dbWriteLagged('mark queued', error);
 }
 

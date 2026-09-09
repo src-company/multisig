@@ -47,7 +47,12 @@ const iface = new ethers.Interface([
   'function getOwners() view returns (address[])',
   'function delay() view returns (uint32)',
   'function executor() view returns (address)',
+  // Confirming an execution reads this out of the receipt. The vault emits it,
+  // so it is proof regardless of who sent the transaction or whether it came
+  // through an executor module.
+  'event ExecutionSuccess(bytes32 indexed txHash, uint256 nonce)',
 ]);
+const EXECUTION_SUCCESS_TOPIC = iface.getEvent('ExecutionSuccess').topicHash;
 const BODY_LIMIT = 72 * 1024;
 class RequestError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -107,7 +112,7 @@ async function verifyProposal(input, { getWallet, readVault }) {
 
 // No caller-controlled URLs, owner lists, or JWTs enter this boundary either.
 // The signer is recovered, never supplied, and ownership is settled by the vault.
-async function verifyMetadata(input, { getWallet, readVault }, now = Date.now()) {
+async function verifyMetadata(input, { getWallet, readOwner }, now = Date.now()) {
   check(input && typeof input === 'object' && !Array.isArray(input), 'Expected a metadata change');
   check(typeof input.wallet_id === 'string' && /^[0-9a-f-]{36}$/i.test(input.wallet_id), 'Invalid wallet id');
   check(input.kind === 'name' || input.kind === 'label', 'Unsupported metadata field');
@@ -138,8 +143,9 @@ async function verifyMetadata(input, { getWallet, readVault }, now = Date.now())
   signer = signer.toLowerCase();
 
   // The database owner list is not proof; the vault is. Same rule as a proposal.
-  const state = await readVault(wallet.chain_id, vault, signer, hash, 'ecdsa');
-  if (!state.isOwner) throw new RequestError(403, 'Signer is not a current on-chain owner');
+  if (!await readOwner(wallet.chain_id, vault, signer)) {
+    throw new RequestError(403, 'Signer is not a current on-chain owner');
+  }
 
   return input.kind === 'name'
     ? { fn: 'set_wallet_name', args: { p_wallet_id: input.wallet_id, p_name: input.value } }
@@ -149,7 +155,7 @@ async function verifyMetadata(input, { getWallet, readVault }, now = Date.now())
 // Retracting one's own signature from a live proposal. The signer is recovered,
 // never supplied, and the row deleted is the recovered signer's own — so this
 // cannot be used to strip a co-signer, which the RPC it replaces allowed.
-async function verifyAction(input, { getProposal, readVault }, now = Date.now()) {
+async function verifyAction(input, { getProposal, readOwner }, now = Date.now()) {
   check(input && typeof input === 'object' && !Array.isArray(input), 'Expected an action');
   check(typeof input.tx_id === 'string' && /^[0-9a-f-]{36}$/i.test(input.tx_id), 'Invalid transaction id');
   check(input.action === 'unsign', 'Unsupported action');
@@ -175,8 +181,9 @@ async function verifyAction(input, { getProposal, readVault }, now = Date.now())
   check(signer, 'Signature could not be recovered');
   signer = signer.toLowerCase();
 
-  const state = await readVault(proposal.chain_id, vault, signer, hash, 'ecdsa');
-  if (!state.isOwner) throw new RequestError(403, 'Signer is not a current on-chain owner');
+  if (!await readOwner(proposal.chain_id, vault, signer)) {
+    throw new RequestError(403, 'Signer is not a current on-chain owner');
+  }
 
   return { fn: 'signed_remove_signature', args: { p_tx_id: input.tx_id, p_signer: signer } };
 }
@@ -186,7 +193,7 @@ async function verifyAction(input, { getProposal, readVault }, now = Date.now())
 // is rebuilt from the stored proposal's own fields rather than read from its
 // tx_hash column, so a legacy row carrying a digest nobody verified cannot lend
 // its authority to a signature over different terms.
-async function verifySignature(input, { getProposal, readVault }) {
+async function verifySignature(input, { getProposal, readVault, readOwner }) {
   check(input && typeof input === 'object' && !Array.isArray(input), 'Expected a signature');
   check(typeof input.tx_id === 'string' && /^[0-9a-f-]{36}$/i.test(input.tx_id), 'Invalid transaction id');
   check(typeof input.signer === 'string' && /^0x[0-9a-f]{40}$/i.test(input.signer), 'Invalid signer');
@@ -221,9 +228,18 @@ async function verifySignature(input, { getProposal, readVault }) {
   } else {
     check(input.signature.toLowerCase() === senderSlot(signer), 'Invalid approval slot');
   }
-  const state = await readVault(p.chain_id, vault, signer, hash, sigType);
-  if (!state.isOwner) throw new RequestError(403, 'Signer is not a current on-chain owner');
-  if (sigType === 'approval' && !state.approved) throw new RequestError(403, 'Transaction has not been approved on chain');
+  // An ECDSA signature needs one fact: is this address an owner. An approval
+  // slot proves nothing by itself and needs the vault's approved mapping too,
+  // which has to be read at the same block as the ownership it accompanies.
+  if (sigType === 'ecdsa') {
+    if (!await readOwner(p.chain_id, vault, signer)) {
+      throw new RequestError(403, 'Signer is not a current on-chain owner');
+    }
+  } else {
+    const state = await readVault(p.chain_id, vault, signer, hash, sigType);
+    if (!state.isOwner) throw new RequestError(403, 'Signer is not a current on-chain owner');
+    if (!state.approved) throw new RequestError(403, 'Transaction has not been approved on chain');
+  }
 
   return { fn: 'signed_add_signature', args: {
     p_tx_id: input.tx_id, p_signer: signer,
@@ -331,6 +347,69 @@ async function verifyRegistration(input, { readVaultRecord }) {
   } };
 }
 
+// Confirming what the chain did with a proposal.
+//
+// mark_executed and mark_queued were the last writes taking a caller's address
+// and checking it against the owner list. Like reconciliation they are not owner
+// actions — the client observes the chain and writes back what it saw — so a
+// prompt would be wrong, and like reconciliation what they assert can simply be
+// asked of the chain.
+//
+// The two are checked differently because they claim different things. Queued is
+// a question about current state: is this digest in the vault's queue. Executed
+// is a question about history, and the vault's own ExecutionSuccess log is what
+// answers it — emitted by the vault, so it holds whoever sent the transaction
+// and whether it arrived through an executor module. Neither the block, the eta
+// nor the transaction hash is taken from the request: they are read back.
+async function verifyConfirm(input, { getProposal, readVaultState, readReceipt }) {
+  check(input && typeof input === 'object' && !Array.isArray(input), 'Expected a confirmation');
+  check(typeof input.tx_id === 'string' && /^[0-9a-f-]{36}$/i.test(input.tx_id), 'Invalid transaction id');
+  check(input.state === 'executed' || input.state === 'queued', 'Unsupported state');
+
+  const p = await getProposal(input.tx_id);
+  check(p && /^0x[0-9a-f]{40}$/i.test(p.address || ''), 'Proposal not found');
+  check(Number.isInteger(p.nonce) && p.nonce >= 0, 'Proposal has no nonce');
+  check(typeof p.target === 'string' && /^0x[0-9a-f]{40}$/i.test(p.target), 'Proposal has no target');
+  check(typeof p.call_data === 'string' && /^0x([0-9a-f]{2})*$/i.test(p.call_data), 'Proposal has no calldata');
+  const value = String(p.value);
+  check(/^(0|[1-9][0-9]{0,77})$/.test(value), 'Proposal value is not an integer');
+
+  const vault = p.address.toLowerCase();
+  const hash = ethers.TypedDataEncoder.hash(
+    { name: 'Multisig', version: '1', chainId: p.chain_id, verifyingContract: vault },
+    TYPES,
+    { target: p.target.toLowerCase(), value, data: p.call_data.toLowerCase(), nonce: p.nonce },
+  );
+
+  if (input.state === 'queued') {
+    check(['proposed', 'executing'].includes(p.status), 'Proposal is not awaiting a queue');
+    const state = await readVaultState(p.chain_id, vault, hash);
+    if (state.queuedEta === 0n) throw new RequestError(409, 'That proposal is not queued on chain');
+    // The eta the vault holds, not the one the caller offered.
+    return { fn: 'confirm_queued', args: {
+      p_tx_id: input.tx_id, p_eta: Number(state.queuedEta),
+      p_block: Number.isInteger(input.block) && input.block >= 0 ? input.block : 0,
+      p_queue_tx: typeof input.tx === 'string' && /^0x[0-9a-f]{64}$/i.test(input.tx) ? input.tx.toLowerCase() : null,
+    } };
+  }
+
+  check(['proposed', 'executing', 'queued'].includes(p.status), 'Proposal is already settled');
+  check(typeof input.tx === 'string' && /^0x[0-9a-f]{64}$/i.test(input.tx), 'An execution transaction is required');
+  const receipt = await readReceipt(p.chain_id, input.tx.toLowerCase());
+  if (!receipt) throw new RequestError(409, 'That transaction is not mined');
+  if (receipt.status !== 1) throw new RequestError(409, 'That transaction did not succeed');
+  // The vault's own log, for this exact digest. A receipt that merely touched
+  // the vault proves nothing about which proposal ran.
+  const ran = (receipt.logs || []).some(l =>
+    String(l.address || '').toLowerCase() === vault &&
+    Array.isArray(l.topics) && l.topics.length >= 2 &&
+    String(l.topics[0]).toLowerCase() === EXECUTION_SUCCESS_TOPIC.toLowerCase() &&
+    String(l.topics[1]).toLowerCase() === hash.toLowerCase());
+  if (!ran) throw new RequestError(409, 'That transaction did not execute this proposal');
+  return { fn: 'confirm_executed', args: {
+    p_tx_id: input.tx_id, p_block: receipt.blockNumber, p_execution_tx: input.tx.toLowerCase() } };
+}
+
 function serviceToken(secret, role = 'proposal_writer') {
   const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
   const now = Math.floor(Date.now() / 1000);
@@ -339,6 +418,12 @@ function serviceToken(secret, role = 'proposal_writer') {
 }
 
 function dependencies({ postgrestUrl, jwtSecret, rpcUrls }, fetcher = fetch) {
+  // Closure scope, not a property, and deliberately so: the verifiers destructure
+  // these methods out of the object — `const { readVault } = deps` — which
+  // detaches them from any `this`. A cache reached through `this` works when the
+  // object is called as a method and throws the moment one is passed by name,
+  // which is how every one of them is actually used.
+  const chainOk = new Set();
   // One message reaches the operator for every way this can fail — a sleeping
   // database, an RPC that rate-limited us, a JWT the storage layer rejected, and
   // a proposal the SQL refused on its merits all read as "unavailable". That is
@@ -365,10 +450,71 @@ function dependencies({ postgrestUrl, jwtSecret, rpcUrls }, fetcher = fetch) {
     }
     return response.json();
   }
+  // Verified once per chain per process rather than once per request. The RPC
+  // map is read from the environment at startup and cannot change under a
+  // running process, so asking every request whether the configured node still
+  // serves the chain it served a moment ago bought nothing and cost a round trip
+  // on the hot path. Scoped to this closure, so a second set of dependencies —
+  // a test's — does not inherit the first one's answers.
+  // The one place a verified write reaches PostgREST. The function name comes
+  // from a verifier and never from a request, and the role travels with it so a
+  // token minted to rename a vault cannot reach the RPC that deletes a
+  // signature. Returns void: these RPCs answer 204 with no body.
+  async function postRpc(fn, args, role) {
+    const response = await fetcher(`${postgrestUrl}/rpc/${fn}`, {
+      method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10000),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${serviceToken(jwtSecret, role)}`,
+      },
+      body: JSON.stringify(args),
+    });
+    if (!response.ok) {
+      let body = '';
+      try { body = (await response.text()).slice(0, 400); } catch (_) {}
+      console.error(`[${fn}] HTTP ${response.status}:`, body);
+      throw new RequestError(503, 'Metadata storage is unavailable');
+    }
+  }
+  async function ensureChain(chainId, rpc) {
+    if (chainOk.has(chainId)) return;
+    const actual = await rpc('eth_chainId', []);
+    if (BigInt(actual) !== BigInt(chainId)) throw new RequestError(503, 'Configured RPC serves the wrong chain');
+    chainOk.add(chainId);
+  }
   return {
     async getWallet(id) {
       const rows = await json(`${postgrestUrl}/wallets?select=chain_id,address&id=eq.${encodeURIComponent(id)}&limit=1`, undefined, 'getWallet');
       return rows[0];
+    },
+    // One eth_call, for the three endpoints whose only question is whether an
+    // address is an owner right now.
+    //
+    // They were routed through readVault, which pins a block and then reads
+    // isOwner, threshold and ownerCount together — five round trips for one
+    // boolean, on every rename, relabel, unsign and added signature. Each
+    // request holds one of thirty-two slots for as long as those take, so the
+    // waste was not latency but capacity: this service is now on the path of
+    // every write that used to go straight to the database, and it is one
+    // instance. Four calls saved is roughly four times the concurrent writes it
+    // can carry before it starts refusing them.
+    //
+    // No block pin, deliberately. A pin makes several reads agree with each
+    // other, and there is only one read; 'latest' is the same question asked
+    // more cheaply, and ownership can change after any verification anyway —
+    // which is why the client re-checks against the chain on every load.
+    async readOwner(chainId, address, who) {
+      const url = rpcUrls[chainId];
+      check(url, 'Unsupported chain');
+      const rpc = async (method, params) => {
+        const result = await json(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) }, `rpc:${method}:chain${chainId}`);
+        if (result.error || result.result === undefined) throw new RequestError(503, 'Chain verification failed');
+        return result.result;
+      };
+      await ensureChain(chainId, rpc);
+      const raw = await rpc('eth_call', [{ to: address, data: iface.encodeFunctionData('isOwner', [who]) }, 'latest']);
+      try { return Boolean(iface.decodeFunctionResult('isOwner', raw)[0]); } catch (_) { return false; }
     },
     async readVault(chainId, address, proposer, hash, sigType) {
       const url = rpcUrls[chainId];
@@ -382,8 +528,9 @@ function dependencies({ postgrestUrl, jwtSecret, rpcUrls }, fetcher = fetch) {
         }
         return result.result;
       }
-      const [actualChain, block] = await Promise.all([rpc('eth_chainId', []), rpc('eth_blockNumber', [])]);
-      if (BigInt(actualChain) !== BigInt(chainId)) throw new RequestError(503, 'Configured RPC serves the wrong chain');
+      // Still pinned to one block: this path reads four things that have to
+      // agree with each other, and the chain check is amortised.
+      const [, block] = await Promise.all([ensureChain(chainId, rpc), rpc('eth_blockNumber', [])]);
       async function call(name, args = []) {
         const result = await rpc('eth_call', [{ to: address, data: iface.encodeFunctionData(name, args) }, block]);
         return iface.decodeFunctionResult(name, result)[0];
@@ -414,7 +561,7 @@ function dependencies({ postgrestUrl, jwtSecret, rpcUrls }, fetcher = fetch) {
       };
     },
     async saveAction({ fn, args }) {
-      return this.saveMetadata({ fn, args }, 'action_writer');
+      return postRpc(fn, args, 'action_writer');
     },
     // Returns the resulting signature count, which the dapp shows.
     // One eth_call, no block pin: the question is whether the vault has moved
@@ -474,8 +621,24 @@ function dependencies({ postgrestUrl, jwtSecret, rpcUrls }, fetcher = fetch) {
         Authorization: `Bearer ${serviceToken(jwtSecret, 'registry_writer')}`,
       }, body: JSON.stringify(args) }, 'saveRegistration');
     },
+    // One call. Receipts are only read to confirm an execution, which happens
+    // once per proposal.
+    async readReceipt(chainId, txHash) {
+      const url = rpcUrls[chainId];
+      check(url, 'Unsupported chain');
+      const result = await json(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getTransactionReceipt', params: [txHash] }) },
+        `rpc:receipt:chain${chainId}`);
+      if (result.error) throw new RequestError(503, 'Chain verification failed');
+      const r = result.result;
+      if (!r) return null;
+      return { status: Number(r.status), blockNumber: Number(r.blockNumber), logs: r.logs || [] };
+    },
+    async saveConfirm({ fn, args }) {
+      return postRpc(fn, args, 'action_writer');
+    },
     async saveReconcile({ fn, args }) {
-      return this.saveMetadata({ fn, args }, 'action_writer');
+      return postRpc(fn, args, 'action_writer');
     },
     async saveSignature({ fn, args }) {
       return json(`${postgrestUrl}/rpc/${fn}`, { method: 'POST', headers: {
@@ -488,17 +651,7 @@ function dependencies({ postgrestUrl, jwtSecret, rpcUrls }, fetcher = fetch) {
     // sends. The role travels with it for the same reason: a token minted to
     // rename a vault must not reach the one that deletes a signature.
     async saveMetadata({ fn, args }, role = 'metadata_writer') {
-      const response = await fetcher(`${postgrestUrl}/rpc/${fn}`, {
-        method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10000),
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${serviceToken(jwtSecret, role)}`,
-        },
-        body: JSON.stringify(args),
-      });
-      // set_wallet_name and set_owner_label return void, so a success is an
-      // empty 204 that has no JSON body to parse.
-      if (!response.ok) throw new RequestError(503, 'Metadata storage is unavailable');
+      return postRpc(fn, args, role);
     },
   };
 }
@@ -516,7 +669,7 @@ function createHandler(deps, allowedOrigins = []) {
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     }
     if (req.url === '/health' && req.method === 'GET') { res.writeHead(200); res.end('ok'); return; }
-    if (!['/proposals', '/metadata', '/action', '/signature', '/reconcile', '/register'].includes(req.url)) { res.writeHead(404); res.end(); return; }
+    if (!['/proposals', '/metadata', '/action', '/signature', '/reconcile', '/register', '/confirm'].includes(req.url)) { res.writeHead(404); res.end(); return; }
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
     if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
     if (active >= 32) { res.writeHead(503); res.end(); return; }
@@ -550,6 +703,12 @@ function createHandler(deps, allowedOrigins = []) {
         if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id)) throw new RequestError(503, 'Vault was not registered');
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(id));
+        return;
+      }
+      if (req.url === '/confirm') {
+        await deps.saveConfirm(await verifyConfirm(input, deps));
+        res.writeHead(204);
+        res.end();
         return;
       }
       if (req.url === '/reconcile') {
@@ -590,4 +749,4 @@ if (require.main === module) {
   server.listen(Number(PORT), '0.0.0.0');
 }
 
-module.exports = { verifyProposal, verifyMetadata, verifyAction, verifySignature, verifyReconcile, verifyRegistration, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, ACTION_TYPES, iface };
+module.exports = { verifyProposal, verifyMetadata, verifyAction, verifySignature, verifyReconcile, verifyRegistration, verifyConfirm, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, ACTION_TYPES, iface };
