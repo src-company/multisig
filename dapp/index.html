@@ -10050,11 +10050,31 @@ async function loadTokenBalances(walletAddr, ethBalance) {
 // only PROPOSAL NOT SAVED, and the reason went to the console. A proposer who
 // had just spent a signing prompt on it was told nothing they could act on.
 // Bounded, because a PostgREST error carries the whole failing row.
+// PostgREST reports a failure as a JSON body, and `message` on the error object
+// is that body as text — so a refused write reached the operator as the whole
+// object, uppercased: SIGNATURE NOT SAVED — {"CODE":"42P10","DETAILS":NULL,...}.
+// The useful sentence is in there, wearing punctuation that makes it unreadable
+// at the moment someone is trying to find out why their signature did not save.
+// Take the message field when the body is one of those, fall back to the raw
+// text when it is not, and keep the whole thing on the error for the console.
 function dbError(label, err) {
-  const detail = err && (err.message || err.status);
+  const raw = err && (err.message || err.status);
+  let detail = raw;
+  if (typeof raw === 'string') {
+    const t = raw.trim();
+    if (t.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(t);
+        // `hint` is PostgREST telling the caller what to do instead; it is worth
+        // more than the code when there is one.
+        if (parsed && typeof parsed.message === 'string' && parsed.message)
+          detail = parsed.hint ? `${parsed.message} (${parsed.hint})` : parsed.message;
+      } catch(_) {}
+    }
+  }
   const short = detail ? String(detail).replace(/\s+/g, ' ').trim().slice(0, 140) : '';
   return Object.assign(new Error(short ? `${label} — ${short.toUpperCase()}` : label),
-    { shortMessage: short ? `${label} — ${short.toUpperCase()}` : label, dbDetail: detail });
+    { shortMessage: short ? `${label} — ${short.toUpperCase()}` : label, dbDetail: raw });
 }
 
 // `chainId` is optional and defaults to the chain the app is pointed at, which is

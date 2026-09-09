@@ -49,6 +49,17 @@ rename or relabel, which is new: these edits used to be unauthenticated.
    `metadata_writer` and is what moves the unauthenticated writes off `anon`;
    a database with a current schema and no roles file applied is one where the
    verifier cannot write and the anonymous RPCs still can.
+
+   Apply the whole file. Do not lift individual functions out of it, however
+   contained the change looks. The functions are not self-contained: several
+   upsert `ON CONFLICT` onto expression indexes defined hundreds of lines above
+   them, and PostgreSQL accepts an `ON CONFLICT` whose target index does not
+   exist at the time the function is created — it raises `42P10` later, on the
+   first row that reaches it. A function installed without its index therefore
+   deploys clean and fails on live traffic, and the same trap runs the other
+   way: dropping a superseded constraint without installing the function that
+   stopped using it breaks a function that was working. `schema.sql` is written
+   to be re-applied in full, and re-applying it is cheaper than either.
 3. Reload the PostgREST schema cache with `NOTIFY pgrst, 'reload schema';`.
    PostgREST resolves RPCs against a cache built at connection time, so a
    function whose signature changed is invisible — and reported as a missing
