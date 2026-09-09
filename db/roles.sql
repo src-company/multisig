@@ -100,6 +100,31 @@ REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM registry_writer;
 GRANT EXECUTE ON FUNCTION register_wallet(int, text, text, numeric, text[], smallint, int, text, bigint, text, text, text[], int) TO registry_writer;
 REVOKE ALL ON FUNCTION register_wallet(int, text, text, numeric, text[], smallint, int, text, bigint, text, text, text[], int) FROM PUBLIC;
 
+-- ── WHAT ONE REQUEST MAY COST ────────────────────────────────────
+-- Reads are unauthenticated and always will be for the public half of this
+-- data, so the defence against a read flood cannot be "who is asking". It has
+-- to be "how much may any one question cost".
+--
+-- Every query this app makes is an indexed lookup capped at PGRST_DB_MAX_ROWS
+-- and measured under a millisecond in the database; five seconds is four orders
+-- of magnitude of headroom and still bounds the shape of attack that actually
+-- gets through a CDN — not volume, which the edge absorbs, but a handful of
+-- deliberately expensive queries holding the ten-connection pool open. With no
+-- timeout at all, ten of those were enough, and no volume was required.
+--
+-- On `authenticator`, and that is the whole subtlety: PostgREST logs in as this
+-- role and then SET ROLEs to anon or one of the writers, and a per-role setting
+-- is applied at LOGIN. Verified rather than assumed on this server — a session
+-- that SET ROLEs to anon reports statement_timeout 0 however anon is
+-- configured, so setting it there protects nothing while looking as though it
+-- does. Setting it here covers every request PostgREST makes, reads and writes
+-- alike; every write function here is a single indexed statement too.
+--
+-- idle_in_transaction_session_timeout for the other way a pool is exhausted: a
+-- connection held inside a transaction that is going nowhere.
+ALTER ROLE authenticator SET statement_timeout = '5s';
+ALTER ROLE authenticator SET idle_in_transaction_session_timeout = '10s';
+
 -- Set / rotate the password out of band (keep it OUT of version control):
 --   ALTER ROLE authenticator WITH PASSWORD '<strong-random-password>';
 -- Then point PGRST_DB_URI at:
