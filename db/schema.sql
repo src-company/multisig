@@ -696,13 +696,19 @@ BEGIN
   -- the case-insensitive index as a raw unique violation rather than an update.
   ON CONFLICT (chain_id, lower(address)) DO UPDATE SET
     threshold = EXCLUDED.threshold, delay = EXCLUDED.delay, executor = EXCLUDED.executor,
-    owner_count = EXCLUDED.owner_count, nonce = GREATEST(wallets.nonce, EXCLUDED.nonce),
-    -- Stored name wins: registration fills a name that is absent and never
-    -- replaces one that is set. The deployer address it gates on is supplied by
-    -- the caller, so this column is not a safe thing for it to overwrite, and
-    -- unlike ownership there is nothing on chain to re-derive it from. Renaming
-    -- has its own RPC.
-    name = COALESCE(wallets.name, EXCLUDED.name)
+    owner_count = EXCLUDED.owner_count, nonce = GREATEST(wallets.nonce, EXCLUDED.nonce)
+    -- `name` is deliberately absent from this list. A name reaches a vault on
+    -- the INSERT above, when the vault is first recorded, and never afterwards.
+    --
+    -- This previously read COALESCE(wallets.name, EXCLUDED.name), on the theory
+    -- that filling an empty name is harmless while overwriting one is not. It
+    -- is not harmless: "empty" is a state any vault can be in — the auto-
+    -- register path records vaults with no name at all, and a name cleared for
+    -- any reason returns to it — so that rule left every unnamed vault writable
+    -- by a caller who names a current owner, which the deployer argument does
+    -- not prove. Whether a name is set is not a permission.
+    --
+    -- Renaming has its own RPC, and it verifies a signature.
   RETURNING id INTO w_id;
 
   -- Reconcile the owner set rather than replacing it wholesale.
@@ -734,13 +740,11 @@ BEGIN
     AND NOT (lower(address) = ANY(SELECT lower(unnest(p_owners))));
 
   FOR i IN 1..array_length(p_owners, 1) LOOP
-    -- Same rule as the name upsert above: fill an absent label, never replace a
-    -- stored one. p_labels arrives on a call whose caller is self-declared.
-    UPDATE owners SET
-      position = i - 1,
-      label = COALESCE(label,
-                CASE WHEN p_labels IS NOT NULL AND i <= array_length(p_labels, 1)
-                     THEN NULLIF(p_labels[i], '') ELSE NULL END)
+    -- Position only. Labels on an existing vault are not this call's to write,
+    -- for the reason the name upsert above gives: an absent label is a state,
+    -- not a permission, and p_labels arrives on a call whose caller is
+    -- self-declared. They are set through the signed RPC.
+    UPDATE owners SET position = i - 1
     WHERE wallet_id = w_id AND lower(address) = lower(p_owners[i]) AND is_current = true;
 
     IF NOT FOUND THEN
@@ -748,11 +752,11 @@ BEGIN
       -- address if there is one — it carries the label this owner last had —
       -- and only insert when there is genuinely nothing to revive. One row,
       -- chosen by id, for the same reason as in sync_wallet_state.
+      -- The revived row keeps the label it was retired with, and takes none
+      -- from the caller. Returning as an owner is not an occasion to be
+      -- relabelled by whoever made the call.
       UPDATE owners SET
-        is_current = true, removed_at = NULL, position = i - 1, added_block = p_block,
-        label = COALESCE(label,
-                  CASE WHEN p_labels IS NOT NULL AND i <= array_length(p_labels, 1)
-                       THEN NULLIF(p_labels[i], '') ELSE NULL END)
+        is_current = true, removed_at = NULL, position = i - 1, added_block = p_block
       WHERE id = (
         SELECT id FROM owners
         WHERE wallet_id = w_id AND lower(address) = lower(p_owners[i]) AND is_current = false
@@ -760,9 +764,14 @@ BEGIN
       );
 
       IF NOT FOUND THEN
+        -- The only path that takes a caller's label, and only while the vault
+        -- itself is being recorded for the first time — the deploy flow, which
+        -- carries the labels its operator just typed. An owner appearing on a
+        -- vault that already exists gets none: that call is reachable by anyone.
         INSERT INTO owners (wallet_id, address, label, position, is_current, added_block)
         VALUES (w_id, p_owners[i],
-                CASE WHEN p_labels IS NOT NULL AND i <= array_length(p_labels, 1) THEN NULLIF(p_labels[i], '') ELSE NULL END,
+                CASE WHEN NOT existed AND p_labels IS NOT NULL AND i <= array_length(p_labels, 1)
+                     THEN NULLIF(p_labels[i], '') ELSE NULL END,
                 i - 1, true, p_block);
       END IF;
     END IF;
