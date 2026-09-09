@@ -3112,10 +3112,28 @@ function markSchemaStale(why){
   flash('THE COORDINATION DATABASE IS RUNNING AN OLDER SCHEMA THAN THIS APP — PROPOSALS AND HISTORY MAY FAIL. RE-APPLY db/schema.sql.', 9000);
   render();
 }
-// One read that only the current schema can answer. sort_ts arrived with the
-// migration that also fixed propose_tx, so a database that cannot serve this
-// column cannot serve a proposal either — and finding that out on page load is
-// worth one request that returns at most a single row.
+// The grants are a separate file from the schema, and a database can be current
+// on one and untouched on the other. Saying "re-apply db/schema.sql" to an
+// operator whose schema is perfectly current is how a real misconfiguration gets
+// dismissed as a false alarm, so this is its own message naming its own file.
+let _grantsStale = null;
+function markGrantsStale(why){
+  if(_grantsStale) return;
+  _grantsStale = why || 'unknown';
+  console.error('Coordination database grants are not the ones this app expects:', _grantsStale, '— re-apply db/roles.sql');
+  flash('THE COORDINATION DATABASE IS MISSING THE GRANTS THIS APP EXPECTS — NAMES AND LABELS ARE UNPROTECTED. RE-APPLY db/roles.sql.', 9000);
+  render();
+}
+// What the schema itself says about the deployment, rather than a column read
+// as a stand-in for it.
+//
+// This used to select tx_history.sort_ts, on the reasoning that the column
+// arrived with the migration that also fixed propose_tx, so a database that
+// could serve it was new enough for everything. A database applied as far as
+// that column and no further serves it and fails a proposal, and roles.sql is a
+// separate file that can be skipped in full while every column answers. The
+// probe passed throughout. deployment_status reports the invariants directly.
+const REQUIRED_SCHEMA_VERSION = 20260909;
 // Drift is a 4xx that names a missing column. Anything else is the service
 // being unreachable, which is a different problem with a different answer.
 //
@@ -3134,15 +3152,34 @@ function markSchemaStale(why){
 // view itself is not there, which is the same class of answer. Both are the
 // server telling us what it has. A timeout tells us nothing.
 async function checkSchemaFresh(){
-  const { error } = await sb.from('tx_history').select('sort_ts').limit(1);
-  if(!error) return;
-  const status = Number(error.status);
-  const saysMissing = /42703|does not exist|undefined_column|Could not find/i.test(String(error.message || ''));
-  if((status === 400 && saysMissing) || status === 404) {
-    markSchemaStale('tx_history.sort_ts: ' + (error.message || status));
+  const { data, error } = await sb.rpc('deployment_status', {});
+  if(error){
+    const status = Number(error.status);
+    // The function's own absence is the oldest drift there is: a database from
+    // before this check existed cannot answer it. 42883 is undefined_function.
+    const saysMissing = /42883|42703|does not exist|undefined_function|undefined_column|Could not find/i.test(String(error.message || ''));
+    if((status === 400 && saysMissing) || status === 404) {
+      markSchemaStale('deployment_status: ' + (error.message || status));
+      return;
+    }
+    // A timeout, a 502, a sleeping instance. Still says nothing about drift.
+    console.warn('Deployment check could not be completed:', error);
     return;
   }
-  console.warn('Schema freshness check could not be completed:', error);
+  const s = Array.isArray(data) ? data[0] : data;
+  if(!s || typeof s !== 'object'){
+    console.warn('Deployment check returned no status:', data);
+    return;
+  }
+  if(Number(s.schema_version) < REQUIRED_SCHEMA_VERSION){
+    markSchemaStale(`schema_version ${s.schema_version} < ${REQUIRED_SCHEMA_VERSION}`);
+    return;
+  }
+  // Only an explicit false. An older status object that does not carry these
+  // keys reads as undefined, and undefined is not a failed assertion.
+  if(s.roles_applied === false || s.writes_verified === false){
+    markGrantsStale(`roles_applied=${s.roles_applied} writes_verified=${s.writes_verified}`);
+  }
 }
 
 // ── EIP-712 ───────────────────────────────────────────────────────

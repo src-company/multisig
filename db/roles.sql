@@ -125,7 +125,11 @@ GRANT EXECUTE ON FUNCTION
   prune_tx(uuid, text),
   remove_signature(uuid, text),
   record_approval(uuid, int, text, text, boolean, bigint, text),
-  sync_wallet_state(uuid, text, smallint, smallint, int, text, int, text[])
+  sync_wallet_state(uuid, text, smallint, smallint, int, text, int, text[]),
+  -- Read-only, and the one call that can tell an operator this file was never
+  -- applied. It reports its own absence by 404ing, so it has to be reachable
+  -- by exactly the role a browser arrives as.
+  deployment_status()
 TO anon;
 
 -- update_wallet_name and update_owner_label are deliberately not in that list.

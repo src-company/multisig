@@ -40,12 +40,30 @@ Coordination database — Postgres plus PostgREST, applied in this order:
 ```bash
 psql -v ON_ERROR_STOP=1 -f db/schema.sql   # tables, RPCs, views, RLS
 psql -v ON_ERROR_STOP=1 -f db/roles.sql    # authenticator + anon grants
+psql -c "NOTIFY pgrst, 'reload schema';"   # PostgREST caches the RPC signatures
 MULTISIG_TEST_PG=1 node --test test/schema.test.js
 ```
 
-Everything anonymous browsers can reach goes through `SECURITY DEFINER`
-functions that do their own owner checks, so those RPCs are the only
-enforcement point. [`render.yaml`](render.yaml) is the deployment blueprint.
+Both files, in that order, on every deploy. They are applied by hand and nothing
+enforces it: a database can be current on the schema and untouched on the grants,
+which leaves the verifier unable to write and the anonymous RPCs still able to.
+The schema cache reload is equally load-bearing — PostgREST resolves RPCs against
+a cache built at connection time, so a function whose signature changed reads as
+a missing function until it runs.
+
+`rpc/deployment_status` reports what a given database actually has: its
+`schema_version`, whether both writer roles exist, and whether the writes that
+must not be anonymous are in fact unreachable by `anon`. The dapp reads it on
+load and says which file to re-apply, naming the schema and the grants
+separately, because they fail independently.
+
+Most of what anonymous browsers reach goes through `SECURITY DEFINER` functions
+that check a caller address they are handed — a claim, not a credential — which
+is tolerable only because every column those RPCs touch is re-derived from chain
+on the next load. The two that are not re-derivable, a vault name and an owner
+label, are instead written through the signed
+[metadata endpoint](api/README.md#signed-metadata-writes).
+[`render.yaml`](render.yaml) is the deployment blueprint.
 
 ## Factory Deployment
 
@@ -282,7 +300,7 @@ moved between hosts.
 
 | | |
 |---|---|
-| CID (v1) | `bafybeiet5m2bfqkmjbttgsrwe6ee7lhmrosspqenr5deeccqis6sgdwikq` |
+| CID (v1) | `bafybeihwgs4sr4rju7qoov54izu6diody36tawfwy33qs76usgypdcp56a` |
 | Gateway | [multisig.wei.limo](https://multisig.wei.limo) |
 | Also resolves | [multisig.wei.is](https://multisig.wei.is) · [multisig.wei.domains](https://multisig.wei.domains) |
 | Any public gateway | `https://ipfs.io/ipfs/<cid>/` |
@@ -293,7 +311,7 @@ against the source rather than trusted:
 ```bash
 node build.js
 ipfs add -r --cid-version 1 -Q --ignore ipfs.json dist
-# bafybeiet5m2bfqkmjbttgsrwe6ee7lhmrosspqenr5deeccqis6sgdwikq
+# bafybeihwgs4sr4rju7qoov54izu6diody36tawfwy33qs76usgypdcp56a
 ```
 
 `--ignore ipfs.json` is load-bearing. The footer shows the CID of the bundle it

@@ -1189,6 +1189,56 @@ DO $$ BEGIN
   END IF;
 END $$;
 
+-- ── DEPLOYMENT STATUS ────────────────────────────────────────────
+-- Two files have to be applied by hand, in order, and nothing enforces either.
+-- The app checked for drift by reading one column that a recent migration had
+-- added, on the assumption that a database new enough to have it was new enough
+-- for everything else. That assumption is what a partial apply breaks: a
+-- database can carry the newest column in schema.sql and still be missing the
+-- functions further down it, and roles.sql is a separate file again, so it can
+-- be skipped in full while every column and function is current. Both happened.
+-- The column probe reported healthy through all of it.
+--
+-- So report the invariants themselves rather than a proxy for them, and report
+-- schema and grants separately, because "re-apply schema.sql" is the wrong
+-- instruction for a database whose schema is fine and whose grants were never
+-- applied. Bump SCHEMA_VERSION whenever this file gains something the app
+-- requires; the app carries the number it needs and says so when it is behind.
+CREATE OR REPLACE FUNCTION deployment_status()
+RETURNS jsonb AS $$
+DECLARE
+  roles_ok boolean := false;
+  writes_ok boolean := false;
+BEGIN
+  roles_ok := EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'proposal_writer')
+          AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'metadata_writer');
+  -- Every write that cannot be re-derived from chain must be unreachable as an
+  -- anonymous RPC. Guarded: on a database where one of these does not exist,
+  -- has_function_privilege raises rather than returning false, and an
+  -- unanswerable question is not a passing answer.
+  BEGIN
+    writes_ok := EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') AND NOT (
+         has_function_privilege('anon', 'public.propose_tx(uuid,int,int,text,numeric,text,text,smallint,text,text,text,sig_type)', 'EXECUTE')
+      OR has_function_privilege('anon', 'public.set_wallet_name(uuid,text)', 'EXECUTE')
+      OR has_function_privilege('anon', 'public.set_owner_label(uuid,text,text)', 'EXECUTE')
+      OR has_function_privilege('anon', 'public.update_wallet_name(uuid,text,text)', 'EXECUTE')
+      OR has_function_privilege('anon', 'public.update_owner_label(uuid,text,text,text)', 'EXECUTE'));
+  EXCEPTION WHEN others THEN writes_ok := false;
+  END;
+  RETURN jsonb_build_object(
+    'schema_version', 20260909,
+    'roles_applied', roles_ok,
+    'writes_verified', writes_ok);
+END;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
+
+REVOKE ALL ON FUNCTION deployment_status() FROM PUBLIC;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    GRANT EXECUTE ON FUNCTION deployment_status() TO anon;
+  END IF;
+END $$;
+
 CREATE OR REPLACE FUNCTION record_approval(
   p_wallet_id uuid, p_chain_id int, p_owner text, p_tx_hash text,
   p_approved boolean, p_block_number bigint DEFAULT NULL,

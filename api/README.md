@@ -1,4 +1,4 @@
-# Signed proposal admission
+# Signed proposal and metadata admission
 
 New proposals must carry an EIP-712 transaction signature from a current vault
 owner. `proposals.cjs` recomputes the digest from the exact submitted transaction
@@ -15,6 +15,28 @@ Anonymous direct calls and the legacy unsigned RPC are disabled. There is no
 SIWE login and no additional wallet prompt for ordinary proposals: the dapp
 already signs these transactions.
 
+## Signed metadata writes
+
+A vault name and an owner label are the only two things the coordination
+database holds that no later read of the chain can reconstruct. Every other
+column is a cache that the next page load re-derives and repairs, so an
+anonymous overwrite of one is noise; an overwrite of these two is permanent.
+
+`POST /metadata` takes `{ wallet_id, kind, subject, value, issued_at, signature }`,
+where `kind` is `name` or `label` and `subject` is the owner a label belongs to
+(the zero address for a name). The service recovers the signer from an EIP-712
+`Metadata` signature over the vault's own domain, confirms `isOwner()` against
+the vault at the current block, and only then calls `set_wallet_name` or
+`set_owner_label` with a `metadata_writer` token. Neither RPC takes a caller
+argument; the function name is chosen by the verifier, never by the request.
+
+`Metadata` is a distinct primary type from `Execute`, so a transaction signature
+cannot be presented as a rename, or a rename as a transaction. `issued_at` is
+bounded to five minutes either side of service time, so a captured signature is
+not a standing permission to rewrite a label. A replay inside that window
+rewrites the same field with the same value. This costs one wallet prompt per
+rename or relabel, which is new: these edits used to be unauthenticated.
+
 ## Deployment
 
 1. Deploy `multisig-proposals` from `render.yaml`, keeping the existing dapp until
@@ -22,13 +44,24 @@ already signs these transactions.
    same `PGRST_JWT_SECRET` as PostgREST, `PROPOSAL_RPC_URLS` (a JSON map from chain
    IDs to trusted HTTPS RPC URLs), and `PROPOSAL_ORIGINS` (comma-separated dapp
    origins). The Blueprint shares the secret between backend services only.
-2. Apply `db/schema.sql`, then `db/roles.sql`, as the database owner. Reload the
-   PostgREST schema cache with `NOTIFY pgrst, 'reload schema';`. This immediately
-   disables unsigned proposal insertion. Old dapp versions will fail to propose.
-3. Deploy the updated dapp promptly. If the service hostname differs, update
+2. Apply `db/schema.sql`, then `db/roles.sql`, as the database owner. **Both, in
+   that order, every time.** `roles.sql` creates `proposal_writer` and
+   `metadata_writer` and is what moves the unauthenticated writes off `anon`;
+   a database with a current schema and no roles file applied is one where the
+   verifier cannot write and the anonymous RPCs still can.
+3. Reload the PostgREST schema cache with `NOTIFY pgrst, 'reload schema';`.
+   PostgREST resolves RPCs against a cache built at connection time, so a
+   function whose signature changed is invisible — and reported as a missing
+   function — until this runs. Adding or replacing a function without it is the
+   failure that looks like the service being broken.
+4. Deploy the updated dapp promptly. If the service hostname differs, update
    `PROPOSAL_API_URL` and the dapp's CSP `connect-src` before building.
-4. Verify an unsigned direct PostgREST proposal is denied, a non-owner signature
+5. Verify an unsigned direct PostgREST proposal is denied, a non-owner signature
    is denied, and an owner-signed proposal appears with its first signature.
+   Then verify `rpc/set_owner_label` and `rpc/set_wallet_name` are denied to
+   `anon`, and that `rpc/deployment_status` reports `roles_applied` and
+   `writes_verified` true with a `schema_version` at or above the
+   `REQUIRED_SCHEMA_VERSION` the dapp carries.
 
 This rollout can briefly interrupt proposals between steps 2 and 3; it fails
 closed. Rollbacks should keep the restricted grants in place. Re-enabling the
@@ -53,10 +86,20 @@ intentional and does not let the relayer forge a different transaction.
 Descriptions are unsigned metadata and are not proof of transaction intent.
 Legacy rows are not retrospectively authenticated by this migration.
 
-This change secures proposal insertion only. Other existing anonymous RPCs can
-still rename coordination records, change statuses, or remove/overwrite stored
-signatures. Do not describe the whole database as authenticated. Keep client
-signature validation and chain reconciliation enabled.
+Proposal insertion and the two metadata writes are verified. The rest of the
+write surface is not: `cancel_tx`, `prune_tx`, `remove_signature`,
+`mark_executed`, `mark_queued`, `record_approval`, `sync_wallet_state` and
+`register_wallet` still take the caller's address as an argument and check it
+against an owner set that is public on chain. Do not describe the whole database
+as authenticated.
+
+What makes that a bounded problem rather than the same one is that every column
+those RPCs touch is re-derived from chain on the next load, so the damage is
+noise and delay rather than anything permanent — which is exactly the property
+names and labels lacked, and why they were moved first. `register_wallet` fills
+an absent name or label and never replaces a stored one, so re-registration is
+not a way back around this. Keep client signature validation and chain
+reconciliation enabled; they are what makes the residual recoverable.
 
 References: [PostgREST 12 authentication](https://docs.postgrest.org/en/v12/references/auth.html),
 [Render Blueprint configuration](https://render.com/docs/blueprint-spec).
