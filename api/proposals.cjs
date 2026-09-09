@@ -140,14 +140,35 @@ function serviceToken(secret, role = 'proposal_writer') {
 }
 
 function dependencies({ postgrestUrl, jwtSecret, rpcUrls }, fetcher = fetch) {
-  async function json(url, options) {
-    const response = await fetcher(url, { ...options, redirect: 'error', signal: AbortSignal.timeout(10000) });
-    if (!response.ok) throw new RequestError(503, 'Proposal storage or chain verification is unavailable');
+  // One message reaches the operator for every way this can fail — a sleeping
+  // database, an RPC that rate-limited us, a JWT the storage layer rejected, and
+  // a proposal the SQL refused on its merits all read as "unavailable". That is
+  // the right answer to give a browser, which must not be told why a write was
+  // refused in terms it could probe. It is the wrong answer to give whoever has
+  // to fix it, and this service logs nothing, so the only evidence of a failed
+  // proposal was the operator's console saying storage was unavailable while
+  // storage was up. Say what actually happened, on the server, where it is safe.
+  async function json(url, options, what) {
+    let response;
+    try {
+      response = await fetcher(url, { ...options, redirect: 'error', signal: AbortSignal.timeout(10000) });
+    } catch (error) {
+      console.error(`[${what}] request failed:`, error && error.message);
+      throw new RequestError(503, 'Proposal storage or chain verification is unavailable');
+    }
+    if (!response.ok) {
+      // Bounded, and never forwarded to the client — a 4xx body from PostgREST
+      // carries the SQL function's own message, which names its checks.
+      let body = '';
+      try { body = (await response.text()).slice(0, 400); } catch (_) {}
+      console.error(`[${what}] HTTP ${response.status}:`, body);
+      throw new RequestError(503, 'Proposal storage or chain verification is unavailable');
+    }
     return response.json();
   }
   return {
     async getWallet(id) {
-      const rows = await json(`${postgrestUrl}/wallets?select=chain_id,address&id=eq.${encodeURIComponent(id)}&limit=1`);
+      const rows = await json(`${postgrestUrl}/wallets?select=chain_id,address&id=eq.${encodeURIComponent(id)}&limit=1`, undefined, 'getWallet');
       return rows[0];
     },
     async readVault(chainId, address, proposer, hash, sigType) {
@@ -155,8 +176,11 @@ function dependencies({ postgrestUrl, jwtSecret, rpcUrls }, fetcher = fetch) {
       check(url, 'Unsupported chain');
       async function rpc(method, params) {
         const result = await json(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
-        if (result.error || result.result === undefined) throw new RequestError(503, 'Chain verification failed');
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) }, `rpc:${method}:chain${chainId}`);
+        if (result.error || result.result === undefined) {
+          console.error(`[rpc:${method}:chain${chainId}] node returned:`, JSON.stringify(result).slice(0, 300));
+          throw new RequestError(503, 'Chain verification failed');
+        }
         return result.result;
       }
       const [actualChain, block] = await Promise.all([rpc('eth_chainId', []), rpc('eth_blockNumber', [])]);
@@ -174,7 +198,7 @@ function dependencies({ postgrestUrl, jwtSecret, rpcUrls }, fetcher = fetch) {
     async saveProposal(proposal) {
       return json(`${postgrestUrl}/rpc/propose_tx`, { method: 'POST', headers: {
         'Content-Type': 'application/json', Authorization: `Bearer ${serviceToken(jwtSecret)}`,
-      }, body: JSON.stringify(proposal) });
+      }, body: JSON.stringify(proposal) }, 'saveProposal');
     },
     // The function name is chosen by verifyMetadata, never by the request, so
     // this cannot be steered at another RPC by anything a caller sends.

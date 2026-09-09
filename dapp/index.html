@@ -3175,6 +3175,12 @@ async function checkSchemaFresh(){
     markSchemaStale(`schema_version ${s.schema_version} < ${REQUIRED_SCHEMA_VERSION}`);
     return;
   }
+  // A missing ON CONFLICT index is a schema problem that only shows up on the
+  // first write that needs it, as a failure naming storage rather than an index.
+  if(s.conflict_indexes === false){
+    markSchemaStale('conflict_indexes: a unique index an ON CONFLICT names is absent');
+    return;
+  }
   // Only an explicit false. An older status object that does not carry these
   // keys reads as undefined, and undefined is not a failed assertion.
   if(s.roles_applied === false || s.writes_verified === false){

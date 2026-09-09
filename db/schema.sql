@@ -1209,9 +1209,19 @@ RETURNS jsonb AS $$
 DECLARE
   roles_ok boolean := false;
   writes_ok boolean := false;
+  conflict_ok boolean := false;
 BEGIN
   roles_ok := EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'proposal_writer')
           AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'metadata_writer');
+  -- The unique indexes the ON CONFLICT clauses name. A function can be replaced
+  -- on its own, and an ON CONFLICT whose target index is absent does not fail
+  -- when the function is created — it fails on the first row that reaches it,
+  -- as 42P10, which surfaces through the verifier as "storage unavailable"
+  -- while storage is up. These are cheap to assert and expensive to diagnose.
+  conflict_ok := (SELECT count(*) FROM pg_indexes
+    WHERE schemaname = 'public'
+      AND indexname IN ('idx_sigs_tx_signer_ci', 'idx_approvals_owner_ci',
+                        'idx_owners_unique', 'idx_wallets_chain_addr_ci')) = 4;
   -- Every write that cannot be re-derived from chain must be unreachable as an
   -- anonymous RPC. Guarded: on a database where one of these does not exist,
   -- has_function_privilege raises rather than returning false, and an
@@ -1228,7 +1238,8 @@ BEGIN
   RETURN jsonb_build_object(
     'schema_version', 20260909,
     'roles_applied', roles_ok,
-    'writes_verified', writes_ok);
+    'writes_verified', writes_ok,
+    'conflict_indexes', conflict_ok);
 END;
 $$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
 

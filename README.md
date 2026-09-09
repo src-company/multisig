@@ -300,7 +300,7 @@ moved between hosts.
 
 | | |
 |---|---|
-| CID (v1) | `bafybeihwgs4sr4rju7qoov54izu6diody36tawfwy33qs76usgypdcp56a` |
+| CID (v1) | `bafybeihsnwb2e32ojgbxvtryfmh43tkmfevkogs5i3ieyxdp22hvwhn4rm` |
 | Gateway | [multisig.wei.limo](https://multisig.wei.limo) |
 | Also resolves | [multisig.wei.is](https://multisig.wei.is) · [multisig.wei.domains](https://multisig.wei.domains) |
 | Any public gateway | `https://ipfs.io/ipfs/<cid>/` |
@@ -311,7 +311,7 @@ against the source rather than trusted:
 ```bash
 node build.js
 ipfs add -r --cid-version 1 -Q --ignore ipfs.json dist
-# bafybeihwgs4sr4rju7qoov54izu6diody36tawfwy33qs76usgypdcp56a
+# bafybeihsnwb2e32ojgbxvtryfmh43tkmfevkogs5i3ieyxdp22hvwhn4rm
 ```
 
 `--ignore ipfs.json` is load-bearing. The footer shows the CID of the bundle it
