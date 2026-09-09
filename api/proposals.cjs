@@ -39,9 +39,9 @@ const iface = new ethers.Interface([
   'function approved(address,bytes32) view returns (bool)',
   'function threshold() view returns (uint16)',
   'function ownerCount() view returns (uint16)',
-  // Reconciliation reads this. A proposal the vault's nonce has passed can
-  // never execute, whoever asks.
+  // Reconciliation reads both of these, and needs both. See verifyReconcile.
   'function nonce() view returns (uint32)',
+  'function queued(bytes32) view returns (uint256)',
 ]);
 const BODY_LIMIT = 72 * 1024;
 class RequestError extends Error {
@@ -237,7 +237,7 @@ async function verifySignature(input, { getProposal, readVault }) {
 // already consumed can never execute, by anyone, ever. That is checkable without
 // knowing who is calling, which is why this endpoint takes no signature and
 // still cannot be used to retire a live proposal.
-async function verifyReconcile(input, { getProposal, readVaultNonce }) {
+async function verifyReconcile(input, { getProposal, readVaultState }) {
   check(input && typeof input === 'object' && !Array.isArray(input), 'Expected a reconciliation');
   check(typeof input.tx_id === 'string' && /^[0-9a-f-]{36}$/i.test(input.tx_id), 'Invalid transaction id');
   check(input.state === 'cancelled' || input.state === 'stale', 'Unsupported state');
@@ -245,15 +245,36 @@ async function verifyReconcile(input, { getProposal, readVaultNonce }) {
   const p = await getProposal(input.tx_id);
   check(p && /^0x[0-9a-f]{40}$/i.test(p.address || ''), 'Proposal not found');
   check(Number.isInteger(p.nonce) && p.nonce >= 0, 'Proposal has no nonce');
-  // Already terminal. Nothing to do, and saying so is not an error worth
-  // failing a page load over.
   check(['proposed', 'executing', 'queued'].includes(p.status), 'Proposal is already settled');
+  check(typeof p.target === 'string' && /^0x[0-9a-f]{40}$/i.test(p.target), 'Proposal has no target');
+  check(typeof p.call_data === 'string' && /^0x([0-9a-f]{2})*$/i.test(p.call_data), 'Proposal has no calldata');
+  const value = String(p.value);
+  check(/^(0|[1-9][0-9]{0,77})$/.test(value), 'Proposal value is not an integer');
 
-  const chainNonce = await readVaultNonce(p.chain_id, p.address.toLowerCase());
-  check(Number.isInteger(chainNonce) && chainNonce >= 0, 'Vault nonce unavailable');
-  // Strictly past it. A proposal AT the current nonce is still executable and is
-  // not this endpoint's to retire, however the caller describes it.
-  if (p.nonce >= chainNonce) {
+  const vault = p.address.toLowerCase();
+  // Rebuilt from the row's own fields, not read from its tx_hash column, so a
+  // digest nobody verified cannot be used to ask about a different transaction.
+  const hash = ethers.TypedDataEncoder.hash(
+    { name: 'Multisig', version: '1', chainId: p.chain_id, verifyingContract: vault },
+    TYPES,
+    { target: p.target.toLowerCase(), value, data: p.call_data.toLowerCase(), nonce: p.nonce },
+  );
+
+  const state = await readVaultState(p.chain_id, vault, hash);
+  check(Number.isInteger(state.nonce) && state.nonce >= 0, 'Vault nonce unavailable');
+
+  // Both conditions, and the second is the one that matters.
+  //
+  // execute() advances the nonce whether it runs the call or queues it, so a
+  // queued proposal ALWAYS reads as behind the vault's nonce — and it is still
+  // fully executable, by executeQueued, at that original nonce. Retiring on the
+  // nonce alone would therefore have retired precisely the live proposals this
+  // endpoint exists to protect, and without a signature. The queue mapping is
+  // what actually says whether the vault will still honour it.
+  if (state.queuedEta !== 0n) {
+    throw new RequestError(409, 'That proposal is queued on chain and can still execute');
+  }
+  if (p.nonce >= state.nonce) {
     throw new RequestError(409, 'That proposal can still execute at the vault current nonce');
   }
   return { fn: 'reconcile_tx', args: { p_tx_id: input.tx_id, p_state: input.state } };
@@ -348,15 +369,26 @@ function dependencies({ postgrestUrl, jwtSecret, rpcUrls }, fetcher = fetch) {
     // One eth_call, no block pin: the question is whether the vault has moved
     // past a nonce, and a slightly stale answer only ever refuses a write that
     // the next page load will ask for again.
-    async readVaultNonce(chainId, address) {
+    // The vault's nonce and this digest's queue entry, read at the same block so
+    // the two cannot disagree about a proposal that queued between them.
+    async readVaultState(chainId, address, hash) {
       const url = rpcUrls[chainId];
       check(url, 'Unsupported chain');
-      const result = await json(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call',
-          params: [{ to: address, data: iface.encodeFunctionData('nonce') }, 'latest'] }) },
-        `rpc:nonce:chain${chainId}`);
-      if (result.error || result.result === undefined) throw new RequestError(503, 'Chain verification failed');
-      return Number(iface.decodeFunctionResult('nonce', result.result)[0]);
+      const call = async (data, what) => {
+        const result = await json(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call',
+            params: [{ to: address, data }, 'latest'] }) }, what);
+        if (result.error || result.result === undefined) throw new RequestError(503, 'Chain verification failed');
+        return result.result;
+      };
+      const [nonceRaw, queuedRaw] = await Promise.all([
+        call(iface.encodeFunctionData('nonce'), `rpc:nonce:chain${chainId}`),
+        call(iface.encodeFunctionData('queued', [hash]), `rpc:queued:chain${chainId}`),
+      ]);
+      return {
+        nonce: Number(iface.decodeFunctionResult('nonce', nonceRaw)[0]),
+        queuedEta: BigInt(iface.decodeFunctionResult('queued', queuedRaw)[0]),
+      };
     },
     async saveReconcile({ fn, args }) {
       return this.saveMetadata({ fn, args }, 'action_writer');

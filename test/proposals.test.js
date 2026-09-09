@@ -41,7 +41,7 @@ function backend(overrides = {}) {
   return { getWallet: async () => ({ chain_id: 1, address: VAULT }),
     readVault: async () => ({ isOwner: true, threshold: 2, ownerCount: 3, approved: false }),
     saveProposal: async () => WALLET_ID, saveMetadata: async () => {}, saveAction: async () => {},
-    saveSignature: async () => 2, saveReconcile: async () => {}, readVaultNonce: async () => 9,
+    saveSignature: async () => 2, saveReconcile: async () => {}, readVaultState: async () => ({ nonce: 9, queuedEta: 0n }),
     getProposal: async () => ({ ...STORED }), ...overrides };
 }
 async function request(body, deps = backend(), headers = {}, url = '/proposals', method = 'POST') {
@@ -456,12 +456,37 @@ test('a proposal the vault has passed can be retired, in either terminal state',
 });
 
 test('a proposal still executable at the vault current nonce is refused', async () => {
-  for (const chainNonce of [7, 6, 0]) {
+  for (const nonce of [7, 6, 0]) {
     const res = await request({ tx_id: WALLET_ID, state: 'cancelled' },
-      backend({ readVaultNonce: async () => chainNonce,
+      backend({ readVaultState: async () => ({ nonce, queuedEta: 0n }),
         saveReconcile: async () => assert.fail('live proposal retired') }), {}, '/reconcile');
-    assert.equal(res.status, 409, `chain nonce ${chainNonce}`);
+    assert.equal(res.status, 409, `chain nonce ${nonce}`);
   }
+});
+
+// The defect this pair exists for: execute() advances the nonce whether it runs
+// the call or queues it, so EVERY queued proposal reads as behind the vault's
+// nonce while remaining executable by executeQueued at its original nonce.
+// Retiring on the nonce alone retired exactly the live proposals this endpoint
+// is meant to protect, and without a signature.
+test('a queued proposal is never retired, however far behind its nonce is', async () => {
+  for (const nonce of [9, 100, 2 ** 31]) {
+    const res = await request({ tx_id: WALLET_ID, state: 'stale' },
+      backend({ readVaultState: async () => ({ nonce, queuedEta: 1788900000n }),
+        saveReconcile: async () => assert.fail('queued proposal retired') }), {}, '/reconcile');
+    assert.equal(res.status, 409, `chain nonce ${nonce}`);
+  }
+});
+
+test('a matured queue entry that the vault has cleared can be retired', async () => {
+  // queued[hash] == 0 and the nonce is behind: it ran, or it was cancelled on
+  // chain. Either way nothing will honour it again.
+  const calls = [];
+  const res = await request({ tx_id: WALLET_ID, state: 'stale' },
+    backend({ readVaultState: async () => ({ nonce: 9, queuedEta: 0n }),
+      saveReconcile: async w => { calls.push(w); } }), {}, '/reconcile');
+  assert.equal(res.status, 204);
+  assert.equal(calls.length, 1);
 });
 
 test('reconciliation rejects bad shapes, unknown states and settled proposals', async () => {
@@ -486,7 +511,7 @@ test('reconciliation rejects bad shapes, unknown states and settled proposals', 
 
 test('reconciliation fails closed when the chain cannot be read', async () => {
   const res = await request({ tx_id: WALLET_ID, state: 'stale' },
-    backend({ readVaultNonce: async () => { throw new Error('secret rpc detail'); },
+    backend({ readVaultState: async () => { throw new Error('secret rpc detail'); },
       saveReconcile: async () => assert.fail('retired without a chain read') }), {}, '/reconcile');
   assert.equal(res.status, 503);
   assert.doesNotMatch(res.body, /secret/);
