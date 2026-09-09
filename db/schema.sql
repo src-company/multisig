@@ -1462,13 +1462,29 @@ BEGIN
   -- anonymous RPC. Guarded: on a database where one of these does not exist,
   -- has_function_privilege raises rather than returning false, and an
   -- unanswerable question is not a passing answer.
+  -- By name, over every overload, rather than by written-out signature. The
+  -- previous form named five functions and five exact argument lists: it could
+  -- not see a sixth being reopened, and a signature that drifted made
+  -- has_function_privilege raise rather than answer. This list is every write
+  -- that must not be reachable anonymously, and adding one is adding a name.
+  --
+  -- It exists because re-applying schema.sql did reopen two of these, and this
+  -- check — which reported writes_verified true throughout — did not notice.
   BEGIN
-    writes_ok := EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') AND NOT (
-         has_function_privilege('anon', 'public.propose_tx(uuid,int,int,text,numeric,text,text,smallint,text,text,text,sig_type)', 'EXECUTE')
-      OR has_function_privilege('anon', 'public.set_wallet_name(uuid,text)', 'EXECUTE')
-      OR has_function_privilege('anon', 'public.set_owner_label(uuid,text,text)', 'EXECUTE')
-      OR has_function_privilege('anon', 'public.update_wallet_name(uuid,text,text)', 'EXECUTE')
-      OR has_function_privilege('anon', 'public.update_owner_label(uuid,text,text,text)', 'EXECUTE'));
+    writes_ok := EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') AND NOT EXISTS (
+      SELECT 1 FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public'
+        AND p.proname IN (
+          'propose_tx',
+          'set_wallet_name', 'set_owner_label',
+          'update_wallet_name', 'update_owner_label',
+          'add_signature', 'remove_signature',
+          'signed_add_signature', 'signed_remove_signature',
+          'cancel_tx', 'prune_tx', 'reconcile_tx',
+          'mark_executed', 'mark_queued', 'confirm_queued', 'confirm_executed',
+          'register_wallet')
+        AND has_function_privilege('anon', p.oid, 'EXECUTE'));
   EXCEPTION WHEN others THEN writes_ok := false;
   END;
   RETURN jsonb_build_object(
@@ -1665,11 +1681,31 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- Found by running this file against a database that already had roles.sql
 -- applied and then reading the views as anon, which is what the deployment
 -- actually does and what no earlier check here did.
+-- mark_executed and mark_queued are NOT put back here any more, and that is the
+-- point of this note. They moved behind the verifier, roles.sql revokes them,
+-- and this block re-granted them on every apply — so re-applying schema.sql
+-- silently reopened two writes that had been deliberately closed, and only a
+-- subsequent roles.sql shut them again. A file that undoes the other file's
+-- security decision is worse than one that merely fails to make it: the drift
+-- banner tells an operator to re-apply this file, and doing so was the thing
+-- that broke the invariant.
+--
+-- Anything this file drops and does not put back has to be listed in roles.sql
+-- instead. Only the views belong here, because only they lose their grants to a
+-- DROP that happens above.
+-- Every role that reads them, not just anon. `reader` was added later and left
+-- out of this block, so each apply of this file dropped the views, restored
+-- anon's grant, and left reader without one — and a browser that had proved an
+-- address got 403 on my_wallets, which is the dashboard. Anonymous visitors saw
+-- a working site while anyone who had connected a wallet saw nothing, which is
+-- close to the worst shape a permissions bug can take.
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
-    EXECUTE 'GRANT EXECUTE ON FUNCTION mark_executed(uuid, bigint, text, text) TO anon';
-    EXECUTE 'GRANT EXECUTE ON FUNCTION mark_queued(uuid, bigint, bigint, text, text) TO anon';
     EXECUTE 'GRANT SELECT ON my_wallets, tx_summary, tx_history TO anon';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'reader') THEN
+    EXECUTE 'GRANT SELECT ON my_wallets, tx_summary, tx_history TO reader';
+    EXECUTE 'GRANT SELECT ON wallets, owners, transactions, signatures TO reader';
   END IF;
 END $$;
 
