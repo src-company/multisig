@@ -28,6 +28,16 @@ const ACTION_TYPES = { Action: [
   { name: 'vault', type: 'address' }, { name: 'action', type: 'string' },
   { name: 'txHash', type: 'bytes32' }, { name: 'issuedAt', type: 'uint64' },
 ] };
+// Proving an address in order to READ. A fourth primary type, unrelated to any
+// vault, so a session signature cannot be presented as an operation on one.
+const SESSION_TYPES = { Session: [
+  { name: 'address', type: 'address' }, { name: 'issuedAt', type: 'uint64' },
+] };
+// How long a read session lasts. Long enough that an operator is not re-prompted
+// while working, short enough that a token lifted off a machine stops being
+// useful the same afternoon. It grants reading, never writing: every write is
+// verified on its own terms regardless of any session.
+const SESSION_TTL_SECONDS = 3600;
 const ZERO = '0x0000000000000000000000000000000000000000';
 // A signature that never expires is a standing permission to rewrite a label.
 // Five minutes is long enough for a hardware wallet to be found and confirmed,
@@ -410,6 +420,43 @@ async function verifyConfirm(input, { getProposal, readVaultState, readReceipt }
     p_tx_id: input.tx_id, p_block: receipt.blockNumber, p_execution_tx: input.tx.toLowerCase() } };
 }
 
+// Issuing a read session.
+//
+// The signature store is the one read that is not already public on chain, and
+// SECURITY.md scopes its risk to "anyone reading the signature store": a
+// threshold-sized set of signatures can be replayed into the other route,
+// imposing the timelock on something that already reached quorum. World-readable
+// bytes therefore promote the entire internet into the co-signer row of that
+// table.
+//
+// This does not make the signer list private — who signed is largely inferable
+// from on-chain approvals, and the count is what an observer actually wants for
+// legitimate reasons. It makes the BYTES require a proven address.
+//
+// No chain call: whoever signed is who they are, and what they may read is
+// decided by the database against the owner rows, not here. That keeps the
+// cheapest and most frequent request on this service free of an RPC round trip.
+async function verifySession(input, _deps, now = Date.now()) {
+  check(input && typeof input === 'object' && !Array.isArray(input), 'Expected a session request');
+  check(typeof input.address === 'string' && /^0x[0-9a-f]{40}$/i.test(input.address), 'Invalid address');
+  check(typeof input.signature === 'string' && /^0x[0-9a-f]{130}$/i.test(input.signature), 'A signature is required');
+  check(/(1b|1c)$/i.test(input.signature), 'Noncanonical signature');
+  check(Number.isInteger(input.issued_at) && input.issued_at > 0, 'Invalid issue time');
+  check(Math.abs(Math.floor(now / 1000) - input.issued_at) <= META_WINDOW_SECONDS, 'Signature has expired');
+  check(Number.isInteger(input.chain_id) && input.chain_id > 0, 'Invalid chain id');
+
+  const address = input.address.toLowerCase();
+  const hash = ethers.TypedDataEncoder.hash(
+    { name: 'Multisig', version: '1', chainId: input.chain_id },
+    SESSION_TYPES,
+    { address, issuedAt: input.issued_at },
+  );
+  let recovered;
+  try { recovered = ethers.recoverAddress(hash, input.signature); } catch (_) {}
+  check(recovered && recovered.toLowerCase() === address, 'Signature does not match the address');
+  return address;
+}
+
 function serviceToken(secret, role = 'proposal_writer') {
   const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
   const now = Math.floor(Date.now() / 1000);
@@ -634,6 +681,12 @@ function dependencies({ postgrestUrl, jwtSecret, rpcUrls }, fetcher = fetch) {
       if (!r) return null;
       return { status: Number(r.status), blockNumber: Number(r.blockNumber), logs: r.logs || [] };
     },
+    readerToken(address, exp) {
+      const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
+      const data = encode({ alg: 'HS256', typ: 'JWT' }) + '.' +
+        encode({ role: 'reader', address, iat: Math.floor(Date.now() / 1000), exp });
+      return data + '.' + createHmac('sha256', jwtSecret).update(data).digest('base64url');
+    },
     async saveConfirm({ fn, args }) {
       return postRpc(fn, args, 'action_writer');
     },
@@ -669,7 +722,7 @@ function createHandler(deps, allowedOrigins = []) {
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     }
     if (req.url === '/health' && req.method === 'GET') { res.writeHead(200); res.end('ok'); return; }
-    if (!['/proposals', '/metadata', '/action', '/signature', '/reconcile', '/register', '/confirm'].includes(req.url)) { res.writeHead(404); res.end(); return; }
+    if (!['/proposals', '/metadata', '/action', '/signature', '/reconcile', '/register', '/confirm', '/session'].includes(req.url)) { res.writeHead(404); res.end(); return; }
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
     if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
     if (active >= 32) { res.writeHead(503); res.end(); return; }
@@ -703,6 +756,17 @@ function createHandler(deps, allowedOrigins = []) {
         if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id)) throw new RequestError(503, 'Vault was not registered');
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(id));
+        return;
+      }
+      if (req.url === '/session') {
+        const address = await verifySession(input, deps);
+        const exp = Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS;
+        // A reader token. It carries the proven address and nothing else, and
+        // the `reader` role holds SELECT and no write grant at all — so a stolen
+        // session cannot be turned into a write even against the vaults it can
+        // read.
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ token: deps.readerToken(address, exp), address, exp }));
         return;
       }
       if (req.url === '/confirm') {
@@ -749,4 +813,4 @@ if (require.main === module) {
   server.listen(Number(PORT), '0.0.0.0');
 }
 
-module.exports = { verifyProposal, verifyMetadata, verifyAction, verifySignature, verifyReconcile, verifyRegistration, verifyConfirm, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, ACTION_TYPES, iface };
+module.exports = { verifyProposal, verifyMetadata, verifyAction, verifySignature, verifyReconcile, verifyRegistration, verifyConfirm, verifySession, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, ACTION_TYPES, SESSION_TYPES, iface };

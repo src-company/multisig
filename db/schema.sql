@@ -542,7 +542,43 @@ DROP POLICY IF EXISTS config_read ON config_log;
 CREATE POLICY wallets_read ON wallets FOR SELECT USING (true);
 CREATE POLICY owners_read ON owners FOR SELECT USING (true);
 CREATE POLICY tx_read ON transactions FOR SELECT USING (true);
-CREATE POLICY sigs_read ON signatures FOR SELECT USING (true);
+-- Rows are visible to everyone; the signature BYTES are not, and that is a
+-- column grant in db/roles.sql rather than anything here. What this policy adds
+-- is the other half: a caller who HAS proven an address sees only the vaults
+-- that address co-signs on. Without it a read session would be a bypass rather
+-- than a gate — anyone can sign as themselves, and if any proven address could
+-- read every signature the proof would buy the attacker exactly what it was
+-- meant to withhold.
+--
+-- No claim at all is the anonymous case, and it keeps every row: the count and
+-- the signer list stay public, which is what tx_summary already reports and what
+-- on-chain approvals largely reveal anyway. The bytes are unreachable for that
+-- caller because the column is not granted.
+-- Written out rather than calling is_wallet_writer, and that is not a style
+-- choice: a policy is evaluated as the role running the query, and
+-- is_wallet_writer is deliberately not granted to anon so that it cannot be
+-- reached as an /rpc/ endpoint. Calling it here turned every anonymous read of
+-- this table — and of any view that joins it — into "permission denied for
+-- function is_wallet_writer", which is a failure that names nothing a reader
+-- could act on. The tables this reads instead are ones anon may already select.
+-- nullif before the cast, on both branches. PostgreSQL does not promise to
+-- short-circuit OR, so the second operand is evaluated even when the first is
+-- already true — and `''::jsonb` raises rather than returning null. An empty
+-- claims setting is not hypothetical: it is what a client library or a future
+-- PostgREST may leave behind where today there is nothing at all, and the
+-- failure it produced was a hard error on every anonymous read of this table.
+--
+-- A token with claims but no address — one of the writer roles — matches
+-- neither branch and sees nothing, which is right: those exist to write.
+CREATE POLICY sigs_read ON signatures FOR SELECT USING (
+  nullif(current_setting('request.jwt.claims', true), '') IS NULL
+  OR EXISTS (
+    SELECT 1 FROM transactions t
+    JOIN owners o ON o.wallet_id = t.wallet_id
+    WHERE t.id = signatures.tx_id
+      AND lower(o.address) = lower(nullif(current_setting('request.jwt.claims', true), '')::jsonb->>'address')
+  )
+);
 CREATE POLICY approvals_read ON approvals FOR SELECT USING (true);
 CREATE POLICY config_read ON config_log FOR SELECT USING (true);
 

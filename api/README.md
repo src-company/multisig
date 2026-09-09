@@ -169,11 +169,36 @@ whole database as authenticated. `record_approval` writes a table `anon` cannot
 read and the dapp never reads; `sync_wallet_state` rewrites an owner set that the
 next page load re-derives from chain and repairs.
 
-**Reads are not authenticated at all.** Every granted table and view is readable
-by anyone, and that is unchanged: it is a property of running with no session,
-not an oversight, and closing it needs the JWT route the end of `db/roles.sql`
-describes. A read flood against a ten-connection pool is not addressed by any of
-the above.
+## Read sessions
+
+`POST /session` takes `{ address, chain_id, issued_at, signature }`, recovers an
+EIP-712 `Session` signature, and returns a JWT carrying the proven address and
+the `reader` role. `Session` is a fourth primary type and names no vault, so it
+cannot be presented as an operation on one. No chain call: whoever signed is who
+they are, and what they may read is decided by the database's owner rows.
+
+What it unlocks is narrow and specific. `signatures` is granted to `anon` **by
+column** — everything except `signature` itself — so the signer list and the
+count stay public, and the bytes do not. That is the split the threat actually
+follows: SECURITY.md scopes the replay residual to "anyone reading the signature
+store", because a threshold-sized set of signatures is valid on the other route.
+Who signed is largely inferable from on-chain approvals anyway and `tx_summary`
+reports the count regardless.
+
+The row policy is the other half, and without it a session would be a bypass
+rather than a gate: anyone can sign as themselves, so a proven address sees only
+the vaults it co-signs on. No claim at all keeps every row, since the bytes are
+already unreachable by column. A writer token carries no address and sees
+nothing.
+
+`reader` holds SELECT and no write grant of any kind, so a session lifted off a
+machine cannot be turned into a write even against the vaults it can read.
+
+Everything else stays public, deliberately: vault addresses, owner sets,
+thresholds, delays, nonces and executed transactions are all readable from the
+contracts. Vault names, owner labels and proposal descriptions remain readable
+too — privacy rather than integrity, and not addressed here. Neither is a read
+flood against a ten-connection pool.
 
 **One dependency this concentrated.** Signing, registration, renaming,
 reconciliation and confirmation now pass through this service, where they

@@ -155,6 +155,10 @@ function coordinationContext() {
     vm.runInContext(grab(name),ctx);
   vm.runInContext('globalThis.sb={from:table=>new PgQuery(table)};',ctx);
   ctx.pgJson=JSON.parse;
+  // No read session in this harness. dbGetSigsByTxIds asks for the signature
+  // column only when it holds one, so this exercises the unauthenticated shape —
+  // which is the one that has to keep paginating correctly.
+  ctx.sessionToken=()=>null;
   return ctx;
 }
 

@@ -67,6 +67,24 @@ REVOKE ALL ON FUNCTION reconcile_tx(uuid, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION confirm_queued(uuid, bigint, bigint, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION confirm_executed(uuid, bigint, text) FROM PUBLIC;
 
+-- A proven reader. api/proposals.cjs mints this after recovering an EIP-712
+-- Session signature, and it carries the address that signed and nothing else.
+--
+-- Reading only: no write grant of any kind, so a session lifted off a machine
+-- cannot be turned into a write even against the vaults it can read. Every write
+-- is verified on its own terms and none of them consults this role.
+DO $$ BEGIN
+  CREATE ROLE reader NOLOGIN;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+GRANT reader TO authenticator;
+GRANT USAGE ON SCHEMA public TO reader;
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM reader;
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM reader;
+GRANT SELECT ON wallets, owners, transactions, signatures TO reader;
+GRANT SELECT ON my_wallets, tx_summary, tx_history TO reader;
+GRANT EXECUTE ON FUNCTION deployment_status() TO reader;
+
 -- Recording a vault. Its own role again: registration writes rows nothing else
 -- writes, and a token minted to register a vault must not reach a signature or
 -- a name. api/proposals.cjs reads the vault's whole configuration from the
@@ -114,8 +132,25 @@ GRANT USAGE ON SCHEMA public TO anon;
 -- Revoked explicitly as well as omitted, because this file is applied to
 -- databases that were set up when they were granted.
 GRANT SELECT ON
-  wallets, owners, transactions, signatures
+  wallets, owners, transactions
 TO anon;
+
+-- signatures is granted by COLUMN, and the one column left out is the point.
+--
+-- SECURITY.md scopes the replay residual to "anyone reading the signature
+-- store": a threshold-sized set of signatures is valid on the other route, so
+-- whoever holds the bytes can queue what should have executed now and consume
+-- the nonce. It cannot steal and it cannot block — but while these were
+-- world-readable, that row of the threat table read "any co-signer, or the
+-- internet", which is not what a reader of that document would assume.
+--
+-- Who signed stays public. It is largely inferable from on-chain approvals, the
+-- count is what an honest observer wants, and tx_summary reports it anyway. What
+-- requires a proven address is the material a replay actually needs.
+-- Revoke first, so a database that was set up when the whole table was granted
+-- ends up with the same privileges as a fresh one.
+REVOKE SELECT ON signatures FROM anon;
+GRANT SELECT (id, tx_id, signer, sig_type, signed_at) ON signatures TO anon;
 
 REVOKE SELECT ON approvals, config_log FROM anon;
 

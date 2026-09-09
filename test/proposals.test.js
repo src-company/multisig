@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { createECDH, createHmac } = require('node:crypto');
 const { Readable } = require('node:stream');
-const { verifyProposal, verifyMetadata, verifyAction, verifySignature, verifyReconcile, verifyRegistration, verifyConfirm, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, ACTION_TYPES, iface } = require('../api/proposals.cjs');
+const { verifyProposal, verifyMetadata, verifyAction, verifySignature, verifyReconcile, verifyRegistration, verifyConfirm, verifySession, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, ACTION_TYPES, SESSION_TYPES, iface } = require('../api/proposals.cjs');
 
 const WALLET_ID = '11111111-1111-4111-8111-111111111111';
 const VAULT = '0x2222222222222222222222222222222222222222';
@@ -684,5 +684,83 @@ test('confirmation rejects bad shapes and settled proposals', async () => {
       backend({ getProposal: async () => ({ ...STORED, status }),
         saveConfirm: async () => assert.fail('settled proposal re-confirmed') }), {}, '/confirm');
     assert.equal(res.status, 400, status);
+  }
+});
+
+// ── READ SESSIONS ─────────────────────────────────────────────────
+// A session proves an address in order to read signature bytes. It grants no
+// write of any kind, and what it may read is decided by the database's owner
+// rows, not by this endpoint.
+function sessionHash(a) {
+  return ethers.TypedDataEncoder.hash(
+    { name: 'Multisig', version: '1', chainId: a.chain_id ?? 1 },
+    SESSION_TYPES, { address: a.address.toLowerCase(), issuedAt: a.issued_at });
+}
+// Real dependencies: minting a session touches neither the chain nor the
+// database, so this exercises the actual token rather than a stand-in for it.
+function sessionBackend() {
+  return dependencies(
+    { postgrestUrl: 'https://db.example', jwtSecret: 'session-secret-'.repeat(3), rpcUrls: { 1: 'https://rpc.example' } },
+    async () => { throw new Error('a session must not reach the network'); });
+}
+function sessionInput(overrides = {}, key = 1n) {
+  const a = { address: address(key), chain_id: 1, issued_at: Math.floor(Date.now() / 1000), ...overrides };
+  a.signature = sign(sessionHash(a), key);
+  return a;
+}
+
+test('a session is issued to the address that signed, and carries only a reader role', async () => {
+  const res = await request(sessionInput(), sessionBackend(), {}, '/session');
+  assert.equal(res.status, 200);
+  const body = JSON.parse(res.body);
+  assert.equal(body.address, address(1n).toLowerCase());
+  const claims = JSON.parse(Buffer.from(body.token.split('.')[1], 'base64url').toString());
+  assert.equal(claims.role, 'reader');
+  assert.equal(claims.address, address(1n).toLowerCase());
+  assert.ok(claims.exp > claims.iat, 'expires after it is issued');
+  assert.ok(claims.exp - claims.iat <= 3600, 'and not far after');
+  // Nothing that could be mistaken for a writer.
+  for (const r of ['proposal_writer', 'metadata_writer', 'action_writer', 'registry_writer']) {
+    assert.notEqual(claims.role, r);
+  }
+});
+
+test('a session cannot be minted for an address that did not sign', async () => {
+  // Key 2's signature, claiming key 1's address.
+  const forged = { ...sessionInput({}, 2n), address: address(1n) };
+  assert.equal((await request(forged, sessionBackend(), {}, '/session')).status, 400);
+  const cases = [
+    { ...sessionInput(), signature: '0x' + '11'.repeat(65) },
+    { ...sessionInput(), signature: undefined },
+    { ...sessionInput(), address: 'nope' },
+    { ...sessionInput(), chain_id: 0 },
+    null,
+  ];
+  for (const c of cases) {
+    assert.equal((await request(c, sessionBackend(), {}, '/session')).status, 400, JSON.stringify(c && c.address));
+  }
+});
+
+test('a session signature expires in both directions', async () => {
+  const now = Math.floor(Date.now() / 1000);
+  for (const issued_at of [now - 301, now + 301]) {
+    assert.equal((await request(sessionInput({ issued_at }), sessionBackend(), {}, '/session')).status, 400, String(issued_at));
+  }
+  assert.equal((await request(sessionInput({ issued_at: now - 299 }), sessionBackend(), {}, '/session')).status, 200);
+});
+
+test('a session signature is not usable as any vault operation', async () => {
+  // Same key, same moment — but Session is its own primary type, so the digest
+  // differs and none of the operation endpoints will take it.
+  const sess = sessionInput();
+  const shapes = [
+    ['/metadata', { wallet_id: WALLET_ID, kind: 'name', subject: ZERO_ADDR, value: 'X', issued_at: sess.issued_at, signature: sess.signature }],
+    ['/action',   { tx_id: WALLET_ID, action: 'unsign', issued_at: sess.issued_at, signature: sess.signature }],
+  ];
+  for (const [url, body] of shapes) {
+    const res = await request(body, metaBackend({
+      saveMetadata: async () => assert.fail('session signature used as a write'),
+      saveAction: async () => assert.fail('session signature used as a write') }), {}, url);
+    assert.ok(res.status === 400 || res.status === 403, `${url} -> ${res.status}`);
   }
 });

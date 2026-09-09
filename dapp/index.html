@@ -3018,7 +3018,13 @@ async function pgFetch(path, init, baseUrl = PGRST_URL) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), PG_TIMEOUT_MS);
     try {
-      const res = await fetch(`${baseUrl}/${path}`, { ...init, signal: ctrl.signal });
+      // The read token goes to the coordination database and nowhere else. The
+      // verifier has its own auth and must never be handed a session.
+      const tok = baseUrl === PGRST_URL ? sessionToken() : null;
+      const opts = tok
+        ? { ...init, headers: { ...(init && init.headers), Authorization: `Bearer ${tok}` }, signal: ctrl.signal }
+        : { ...init, signal: ctrl.signal };
+      const res = await fetch(`${baseUrl}/${path}`, opts);
       clearTimeout(timer);
       if(!res.ok && PG_RETRY_STATUS.has(res.status) && attempt < PG_MAX_ATTEMPTS - 1) {
         lastErr = { status: res.status, message: `HTTP ${res.status}` };
@@ -3208,6 +3214,55 @@ const EIP712_ACTION_TYPES = { Action: [
   { name:'txHash', type:'bytes32' }, { name:'issuedAt', type:'uint64' },
 ]};
 const META_ZERO = '0x0000000000000000000000000000000000000000';
+// Proving an address in order to READ the signature bytes. Its own primary type
+// again, and it names no vault, so it cannot be presented as an operation on one.
+const EIP712_SESSION_TYPES = { Session: [
+  { name:'address', type:'address' }, { name:'issuedAt', type:'uint64' },
+]};
+// The signature store is the one read that is not already public on chain. Who
+// signed stays visible to everyone; the bytes need a proven address, because a
+// threshold-sized set of them can be replayed into the other route. See
+// SECURITY.md, which scopes that risk to "anyone reading the signature store".
+//
+// Held in memory only. Not localStorage: a read token for someone's vaults is
+// not a thing to leave on disk for the next page that runs on this origin, and
+// re-minting costs one prompt an hour.
+let _session = null;
+function sessionToken() {
+  if(!_session) return null;
+  // A minute of slack, so a token does not expire between being chosen and used.
+  if(_session.exp - 60 <= Math.floor(Date.now() / 1000)) { _session = null; return null; }
+  if(_session.address !== String(window._connectedAddress || '').toLowerCase()) { _session = null; return null; }
+  return _session.token;
+}
+// Best effort, always. A refused prompt or an unreachable verifier costs the
+// signer list's bytes and nothing else — every other read still works, and every
+// write is verified on its own terms and does not consult this.
+async function ensureSession() {
+  if(sessionToken()) return true;
+  const signer = window._signer;
+  const addr = String(window._connectedAddress || '').toLowerCase();
+  if(!signer || !/^0x[0-9a-f]{40}$/.test(addr)) return false;
+  const issuedAt = Math.floor(Date.now() / 1000);
+  let sig;
+  try {
+    sig = normalizeSigV(await signer.signTypedData(
+      { ...EIP712_DOMAIN, chainId: S.chainId },
+      EIP712_SESSION_TYPES, { address: addr, issuedAt }));
+  } catch(e) { console.warn('Read session declined:', e && e.message); return false; }
+  try {
+    const res = await pgFetch('session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ address: addr, chain_id: S.chainId, issued_at: issuedAt, signature: sig }),
+    }, PROPOSAL_API_URL);
+    if(!res.ok) { console.warn('Read session refused:', res.status); return false; }
+    const j = JSON.parse(await res.text());
+    if(!j || typeof j.token !== 'string') return false;
+    _session = { token: j.token, address: addr, exp: Number(j.exp) || 0 };
+    return true;
+  } catch(e) { console.warn('Read session unavailable:', e && e.message); return false; }
+}
 
 // ── PROVIDER STATE ────────────────────────────────────────────────
 let provider = null;
@@ -10384,7 +10439,13 @@ async function dbGetSigsByTxIds(txIds) {
     const ids = txIds.slice(offset, offset + 40);
     let cursor = null;
     for(;;) {
-      let q = sb.from('signatures').select('id, tx_id, signer, signature, sig_type')
+      // Without a session the `signature` column is not granted, and asking for
+      // it is a 401 rather than a null — so ask for what is readable. The signer
+      // list still renders; what is missing is the material a replay needs.
+      const cols = sessionToken()
+        ? 'id, tx_id, signer, signature, sig_type'
+        : 'id, tx_id, signer, sig_type';
+      let q = sb.from('signatures').select(cols)
         .in('tx_id', ids).order('id', { ascending: true }).limit(PROPOSAL_PAGE_SIZE);
       if(cursor) q = q.gt('id', cursor);
       const { data, error } = await q;
@@ -10653,6 +10714,11 @@ async function loadAllVaults() {
   if(S.demoMode) return;
   const addr = window._connectedAddress;
   if(!addr) return;
+  // Ask for a read session before the queue is loaded, so the first load already
+  // has the signature bytes rather than fetching them, missing them, and needing
+  // a second pass. Awaited but never required: it returns false on a declined
+  // prompt or an unreachable verifier, and everything below proceeds either way.
+  await ensureSession();
   const hadVaults = S.vaults.length > 0;
   // The chain this run is for. Two of these can be in flight at once — the
   // switcher starts one per click and switchChain awaits the wallet in between,
