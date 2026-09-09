@@ -1231,13 +1231,92 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
+-- The counterpart. add_signature took the signer's address as an argument and
+-- checked it against the owner list, so a row could be filed against any owner's
+-- name without that owner having signed anything. The client already refuses to
+-- count such a row — verifySigs recovers every signature against the chain's
+-- owner set before any of them is displayed or packed — so this was never a way
+-- to fake a quorum. What it was is a way to put words in an owner's mouth in the
+-- record every co-signer reads.
+--
+-- This needs no prompt to close, because the signature is the credential and it
+-- is already in the request: api/proposals.cjs rebuilds the digest from the
+-- stored proposal's own fields, recovers the signer, and confirms isOwner()
+-- before calling. A signature that does not recover to the address it claims
+-- never arrives here.
+CREATE OR REPLACE FUNCTION signed_add_signature(
+  p_tx_id uuid, p_signer text, p_signature text,
+  p_sig_type sig_type DEFAULT 'ecdsa'
+) RETURNS int AS $$
+DECLARE
+  cnt int;
+BEGIN
+  IF coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb->>'role', '') <> 'action_writer' THEN
+    RAISE EXCEPTION 'A verified owner signature is required' USING ERRCODE = '42501';
+  END IF;
+  PERFORM rate_gate('sig:' || p_tx_id::text || ':' || client_ip(), 120, interval '1 minute');
+  -- Terminal proposals do not take new signatures, for the reason
+  -- add_signature's own comment gives.
+  IF NOT EXISTS (
+    SELECT 1 FROM transactions
+    WHERE id = p_tx_id AND status IN ('proposed', 'executing', 'queued')
+  ) THEN
+    RAISE EXCEPTION 'Proposal is no longer open for signatures';
+  END IF;
+  INSERT INTO signatures (tx_id, signer, sig_type, signature)
+  VALUES (p_tx_id, p_signer, p_sig_type, p_signature)
+  ON CONFLICT (tx_id, lower(signer)) DO UPDATE SET
+    signer = EXCLUDED.signer,
+    signature = EXCLUDED.signature, sig_type = EXCLUDED.sig_type, signed_at = now();
+  SELECT count(*) INTO cnt FROM signatures WHERE tx_id = p_tx_id;
+  RETURN cnt;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+-- Retiring a proposal the vault has already moved past.
+--
+-- cancel_tx and prune_tx took the caller's address and checked it against the
+-- owner list, so anyone could retire a live proposal — the plainest griefing
+-- available here, since the co-signers lose the row they were collecting
+-- signatures on. They could not be made owner-gated in the usual way: both are
+-- called from reconciliation, where the client is writing back what it just read
+-- from the chain, and a wallet prompt there would fire on ordinary page loads.
+--
+-- The claim they carry is about the chain rather than about who is asking, so
+-- api/proposals.cjs asks the chain: it reads the vault's nonce and only calls
+-- this when the proposal's nonce is strictly behind it. Such a proposal can
+-- never execute again, so retiring it takes nothing from anyone. A proposal at
+-- the current nonce is refused, whoever asks and however they describe it.
+CREATE OR REPLACE FUNCTION reconcile_tx(
+  p_tx_id uuid, p_state text
+) RETURNS void AS $$
+BEGIN
+  IF coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb->>'role', '') <> 'action_writer' THEN
+    RAISE EXCEPTION 'A verified reconciliation is required' USING ERRCODE = '42501';
+  END IF;
+  IF p_state NOT IN ('cancelled', 'stale') THEN
+    RAISE EXCEPTION 'Unsupported state';
+  END IF;
+  PERFORM rate_gate('mark:' || p_tx_id::text || ':' || client_ip(), 240, interval '1 minute');
+  UPDATE transactions
+  SET status = p_state::tx_status, cancelled_at = now()
+  WHERE id = p_tx_id AND status IN ('proposed', 'executing', 'queued');
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+REVOKE ALL ON FUNCTION reconcile_tx(uuid, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION signed_remove_signature(uuid, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION signed_add_signature(uuid, text, text, sig_type) FROM PUBLIC;
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
     REVOKE ALL ON FUNCTION signed_remove_signature(uuid, text) FROM anon;
+    REVOKE ALL ON FUNCTION signed_add_signature(uuid, text, text, sig_type) FROM anon;
+    REVOKE ALL ON FUNCTION reconcile_tx(uuid, text) FROM anon;
   END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'action_writer') THEN
     GRANT EXECUTE ON FUNCTION signed_remove_signature(uuid, text) TO action_writer;
+    GRANT EXECUTE ON FUNCTION signed_add_signature(uuid, text, text, sig_type) TO action_writer;
+    GRANT EXECUTE ON FUNCTION reconcile_tx(uuid, text) TO action_writer;
   END IF;
 END $$;
 

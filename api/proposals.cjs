@@ -39,6 +39,9 @@ const iface = new ethers.Interface([
   'function approved(address,bytes32) view returns (bool)',
   'function threshold() view returns (uint16)',
   'function ownerCount() view returns (uint16)',
+  // Reconciliation reads this. A proposal the vault's nonce has passed can
+  // never execute, whoever asks.
+  'function nonce() view returns (uint32)',
 ]);
 const BODY_LIMIT = 72 * 1024;
 class RequestError extends Error {
@@ -173,6 +176,89 @@ async function verifyAction(input, { getProposal, readVault }, now = Date.now())
   return { fn: 'signed_remove_signature', args: { p_tx_id: input.tx_id, p_signer: signer } };
 }
 
+// Adding a co-signer's signature. This one needs no wallet prompt of its own:
+// the signature IS the credential, and it is already in the request. The digest
+// is rebuilt from the stored proposal's own fields rather than read from its
+// tx_hash column, so a legacy row carrying a digest nobody verified cannot lend
+// its authority to a signature over different terms.
+async function verifySignature(input, { getProposal, readVault }) {
+  check(input && typeof input === 'object' && !Array.isArray(input), 'Expected a signature');
+  check(typeof input.tx_id === 'string' && /^[0-9a-f-]{36}$/i.test(input.tx_id), 'Invalid transaction id');
+  check(typeof input.signer === 'string' && /^0x[0-9a-f]{40}$/i.test(input.signer), 'Invalid signer');
+  check(typeof input.signature === 'string' && /^0x[0-9a-f]{130}$/i.test(input.signature), 'A signature is required');
+  const sigType = input.sig_type || 'ecdsa';
+  check(sigType === 'ecdsa' || sigType === 'approval', 'Unsupported signature type');
+
+  const p = await getProposal(input.tx_id);
+  check(p && /^0x[0-9a-f]{40}$/i.test(p.address || ''), 'Proposal not found');
+  // The SQL refuses these too. Refusing here as well keeps the reason specific,
+  // and keeps a settled proposal from being reopened by a request that reached
+  // the database at all.
+  check(['proposed', 'executing', 'queued'].includes(p.status), 'Proposal is no longer open for signatures');
+  check(typeof p.target === 'string' && /^0x[0-9a-f]{40}$/i.test(p.target), 'Proposal has no target');
+  check(typeof p.call_data === 'string' && /^0x([0-9a-f]{2})*$/i.test(p.call_data), 'Proposal has no calldata');
+  check(Number.isInteger(p.nonce) && p.nonce >= 0, 'Proposal has no nonce');
+  const value = String(p.value);
+  check(/^(0|[1-9][0-9]{0,77})$/.test(value), 'Proposal value is not an integer');
+
+  const vault = p.address.toLowerCase();
+  const signer = input.signer.toLowerCase();
+  const hash = ethers.TypedDataEncoder.hash(
+    { name: 'Multisig', version: '1', chainId: p.chain_id, verifyingContract: vault },
+    TYPES,
+    { target: p.target.toLowerCase(), value, data: p.call_data.toLowerCase(), nonce: p.nonce },
+  );
+  if (sigType === 'ecdsa') {
+    check(/(1b|1c)$/i.test(input.signature), 'Noncanonical signature');
+    let recovered;
+    try { recovered = ethers.recoverAddress(hash, input.signature); } catch (_) {}
+    check(recovered && recovered.toLowerCase() === signer, 'Signature does not match the signer');
+  } else {
+    check(input.signature.toLowerCase() === senderSlot(signer), 'Invalid approval slot');
+  }
+  const state = await readVault(p.chain_id, vault, signer, hash, sigType);
+  if (!state.isOwner) throw new RequestError(403, 'Signer is not a current on-chain owner');
+  if (sigType === 'approval' && !state.approved) throw new RequestError(403, 'Transaction has not been approved on chain');
+
+  return { fn: 'signed_add_signature', args: {
+    p_tx_id: input.tx_id, p_signer: signer,
+    p_signature: input.signature.toLowerCase(), p_sig_type: sigType } };
+}
+
+// Retiring a proposal the vault has moved past.
+//
+// cancel_tx and prune_tx are not owner actions and cannot be made into them: the
+// client calls both from reconciliation, writing back what it just read from the
+// chain, and loadVaultQueue prunes superseded rows in a loop. A wallet prompt
+// there would fire on ordinary page loads.
+//
+// But what they assert is not an identity claim at all — it is a claim about the
+// chain, and the chain can be asked. A proposal whose nonce the vault has
+// already consumed can never execute, by anyone, ever. That is checkable without
+// knowing who is calling, which is why this endpoint takes no signature and
+// still cannot be used to retire a live proposal.
+async function verifyReconcile(input, { getProposal, readVaultNonce }) {
+  check(input && typeof input === 'object' && !Array.isArray(input), 'Expected a reconciliation');
+  check(typeof input.tx_id === 'string' && /^[0-9a-f-]{36}$/i.test(input.tx_id), 'Invalid transaction id');
+  check(input.state === 'cancelled' || input.state === 'stale', 'Unsupported state');
+
+  const p = await getProposal(input.tx_id);
+  check(p && /^0x[0-9a-f]{40}$/i.test(p.address || ''), 'Proposal not found');
+  check(Number.isInteger(p.nonce) && p.nonce >= 0, 'Proposal has no nonce');
+  // Already terminal. Nothing to do, and saying so is not an error worth
+  // failing a page load over.
+  check(['proposed', 'executing', 'queued'].includes(p.status), 'Proposal is already settled');
+
+  const chainNonce = await readVaultNonce(p.chain_id, p.address.toLowerCase());
+  check(Number.isInteger(chainNonce) && chainNonce >= 0, 'Vault nonce unavailable');
+  // Strictly past it. A proposal AT the current nonce is still executable and is
+  // not this endpoint's to retire, however the caller describes it.
+  if (p.nonce >= chainNonce) {
+    throw new RequestError(409, 'That proposal can still execute at the vault current nonce');
+  }
+  return { fn: 'reconcile_tx', args: { p_tx_id: input.tx_id, p_state: input.state } };
+}
+
 function serviceToken(secret, role = 'proposal_writer') {
   const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
   const now = Math.floor(Date.now() / 1000);
@@ -245,13 +331,41 @@ function dependencies({ postgrestUrl, jwtSecret, rpcUrls }, fetcher = fetch) {
     // the stored row rather than from anything the request supplied.
     async getProposal(id) {
       const rows = await json(
-        `${postgrestUrl}/transactions?select=tx_hash,chain_id,wallets(address)&id=eq.${encodeURIComponent(id)}&limit=1`,
+        `${postgrestUrl}/transactions?select=tx_hash,chain_id,nonce,target,value,call_data,status,wallets(address)&id=eq.${encodeURIComponent(id)}&limit=1`,
         undefined, 'getProposal');
       const row = rows && rows[0];
-      return row ? { tx_hash: row.tx_hash, chain_id: row.chain_id, address: row.wallets && row.wallets.address } : null;
+      if (!row) return null;
+      return {
+        tx_hash: row.tx_hash, chain_id: row.chain_id, nonce: row.nonce,
+        target: row.target, value: row.value, call_data: row.call_data, status: row.status,
+        address: row.wallets && row.wallets.address,
+      };
     },
     async saveAction({ fn, args }) {
       return this.saveMetadata({ fn, args }, 'action_writer');
+    },
+    // Returns the resulting signature count, which the dapp shows.
+    // One eth_call, no block pin: the question is whether the vault has moved
+    // past a nonce, and a slightly stale answer only ever refuses a write that
+    // the next page load will ask for again.
+    async readVaultNonce(chainId, address) {
+      const url = rpcUrls[chainId];
+      check(url, 'Unsupported chain');
+      const result = await json(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call',
+          params: [{ to: address, data: iface.encodeFunctionData('nonce') }, 'latest'] }) },
+        `rpc:nonce:chain${chainId}`);
+      if (result.error || result.result === undefined) throw new RequestError(503, 'Chain verification failed');
+      return Number(iface.decodeFunctionResult('nonce', result.result)[0]);
+    },
+    async saveReconcile({ fn, args }) {
+      return this.saveMetadata({ fn, args }, 'action_writer');
+    },
+    async saveSignature({ fn, args }) {
+      return json(`${postgrestUrl}/rpc/${fn}`, { method: 'POST', headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${serviceToken(jwtSecret, 'action_writer')}`,
+      }, body: JSON.stringify(args) }, 'saveSignature');
     },
     // The function name is chosen by verifyMetadata/verifyAction, never by the
     // request, so this cannot be steered at another RPC by anything a caller
@@ -286,7 +400,7 @@ function createHandler(deps, allowedOrigins = []) {
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     }
     if (req.url === '/health' && req.method === 'GET') { res.writeHead(200); res.end('ok'); return; }
-    if (req.url !== '/proposals' && req.url !== '/metadata' && req.url !== '/action') { res.writeHead(404); res.end(); return; }
+    if (!['/proposals', '/metadata', '/action', '/signature', '/reconcile'].includes(req.url)) { res.writeHead(404); res.end(); return; }
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
     if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
     if (active >= 32) { res.writeHead(503); res.end(); return; }
@@ -315,6 +429,18 @@ function createHandler(deps, allowedOrigins = []) {
         res.end();
         return;
       }
+      if (req.url === '/reconcile') {
+        await deps.saveReconcile(await verifyReconcile(input, deps));
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+      if (req.url === '/signature') {
+        const count = await deps.saveSignature(await verifySignature(input, deps));
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(typeof count === 'number' ? count : null));
+        return;
+      }
       const proposal = await verifyProposal(input, deps);
       const id = await deps.saveProposal(proposal);
       if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id)) throw new RequestError(503, 'Proposal was not saved');
@@ -341,4 +467,4 @@ if (require.main === module) {
   server.listen(Number(PORT), '0.0.0.0');
 }
 
-module.exports = { verifyProposal, verifyMetadata, verifyAction, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, ACTION_TYPES, iface };
+module.exports = { verifyProposal, verifyMetadata, verifyAction, verifySignature, verifyReconcile, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, ACTION_TYPES, iface };

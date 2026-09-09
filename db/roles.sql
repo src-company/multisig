@@ -57,7 +57,11 @@ GRANT USAGE ON SCHEMA public TO action_writer;
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM action_writer;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM action_writer;
 GRANT EXECUTE ON FUNCTION signed_remove_signature(uuid, text) TO action_writer;
+GRANT EXECUTE ON FUNCTION signed_add_signature(uuid, text, text, sig_type) TO action_writer;
+GRANT EXECUTE ON FUNCTION reconcile_tx(uuid, text) TO action_writer;
 REVOKE ALL ON FUNCTION signed_remove_signature(uuid, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION signed_add_signature(uuid, text, text, sig_type) FROM PUBLIC;
+REVOKE ALL ON FUNCTION reconcile_tx(uuid, text) FROM PUBLIC;
 
 -- Set / rotate the password out of band (keep it OUT of version control):
 --   ALTER ROLE authenticator WITH PASSWORD '<strong-random-password>';
@@ -128,7 +132,6 @@ REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION
   register_wallet(int, text, text, numeric, text[], smallint, int, text, bigint, text, text, text[], int),
-  add_signature(uuid, text, text, sig_type),
   mark_executed(uuid, bigint, text, text),
   -- Five arguments, matching schema.sql. This read `mark_queued(uuid, bigint,
   -- bigint, text)` — the signature schema.sql drops — so on a fresh database
@@ -136,8 +139,6 @@ GRANT EXECUTE ON FUNCTION
   -- functions below or above it were granted to anon. The dapp could read
   -- everything and write nothing.
   mark_queued(uuid, bigint, bigint, text, text),
-  cancel_tx(uuid, text),
-  prune_tx(uuid, text),
   record_approval(uuid, int, text, text, boolean, bigint, text),
   sync_wallet_state(uuid, text, smallint, smallint, int, text, int, text[]),
   -- Read-only, and the one call that can tell an operator this file was never
@@ -169,6 +170,21 @@ FROM anon, PUBLIC;
 -- replacement, signed_remove_signature, removes only the signature belonging to
 -- the address that signed the request.
 REVOKE EXECUTE ON FUNCTION remove_signature(uuid, text) FROM anon, PUBLIC;
+
+-- add_signature goes with it. It filed a signature against any owner's name
+-- without that owner having signed anything — never a way to fake a quorum,
+-- since the client recovers every signature against the chain's owner set
+-- before counting it, but a way to put words in an owner's mouth in the record
+-- the co-signers read. signed_add_signature verifies the signature it is given.
+REVOKE EXECUTE ON FUNCTION add_signature(uuid, text, text, sig_type) FROM anon, PUBLIC;
+
+-- cancel_tx and prune_tx go too. Both retired a live proposal on the strength of
+-- a named owner, which is the plainest griefing this schema offered: the
+-- co-signers lose the row they were collecting signatures on. Their replacement,
+-- reconcile_tx, is reached only after the verifier has read the vault's nonce
+-- and found the proposal strictly behind it — one that can never execute again,
+-- so retiring it takes nothing from anyone.
+REVOKE EXECUTE ON FUNCTION cancel_tx(uuid, text), prune_tx(uuid, text) FROM anon, PUBLIC;
 
 -- ── DEFAULTS ─────────────────────────────────────────────────────
 -- Keep future objects from leaking to anon unless granted explicitly.

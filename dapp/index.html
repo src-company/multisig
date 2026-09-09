@@ -10211,13 +10211,40 @@ async function dbProposeTx(wId, nonce, target, value, callData, txHash, thresh, 
   return result;
 }
 
+// Goes through the verifier, which recovers the signer from this very signature
+// and confirms isOwner() against the vault before the row is written. No extra
+// wallet prompt: the signature is the credential, and it was just produced.
+//
+// The RPC this replaces took the signer's address as an argument and checked it
+// against the owner list, so a row could be filed under any owner's name with
+// bytes that were not theirs. verifySigs already refused to count such a row —
+// it recovers every signature against the chain's owner set before anything is
+// displayed or packed — so it was never a way to fake a quorum, only a way to
+// put words in an owner's mouth in the record the co-signers read.
 async function dbAddSig(txId, signerAddr, signature, sigType) {
-  const { data, error } = await sb.rpc('add_signature', {
-    p_tx_id: txId, p_signer: signerAddr, p_signature: signature,
-    p_sig_type: sigType || 'ecdsa'
-  });
-  if(error) { console.error('DB add sig:', error); throw dbError('SIGNATURE NOT SAVED', error); }
-  return data;
+  let res;
+  try {
+    res = await pgFetch('signature', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({
+        tx_id: txId, signer: signerAddr, signature,
+        sig_type: sigType || 'ecdsa',
+      }),
+    }, PROPOSAL_API_URL);
+  } catch(e) {
+    console.error('DB add sig:', e);
+    throw dbError('SIGNATURE NOT SAVED', { message: String(e && e.message || e) });
+  }
+  const text = await res.text();
+  let result;
+  try { result = JSON.parse(text); } catch(_) {}
+  if(!res.ok) {
+    console.error('DB add sig:', res.status, text);
+    throw dbError('SIGNATURE NOT SAVED', { status: res.status, message: result?.message || `HTTP ${res.status}` });
+  }
+  // The resulting signature count, which is what the old RPC returned.
+  return typeof result === 'number' ? result : null;
 }
 
 // A proposal's signatures, fetched WITH the proposal rather than after them.
@@ -10385,8 +10412,26 @@ async function dbMarkQueued(txId, eta, block, queueTx) {
   if(error) dbWriteLagged('mark queued', error);
 }
 
+// Retiring a proposal goes through the verifier, which reads the vault's nonce
+// and only writes when this proposal's nonce is strictly behind it. No prompt:
+// the claim is about the chain, not about who is asking, so there is nothing for
+// an operator to sign. A proposal still executable at the current nonce is
+// refused with 409, which is correct — this path is reconciliation, and it runs
+// after the chain has already moved.
+async function dbReconcileTx(txId, state, op) {
+  try {
+    const res = await pgFetch('reconcile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tx_id: txId, state }),
+    }, PROPOSAL_API_URL);
+    if(!res.ok) return { error: { status: res.status, message: await res.text() } };
+    return { error: null };
+  } catch(e) { return { error: { message: String(e && e.message || e) } }; }
+}
+
 async function dbCancelTx(txId, cancelledBy) {
-  const { error } = await sb.rpc('cancel_tx', { p_tx_id: txId, p_cancelled_by: cancelledBy });
+  const { error } = await dbReconcileTx(txId, 'cancelled', 'cancel tx');
   if(error) dbWriteLagged('cancel tx', error);
 }
 
@@ -10403,7 +10448,7 @@ async function dbCancelTx(txId, cancelledBy) {
 // would bury the ones that matter. sb.rpc resolves with {error} rather than
 // rejecting, so the caller's .catch() never saw these.
 async function dbPruneTx(txId) {
-  const { error } = await sb.rpc('prune_tx', { p_tx_id: txId, p_caller: window._connectedAddress });
+  const { error } = await dbReconcileTx(txId, 'stale', 'prune tx');
   if(error) console.error('DB prune tx:', error);
 }
 

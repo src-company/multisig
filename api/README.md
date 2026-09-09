@@ -116,21 +116,32 @@ intentional and does not let the relayer forge a different transaction.
 Descriptions are unsigned metadata and are not proof of transaction intent.
 Legacy rows are not retrospectively authenticated by this migration.
 
-Proposal insertion, the two metadata writes and unsigning are verified. The rest
-of the write surface is not: `cancel_tx`, `prune_tx`, `add_signature`,
-`mark_executed`, `mark_queued`, `record_approval`, `sync_wallet_state` and
-`register_wallet` still take the caller's address as an argument and check it
-against an owner set that is public on chain. Do not describe the whole database
-as authenticated.
+Everything that destroys or attributes is verified: proposal insertion, both
+metadata writes, adding a signature, retracting one, and retiring a proposal.
+Two verification styles, chosen by what the write actually claims.
 
-`cancel_tx` and `prune_tx` are the ones left that destroy something, and they
-are not simply un-migrated: both are called from reconciliation, where the
-client has read the chain and is writing back what it saw — `loadVaultQueue`
-prunes superseded rows in a loop. A wallet prompt there would fire on ordinary
-page loads. What they assert is chain-checkable rather than identity-checkable
-(a proposal whose nonce the vault has passed can never execute), so the route
-for them is a verifier that confirms the claim against the chain, not a
-signature.
+**Signature-verified** — the claim is about identity, so a signature settles it.
+`propose_tx`, `set_wallet_name`, `set_owner_label`, `signed_remove_signature`
+and `signed_add_signature`. Adding a signature costs no extra prompt: the
+signature is the credential and is already in the request.
+
+**Chain-verified** — the claim is about the chain, so the chain settles it and no
+signature is needed. `reconcile_tx` retires a proposal only when the vault's
+nonce is strictly past it, which makes the proposal unexecutable by anyone. This
+is what `cancel_tx` and `prune_tx` became: both were called from reconciliation,
+where the client writes back what it just read and `loadVaultQueue` prunes
+superseded rows in a loop, so a wallet prompt would have fired on ordinary page
+loads. A proposal at the current nonce is refused with 409 however it is
+described.
+
+Still anonymous, and not yet migrated: `mark_executed`, `mark_queued`,
+`record_approval`, `sync_wallet_state` and `register_wallet`. Do not describe the
+whole database as authenticated. The first two are chain-verifiable on the same
+pattern as `reconcile_tx` and are the obvious next step. `register_wallet` cannot
+require ownership at all — a vault is registered by whoever opens it, who may be
+looking rather than signing — so its exposure is bounded by refusing to write
+metadata onto a vault that already exists, and by the dashboard keeping only
+vaults whose on-chain owner set contains the viewer.
 
 What makes that a bounded problem rather than the same one is that every column
 those RPCs touch is re-derived from chain on the next load, so the damage is

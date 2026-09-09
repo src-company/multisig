@@ -2,13 +2,15 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { createECDH, createHmac } = require('node:crypto');
 const { Readable } = require('node:stream');
-const { verifyProposal, verifyMetadata, verifyAction, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, ACTION_TYPES, iface } = require('../api/proposals.cjs');
+const { verifyProposal, verifyMetadata, verifyAction, verifySignature, verifyReconcile, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, ACTION_TYPES, iface } = require('../api/proposals.cjs');
 
 const WALLET_ID = '11111111-1111-4111-8111-111111111111';
 const VAULT = '0x2222222222222222222222222222222222222222';
 const TARGET = '0x3333333333333333333333333333333333333333';
 const N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
 const TX_HASH = '0x' + '5'.repeat(64);
+const STORED = { tx_hash: TX_HASH, chain_id: 1, nonce: 7, target: TARGET,
+  value: '900719925474099312345', call_data: '0x1234', status: 'proposed', address: VAULT };
 const hex = x => x.toString(16).padStart(64, '0');
 function publicKey(key) {
   const curve = createECDH('secp256k1');
@@ -39,7 +41,8 @@ function backend(overrides = {}) {
   return { getWallet: async () => ({ chain_id: 1, address: VAULT }),
     readVault: async () => ({ isOwner: true, threshold: 2, ownerCount: 3, approved: false }),
     saveProposal: async () => WALLET_ID, saveMetadata: async () => {}, saveAction: async () => {},
-    getProposal: async () => ({ tx_hash: TX_HASH, chain_id: 1, address: VAULT }), ...overrides };
+    saveSignature: async () => 2, saveReconcile: async () => {}, readVaultNonce: async () => 9,
+    getProposal: async () => ({ ...STORED }), ...overrides };
 }
 async function request(body, deps = backend(), headers = {}, url = '/proposals', method = 'POST') {
   const req = Readable.from([Buffer.from(typeof body === 'string' ? body : JSON.stringify(body))]);
@@ -367,4 +370,124 @@ test('a metadata signature cannot be replayed as an unsign', async () => {
     issued_at: Math.floor(Date.now() / 1000), signature: m.signature },
     actionBackend({ saveAction: async () => assert.fail('metadata signature reused') }), {}, '/action');
   assert.ok(res.status === 400 || res.status === 403, String(res.status));
+});
+
+// ── SIGNED ADD-SIGNATURE ──────────────────────────────────────────
+// The digest is rebuilt from the stored proposal, so a signature is only
+// accepted for the exact terms the row records.
+function storedHash(p = STORED) {
+  return ethers.TypedDataEncoder.hash(
+    { name: 'Multisig', version: '1', chainId: p.chain_id, verifyingContract: p.address.toLowerCase() },
+    TYPES,
+    { target: p.target.toLowerCase(), value: String(p.value), data: p.call_data.toLowerCase(), nonce: p.nonce });
+}
+function sigInput(overrides = {}, key = 1n) {
+  return { tx_id: WALLET_ID, signer: address(key), signature: sign(storedHash(), key), sig_type: 'ecdsa', ...overrides };
+}
+function sigBackend(overrides = {}) {
+  return backend({ readVault: async (chainId, vault, signer) => ({
+    isOwner: signer === address(1n).toLowerCase() || signer === address(2n).toLowerCase(),
+    threshold: 2, ownerCount: 3, approved: false,
+  }), ...overrides });
+}
+
+test('a signature verified against the stored proposal is written once', async () => {
+  const calls = [];
+  const res = await request(sigInput(), sigBackend({ saveSignature: async w => { calls.push(w); return 2; } }), {}, '/signature');
+  assert.equal(res.status, 200);
+  assert.equal(JSON.parse(res.body), 2);
+  assert.deepEqual(calls[0], { fn: 'signed_add_signature', args: {
+    p_tx_id: WALLET_ID, p_signer: address(1n).toLowerCase(),
+    p_signature: sigInput().signature.toLowerCase(), p_sig_type: 'ecdsa' } });
+});
+
+test('a signature filed under another owner name is refused', async () => {
+  // Key 2's bytes, claimed as key 1. This is exactly what add_signature allowed.
+  const forged = { ...sigInput({}, 2n), signer: address(1n) };
+  const res = await request(forged, sigBackend({ saveSignature: async () => assert.fail('forged signer stored') }), {}, '/signature');
+  assert.equal(res.status, 400);
+});
+
+test('a signature over different terms than the stored proposal is refused', async () => {
+  const base = sigInput();
+  for (const p of [{ ...STORED, target: VAULT }, { ...STORED, value: '42' },
+                   { ...STORED, call_data: '0x5678' }, { ...STORED, nonce: 8 },
+                   { ...STORED, chain_id: 8453 }, { ...STORED, address: TARGET }]) {
+    const res = await request(base, sigBackend({ getProposal: async () => p,
+      saveSignature: async () => assert.fail('mismatched terms stored') }), {}, '/signature');
+    assert.ok(res.status === 400 || res.status === 403, `${JSON.stringify(p)} -> ${res.status}`);
+  }
+});
+
+test('a non-owner signature and a settled proposal are both refused', async () => {
+  const stranger = await request(sigInput({}, 3n), sigBackend({
+    saveSignature: async () => assert.fail('non-owner stored') }), {}, '/signature');
+  assert.equal(stranger.status, 403);
+  for (const status of ['executed', 'cancelled', 'stale']) {
+    const res = await request(sigInput(), sigBackend({ getProposal: async () => ({ ...STORED, status }),
+      saveSignature: async () => assert.fail('settled proposal signed') }), {}, '/signature');
+    assert.equal(res.status, 400, status);
+  }
+});
+
+test('an approval slot still needs the vault to say it was approved', async () => {
+  const slot = senderSlot(address(1n).toLowerCase());
+  const input = { tx_id: WALLET_ID, signer: address(1n), signature: slot, sig_type: 'approval' };
+  const denied = await request(input, sigBackend({
+    readVault: async () => ({ isOwner: true, threshold: 2, ownerCount: 3, approved: false }),
+    saveSignature: async () => assert.fail('unapproved slot stored') }), {}, '/signature');
+  assert.equal(denied.status, 403);
+  const ok = await request(input, sigBackend({
+    readVault: async () => ({ isOwner: true, threshold: 2, ownerCount: 3, approved: true }) }), {}, '/signature');
+  assert.equal(ok.status, 200);
+});
+
+// ── CHAIN-VERIFIED RECONCILIATION ─────────────────────────────────
+// No signature, and still not forgeable: the vault's nonce decides.
+test('a proposal the vault has passed can be retired, in either terminal state', async () => {
+  for (const state of ['cancelled', 'stale']) {
+    const calls = [];
+    // STORED.nonce is 7; the vault is at 9, so this proposal can never execute.
+    const res = await request({ tx_id: WALLET_ID, state },
+      backend({ saveReconcile: async w => { calls.push(w); } }), {}, '/reconcile');
+    assert.equal(res.status, 204, state);
+    assert.deepEqual(calls[0], { fn: 'reconcile_tx', args: { p_tx_id: WALLET_ID, p_state: state } });
+  }
+});
+
+test('a proposal still executable at the vault current nonce is refused', async () => {
+  for (const chainNonce of [7, 6, 0]) {
+    const res = await request({ tx_id: WALLET_ID, state: 'cancelled' },
+      backend({ readVaultNonce: async () => chainNonce,
+        saveReconcile: async () => assert.fail('live proposal retired') }), {}, '/reconcile');
+    assert.equal(res.status, 409, `chain nonce ${chainNonce}`);
+  }
+});
+
+test('reconciliation rejects bad shapes, unknown states and settled proposals', async () => {
+  const bad = [
+    { tx_id: 'nope', state: 'stale' },
+    { tx_id: WALLET_ID, state: 'executed' },
+    { tx_id: WALLET_ID, state: 'PWNED' },
+    { tx_id: WALLET_ID },
+    null,
+  ];
+  for (const b of bad) {
+    const res = await request(b, backend({ saveReconcile: async () => assert.fail('bad reconcile stored') }), {}, '/reconcile');
+    assert.equal(res.status, 400, JSON.stringify(b));
+  }
+  for (const status of ['executed', 'cancelled', 'stale']) {
+    const res = await request({ tx_id: WALLET_ID, state: 'stale' },
+      backend({ getProposal: async () => ({ ...STORED, status }),
+        saveReconcile: async () => assert.fail('settled proposal re-retired') }), {}, '/reconcile');
+    assert.equal(res.status, 400, status);
+  }
+});
+
+test('reconciliation fails closed when the chain cannot be read', async () => {
+  const res = await request({ tx_id: WALLET_ID, state: 'stale' },
+    backend({ readVaultNonce: async () => { throw new Error('secret rpc detail'); },
+      saveReconcile: async () => assert.fail('retired without a chain read') }), {}, '/reconcile');
+  assert.equal(res.status, 503);
+  assert.doesNotMatch(res.body, /secret/);
 });
