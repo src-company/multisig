@@ -571,7 +571,13 @@ CREATE POLICY tx_read ON transactions FOR SELECT USING (true);
 -- A token with claims but no address — one of the writer roles — matches
 -- neither branch and sees nothing, which is right: those exist to write.
 CREATE POLICY sigs_read ON signatures FOR SELECT USING (
-  nullif(current_setting('request.jwt.claims', true), '') IS NULL
+  -- "carries no address", not "carries no claims". PostgREST hands an
+  -- unauthenticated request an empty claims object rather than nothing at all,
+  -- so testing for absent claims matched no anonymous request and hid every row
+  -- from them — the signer list came back empty and tx_summary reported a
+  -- signature count of zero on proposals that plainly had signatures. Only a
+  -- token that names an address is scoped by one.
+  nullif(current_setting('request.jwt.claims', true), '')::jsonb->>'address' IS NULL
   OR EXISTS (
     SELECT 1 FROM transactions t
     JOIN owners o ON o.wallet_id = t.wallet_id
