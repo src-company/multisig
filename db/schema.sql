@@ -617,6 +617,19 @@ DECLARE
   i int;
   existed boolean;
 BEGIN
+  -- Reached only through api/proposals.cjs, which reads the vault's owners,
+  -- threshold, delay, executor and nonce from the contract and passes those —
+  -- so every field below describes a multisig that exists, and an address with
+  -- no code cannot be recorded at all.
+  --
+  -- The claim is checked as well as the grant. Being off anon's grant list is
+  -- the gate; this is the belt, and it is here because a roles.sql that never
+  -- got applied is not a hypothetical on this schema — it is how the proposal
+  -- verifier sat inert for two months. A database missing the role fails closed
+  -- rather than silently accepting anonymous registrations again.
+  IF coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb->>'role', '') <> 'registry_writer' THEN
+    RAISE EXCEPTION 'A verified vault registration is required' USING ERRCODE = '42501';
+  END IF;
   -- Bucketed on the caller rather than the vault: this is the one write that
   -- CREATES vaults, so a per-vault budget would be a fresh budget every time
   -- and no limit at all. Registration is a once-per-vault event (a deploy, or
@@ -1312,11 +1325,15 @@ DO $$ BEGIN
     REVOKE ALL ON FUNCTION signed_remove_signature(uuid, text) FROM anon;
     REVOKE ALL ON FUNCTION signed_add_signature(uuid, text, text, sig_type) FROM anon;
     REVOKE ALL ON FUNCTION reconcile_tx(uuid, text) FROM anon;
+    REVOKE ALL ON FUNCTION register_wallet(int, text, text, numeric, text[], smallint, int, text, bigint, text, text, text[], int) FROM anon;
   END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'action_writer') THEN
     GRANT EXECUTE ON FUNCTION signed_remove_signature(uuid, text) TO action_writer;
     GRANT EXECUTE ON FUNCTION signed_add_signature(uuid, text, text, sig_type) TO action_writer;
     GRANT EXECUTE ON FUNCTION reconcile_tx(uuid, text) TO action_writer;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'registry_writer') THEN
+    GRANT EXECUTE ON FUNCTION register_wallet(int, text, text, numeric, text[], smallint, int, text, bigint, text, text, text[], int) TO registry_writer;
   END IF;
 END $$;
 

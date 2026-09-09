@@ -134,14 +134,27 @@ superseded rows in a loop, so a wallet prompt would have fired on ordinary page
 loads. A proposal at the current nonce is refused with 409 however it is
 described.
 
+`POST /register` records a vault. It is the second chain-verified endpoint and
+the one that closes a storage attack rather than a tampering one: registration
+cannot require ownership, since a vault is registered by whoever opens it and
+that person may be reading rather than signing, so anonymous it was a row-
+creating endpoint with no ceiling on how many vaults may exist — exhaustion of a
+256 MB database with a rate limit in front of it rather than a defence.
+
+Nothing about a vault has to be taken on trust. The caller sends an address; the
+service reads `getOwners()`, `threshold()`, `delay()`, `executor()` and `nonce()`
+from the contract and records those. An address with no code answers none of
+them, so fabricated vaults cannot be recorded at all, and what stays registerable
+is the set of genuinely deployed multisigs — finite, and costing gas to grow. The
+deployer passed to `register_wallet` is a real owner read from the chain, never
+the caller's claim. Only a name and labels come from the request, and only while
+the vault is first recorded.
+
 Still anonymous, and not yet migrated: `mark_executed`, `mark_queued`,
-`record_approval`, `sync_wallet_state` and `register_wallet`. Do not describe the
-whole database as authenticated. The first two are chain-verifiable on the same
-pattern as `reconcile_tx` and are the obvious next step. `register_wallet` cannot
-require ownership at all — a vault is registered by whoever opens it, who may be
-looking rather than signing — so its exposure is bounded by refusing to write
-metadata onto a vault that already exists, and by the dashboard keeping only
-vaults whose on-chain owner set contains the viewer.
+`record_approval` and `sync_wallet_state`. Do not describe the whole database as
+authenticated. The first two are chain-verifiable on the same pattern as
+`reconcile_tx` — they assert something about the chain and are checked against an
+owner list — and are the obvious next step.
 
 What makes that a bounded problem rather than the same one is that every column
 those RPCs touch is re-derived from chain on the next load, so the damage is

@@ -42,6 +42,11 @@ const iface = new ethers.Interface([
   // Reconciliation reads both of these, and needs both. See verifyReconcile.
   'function nonce() view returns (uint32)',
   'function queued(bytes32) view returns (uint256)',
+  // Registration derives the whole vault record from these rather than
+  // accepting one. An address with no code answers none of them.
+  'function getOwners() view returns (address[])',
+  'function delay() view returns (uint32)',
+  'function executor() view returns (address)',
 ]);
 const BODY_LIMIT = 72 * 1024;
 class RequestError extends Error {
@@ -280,6 +285,52 @@ async function verifyReconcile(input, { getProposal, readVaultState }) {
   return { fn: 'reconcile_tx', args: { p_tx_id: input.tx_id, p_state: input.state } };
 }
 
+// Recording a vault.
+//
+// register_wallet has to be reachable without proving anything — a vault is
+// registered by whoever opens it, who may be reading rather than signing — so it
+// could not be signature-gated and was left anonymous. That made it an
+// unauthenticated row-creating endpoint on a 256 MB database with no ceiling on
+// how many vaults may exist, which is a storage exhaustion attack with a rate
+// limit in front of it rather than a defence.
+//
+// Nothing about a vault needs to be taken on trust, though: every field is
+// readable from the contract. The caller now supplies an address and nothing
+// else that matters, and an address with no code answers none of these calls, so
+// fabricated vaults cannot be recorded at all. What remains registerable is the
+// set of genuinely deployed multisigs, which is finite and costs gas to grow.
+async function verifyRegistration(input, { readVaultRecord }) {
+  check(input && typeof input === 'object' && !Array.isArray(input), 'Expected a registration');
+  check(Number.isInteger(input.chain_id) && input.chain_id > 0, 'Invalid chain id');
+  check(typeof input.address === 'string' && /^0x[0-9a-f]{40}$/i.test(input.address), 'Invalid vault address');
+  check(input.name == null || (typeof input.name === 'string' && input.name.length <= 128), 'Name is too long');
+  check(input.labels == null || (Array.isArray(input.labels) && input.labels.length <= 64
+    && input.labels.every(l => l == null || (typeof l === 'string' && l.length <= 64))), 'Invalid labels');
+  // Informational only, and bounded so they cannot be used as free storage.
+  const salt = input.salt == null ? '0' : String(input.salt);
+  check(/^(0|[1-9][0-9]{0,77})$/.test(salt), 'Invalid salt');
+  const block = Number.isInteger(input.block) && input.block >= 0 ? input.block : 0;
+  const tx = typeof input.tx === 'string' && /^0x[0-9a-f]{64}$/i.test(input.tx) ? input.tx.toLowerCase() : '';
+
+  const vault = input.address.toLowerCase();
+  const r = await readVaultRecord(input.chain_id, vault);
+  check(Array.isArray(r.owners) && r.owners.length > 0, 'No multisig at that address on that chain');
+  check(Number.isInteger(r.threshold) && r.threshold > 0, 'No multisig at that address on that chain');
+
+  return { fn: 'register_wallet', args: {
+    p_chain_id: input.chain_id, p_address: vault,
+    // A real current owner, so register_wallet's own writer test is satisfied by
+    // the chain rather than by a claim. Never the caller's address.
+    p_deployer: r.owners[0].toLowerCase(),
+    p_salt: salt,
+    p_owners: r.owners.map(o => o.toLowerCase()),
+    p_threshold: r.threshold, p_delay: r.delay, p_executor: r.executor.toLowerCase(),
+    p_block: block, p_tx: tx,
+    p_name: input.name ?? null, p_labels: input.labels ?? null,
+    p_nonce: r.nonce,
+  } };
+}
+
 function serviceToken(secret, role = 'proposal_writer') {
   const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
   const now = Math.floor(Date.now() / 1000);
@@ -390,6 +441,39 @@ function dependencies({ postgrestUrl, jwtSecret, rpcUrls }, fetcher = fetch) {
         queuedEta: BigInt(iface.decodeFunctionResult('queued', queuedRaw)[0]),
       };
     },
+    // Every field of a vault, read from the vault, at one block.
+    async readVaultRecord(chainId, address) {
+      const url = rpcUrls[chainId];
+      check(url, 'Unsupported chain');
+      const call = async (name, what) => {
+        const result = await json(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call',
+            params: [{ to: address, data: iface.encodeFunctionData(name) }, 'latest'] }) }, what);
+        // An address with no code returns '0x' rather than erroring, and that is
+        // the answer this endpoint exists to act on: not a multisig.
+        if (result.error || !result.result || result.result === '0x') return null;
+        try { return iface.decodeFunctionResult(name, result.result)[0]; } catch (_) { return null; }
+      };
+      const [owners, threshold, delay, executor, nonce] = await Promise.all([
+        call('getOwners', `rpc:getOwners:chain${chainId}`),
+        call('threshold', `rpc:threshold:chain${chainId}`),
+        call('delay', `rpc:delay:chain${chainId}`),
+        call('executor', `rpc:executor:chain${chainId}`),
+        call('nonce', `rpc:nonce:chain${chainId}`),
+      ]);
+      if (!owners || threshold == null) return { owners: null };
+      return {
+        owners: Array.from(owners), threshold: Number(threshold),
+        delay: Number(delay ?? 0), executor: String(executor ?? ZERO),
+        nonce: Number(nonce ?? 0),
+      };
+    },
+    async saveRegistration({ fn, args }) {
+      return json(`${postgrestUrl}/rpc/${fn}`, { method: 'POST', headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${serviceToken(jwtSecret, 'registry_writer')}`,
+      }, body: JSON.stringify(args) }, 'saveRegistration');
+    },
     async saveReconcile({ fn, args }) {
       return this.saveMetadata({ fn, args }, 'action_writer');
     },
@@ -432,7 +516,7 @@ function createHandler(deps, allowedOrigins = []) {
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     }
     if (req.url === '/health' && req.method === 'GET') { res.writeHead(200); res.end('ok'); return; }
-    if (!['/proposals', '/metadata', '/action', '/signature', '/reconcile'].includes(req.url)) { res.writeHead(404); res.end(); return; }
+    if (!['/proposals', '/metadata', '/action', '/signature', '/reconcile', '/register'].includes(req.url)) { res.writeHead(404); res.end(); return; }
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
     if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
     if (active >= 32) { res.writeHead(503); res.end(); return; }
@@ -459,6 +543,13 @@ function createHandler(deps, allowedOrigins = []) {
         await deps.saveAction(await verifyAction(input, deps));
         res.writeHead(204);
         res.end();
+        return;
+      }
+      if (req.url === '/register') {
+        const id = await deps.saveRegistration(await verifyRegistration(input, deps));
+        if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id)) throw new RequestError(503, 'Vault was not registered');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(id));
         return;
       }
       if (req.url === '/reconcile') {
@@ -499,4 +590,4 @@ if (require.main === module) {
   server.listen(Number(PORT), '0.0.0.0');
 }
 
-module.exports = { verifyProposal, verifyMetadata, verifyAction, verifySignature, verifyReconcile, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, ACTION_TYPES, iface };
+module.exports = { verifyProposal, verifyMetadata, verifyAction, verifySignature, verifyReconcile, verifyRegistration, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, ACTION_TYPES, iface };

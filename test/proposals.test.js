@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { createECDH, createHmac } = require('node:crypto');
 const { Readable } = require('node:stream');
-const { verifyProposal, verifyMetadata, verifyAction, verifySignature, verifyReconcile, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, ACTION_TYPES, iface } = require('../api/proposals.cjs');
+const { verifyProposal, verifyMetadata, verifyAction, verifySignature, verifyReconcile, verifyRegistration, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, ACTION_TYPES, iface } = require('../api/proposals.cjs');
 
 const WALLET_ID = '11111111-1111-4111-8111-111111111111';
 const VAULT = '0x2222222222222222222222222222222222222222';
@@ -42,6 +42,8 @@ function backend(overrides = {}) {
     readVault: async () => ({ isOwner: true, threshold: 2, ownerCount: 3, approved: false }),
     saveProposal: async () => WALLET_ID, saveMetadata: async () => {}, saveAction: async () => {},
     saveSignature: async () => 2, saveReconcile: async () => {}, readVaultState: async () => ({ nonce: 9, queuedEta: 0n }),
+    saveRegistration: async () => WALLET_ID,
+    readVaultRecord: async () => ({ owners: [address(1n), address(2n)], threshold: 2, delay: 0, executor: ZERO_ADDR, nonce: 5 }),
     getProposal: async () => ({ ...STORED }), ...overrides };
 }
 async function request(body, deps = backend(), headers = {}, url = '/proposals', method = 'POST') {
@@ -513,6 +515,71 @@ test('reconciliation fails closed when the chain cannot be read', async () => {
   const res = await request({ tx_id: WALLET_ID, state: 'stale' },
     backend({ readVaultState: async () => { throw new Error('secret rpc detail'); },
       saveReconcile: async () => assert.fail('retired without a chain read') }), {}, '/reconcile');
+  assert.equal(res.status, 503);
+  assert.doesNotMatch(res.body, /secret/);
+});
+
+// ── CHAIN-DERIVED REGISTRATION ────────────────────────────────────
+// The caller supplies an address. Everything that describes the vault is read
+// from the vault, so a fabricated address cannot be recorded at all — which is
+// what takes the storage-exhaustion primitive away.
+test('a vault record is built from the chain, not from the request', async () => {
+  const calls = [];
+  const res = await request({
+    chain_id: 1, address: VAULT,
+    // All of this is either ignored or bounded. None of it describes the vault.
+    owners: [TARGET], threshold: 1, delay: 999, executor: TARGET, nonce: 4242,
+    deployer: TARGET, name: 'TREASURY', labels: ['A', 'B'],
+  }, backend({ saveRegistration: async w => { calls.push(w); return WALLET_ID; } }), {}, '/register');
+  assert.equal(res.status, 200);
+  assert.equal(JSON.parse(res.body), WALLET_ID);
+  const a = calls[0].args;
+  assert.equal(calls[0].fn, 'register_wallet');
+  assert.deepEqual(a.p_owners, [address(1n).toLowerCase(), address(2n).toLowerCase()]);
+  assert.equal(a.p_threshold, 2);
+  assert.equal(a.p_delay, 0);
+  assert.equal(a.p_nonce, 5);
+  assert.equal(a.p_executor, ZERO_ADDR);
+  // The deployer is a real chain owner, never the caller's claim.
+  assert.equal(a.p_deployer, address(1n).toLowerCase());
+  assert.notEqual(a.p_deployer, TARGET.toLowerCase());
+  // Name and labels do pass through: the chain has no opinion about them, and
+  // register_wallet only honours them while the vault is first recorded.
+  assert.equal(a.p_name, 'TREASURY');
+  assert.deepEqual(a.p_labels, ['A', 'B']);
+});
+
+test('an address with no multisig on it cannot be registered', async () => {
+  for (const record of [{ owners: null }, { owners: [], threshold: 2 },
+                        { owners: [address(1n)], threshold: 0 },
+                        { owners: [address(1n)], threshold: null }]) {
+    const res = await request({ chain_id: 1, address: VAULT },
+      backend({ readVaultRecord: async () => record,
+        saveRegistration: async () => assert.fail('phantom vault recorded') }), {}, '/register');
+    assert.equal(res.status, 400, JSON.stringify(record));
+  }
+});
+
+test('registration rejects bad shapes and oversized metadata', async () => {
+  const bad = [
+    { chain_id: 1, address: 'nope' },
+    { chain_id: 0, address: VAULT },
+    { chain_id: '1', address: VAULT },
+    { chain_id: 1, address: VAULT, name: 'x'.repeat(129) },
+    { chain_id: 1, address: VAULT, labels: ['x'.repeat(65)] },
+    { chain_id: 1, address: VAULT, salt: '-1' },
+    null,
+  ];
+  for (const b of bad) {
+    const res = await request(b, backend({ saveRegistration: async () => assert.fail('bad registration stored') }), {}, '/register');
+    assert.equal(res.status, 400, JSON.stringify(b));
+  }
+});
+
+test('registration fails closed when the chain cannot be read', async () => {
+  const res = await request({ chain_id: 1, address: VAULT },
+    backend({ readVaultRecord: async () => { throw new Error('secret rpc detail'); },
+      saveRegistration: async () => assert.fail('recorded without a chain read') }), {}, '/register');
   assert.equal(res.status, 503);
   assert.doesNotMatch(res.body, /secret/);
 });

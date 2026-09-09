@@ -63,6 +63,21 @@ REVOKE ALL ON FUNCTION signed_remove_signature(uuid, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION signed_add_signature(uuid, text, text, sig_type) FROM PUBLIC;
 REVOKE ALL ON FUNCTION reconcile_tx(uuid, text) FROM PUBLIC;
 
+-- Recording a vault. Its own role again: registration writes rows nothing else
+-- writes, and a token minted to register a vault must not reach a signature or
+-- a name. api/proposals.cjs reads the vault's whole configuration from the
+-- contract before calling, so an address with no code cannot be recorded.
+DO $$ BEGIN
+  CREATE ROLE registry_writer NOLOGIN;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+GRANT registry_writer TO authenticator;
+GRANT USAGE ON SCHEMA public TO registry_writer;
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM registry_writer;
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM registry_writer;
+GRANT EXECUTE ON FUNCTION register_wallet(int, text, text, numeric, text[], smallint, int, text, bigint, text, text, text[], int) TO registry_writer;
+REVOKE ALL ON FUNCTION register_wallet(int, text, text, numeric, text[], smallint, int, text, bigint, text, text, text[], int) FROM PUBLIC;
+
 -- Set / rotate the password out of band (keep it OUT of version control):
 --   ALTER ROLE authenticator WITH PASSWORD '<strong-random-password>';
 -- Then point PGRST_DB_URI at:
@@ -131,7 +146,6 @@ TO anon;
 REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION
-  register_wallet(int, text, text, numeric, text[], smallint, int, text, bigint, text, text, text[], int),
   mark_executed(uuid, bigint, text, text),
   -- Five arguments, matching schema.sql. This read `mark_queued(uuid, bigint,
   -- bigint, text)` — the signature schema.sql drops — so on a fresh database
@@ -185,6 +199,17 @@ REVOKE EXECUTE ON FUNCTION add_signature(uuid, text, text, sig_type) FROM anon, 
 -- and found the proposal strictly behind it — one that can never execute again,
 -- so retiring it takes nothing from anyone.
 REVOKE EXECUTE ON FUNCTION cancel_tx(uuid, text), prune_tx(uuid, text) FROM anon, PUBLIC;
+
+-- register_wallet leaves too, and for a different reason from the rest: it never
+-- could be signature-gated, since a vault is registered by whoever opens it and
+-- that person may be reading rather than signing. Anonymous, it was a row-
+-- creating endpoint with no ceiling on how many vaults may exist — storage
+-- exhaustion with a rate limit in front of it rather than a defence. The
+-- verifier now reads the vault's configuration from the contract, so only
+-- genuinely deployed multisigs can be recorded, and those cost gas to create.
+REVOKE EXECUTE ON FUNCTION
+  register_wallet(int, text, text, numeric, text[], smallint, int, text, bigint, text, text, text[], int)
+FROM anon, PUBLIC;
 
 -- ── DEFAULTS ─────────────────────────────────────────────────────
 -- Keep future objects from leaking to anon unless granted explicitly.

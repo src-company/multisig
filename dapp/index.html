@@ -10087,16 +10087,39 @@ function dbError(label, err) {
 // what every caller that registers a vault it is looking at wants. A deploy walk
 // passes it explicitly: it is registering a vault on a chain it named, and the
 // selected chain is a side effect of that walk rather than the fact being recorded.
+// Registration goes through the verifier, which reads the vault's owners,
+// threshold, delay, executor and nonce from the contract and records those. The
+// arguments this function still takes for that state are no longer sent: the
+// caller read them from the same chain a moment ago, but a caller's word is not
+// what the record should be built from, and an address with no code answers none
+// of those calls — which is what stops fabricated vaults being recorded at all.
+//
+// Kept in the signature rather than removed because every call site reads them
+// anyway and dropping thirteen arguments across two call paths is churn with a
+// bug in it. What is sent is the address, the chain, and the fields the chain
+// has no opinion about: a name, labels, and the deploy's own salt and receipt.
 async function dbRegisterWallet(addr, deployer, salt, ownerList, thresh, del, exec, block, txHash, name, labels, nonce, chainId) {
-  const { data, error } = await sb.rpc('register_wallet', {
-    p_chain_id: chainId || S.chainId, p_address: addr, p_deployer: deployer,
-    p_salt: salt.toString(), p_owners: ownerList, p_threshold: thresh,
-    p_delay: del, p_executor: exec, p_block: block, p_tx: txHash,
-    p_name: name || null, p_labels: labels || null,
-    p_nonce: nonce || 0
-  });
-  if(error) console.error('DB register:', error);
-  return data;
+  let res;
+  try {
+    res = await pgFetch('register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({
+        chain_id: chainId || S.chainId,
+        address: addr,
+        salt: salt == null ? '0' : salt.toString(),
+        block: block || 0,
+        tx: txHash || null,
+        name: name || null,
+        labels: labels || null,
+      }),
+    }, PROPOSAL_API_URL);
+  } catch(e) { console.error('DB register:', e); return null; }
+  const text = await res.text();
+  let result;
+  try { result = JSON.parse(text); } catch(_) {}
+  if(!res.ok) { console.error('DB register:', res.status, text); return null; }
+  return typeof result === 'string' && /^[0-9a-f-]{36}$/i.test(result) ? result : null;
 }
 
 // Matched case-insensitively on the address. A miss here is not harmless: the
