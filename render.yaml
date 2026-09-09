@@ -81,8 +81,14 @@ services:
           type: web
           name: multisig-postgrest
           envVarKey: PGRST_JWT_SECRET
+      # Every origin this app is actually published under. The three .wei names
+      # were missing, and they are the IPFS deployment — the one the README
+      # sends people to — so a proposal raised there failed its preflight and
+      # surfaced as "TypeError: Failed to fetch", which names neither CORS nor
+      # this list. They resolve through a contenthash only the .wei name's owner
+      # can set, so they are no more open than the hostnames beside them.
       - key: PROPOSAL_ORIGINS
-        value: https://www.multisig.software,https://multisig.software,https://multisig-dapp.onrender.com
+        value: https://www.multisig.software,https://multisig.software,https://multisig-dapp.onrender.com,https://multisig.wei.limo,https://multisig.wei.is,https://multisig.wei.domains
       # Server-controlled RPC allowlist. Replace with trusted provider URLs in
       # the dashboard if desired; requests cannot supply a provider or owner set.
       - key: PROPOSAL_RPC_URLS
