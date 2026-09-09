@@ -22,6 +22,12 @@ const META_TYPES = { Metadata: [
   { name: 'vault', type: 'address' }, { name: 'subject', type: 'address' },
   { name: 'value', type: 'string' }, { name: 'issuedAt', type: 'uint64' },
 ] };
+// Retracting a signature is not a metadata edit and must not share its type: a
+// signature over one must never be presentable as the other.
+const ACTION_TYPES = { Action: [
+  { name: 'vault', type: 'address' }, { name: 'action', type: 'string' },
+  { name: 'txHash', type: 'bytes32' }, { name: 'issuedAt', type: 'uint64' },
+] };
 const ZERO = '0x0000000000000000000000000000000000000000';
 // A signature that never expires is a standing permission to rewrite a label.
 // Five minutes is long enough for a hardware wallet to be found and confirmed,
@@ -132,6 +138,41 @@ async function verifyMetadata(input, { getWallet, readVault }, now = Date.now())
     : { fn: 'set_owner_label', args: { p_wallet_id: input.wallet_id, p_address: subject.toLowerCase(), p_label: input.value } };
 }
 
+// Retracting one's own signature from a live proposal. The signer is recovered,
+// never supplied, and the row deleted is the recovered signer's own — so this
+// cannot be used to strip a co-signer, which the RPC it replaces allowed.
+async function verifyAction(input, { getProposal, readVault }, now = Date.now()) {
+  check(input && typeof input === 'object' && !Array.isArray(input), 'Expected an action');
+  check(typeof input.tx_id === 'string' && /^[0-9a-f-]{36}$/i.test(input.tx_id), 'Invalid transaction id');
+  check(input.action === 'unsign', 'Unsupported action');
+  check(typeof input.signature === 'string' && /^0x[0-9a-f]{130}$/i.test(input.signature), 'An owner signature is required');
+  check(/(1b|1c)$/i.test(input.signature), 'Noncanonical signature');
+  check(Number.isInteger(input.issued_at) && input.issued_at > 0, 'Invalid issue time');
+  check(Math.abs(Math.floor(now / 1000) - input.issued_at) <= META_WINDOW_SECONDS, 'Signature has expired');
+
+  // The vault and the digest come from the stored proposal, not the request, so
+  // a signature cannot be aimed at a different vault than the one it names.
+  const proposal = await getProposal(input.tx_id);
+  check(proposal && /^0x[0-9a-f]{40}$/i.test(proposal.address || ''), 'Proposal not found');
+  check(/^0x[0-9a-f]{64}$/i.test(proposal.tx_hash || ''), 'Proposal has no transaction hash');
+  const vault = proposal.address.toLowerCase();
+  const txHash = proposal.tx_hash.toLowerCase();
+  const hash = ethers.TypedDataEncoder.hash(
+    { name: 'Multisig', version: '1', chainId: proposal.chain_id, verifyingContract: vault },
+    ACTION_TYPES,
+    { vault, action: input.action, txHash, issuedAt: input.issued_at },
+  );
+  let signer;
+  try { signer = ethers.recoverAddress(hash, input.signature); } catch (_) {}
+  check(signer, 'Signature could not be recovered');
+  signer = signer.toLowerCase();
+
+  const state = await readVault(proposal.chain_id, vault, signer, hash, 'ecdsa');
+  if (!state.isOwner) throw new RequestError(403, 'Signer is not a current on-chain owner');
+
+  return { fn: 'signed_remove_signature', args: { p_tx_id: input.tx_id, p_signer: signer } };
+}
+
 function serviceToken(secret, role = 'proposal_writer') {
   const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
   const now = Math.floor(Date.now() / 1000);
@@ -200,14 +241,28 @@ function dependencies({ postgrestUrl, jwtSecret, rpcUrls }, fetcher = fetch) {
         'Content-Type': 'application/json', Authorization: `Bearer ${serviceToken(jwtSecret)}`,
       }, body: JSON.stringify(proposal) }, 'saveProposal');
     },
-    // The function name is chosen by verifyMetadata, never by the request, so
-    // this cannot be steered at another RPC by anything a caller sends.
-    async saveMetadata({ fn, args }) {
+    // The vault a proposal belongs to, so an action's typed data is built from
+    // the stored row rather than from anything the request supplied.
+    async getProposal(id) {
+      const rows = await json(
+        `${postgrestUrl}/transactions?select=tx_hash,chain_id,wallets(address)&id=eq.${encodeURIComponent(id)}&limit=1`,
+        undefined, 'getProposal');
+      const row = rows && rows[0];
+      return row ? { tx_hash: row.tx_hash, chain_id: row.chain_id, address: row.wallets && row.wallets.address } : null;
+    },
+    async saveAction({ fn, args }) {
+      return this.saveMetadata({ fn, args }, 'action_writer');
+    },
+    // The function name is chosen by verifyMetadata/verifyAction, never by the
+    // request, so this cannot be steered at another RPC by anything a caller
+    // sends. The role travels with it for the same reason: a token minted to
+    // rename a vault must not reach the one that deletes a signature.
+    async saveMetadata({ fn, args }, role = 'metadata_writer') {
       const response = await fetcher(`${postgrestUrl}/rpc/${fn}`, {
         method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10000),
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${serviceToken(jwtSecret, 'metadata_writer')}`,
+          Authorization: `Bearer ${serviceToken(jwtSecret, role)}`,
         },
         body: JSON.stringify(args),
       });
@@ -231,7 +286,7 @@ function createHandler(deps, allowedOrigins = []) {
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     }
     if (req.url === '/health' && req.method === 'GET') { res.writeHead(200); res.end('ok'); return; }
-    if (req.url !== '/proposals' && req.url !== '/metadata') { res.writeHead(404); res.end(); return; }
+    if (req.url !== '/proposals' && req.url !== '/metadata' && req.url !== '/action') { res.writeHead(404); res.end(); return; }
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
     if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
     if (active >= 32) { res.writeHead(503); res.end(); return; }
@@ -250,6 +305,12 @@ function createHandler(deps, allowedOrigins = []) {
       catch (_) { throw new RequestError(400, 'Invalid JSON'); }
       if (req.url === '/metadata') {
         await deps.saveMetadata(await verifyMetadata(input, deps));
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+      if (req.url === '/action') {
+        await deps.saveAction(await verifyAction(input, deps));
         res.writeHead(204);
         res.end();
         return;
@@ -280,4 +341,4 @@ if (require.main === module) {
   server.listen(Number(PORT), '0.0.0.0');
 }
 
-module.exports = { verifyProposal, verifyMetadata, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, iface };
+module.exports = { verifyProposal, verifyMetadata, verifyAction, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, ACTION_TYPES, iface };

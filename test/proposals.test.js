@@ -2,12 +2,13 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { createECDH, createHmac } = require('node:crypto');
 const { Readable } = require('node:stream');
-const { verifyProposal, verifyMetadata, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, iface } = require('../api/proposals.cjs');
+const { verifyProposal, verifyMetadata, verifyAction, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, ACTION_TYPES, iface } = require('../api/proposals.cjs');
 
 const WALLET_ID = '11111111-1111-4111-8111-111111111111';
 const VAULT = '0x2222222222222222222222222222222222222222';
 const TARGET = '0x3333333333333333333333333333333333333333';
 const N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
+const TX_HASH = '0x' + '5'.repeat(64);
 const hex = x => x.toString(16).padStart(64, '0');
 function publicKey(key) {
   const curve = createECDH('secp256k1');
@@ -37,7 +38,8 @@ function proposal(overrides = {}, key = 1n) {
 function backend(overrides = {}) {
   return { getWallet: async () => ({ chain_id: 1, address: VAULT }),
     readVault: async () => ({ isOwner: true, threshold: 2, ownerCount: 3, approved: false }),
-    saveProposal: async () => WALLET_ID, saveMetadata: async () => {}, ...overrides };
+    saveProposal: async () => WALLET_ID, saveMetadata: async () => {}, saveAction: async () => {},
+    getProposal: async () => ({ tx_hash: TX_HASH, chain_id: 1, address: VAULT }), ...overrides };
 }
 async function request(body, deps = backend(), headers = {}, url = '/proposals', method = 'POST') {
   const req = Readable.from([Buffer.from(typeof body === 'string' ? body : JSON.stringify(body))]);
@@ -289,4 +291,80 @@ test('metadata length ceilings match the columns, and the RPC is never caller-ch
   // A caller-supplied fn is ignored: verifyMetadata returns the name itself.
   const write = await verifyMetadata({ ...metadata(), fn: 'propose_tx' }, backend());
   assert.equal(write.fn, 'set_wallet_name');
+});
+
+// ── SIGNED UNSIGN ─────────────────────────────────────────────────
+// Withdrawing a signature was reachable by anyone willing to name an owner,
+// which is enough to hold a vault below quorum indefinitely. The signer is now
+// recovered, and the row removed is that signer's own.
+function actionHash(a) {
+  return ethers.TypedDataEncoder.hash(
+    { name: 'Multisig', version: '1', chainId: a.chainId ?? 1, verifyingContract: (a.vault ?? VAULT).toLowerCase() },
+    ACTION_TYPES,
+    { vault: (a.vault ?? VAULT).toLowerCase(), action: a.action, txHash: (a.txHash ?? TX_HASH).toLowerCase(), issuedAt: a.issued_at });
+}
+function action(overrides = {}, key = 1n) {
+  const a = { tx_id: WALLET_ID, action: 'unsign', issued_at: Math.floor(Date.now() / 1000), ...overrides };
+  a.signature = sign(actionHash({ ...a, txHash: overrides.txHash, vault: overrides.vault, chainId: overrides.chainId }), key);
+  delete a.chainId; delete a.vault; delete a.txHash;
+  return a;
+}
+function actionBackend(overrides = {}) {
+  return backend({ readVault: async (chainId, vault, signer) => ({
+    isOwner: signer === address(1n).toLowerCase(), threshold: 2, ownerCount: 3, approved: false,
+  }), ...overrides });
+}
+
+test('a signed unsign removes only the recovered signer own signature', async () => {
+  const calls = [];
+  const res = await request(action(), actionBackend({ saveAction: async w => { calls.push(w); } }), {}, '/action');
+  assert.equal(res.status, 204);
+  assert.deepEqual(calls[0], { fn: 'signed_remove_signature', args: { p_tx_id: WALLET_ID, p_signer: address(1n).toLowerCase() } });
+});
+
+test('an unsign cannot be aimed at another owner signature', async () => {
+  // There is no field to aim with: p_signer is the recovered address, so a
+  // valid signature from key 2 can only ever delete key 2's own row.
+  const other = action({}, 2n);
+  const res = await request(other, actionBackend({ saveAction: async () => assert.fail('non-owner unsigned') }), {}, '/action');
+  assert.equal(res.status, 403);
+});
+
+test('forged, malformed and expired unsign requests never reach storage', async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const cases = [
+    { ...action(), signature: '0x' + '11'.repeat(65) },
+    { ...action(), signature: undefined },
+    { ...action(), action: 'cancel' },
+    { ...action(), issued_at: now - 301 },
+    { ...action(), issued_at: now + 301 },
+    { ...action(), tx_id: 'not-a-uuid' },
+  ];
+  for (const c of cases) {
+    const res = await request(c, actionBackend({ saveAction: async () => assert.fail('bad action stored') }), {}, '/action');
+    assert.ok(res.status === 400 || res.status === 403, `${JSON.stringify(c.action || c.issued_at)} -> ${res.status}`);
+  }
+});
+
+test('an unsign signature is bound to the stored proposal, not the request', async () => {
+  // The vault and digest come from getProposal. A proposal stored against a
+  // different vault or digest moves the domain, so the same bytes stop matching.
+  for (const p of [{ tx_hash: TX_HASH, chain_id: 1, address: TARGET },
+                   { tx_hash: '0x' + '6'.repeat(64), chain_id: 1, address: VAULT },
+                   { tx_hash: TX_HASH, chain_id: 8453, address: VAULT }]) {
+    const res = await request(action(), actionBackend({ getProposal: async () => p,
+      saveAction: async () => assert.fail('rebound action stored') }), {}, '/action');
+    assert.ok(res.status === 400 || res.status === 403, `${JSON.stringify(p)} -> ${res.status}`);
+  }
+  const missing = await request(action(), actionBackend({ getProposal: async () => null,
+    saveAction: async () => assert.fail('unknown proposal stored') }), {}, '/action');
+  assert.equal(missing.status, 400);
+});
+
+test('a metadata signature cannot be replayed as an unsign', async () => {
+  const m = metadata();
+  const res = await request({ tx_id: WALLET_ID, action: 'unsign',
+    issued_at: Math.floor(Date.now() / 1000), signature: m.signature },
+    actionBackend({ saveAction: async () => assert.fail('metadata signature reused') }), {}, '/action');
+  assert.ok(res.status === 400 || res.status === 403, String(res.status));
 });

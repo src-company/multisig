@@ -1198,6 +1198,49 @@ DO $$ BEGIN
   END IF;
 END $$;
 
+-- ── VERIFIED UNSIGN ──────────────────────────────────────────────
+-- remove_signature takes the signer's address as an argument and checks it
+-- against the owner list, so anyone willing to name an owner could delete that
+-- owner's signature from a live proposal — repeatedly, holding a vault below
+-- quorum for as long as they cared to. Nothing is stolen by it and the next
+-- signature repairs it, but "the co-signers cannot reach quorum" is the outcome
+-- a griefer is usually after, and it was available to anyone.
+--
+-- This one carries no owner list check at all, because it does not need one:
+-- api/proposals.cjs recovers the signer from an EIP-712 Action signature and
+-- confirms isOwner() against the vault before calling. It deletes only the
+-- signature belonging to the address that signed the request, which is stricter
+-- than the function it replaces — that one let any owner remove any other
+-- owner's signature, and no part of this app ever wanted to.
+CREATE OR REPLACE FUNCTION signed_remove_signature(
+  p_tx_id uuid, p_signer text
+) RETURNS void AS $$
+BEGIN
+  IF coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb->>'role', '') <> 'action_writer' THEN
+    RAISE EXCEPTION 'A verified owner signature is required' USING ERRCODE = '42501';
+  END IF;
+  PERFORM rate_gate('sig:' || p_tx_id::text || ':' || client_ip(), 120, interval '1 minute');
+  -- Live proposals only, and case-insensitively, for the reasons
+  -- remove_signature's own comment gives.
+  DELETE FROM signatures s
+  USING transactions t
+  WHERE s.tx_id = p_tx_id
+    AND t.id = s.tx_id
+    AND lower(s.signer) = lower(p_signer)
+    AND t.status IN ('proposed', 'executing', 'queued');
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+REVOKE ALL ON FUNCTION signed_remove_signature(uuid, text) FROM PUBLIC;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    REVOKE ALL ON FUNCTION signed_remove_signature(uuid, text) FROM anon;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'action_writer') THEN
+    GRANT EXECUTE ON FUNCTION signed_remove_signature(uuid, text) TO action_writer;
+  END IF;
+END $$;
+
 -- ── DEPLOYMENT STATUS ────────────────────────────────────────────
 -- Two files have to be applied by hand, in order, and nothing enforces either.
 -- The app checked for drift by reading one column that a recent migration had

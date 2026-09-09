@@ -44,6 +44,21 @@ GRANT EXECUTE ON FUNCTION set_owner_label(uuid, text, text) TO metadata_writer;
 REVOKE ALL ON FUNCTION set_wallet_name(uuid, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION set_owner_label(uuid, text, text) FROM PUBLIC;
 
+-- Retracting a signature. Separate again from the two above, so a token minted
+-- to rename a vault cannot delete a signature: these roles exist to bound what
+-- a stolen or mis-issued token can reach, and that only works if each holds one
+-- kind of write.
+DO $$ BEGIN
+  CREATE ROLE action_writer NOLOGIN;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+GRANT action_writer TO authenticator;
+GRANT USAGE ON SCHEMA public TO action_writer;
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM action_writer;
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM action_writer;
+GRANT EXECUTE ON FUNCTION signed_remove_signature(uuid, text) TO action_writer;
+REVOKE ALL ON FUNCTION signed_remove_signature(uuid, text) FROM PUBLIC;
+
 -- Set / rotate the password out of band (keep it OUT of version control):
 --   ALTER ROLE authenticator WITH PASSWORD '<strong-random-password>';
 -- Then point PGRST_DB_URI at:
@@ -123,7 +138,6 @@ GRANT EXECUTE ON FUNCTION
   mark_queued(uuid, bigint, bigint, text, text),
   cancel_tx(uuid, text),
   prune_tx(uuid, text),
-  remove_signature(uuid, text),
   record_approval(uuid, int, text, text, boolean, bigint, text),
   sync_wallet_state(uuid, text, smallint, smallint, int, text, int, text[]),
   -- Read-only, and the one call that can tell an operator this file was never
@@ -148,6 +162,13 @@ REVOKE EXECUTE ON FUNCTION
   update_wallet_name(uuid, text, text),
   update_owner_label(uuid, text, text, text)
 FROM anon, PUBLIC;
+
+-- remove_signature leaves the list for the same reason, one step behind. It
+-- deletes a signature from a live proposal on the strength of a named owner, so
+-- an anonymous caller could hold a vault below quorum indefinitely. Its
+-- replacement, signed_remove_signature, removes only the signature belonging to
+-- the address that signed the request.
+REVOKE EXECUTE ON FUNCTION remove_signature(uuid, text) FROM anon, PUBLIC;
 
 -- ── DEFAULTS ─────────────────────────────────────────────────────
 -- Keep future objects from leaking to anon unless granted explicitly.

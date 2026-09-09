@@ -3201,6 +3201,12 @@ const EIP712_META_TYPES = { Metadata: [
   { name:'vault', type:'address' }, { name:'subject', type:'address' },
   { name:'value', type:'string' }, { name:'issuedAt', type:'uint64' },
 ]};
+// Withdrawing a signature. Its own primary type again, so none of these three
+// can be replayed as either of the others.
+const EIP712_ACTION_TYPES = { Action: [
+  { name:'vault', type:'address' }, { name:'action', type:'string' },
+  { name:'txHash', type:'bytes32' }, { name:'issuedAt', type:'uint64' },
+]};
 const META_ZERO = '0x0000000000000000000000000000000000000000';
 
 // ── PROVIDER STATE ────────────────────────────────────────────────
@@ -10482,9 +10488,38 @@ async function dbUpdateWalletName(v, name) {
   return dbWriteMetadata(v, 'name', null, name);
 }
 
-async function dbRemoveSig(txId, signerAddr) {
-  const { error } = await sb.rpc('remove_signature', { p_tx_id: txId, p_signer: signerAddr });
-  if(error) console.error('DB remove sig:', error);
+// Retracting a signature is signed, like adding one. The RPC this replaces took
+// the signer's address as an argument and checked it against the owner list, so
+// anyone able to name an owner could delete that owner's signature from a live
+// proposal and keep doing it — which holds a vault below quorum without ever
+// touching the chain. The verifier recovers the signer instead, and the row it
+// removes is that signer's own.
+//
+// One prompt, on an action the operator explicitly asked for, having just been
+// prompted to create the signature being withdrawn.
+async function dbRemoveSig(txId, signerAddr, v, txHash) {
+  const signer = window._signer;
+  const vault = v && v.address;
+  if(!signer || !vault) { console.error('DB remove sig: no signer or vault'); return false; }
+  // The digest is what the verifier rebuilds its typed data around, and it reads
+  // the stored proposal for it rather than trusting this — so a mismatch is
+  // refused rather than acted on. Passed in because the caller already has it.
+  if(!/^0x[0-9a-fA-F]{64}$/.test(txHash || '')) { console.error('DB remove sig: no digest for', txId); return false; }
+  const issuedAt = Math.floor(Date.now() / 1000);
+  const domain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: vault };
+  const msg = { vault: vault.toLowerCase(), action: 'unsign', txHash: txHash.toLowerCase(), issuedAt };
+  let sig;
+  try { sig = normalizeSigV(await signer.signTypedData(domain, EIP712_ACTION_TYPES, msg)); }
+  catch(e) { console.error('DB remove sig sign:', e); return false; }
+  try {
+    const res = await pgFetch('action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tx_id: txId, action: 'unsign', issued_at: issuedAt, signature: sig }),
+    }, PROPOSAL_API_URL);
+    if(!res.ok) { console.error('DB remove sig:', res.status); return false; }
+    return true;
+  } catch(e) { console.error('DB remove sig:', e); return false; }
 }
 
 async function dbRecordApproval(walletId, chainId, owner, txHash, approved, blockNumber, approvalTx) {
@@ -13076,7 +13111,7 @@ async function prodUnsign(vi, nonce) {
   }
 
   // Remove from DB
-  if(tx.dbId) await dbRemoveSig(tx.dbId, connectedAddress);
+  if(tx.dbId) await dbRemoveSig(tx.dbId, connectedAddress, v, tx.txHash);
 
   flash(wasOnchainApproval ? `REVOKED #${nonce} (ON-CHAIN)` : `UNSIGNED #${nonce}`);
   render();

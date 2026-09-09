@@ -37,6 +37,25 @@ not a standing permission to rewrite a label. A replay inside that window
 rewrites the same field with the same value. This costs one wallet prompt per
 rename or relabel, which is new: these edits used to be unauthenticated.
 
+## Signed unsign
+
+`POST /action` takes `{ tx_id, action: "unsign", issued_at, signature }` and
+retracts the caller's own signature from a live proposal. The vault and the
+digest are read from the stored proposal, never taken from the request, so a
+signature cannot be aimed at a vault it does not name. The service recovers the
+signer from an EIP-712 `Action` signature, confirms `isOwner()` on chain, and
+calls `signed_remove_signature` with an `action_writer` token.
+
+`Action` is a third primary type alongside `Execute` and `Metadata`, so none of
+the three can be replayed as another, and `issued_at` is bounded the same five
+minutes either side of service time.
+
+This is stricter than the `remove_signature` it replaces, not merely
+authenticated: the row deleted is the recovered signer's own, so no caller can
+strip a co-signer's signature. The old RPC allowed exactly that on the strength
+of a named owner, which was enough to hold a vault below quorum indefinitely
+without ever touching the chain. It is off the anonymous grant list.
+
 ## Deployment
 
 1. Deploy `multisig-proposals` from `render.yaml`, keeping the existing dapp until
@@ -97,12 +116,21 @@ intentional and does not let the relayer forge a different transaction.
 Descriptions are unsigned metadata and are not proof of transaction intent.
 Legacy rows are not retrospectively authenticated by this migration.
 
-Proposal insertion and the two metadata writes are verified. The rest of the
-write surface is not: `cancel_tx`, `prune_tx`, `remove_signature`,
+Proposal insertion, the two metadata writes and unsigning are verified. The rest
+of the write surface is not: `cancel_tx`, `prune_tx`, `add_signature`,
 `mark_executed`, `mark_queued`, `record_approval`, `sync_wallet_state` and
 `register_wallet` still take the caller's address as an argument and check it
 against an owner set that is public on chain. Do not describe the whole database
 as authenticated.
+
+`cancel_tx` and `prune_tx` are the ones left that destroy something, and they
+are not simply un-migrated: both are called from reconciliation, where the
+client has read the chain and is writing back what it saw — `loadVaultQueue`
+prunes superseded rows in a loop. A wallet prompt there would fire on ordinary
+page loads. What they assert is chain-checkable rather than identity-checkable
+(a proposal whose nonce the vault has passed can never execute), so the route
+for them is a verifier that confirms the claim against the chain, not a
+signature.
 
 What makes that a bounded problem rather than the same one is that every column
 those RPCs touch is re-derived from chain on the next load, so the damage is
