@@ -107,11 +107,26 @@ GRANT EXECUTE ON FUNCTION
   cancel_tx(uuid, text),
   prune_tx(uuid, text),
   remove_signature(uuid, text),
-  update_wallet_name(uuid, text, text),
-  update_owner_label(uuid, text, text, text),
   record_approval(uuid, int, text, text, boolean, bigint, text),
   sync_wallet_state(uuid, text, smallint, smallint, int, text, int, text[])
 TO anon;
+
+-- update_wallet_name and update_owner_label are deliberately not in that list.
+-- Both take the caller's address as an argument and check it against an owner
+-- set that is public on chain, so as anon RPCs they are open to anyone willing
+-- to name a real owner. Every other write in the list is re-derived from chain
+-- on the next load and repairs itself; these two are not. A vault name and an
+-- owner label exist only here, so an overwrite is the one kind of damage this
+-- schema cannot undo, and that makes them the wrong pair to leave unauthenticated.
+--
+-- They stay revoked until they read the caller from a verified claim rather
+-- than an argument — the JWT route the end of this file describes, which
+-- api/proposals.cjs already implements for proposal admission. Re-granting them
+-- to anon restores the hole; extend the verifier instead.
+REVOKE EXECUTE ON FUNCTION
+  update_wallet_name(uuid, text, text),
+  update_owner_label(uuid, text, text, text)
+FROM anon, PUBLIC;
 
 -- ── DEFAULTS ─────────────────────────────────────────────────────
 -- Keep future objects from leaking to anon unless granted explicitly.
