@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { createECDH, createHmac } = require('node:crypto');
 const { Readable } = require('node:stream');
-const { verifyProposal, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, iface } = require('../api/proposals.cjs');
+const { verifyProposal, verifyMetadata, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, iface } = require('../api/proposals.cjs');
 
 const WALLET_ID = '11111111-1111-4111-8111-111111111111';
 const VAULT = '0x2222222222222222222222222222222222222222';
@@ -37,7 +37,7 @@ function proposal(overrides = {}, key = 1n) {
 function backend(overrides = {}) {
   return { getWallet: async () => ({ chain_id: 1, address: VAULT }),
     readVault: async () => ({ isOwner: true, threshold: 2, ownerCount: 3, approved: false }),
-    saveProposal: async () => WALLET_ID, ...overrides };
+    saveProposal: async () => WALLET_ID, saveMetadata: async () => {}, ...overrides };
 }
 async function request(body, deps = backend(), headers = {}, url = '/proposals', method = 'POST') {
   const req = Readable.from([Buffer.from(typeof body === 'string' ? body : JSON.stringify(body))]);
@@ -188,4 +188,105 @@ test('service token is signed, short-lived, and carries only restricted role', (
   const claims = JSON.parse(Buffer.from(payload, 'base64url'));
   assert.equal(claims.role, 'proposal_writer');
   assert.equal(claims.exp - claims.iat, 30);
+});
+
+// ── SIGNED METADATA WRITES ────────────────────────────────────────
+// A name and a label are the only columns the chain cannot put back, so the
+// writes that set them are verified the same way a proposal is: the signer is
+// recovered from the signature and confirmed against the vault, never supplied.
+const ZERO_ADDR = '0x0000000000000000000000000000000000000000';
+const OWNER = '0x4444444444444444444444444444444444444444';
+function metaHash(m) {
+  const subject = (m.kind === 'label' ? m.subject : ZERO_ADDR).toLowerCase();
+  return ethers.TypedDataEncoder.hash(
+    { name: 'Multisig', version: '1', chainId: m.chainId ?? 1, verifyingContract: (m.vault ?? VAULT).toLowerCase() },
+    META_TYPES,
+    { vault: (m.vault ?? VAULT).toLowerCase(), subject, value: m.value, issuedAt: m.issued_at });
+}
+// Unlike a proposal, a metadata payload carries no separate hash field to
+// cross-check — the digest is derived from the payload itself, so the only
+// thing standing between a forged signature and a write is the recovered
+// address failing isOwner(). A mock that answers true for every signer would
+// not model that, and would pass a payload production rejects.
+function metaBackend(overrides = {}) {
+  return backend({ readVault: async (chainId, vault, signer) => ({
+    isOwner: signer === address(1n).toLowerCase(), threshold: 2, ownerCount: 3, approved: false,
+  }), ...overrides });
+}
+function metadata(overrides = {}, key = 1n) {
+  const m = { wallet_id: WALLET_ID, kind: 'name', subject: ZERO_ADDR, value: 'TREASURY',
+    issued_at: Math.floor(Date.now() / 1000), ...overrides };
+  m.signature = sign(metaHash(m), key);
+  delete m.chainId; delete m.vault;
+  return m;
+}
+
+test('a signed name and label reach their own RPC with the recovered subject', async () => {
+  const calls = [];
+  const deps = backend({ saveMetadata: async write => { calls.push(write); } });
+  assert.equal((await request(metadata(), deps, {}, '/metadata')).status, 204);
+  assert.equal((await request(metadata({ kind: 'label', subject: OWNER, value: 'COLD KEY' }), deps, {}, '/metadata')).status, 204);
+  assert.deepEqual(calls[0], { fn: 'set_wallet_name', args: { p_wallet_id: WALLET_ID, p_name: 'TREASURY' } });
+  assert.deepEqual(calls[1], { fn: 'set_owner_label',
+    args: { p_wallet_id: WALLET_ID, p_address: OWNER.toLowerCase(), p_label: 'COLD KEY' } });
+});
+
+test('forged, wrong-key and malformed metadata signatures never reach storage', async () => {
+  const cases = [undefined, '0x', '0x' + '11'.repeat(65), metadata({}, 2n).signature,
+    metadata().signature.slice(0, -2) + '00', metadata().signature + '00'];
+  for (const signature of cases) {
+    const result = await request({ ...metadata(), signature },
+      metaBackend({ saveMetadata: async () => assert.fail('unauthorized metadata write') }), {}, '/metadata');
+    assert.ok(result.status === 400 || result.status === 403, `${signature} -> ${result.status}`);
+  }
+});
+
+test('a metadata signature binds value, subject, vault and chain', async () => {
+  const base = metadata({ kind: 'label', subject: OWNER, value: 'COLD KEY' });
+  // Each change re-signs nothing: the original signature is kept, so a payload
+  // altered in flight recovers to a different address than the one on chain.
+  for (const change of [{ value: 'PWNED' }, { subject: TARGET }, { kind: 'name' }]) {
+    const result = await request({ ...base, ...change },
+      metaBackend({ saveMetadata: async () => assert.fail('altered metadata stored') }), {}, '/metadata');
+    assert.ok(result.status === 400 || result.status === 403, `${JSON.stringify(change)} -> ${result.status}`);
+  }
+  // A different vault or chain moves the domain, so the same bytes stop matching.
+  for (const wallet of [{ chain_id: 1, address: TARGET }, { chain_id: 8453, address: VAULT }]) {
+    const result = await request(base, metaBackend({ getWallet: async () => wallet,
+      saveMetadata: async () => assert.fail('wrong domain stored') }), {}, '/metadata');
+    assert.ok(result.status === 400 || result.status === 403, `${JSON.stringify(wallet)} -> ${result.status}`);
+  }
+});
+
+test('a metadata signature expires, in both directions', async () => {
+  const now = Math.floor(Date.now() / 1000);
+  for (const issued_at of [now - 301, now + 301]) {
+    const result = await request(metadata({ issued_at }),
+      backend({ saveMetadata: async () => assert.fail('stale metadata stored') }), {}, '/metadata');
+    assert.equal(result.status, 400, String(issued_at));
+  }
+  assert.equal((await request(metadata({ issued_at: now - 299 }), backend(), {}, '/metadata')).status, 204);
+});
+
+test('current chain ownership gates a metadata write, whatever the database says', async () => {
+  const result = await request(metadata(), backend({ readVault: async () => ({ isOwner: false, threshold: 2, ownerCount: 3 }),
+    saveMetadata: async () => assert.fail('non-owner wrote metadata') }), {}, '/metadata');
+  assert.equal(result.status, 403);
+});
+
+test('an Execute signature cannot be replayed as a metadata write', async () => {
+  const p = proposal();
+  const result = await request({ wallet_id: WALLET_ID, kind: 'name', subject: ZERO_ADDR,
+    value: 'TREASURY', issued_at: Math.floor(Date.now() / 1000), signature: p.p_signature },
+    metaBackend({ saveMetadata: async () => assert.fail('proposal signature reused as metadata') }), {}, '/metadata');
+  assert.ok(result.status === 400 || result.status === 403, String(result.status));
+});
+
+test('metadata length ceilings match the columns, and the RPC is never caller-chosen', async () => {
+  assert.equal((await request(metadata({ value: 'x'.repeat(129) }), backend(), {}, '/metadata')).status, 400);
+  assert.equal((await request(metadata({ kind: 'label', subject: OWNER, value: 'x'.repeat(65) }), backend(), {}, '/metadata')).status, 400);
+  assert.equal((await request(metadata({ kind: 'drop_table' }), backend(), {}, '/metadata')).status, 400);
+  // A caller-supplied fn is ignored: verifyMetadata returns the name itself.
+  const write = await verifyMetadata({ ...metadata(), fn: 'propose_tx' }, backend());
+  assert.equal(write.fn, 'set_wallet_name');
 });

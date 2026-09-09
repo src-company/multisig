@@ -3151,6 +3151,14 @@ const EIP712_TYPES = { Execute: [
   { name:'target', type:'address' }, { name:'value', type:'uint256' },
   { name:'data', type:'bytes' }, { name:'nonce', type:'uint32' },
 ]};
+// A separate primary type from Execute, so a signature over one can never be
+// presented as the other. `subject` is the owner a label belongs to, and the
+// zero address when the value being set is the vault's own name.
+const EIP712_META_TYPES = { Metadata: [
+  { name:'vault', type:'address' }, { name:'subject', type:'address' },
+  { name:'value', type:'string' }, { name:'issuedAt', type:'uint64' },
+]};
+const META_ZERO = '0x0000000000000000000000000000000000000000';
 
 // ── PROVIDER STATE ────────────────────────────────────────────────
 let provider = null;
@@ -10372,12 +10380,43 @@ async function dbSyncWalletState(vaultAddr, dbId, state, chainId = S.chainId) {
   } catch(e) { console.error('DB sync:', e); return false; }
 }
 
+// A vault name and an owner label are the only two things this app stores that
+// no later read of the chain can reconstruct. Everything else in the
+// coordination record is a cache of chain state and repairs itself on the next
+// load; these do not, so an overwrite is permanent. They are therefore the two
+// writes that are signed, and the verifier recovers the signer from the
+// signature rather than being handed an address to trust.
+async function dbWriteMetadata(v, kind, subject, value) {
+  const signer = window._signer;
+  if(!signer || !v || !v.dbId || !v.address) return false;
+  const issuedAt = Math.floor(Date.now() / 1000);
+  const domain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address };
+  const msg = {
+    vault: v.address.toLowerCase(),
+    subject: (subject || META_ZERO).toLowerCase(),
+    value: value || '', issuedAt,
+  };
+  let sig;
+  try { sig = normalizeSigV(await signer.signTypedData(domain, EIP712_META_TYPES, msg)); }
+  catch(e) { console.error('DB metadata sign:', e); return false; }
+  try {
+    const res = await pgFetch('metadata', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        wallet_id: v.dbId, kind, subject: msg.subject,
+        value: msg.value, issued_at: issuedAt, signature: sig,
+      }),
+    }, PROPOSAL_API_URL);
+    if(!res.ok) { console.error('DB metadata:', res.status); return false; }
+    return true;
+  } catch(e) { console.error('DB metadata:', e); return false; }
+}
+
 // Reports whether the write landed, because its caller shows the operator a
 // result either way and had no way to tell which one was true.
-async function dbUpdateWalletName(dbId, name) {
-  const { error } = await sb.rpc('update_wallet_name', { p_wallet_id: dbId, p_name: name, p_caller: window._connectedAddress });
-  if(error) { console.error('DB update name:', error); return false; }
-  return true;
+async function dbUpdateWalletName(v, name) {
+  return dbWriteMetadata(v, 'name', null, name);
 }
 
 async function dbRemoveSig(txId, signerAddr) {
@@ -10393,9 +10432,8 @@ async function dbRecordApproval(walletId, chainId, owner, txHash, approved, bloc
   if(error) console.error('DB record approval:', error);
 }
 
-async function dbUpdateOwnerLabel(dbId, address, label) {
-  const { error } = await sb.rpc('update_owner_label', { p_wallet_id: dbId, p_address: address, p_label: label, p_caller: window._connectedAddress });
-  if(error) console.error('DB update label:', error);
+async function dbUpdateOwnerLabel(v, address, label) {
+  return dbWriteMetadata(v, 'label', address, label);
 }
 
 async function dbGetOwnerLabels(dbId) {
@@ -11329,7 +11367,7 @@ async function reloadVault(vi) {
     if(v._pendingLabel && v._pendingLabel.label && v.dbId) {
       const pl = v._pendingLabel;
       const match = v.owners.find(o => o.addr.toLowerCase() === pl.addr);
-      if(match) dbUpdateOwnerLabel(v.dbId, match.addr, pl.label);
+      if(match) dbUpdateOwnerLabel(v, match.addr, pl.label);
     }
     delete v._pendingLabel;
     // Names are started here and not waited for — see loadSingleVaultData. This
@@ -11455,7 +11493,7 @@ async function renameVault() {
     // the new name, said it had worked, and then reverted on the next load with
     // nothing to explain it. Put the old name back rather than leave the screen
     // disagreeing with the record.
-    if(!(await dbUpdateWalletName(v.dbId, name))) {
+    if(!(await dbUpdateWalletName(v, name))) {
       v.name = was;
       S.rename = { addr: v.address, text: name };
       flash('RENAME NOT SAVED — THE COORDINATION SERVICE DID NOT ACCEPT IT. YOUR CO-SIGNERS WOULD STILL SEE THE OLD NAME, SO IT HAS BEEN PUT BACK.', 7000);
@@ -11490,7 +11528,7 @@ async function updateOwnerLabel(vi, addr, label) {
   // to reading from the stored value.
   clearOwnerLabelDraft(v.address, o.addr);
   if(!S.demoMode && v.dbId) {
-    await dbUpdateOwnerLabel(v.dbId, o.addr, label);
+    await dbUpdateOwnerLabel(v, o.addr, label);
   }
 }
 

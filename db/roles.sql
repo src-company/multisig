@@ -27,6 +27,23 @@ REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM proposal_writer;
 GRANT EXECUTE ON FUNCTION propose_tx(uuid, int, int, text, numeric, text, text, smallint, text, text, text, sig_type) TO proposal_writer;
 REVOKE ALL ON FUNCTION propose_tx(uuid, int, int, text, numeric, text, text, smallint, text, text, text, sig_type) FROM PUBLIC;
 
+-- Also used only by api/proposals.cjs, and only after it has recovered an
+-- EIP-712 signature and confirmed isOwner() against the vault. Separate from
+-- proposal_writer so a token minted for one cannot write the other: the two
+-- reach different functions and are checked for different claims.
+DO $$ BEGIN
+  CREATE ROLE metadata_writer NOLOGIN;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+GRANT metadata_writer TO authenticator;
+GRANT USAGE ON SCHEMA public TO metadata_writer;
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM metadata_writer;
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM metadata_writer;
+GRANT EXECUTE ON FUNCTION set_wallet_name(uuid, text) TO metadata_writer;
+GRANT EXECUTE ON FUNCTION set_owner_label(uuid, text, text) TO metadata_writer;
+REVOKE ALL ON FUNCTION set_wallet_name(uuid, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION set_owner_label(uuid, text, text) FROM PUBLIC;
+
 -- Set / rotate the password out of band (keep it OUT of version control):
 --   ALTER ROLE authenticator WITH PASSWORD '<strong-random-password>';
 -- Then point PGRST_DB_URI at:

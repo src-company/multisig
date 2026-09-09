@@ -1138,6 +1138,57 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+-- ── VERIFIED METADATA WRITES ─────────────────────────────────────
+-- The two functions above take the writer's address as an argument and check it
+-- against an owner set that is public on chain. That is a claim, not a
+-- credential, and a vault name and an owner label are the only columns here
+-- that no later read of the chain can put back. The pair below replaces them.
+--
+-- They carry no caller argument at all. api/proposals.cjs recovers the signer
+-- from an EIP-712 signature, confirms isOwner() against the vault itself, and
+-- only then calls these with a metadata_writer token — the same shape the
+-- proposal path already uses. Whoever holds that role has already been proven
+-- to be an owner, so there is nothing left here to check but the write.
+
+CREATE OR REPLACE FUNCTION set_wallet_name(
+  p_wallet_id uuid, p_name text
+) RETURNS void AS $$
+BEGIN
+  IF coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb->>'role', '') <> 'metadata_writer' THEN
+    RAISE EXCEPTION 'A verified owner signature is required' USING ERRCODE = '42501';
+  END IF;
+  PERFORM rate_gate('meta:' || p_wallet_id::text || ':' || client_ip(), 60, interval '1 minute');
+  UPDATE wallets SET name = NULLIF(p_name, '') WHERE id = p_wallet_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+CREATE OR REPLACE FUNCTION set_owner_label(
+  p_wallet_id uuid, p_address text, p_label text
+) RETURNS void AS $$
+BEGIN
+  IF coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb->>'role', '') <> 'metadata_writer' THEN
+    RAISE EXCEPTION 'A verified owner signature is required' USING ERRCODE = '42501';
+  END IF;
+  PERFORM rate_gate('meta:' || p_wallet_id::text || ':' || client_ip(), 60, interval '1 minute');
+  -- Case-insensitive, for the reason update_owner_label's comment gives.
+  UPDATE owners SET label = NULLIF(p_label, '')
+  WHERE wallet_id = p_wallet_id AND lower(address) = lower(p_address) AND is_current = true;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+REVOKE ALL ON FUNCTION set_wallet_name(uuid, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION set_owner_label(uuid, text, text) FROM PUBLIC;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    REVOKE ALL ON FUNCTION set_wallet_name(uuid, text) FROM anon;
+    REVOKE ALL ON FUNCTION set_owner_label(uuid, text, text) FROM anon;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'metadata_writer') THEN
+    GRANT EXECUTE ON FUNCTION set_wallet_name(uuid, text) TO metadata_writer;
+    GRANT EXECUTE ON FUNCTION set_owner_label(uuid, text, text) TO metadata_writer;
+  END IF;
+END $$;
+
 CREATE OR REPLACE FUNCTION record_approval(
   p_wallet_id uuid, p_chain_id int, p_owner text, p_tx_hash text,
   p_approved boolean, p_block_number bigint DEFAULT NULL,

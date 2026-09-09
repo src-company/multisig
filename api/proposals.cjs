@@ -14,6 +14,20 @@ const TYPES = { Execute: [
   { name: 'target', type: 'address' }, { name: 'value', type: 'uint256' },
   { name: 'data', type: 'bytes' }, { name: 'nonce', type: 'uint32' },
 ] };
+// Metadata is not a vault operation and must never be confused for one: this is
+// a distinct primary type, so an Execute signature can never be replayed as a
+// rename and a rename can never be replayed as a transaction. `subject` is the
+// owner a label belongs to, or the zero address when the value is a vault name.
+const META_TYPES = { Metadata: [
+  { name: 'vault', type: 'address' }, { name: 'subject', type: 'address' },
+  { name: 'value', type: 'string' }, { name: 'issuedAt', type: 'uint64' },
+] };
+const ZERO = '0x0000000000000000000000000000000000000000';
+// A signature that never expires is a standing permission to rewrite a label.
+// Five minutes is long enough for a hardware wallet to be found and confirmed,
+// and short enough that a captured one is worthless by the time it is read. A
+// replay inside the window rewrites the same field with the same value.
+const META_WINDOW_SECONDS = 300;
 const iface = new ethers.Interface([
   'function isOwner(address) view returns (bool)',
   'function approved(address,bytes32) view returns (bool)',
@@ -77,10 +91,51 @@ async function verifyProposal(input, { getWallet, readVault }) {
   };
 }
 
-function serviceToken(secret) {
+// No caller-controlled URLs, owner lists, or JWTs enter this boundary either.
+// The signer is recovered, never supplied, and ownership is settled by the vault.
+async function verifyMetadata(input, { getWallet, readVault }, now = Date.now()) {
+  check(input && typeof input === 'object' && !Array.isArray(input), 'Expected a metadata change');
+  check(typeof input.wallet_id === 'string' && /^[0-9a-f-]{36}$/i.test(input.wallet_id), 'Invalid wallet id');
+  check(input.kind === 'name' || input.kind === 'label', 'Unsupported metadata field');
+  check(typeof input.signature === 'string' && /^0x[0-9a-f]{130}$/i.test(input.signature), 'An owner signature is required');
+  check(/(1b|1c)$/i.test(input.signature), 'Noncanonical signature');
+  check(Number.isInteger(input.issued_at) && input.issued_at > 0, 'Invalid issue time');
+  // Both directions. A future timestamp would otherwise buy an unbounded window.
+  check(Math.abs(Math.floor(now / 1000) - input.issued_at) <= META_WINDOW_SECONDS, 'Signature has expired');
+  // The column ceilings in schema.sql, enforced before the write rather than as
+  // a constraint violation the operator would see as a failed save.
+  const limit = input.kind === 'name' ? 128 : 64;
+  check(typeof input.value === 'string' && input.value.length <= limit, 'Value is too long');
+  // A label is written against one owner; a name belongs to the vault itself.
+  const subject = input.kind === 'label' ? input.subject : ZERO;
+  check(typeof subject === 'string' && /^0x[0-9a-f]{40}$/i.test(subject), 'Invalid subject address');
+
+  const wallet = await getWallet(input.wallet_id);
+  check(wallet && /^0x[0-9a-f]{40}$/i.test(wallet.address), 'Wallet does not match');
+  const vault = wallet.address.toLowerCase();
+  const hash = ethers.TypedDataEncoder.hash(
+    { name: 'Multisig', version: '1', chainId: wallet.chain_id, verifyingContract: vault },
+    META_TYPES,
+    { vault, subject: subject.toLowerCase(), value: input.value, issuedAt: input.issued_at },
+  );
+  let signer;
+  try { signer = ethers.recoverAddress(hash, input.signature); } catch (_) {}
+  check(signer, 'Signature could not be recovered');
+  signer = signer.toLowerCase();
+
+  // The database owner list is not proof; the vault is. Same rule as a proposal.
+  const state = await readVault(wallet.chain_id, vault, signer, hash, 'ecdsa');
+  if (!state.isOwner) throw new RequestError(403, 'Signer is not a current on-chain owner');
+
+  return input.kind === 'name'
+    ? { fn: 'set_wallet_name', args: { p_wallet_id: input.wallet_id, p_name: input.value } }
+    : { fn: 'set_owner_label', args: { p_wallet_id: input.wallet_id, p_address: subject.toLowerCase(), p_label: input.value } };
+}
+
+function serviceToken(secret, role = 'proposal_writer') {
   const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
   const now = Math.floor(Date.now() / 1000);
-  const data = encode({ alg: 'HS256', typ: 'JWT' }) + '.' + encode({ role: 'proposal_writer', iat: now, exp: now + 30 });
+  const data = encode({ alg: 'HS256', typ: 'JWT' }) + '.' + encode({ role, iat: now, exp: now + 30 });
   return data + '.' + createHmac('sha256', secret).update(data).digest('base64url');
 }
 
@@ -121,6 +176,21 @@ function dependencies({ postgrestUrl, jwtSecret, rpcUrls }, fetcher = fetch) {
         'Content-Type': 'application/json', Authorization: `Bearer ${serviceToken(jwtSecret)}`,
       }, body: JSON.stringify(proposal) });
     },
+    // The function name is chosen by verifyMetadata, never by the request, so
+    // this cannot be steered at another RPC by anything a caller sends.
+    async saveMetadata({ fn, args }) {
+      const response = await fetcher(`${postgrestUrl}/rpc/${fn}`, {
+        method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10000),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${serviceToken(jwtSecret, 'metadata_writer')}`,
+        },
+        body: JSON.stringify(args),
+      });
+      // set_wallet_name and set_owner_label return void, so a success is an
+      // empty 204 that has no JSON body to parse.
+      if (!response.ok) throw new RequestError(503, 'Metadata storage is unavailable');
+    },
   };
 }
 
@@ -137,7 +207,7 @@ function createHandler(deps, allowedOrigins = []) {
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     }
     if (req.url === '/health' && req.method === 'GET') { res.writeHead(200); res.end('ok'); return; }
-    if (req.url !== '/proposals') { res.writeHead(404); res.end(); return; }
+    if (req.url !== '/proposals' && req.url !== '/metadata') { res.writeHead(404); res.end(); return; }
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
     if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
     if (active >= 32) { res.writeHead(503); res.end(); return; }
@@ -154,6 +224,12 @@ function createHandler(deps, allowedOrigins = []) {
       let input;
       try { input = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
       catch (_) { throw new RequestError(400, 'Invalid JSON'); }
+      if (req.url === '/metadata') {
+        await deps.saveMetadata(await verifyMetadata(input, deps));
+        res.writeHead(204);
+        res.end();
+        return;
+      }
       const proposal = await verifyProposal(input, deps);
       const id = await deps.saveProposal(proposal);
       if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id)) throw new RequestError(503, 'Proposal was not saved');
@@ -180,4 +256,4 @@ if (require.main === module) {
   server.listen(Number(PORT), '0.0.0.0');
 }
 
-module.exports = { verifyProposal, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, iface };
+module.exports = { verifyProposal, verifyMetadata, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, iface };
