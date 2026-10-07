@@ -64,6 +64,32 @@ const iface = new ethers.Interface([
 ]);
 const EXECUTION_SUCCESS_TOPIC = iface.getEvent('ExecutionSuccess').topicHash;
 const BODY_LIMIT = 72 * 1024;
+// PostgREST serialises a `numeric` column as a bare JSON number, and a wei
+// amount is routinely larger than the 2^53 a double can hold exactly. Response
+// .json() rounds it before any of this code sees it, and the rounded figure is
+// not a cosmetic difference here: every digest this service rebuilds from a
+// stored proposal is rebuilt from its `value`, so a rounded one hashes to a
+// different Execute digest than the owner signed over. The signature then
+// recovers to a stranger and is refused as not matching its signer — while the
+// proposer's own signature, checked at propose time against the exact string in
+// the request rather than against the stored row, verified fine. The visible
+// symptom was a vault where the first signature stuck and no second one ever
+// could, on any proposal whose value exceeded 2^53 wei. A MAX send produces
+// exactly such a figure, because it sends the raw balance rather than a rounded
+// one.
+//
+// Quote those two columns before parsing, so they arrive as strings and keep
+// every digit. The same regex and the same reasoning as the dapp's pgJson (see
+// _PG_BIGNUM in dapp/index.html) — the two have to agree about the digest or
+// nothing either of them signs can be checked by the other.
+//
+// Scoped to the keys that are `numeric` in the schema and to runs of 16+ digits,
+// so nothing else in a response is touched. A JSON-RPC reply carries its numbers
+// as hex strings and is unaffected.
+const PG_BIGNUM = /([{,]\s*)"(value|salt)"(\s*:\s*)(-?\d{16,})(?=\s*[,}])/g;
+function parsePgJson(text) {
+  return JSON.parse(String(text).replace(PG_BIGNUM, '$1"$2"$3"$4"'));
+}
 class RequestError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
@@ -495,7 +521,9 @@ function dependencies({ postgrestUrl, jwtSecret, rpcUrls }, fetcher = fetch) {
       console.error(`[${what}] HTTP ${response.status}:`, body);
       throw new RequestError(503, 'Proposal storage or chain verification is unavailable');
     }
-    return response.json();
+    // Not response.json(): see parsePgJson. A stored `value` has to survive this
+    // parse digit for digit or the digest rebuilt from it is the wrong digest.
+    return parsePgJson(await response.text());
   }
   // Verified once per chain per process rather than once per request. The RPC
   // map is read from the environment at startup and cannot change under a

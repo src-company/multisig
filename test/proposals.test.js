@@ -11,6 +11,12 @@ const N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
 const TX_HASH = '0x' + '5'.repeat(64);
 const STORED = { tx_hash: TX_HASH, chain_id: 1, nonce: 7, target: TARGET,
   value: '900719925474099312345', call_data: '0x1234', status: 'proposed', address: VAULT };
+// A stubbed Response answers .text(), not .json(), because text is what the
+// service actually reads: a numeric `value` wider than 2^53 only survives the
+// trip if it is parsed out of the raw body. A stub that hands back a decoded
+// object cannot show that, which is how the rounding bug stayed invisible here
+// while every real co-signature on a large proposal was being refused.
+const reply = body => ({ ok: true, text: async () => JSON.stringify(body) });
 const hex = x => x.toString(16).padStart(64, '0');
 function publicKey(key) {
   const curve = createECDH('secp256k1');
@@ -161,13 +167,13 @@ test('backend uses configured RPC and one block, validates chain id, and sends J
   const secret = 'test-secret-'.repeat(4);
   const deps = dependencies({ postgrestUrl: 'https://db.example', jwtSecret: secret, rpcUrls: { 1: 'https://rpc.example' } }, async (url, options) => {
     urls.push(url);
-    if (url.startsWith('https://db.example/wallets')) return { ok: true, json: async () => [{ chain_id: 1, address: VAULT }] };
+    if (url.startsWith('https://db.example/wallets')) return reply([{ chain_id: 1, address: VAULT }]);
     if (url.endsWith('/rpc/propose_tx')) {
       assert.match(options.headers.Authorization, /^Bearer /);
       const payload = JSON.parse(options.body);
       assert.equal(payload.p_signature, proposal().p_signature);
       assert.equal(payload.rpcUrl, undefined);
-      return { ok: true, json: async () => WALLET_ID };
+      return reply(WALLET_ID);
     }
     assert.equal(url, 'https://rpc.example');
     assert.equal(options.headers.Authorization, undefined);
@@ -180,14 +186,69 @@ test('backend uses configured RPC and one block, validates chain id, and sends J
       const call = iface.parseTransaction({ data: rpc.params[0].data });
       result = iface.encodeFunctionResult(call.name, [call.name === 'isOwner' ? true : call.name === 'threshold' ? 2 : 3]);
     }
-    return { ok: true, json: async () => ({ result }) };
+    return reply({ result });
   });
   assert.equal((await request({ ...proposal(), rpcUrl: 'https://attacker.example' }, deps)).status, 200);
   assert.ok(urls.every(url => !url.includes('attacker')));
   const wrong = dependencies({ postgrestUrl: 'https://db.example', jwtSecret: secret, rpcUrls: { 1: 'https://rpc.example' } },
-    async () => ({ ok: true, json: async () => ({ result: '0x2' }) }));
+    async () => reply({ result: '0x2' }));
   await assert.rejects(wrong.readVault(1, VAULT, address(1n), proposal().p_tx_hash, 'ecdsa'), /wrong chain/);
   await assert.rejects(wrong.readVault(8453, VAULT, address(1n), proposal().p_tx_hash, 'ecdsa'), /Unsupported chain/);
+});
+
+// A wei amount wider than 2^53, read back through the real HTTP boundary.
+//
+// This is the shape that broke a live vault: the first signature stuck and no
+// second one ever could. PostgREST sends a `numeric` column as a bare JSON
+// number, so response.json() rounded an exact 880300646278592485 wei to
+// ...592500 — fifteen wei, and a completely different Execute digest. The
+// proposer never noticed, because verifyProposal hashes the exact string in the
+// request; every co-signer was refused, because verifySignature hashes the
+// stored row. Both halves are asserted here: the digits survive the parse, and a
+// genuine co-signature over them is accepted.
+const WIDE_VALUE = '880300646278592485';
+function wideDeps(sent) {
+  return dependencies({ postgrestUrl: 'https://db.example', jwtSecret: 'k'.repeat(32), rpcUrls: { 1: 'https://rpc.example' } },
+    async (url, options) => {
+      // Raw text with the value as a BARE number, exactly as PostgREST sends it.
+      if (url.startsWith('https://db.example/transactions')) return { ok: true, text: async () =>
+        `[{"tx_hash":"${TX_HASH}","chain_id":1,"nonce":7,"target":"${TARGET}","value":${WIDE_VALUE},` +
+        `"call_data":"0x1234","status":"proposed","wallets":{"address":"${VAULT}"}}]` };
+      if (url.endsWith('/rpc/signed_add_signature')) { sent.push(JSON.parse(options.body)); return reply(2); }
+      const rpc = JSON.parse(options.body);
+      if (rpc.method === 'eth_chainId') return reply({ result: '0x1' });
+      const call = iface.parseTransaction({ data: rpc.params[0].data });
+      return reply({ result: iface.encodeFunctionResult(call.name, [true]) });
+    });
+}
+
+test('a value wider than 2^53 survives the read, so a co-signer is not refused', async () => {
+  const deps = wideDeps([]);
+  // Every digit, and as a string — a JS number cannot hold this one.
+  const stored = await deps.getProposal('feedb392-54e6-48a8-b211-fff91dd1d2d8');
+  assert.equal(String(stored.value), WIDE_VALUE);
+  assert.notEqual(String(stored.value), '880300646278592500');
+
+  const sent = [];
+  const live = wideDeps(sent);
+  const digest = ethers.TypedDataEncoder.hash(
+    { name: 'Multisig', version: '1', chainId: 1, verifyingContract: VAULT }, TYPES,
+    { target: TARGET, value: WIDE_VALUE, data: '0x1234', nonce: 7 });
+  const res = await request({ tx_id: 'feedb392-54e6-48a8-b211-fff91dd1d2d8',
+    signer: address(3n), signature: sign(digest, 3n) }, live, {}, '/signature');
+  assert.equal(res.status, 200);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].p_signer, address(3n).toLowerCase());
+
+  // And the rounded value is still refused, so this is a check and not a bypass:
+  // a signature over ...592500 is a signature over a different transaction.
+  const rounded = ethers.TypedDataEncoder.hash(
+    { name: 'Multisig', version: '1', chainId: 1, verifyingContract: VAULT }, TYPES,
+    { target: TARGET, value: '880300646278592500', data: '0x1234', nonce: 7 });
+  assert.notEqual(rounded, digest);
+  const bad = await request({ tx_id: 'feedb392-54e6-48a8-b211-fff91dd1d2d8',
+    signer: address(3n), signature: sign(rounded, 3n) }, wideDeps([]), {}, '/signature');
+  assert.equal(bad.status, 400);
 });
 
 test('service token is signed, short-lived, and carries only restricted role', () => {
@@ -604,11 +665,11 @@ test('dependency methods survive being destructured out of the object', async ()
   const deps = dependencies({ postgrestUrl: 'https://db.example', jwtSecret: 'k'.repeat(32), rpcUrls: { 1: 'https://rpc.example' } },
     async (url, options) => {
       const rpc = JSON.parse(options.body);
-      if (rpc.method === 'eth_chainId') { chainIdCalls++; return { ok: true, json: async () => ({ result: '0x1' }) }; }
-      if (rpc.method === 'eth_blockNumber') return { ok: true, json: async () => ({ result: '0x123' }) };
+      if (rpc.method === 'eth_chainId') { chainIdCalls++; return reply({ result: '0x1' }); }
+      if (rpc.method === 'eth_blockNumber') return reply({ result: '0x123' });
       const call = iface.parseTransaction({ data: rpc.params[0].data });
-      return { ok: true, json: async () => ({ result: iface.encodeFunctionResult(call.name,
-        [call.name === 'isOwner' ? true : call.name === 'threshold' ? 2 : 3]) }) };
+      return reply({ result: iface.encodeFunctionResult(call.name,
+        [call.name === 'isOwner' ? true : call.name === 'threshold' ? 2 : 3]) });
     });
   const { readOwner, readVault } = deps;
   assert.equal(await readOwner(1, VAULT, address(1n)), true);
