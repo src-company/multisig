@@ -451,6 +451,12 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
 .tx-foot{margin-top:12px;display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap}
 .tx-foot-diag{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .tx-foot-act{display:flex;gap:8px;flex-shrink:0;margin-left:auto}
+/* A wallet flow is already in flight, so this card's controls are not available
+   — see guardSubmit. Quiet and inert rather than removed: the buttons have to
+   stay where they are, because the one being waited on is the one just pressed
+   and a card that reshuffles under the cursor is worse than one that waits. */
+.tx-foot-act.working>*{opacity:.35;pointer-events:none}
+.tx-foot-act.working{cursor:progress}
 
 /* tx builder */
 .txb{padding:20px 18px;border:1px solid var(--fr);border-left:2px solid var(--a);background:color-mix(in srgb,var(--a) 4%,transparent);margin:6px 0 28px}
@@ -4975,11 +4981,27 @@ function deepLinkIndex() {
 }
 function dismissFocus(){ _focusNonce = null; _focusVaultAddr = null; _focusScroll = false; render(); }
 
+// A press that changes nothing on screen reads as a press that was missed.
+//
+// _submitting already did the important half — one wallet flow at a time, so a
+// second press cannot open a second prompt for the same proposal — and it did it
+// invisibly. Every one of these routes opens with at least one round trip before
+// its first flash: prodSubmit reads the live nonce off the vault, prodSign builds
+// a digest and waits on the wallet. For as long as that took, the card looked
+// exactly as it had before the press, SUBMIT still sitting there inviting
+// another one. The second press hit the `return` below and was dropped in
+// silence, which looks identical to the first one having been ignored.
+//
+// So render on both edges. The press is acknowledged in the frame it happens in
+// — the card's controls go quiet, see .tx-foot-act.working — and a second press
+// is answered rather than discarded. render() is already coalesced into one
+// rebuild per animation frame, so neither call costs a repaint of its own.
 function guardSubmit(fn) {
   return async function(...args) {
-    if (_submitting) return;
+    if (_submitting) { flash('ONE AT A TIME \u2014 THE LAST ONE IS STILL GOING'); return; }
     _submitting = true;
-    try { await fn(...args); } finally { _submitting = false; }
+    render();
+    try { await fn(...args); } finally { _submitting = false; render(); }
   };
 }
 // Waits longer than a few seconds are usually an RPC taking its time, and the
@@ -6389,7 +6411,7 @@ ${/* margin-left:auto puts the explorer link on the row's trailing edge, which i
             ${txDecodeLink(tx, v)}
             ${canReject?`<button class="reject-link${armed?' armed':''}" onclick="armReject(${S.sel},'${jstr(queueRef(v, tx))}')" title="Sign a no-op to consume this nonce so later transactions can proceed">${rlabel}</button>`:''}
           </div>
-          ${actionBtn?`<div class="tx-foot-act">${actionBtn}</div>`:''}
+          ${actionBtn?`<div class="tx-foot-act${_submitting?' working':''}">${actionBtn}</div>`:''}
         </div>`;
       })()}
       ${tx._sim?renderSim(tx._sim,{ rerun:`simulateProposal(${S.sel},'${jstr(queueRef(v, tx))}')`, dismiss:`dismissProposalSim(${S.sel},'${jstr(queueRef(v, tx))}')` }):''}
@@ -11687,6 +11709,19 @@ async function reloadVault(vi) {
       if(changed) render();
     }).catch(e => console.error('Owner names:', e));
 
+    // The chain snapshot is in hand — draw it, rather than holding it back until
+    // five more reads have finished.
+    //
+    // Nothing below this line changes the vault's threshold, its owner set, its
+    // delay or its nonce; they were settled by multicallLoad above and then sat
+    // undrawn while the executor, the token balances, the queue, the history and
+    // the slow outbound were fetched. On the path this function is most often
+    // reached by — straight after a submit — that is precisely the moment the
+    // header is being read, and the figures in it were a round of reads out of
+    // date for no reason. Everything already on screen stays on screen: the
+    // queue and the holdings are only replaced below, never cleared first.
+    render();
+
     // Executor check + token balances + queue + history in parallel
     const [fpResult, holdings, , , slowOut] = await Promise.all([
       readExecutorState(s.executor, v.address),
@@ -13459,6 +13494,56 @@ function sawQueuedEta(receipt, vAddr, hash) {
   return hit ? Number(hit.args[2]) : 0;
 }
 
+// The outcome, applied to what is on screen, ahead of the bookkeeping that
+// records it and the reload that re-reads it.
+//
+// Every submit route ended the same way: flash the result, await two or three
+// writes to the coordination database, then await reloadVault — which re-reads
+// the vault, its executor, its balances, its whole queue and its history before
+// it repaints. The proposal sat there as a live row that entire time, SUBMIT
+// still on it, for a second or more after the vault had demonstrably executed
+// it. The press is the one moment somebody is watching that card, and it was
+// the moment the card stopped telling the truth. The demo mode had no such gap,
+// which is the tell: it settles its own queue and renders in the same tick.
+//
+// Nothing drawn here is a guess, which is what makes it safe to draw before the
+// record agrees. The vault emitted ExecutionSuccess for this exact digest, so
+// the proposal is spent; execute() consumes the nonce whether it runs the call
+// or queues it, so the vault has moved on by one either way. reloadVault still
+// runs, still reads the chain, and still has the last word on all of it.
+//
+// Matched by reference, not by nonce: a nonce is contested, not owned — two
+// proposals can sit at the same one — and the row to settle is the row that was
+// submitted, not whichever other one happens to share its number.
+function settleExecuted(v, tx) {
+  if(!v || !tx) return;
+  if(Array.isArray(v.queue)) v.queue = v.queue.filter(t => t !== tx);
+  if(Number.isInteger(v.nonce) && tx.nonce === v.nonce) v.nonce = v.nonce + 1;
+}
+// Queued rather than run: the row stays where it is, carrying the eta the vault
+// itself reported, and the nonce still advances because writing the entry is
+// what spent it.
+function settleQueued(v, tx, eta, queueTxHash) {
+  if(!tx) return;
+  tx.eta = eta;
+  if(queueTxHash) tx.queueTx = queueTxHash;
+  if(v && Number.isInteger(v.nonce) && tx.nonce === v.nonce) v.nonce = v.nonce + 1;
+}
+// The other half of a cancel: Queued(hash, _, 0) is the vault saying it is no
+// longer holding that digest, so the proposal it names is gone, whoever raised
+// it. Without this the cancel settled and left the queue while the proposal it
+// had just killed stayed on screen beside it looking live, until the reload
+// caught up — a worse picture than the one before any of this, which at least
+// moved both rows at the same time.
+//
+// Matched on the digest, because that is what the vault named. A hash this
+// client holds no row for is not an error: a cancel can be aimed at a proposal
+// this queue never had.
+function settleCancelled(v, hash) {
+  if(!v || !Array.isArray(v.queue) || !hash) return;
+  v.queue = v.queue.filter(t => !_sameHash(t.txHash, hash));
+}
+
 async function prodSubmit(vi, nonce) {
   const w = requireSigner(); if(!w) return;
   const { signer, addr: connectedAddress } = w;
@@ -13522,6 +13607,11 @@ async function prodSubmit(vi, nonce) {
     // Parse events \u2014 only the vault's own, and only for this proposal's digest.
     // See vaultLogs: matching on topic0 across every log in the receipt let a
     // call target forge these.
+    //
+    // Settle the card against that account of it and defer the writes that
+    // record it, rather than awaiting them here \u2014 see settleExecuted. Nothing
+    // in this loop needs the database to answer before the screen can be right.
+    const record = [];
     // Whether the vault said anything at all about what this transaction did.
     // Checked after the loop \u2014 see below.
     let saidSomething = false;
@@ -13529,7 +13619,8 @@ async function prodSubmit(vi, nonce) {
       if(parsed.name === 'ExecutionSuccess' && _sameHash(parsed.args[0], tx.txHash)) {
         saidSomething = true;
         flash(`EXECUTED #${nonce}`);
-        if(tx.dbId) await dbMarkExecuted(tx.dbId, Number(receipt.blockNumber), receipt.hash);
+        settleExecuted(v, tx);
+        if(tx.dbId) record.push(() => dbMarkExecuted(tx.dbId, Number(receipt.blockNumber), receipt.hash));
       }
       if(parsed.name === 'Queued') {
         const eta = Number(parsed.args[2]);
@@ -13537,18 +13628,25 @@ async function prodSubmit(vi, nonce) {
           // A cancellation, naming the hash it removed. The row it points at is
           // looked up by that hash, so it is only acted on when the vault itself
           // announced it \u2014 and only for a proposal on this vault.
+          //
+          // Deferred whole, lookup included: which row this names is a question
+          // only the database can answer, and the proposal in front of the
+          // operator does not depend on the answer. saidSomething is still set
+          // here, synchronously, because the check below reads it.
           saidSomething = true;
-          const cancelledDbTx = await dbGetTxByHash(parsed.args[0]);
-          if(cancelledDbTx && cancelledDbTx.wallet_id === v.dbId) {
-            flash('CANCELLED QUEUED TX');
-            await dbCancelTx(cancelledDbTx.id, connectedAddress);
-          }
+          settleCancelled(v, parsed.args[0]);
+          record.push(async () => {
+            const cancelledDbTx = await dbGetTxByHash(parsed.args[0]);
+            if(cancelledDbTx && cancelledDbTx.wallet_id === v.dbId) {
+              flash('CANCELLED QUEUED TX');
+              await dbCancelTx(cancelledDbTx.id, connectedAddress);
+            }
+          });
         } else if(_sameHash(parsed.args[0], tx.txHash)) {
-          tx.eta = eta;
-          tx.queueTx = receipt.hash;
           saidSomething = true;
           flash(`QUEUED #${nonce} \u2014 ETA: ${new Date(eta*1000).toLocaleString()}`);
-          if(tx.dbId) await dbMarkQueued(tx.dbId, eta, Number(receipt.blockNumber), receipt.hash);
+          settleQueued(v, tx, eta, receipt.hash);
+          if(tx.dbId) record.push(() => dbMarkQueued(tx.dbId, eta, Number(receipt.blockNumber), receipt.hash));
         }
       }
     }
@@ -13571,6 +13669,22 @@ async function prodSubmit(vi, nonce) {
       return;
     }
 
+    // On screen now, in this frame, from the vault's own logs.
+    render();
+    // Then the record \u2014 and only then the reload. loadVaultQueue reads these
+    // rows back and prunes against them, so a reload that overtook its own write
+    // would re-read a proposal still marked live and put it straight back.
+    for(const write of record) {
+      // Caught, and deliberately not reported as a failed submit. The confirm
+      // helpers already say the one true thing about their own failure (see
+      // dbWriteLagged: the record lags the chain, and reconciliation heals it).
+      // What was not handled was a throw out of the cancel lookup beside them,
+      // which reached the outer catch and flashed SUBMIT FAILED over a
+      // transaction that was mined and irreversible \u2014 a lie, and in the more
+      // alarming direction.
+      try { await write(); }
+      catch(e) { console.error('Recording the outcome:', e); }
+    }
     await reloadVault(vi);
   } catch(e) {
     console.error(e);
@@ -13610,6 +13724,13 @@ async function prodExecute(vi, nonce) {
       await reloadVault(vi);
       return;
     }
+    // Said and drawn before any of it is recorded — the vault has already
+    // confirmed this digest executed, which is the whole basis for the claim.
+    // See settleExecuted.
+    flash(`EXECUTED #${nonce}`);
+    settleExecuted(v, tx);
+    render();
+
     if(tx.dbId) await dbMarkExecuted(tx.dbId, Number(receipt.blockNumber), receipt.hash);
 
     // Detect a cancel, which announces itself as Queued(hash, 0, 0). Read from
@@ -13617,12 +13738,16 @@ async function prodExecute(vi, nonce) {
     // it names belongs to this vault.
     for(const parsed of vaultLogs(receipt, v.address)) {
       if(parsed.name === 'Queued' && Number(parsed.args[2]) === 0) {
-        const cancelledDbTx = await dbGetTxByHash(parsed.args[0]);
-        if(cancelledDbTx && cancelledDbTx.wallet_id === v.dbId) await dbCancelTx(cancelledDbTx.id, connectedAddress);
+        // Caught for the reason dbWriteLagged gives: this transaction is mined
+        // and irreversible, and a failed lookup behind it must not be reported
+        // as a failed execute.
+        try {
+          const cancelledDbTx = await dbGetTxByHash(parsed.args[0]);
+          if(cancelledDbTx && cancelledDbTx.wallet_id === v.dbId) await dbCancelTx(cancelledDbTx.id, connectedAddress);
+        } catch(e) { console.error('Recording a cancellation:', e); }
       }
     }
 
-    flash(`EXECUTED #${nonce}`);
     await reloadVault(vi);
   } catch(e) {
     console.error(e);
@@ -13686,8 +13811,12 @@ async function prodFastExecute(vi, nonce) {
       await reloadVault(vi);
       return;
     }
-    if(tx.dbId) await dbMarkExecuted(tx.dbId, Number(receipt.blockNumber), receipt.hash);
+    // The route whose whole claim is that it does not wait should not then wait
+    // on a database write and a full reload before it says so. See settleExecuted.
     flash(`INSTANT EXECUTED #${nonce} VIA EXECUTOR`);
+    settleExecuted(v, tx);
+    render();
+    if(tx.dbId) await dbMarkExecuted(tx.dbId, Number(receipt.blockNumber), receipt.hash);
     await reloadVault(vi);
   } catch(e) {
     console.error(e);
@@ -13828,13 +13957,19 @@ async function prodCancel(vi, nonce) {
       return;
     }
 
+    // The vault has confirmed it dropped the digest, so say so and draw it before
+    // the record is written — this is the emergency brake, and the one press whose
+    // result an operator most needs to see land. See settleExecuted.
+    flash(`CANCELLED #${nonce} VIA EXECUTOR`);
+    settleCancelled(v, origTxHash);
+    render();
+
     if(v.dbId) {
       if(existingTxId) await dbMarkExecuted(existingTxId, Number(receipt.blockNumber), receipt.hash);
       if(tx.dbId) {
         await dbCancelTx(tx.dbId, connectedAddress);
       }
     }
-    flash(`CANCELLED #${nonce} VIA EXECUTOR`);
     await reloadVault(vi);
   } catch(e) {
     console.error(e);
@@ -14511,11 +14646,18 @@ async function prodAccelerate(vi, nonce) {
       return;
     }
 
+    // Said and drawn on the vault's own ExecutionSuccess, ahead of the record.
+    // See settleExecuted — and note the nonce is deliberately untouched here: an
+    // accelerated proposal runs at its original nonce, which the vault passed
+    // when the entry was queued.
+    flash(`ACCELERATED #${nonce} VIA EXECUTOR`);
+    settleExecuted(v, tx);
+    render();
+
     if(v.dbId) {
       if(existingTxId) await dbMarkExecuted(existingTxId, Number(receipt.blockNumber), receipt.hash);
       if(tx.dbId) await dbMarkExecuted(tx.dbId, Number(receipt.blockNumber), receipt.hash);
     }
-    flash(`ACCELERATED #${nonce} VIA EXECUTOR`);
     await reloadVault(vi);
   } catch(e) {
     console.error(e);

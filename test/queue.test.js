@@ -61,6 +61,15 @@ const NEEDED = [
   'renderDash', 'txSt', 'fmtEta', 'canForwardCancel', 'hasForwarder', 'isCancelTx',
   'rejectArmKey', 'queueRef',
   'vaultDot', 'ownerIdent', 'thresholdNote', 'delayNote',
+  // Not render functions. They are what the submit routes apply to the card
+  // between the receipt and the reload, so what they do to a queue is worth
+  // pinning on its own — a wrong settle draws a confident lie for the second or
+  // two before reloadVault contradicts it.
+  'settleExecuted', 'settleQueued', 'settleCancelled',
+  // Lifted, not stubbed: whether two digests are the same digest however they
+  // are cased is the whole of what settleCancelled decides on, so a copy of it
+  // here would be asserting against this suite's idea of the comparison.
+  '_sameHash',
 ];
 
 const YOU = '0x1111111111111111111111111111111111111111';
@@ -103,6 +112,10 @@ const sandbox = {
   // the state a fresh page is in, and the state the crashed line was reached in.
   cannotSign: () => sandbox._cannotSign,
   _cannotSign: false,
+  // A wallet flow in flight. guardSubmit sets it and renders, and the card reads
+  // it to put its controls out of reach — so renderDash needs it defined for the
+  // same reason it needs _cannotSign: it is read on an ordinary draw.
+  _submitting: false,
   txKind: () => ({ label: 'ETH TRANSFER', tone: 'value' }),
   tokIcon: () => '',
   pgAttrs: () => '',
@@ -129,6 +142,7 @@ const sandbox = {
   isMegaName: () => false,
   isBaseName: () => false,
   selOf: d => (typeof d === 'string' && d.length >= 10 ? d.slice(0, 10) : ''),
+
   SEL: { cancelQueued: '0xdeadbeef' },
 };
 vm.createContext(sandbox);
@@ -186,6 +200,108 @@ test('an account that cannot sign is offered approval instead, and never SIGN', 
     assert.doesNotMatch(html, /doSign\(0,'proposal:[^']+'\)/, 'a contract account has nothing to sign with');
     assert.match(html, /CANNOT SIGN/);
   } finally { sandbox._cannotSign = false; }
+});
+
+test('a proposal whose wallet flow is in flight puts its own controls out of reach', () => {
+  // The press has to be visible in the frame it happens in. guardSubmit already
+  // refused to start a second flow while one was running; what it did not do was
+  // say so, so SUBMIT sat there looking untouched for as long as the first round
+  // trip took and invited the press again.
+  //
+  // Asserted on the card rather than on guardSubmit because the card is where it
+  // has to show: the buttons keep their places and their handlers, and the class
+  // is what takes them out of reach (.tx-foot-act.working, pointer-events:none).
+  // Removing or disabling them instead would reshuffle the row under the cursor
+  // at the one moment somebody is looking at it.
+  vault(proposal({ approvals: { [YOU]: true, [THEM]: true } }));
+  const idle = draw();
+  assert.match(idle, /class="tx-foot-act"/, 'an idle card carries no working state');
+  sandbox._submitting = true;
+  try {
+    const busy = draw();
+    assert.match(busy, /class="tx-foot-act working"/, 'the card says a flow is in flight');
+    // Still the same controls, still wired to the same handler.
+    assert.match(busy, /doSubmit\(0,'proposal:[^']+'\)/, 'the button stays where it was');
+  } finally { sandbox._submitting = false; }
+  assert.match(draw(), /class="tx-foot-act"/, 'and the state is left behind when the flow ends');
+});
+
+// ── settling a card against the vault's own account of what happened ─────
+
+test('an executed proposal leaves the queue and takes the nonce with it', () => {
+  const { settleExecuted } = sandbox;
+  const tx = proposal({ nonce: 40 });
+  const v = vault(tx, { nonce: 40 });
+  settleExecuted(v, tx);
+  assert.deepEqual(v.queue, [], 'the proposal is spent \u2014 the vault said ExecutionSuccess for its digest');
+  assert.equal(v.nonce, 41, 'executing is what consumes the nonce');
+});
+
+test('settling matches the proposal that was submitted, not whichever shares its nonce', () => {
+  // A nonce is contested, not owned: two proposals can sit at the same one and
+  // only one of them can ever execute. Filtering by nonce would retire both, and
+  // the one it should not have retired is still live on chain.
+  const { settleExecuted } = sandbox;
+  const mine = proposal({ nonce: 40, txHash: '0x' + 'aa'.repeat(32) });
+  const theirs = proposal({ nonce: 40, txHash: '0x' + 'bb'.repeat(32) });
+  const v = vault(null, { nonce: 40 });
+  v.queue = [mine, theirs];
+  settleExecuted(v, mine);
+  assert.deepEqual(v.queue, [theirs], 'the other proposal at this nonce is left alone');
+});
+
+test('a queued proposal keeps its row, gains the eta the vault reported, and still spends the nonce', () => {
+  // execute() advances the nonce whether it runs the call or writes the queue
+  // entry, so a queued proposal is behind the vault's nonce and fully live — the
+  // distinction loadVaultQueue is built around.
+  const { settleQueued } = sandbox;
+  const tx = proposal({ nonce: 40, eta: 0 });
+  const v = vault(tx, { nonce: 40 });
+  settleQueued(v, tx, 1791405767, '0x' + 'cd'.repeat(32));
+  assert.equal(v.queue.length, 1, 'a queued proposal has not gone anywhere');
+  assert.equal(tx.eta, 1791405767, 'and it carries the eta the vault itself reported');
+  assert.equal(tx.queueTx, '0x' + 'cd'.repeat(32));
+  assert.equal(v.nonce, 41, 'writing the entry is what spent the nonce');
+});
+
+test('settling a proposal that is not at the live nonce leaves the nonce alone', () => {
+  // executeQueued runs a proposal at its original nonce, long after the vault
+  // has moved past it. Advancing on that would invent a nonce the vault never
+  // reached, and every companion flow builds against the live one.
+  const { settleExecuted } = sandbox;
+  const tx = proposal({ nonce: 37 });
+  const v = vault(tx, { nonce: 40 });
+  settleExecuted(v, tx);
+  assert.deepEqual(v.queue, []);
+  assert.equal(v.nonce, 40, 'the vault is where it was');
+});
+
+test('a cancellation takes its victim off the queue, matched on the digest the vault named', () => {
+  // Queued(hash, _, 0) is the vault saying it no longer holds that digest. The
+  // cancel proposal and the proposal it killed have to leave together \u2014 settling
+  // only the cancel left the dead proposal on screen looking live.
+  const { settleCancelled } = sandbox;
+  const victim = proposal({ nonce: 40, txHash: '0x' + 'ab'.repeat(32), eta: 123 });
+  const other = proposal({ nonce: 41, txHash: '0x' + 'cd'.repeat(32) });
+  const v = vault(null, { nonce: 40 });
+  v.queue = [victim, other];
+  // Cased the other way on purpose: a digest is the same digest however it is
+  // spelled, and the vault's log is not obliged to match the row's casing.
+  settleCancelled(v, ('0x' + 'AB'.repeat(32)));
+  assert.deepEqual(v.queue, [other], 'the cancelled proposal is gone, the unrelated one is not');
+  assert.equal(v.nonce, 40, 'a cancellation is not an execution and spends no nonce');
+});
+
+test('a cancellation naming a proposal this queue never held changes nothing', () => {
+  // A cancel can be aimed at a digest this client has no row for. That is not an
+  // error and must not disturb the rows it does have.
+  const { settleCancelled } = sandbox;
+  const tx = proposal({ nonce: 40, txHash: '0x' + 'ab'.repeat(32) });
+  const v = vault(tx, { nonce: 40 });
+  settleCancelled(v, '0x' + 'ff'.repeat(32));
+  assert.deepEqual(v.queue, [tx]);
+  settleCancelled(v, null);
+  assert.deepEqual(v.queue, [tx], 'and neither does a cancellation with no hash at all');
 });
 
 test('the demo never asks a chain whether the demo account has code', () => {
