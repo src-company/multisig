@@ -150,29 +150,52 @@ function getCoinbaseProvider() {
 // thing worth keeping: a session restored from storage, which is what auto-connect
 // hands to this function. `enable()` below is safe to call either way; it only
 // opens the QR modal when there is no session to use.
+//
+// The in-flight init is cached as well as the result, for the same reason
+// getCoinbaseProvider caches its own and in the same shape. `init()` is not
+// instant — it is preceded by a 635 KB download and followed by storage reads
+// and a relay handshake — and the two callers that reach it race by
+// construction: tryAutoConnect awaits this before it has set _isConnecting, so a
+// returning visitor who presses Connect during that wait arrives here with the
+// first init still outstanding. Checking only the resolved slot let both run,
+// and the second one's provider overwrote the first in a variable the first had
+// not reached yet: two EthereumProvider instances, two relay sockets competing
+// for one pairing, the orphan still holding the session and still the one
+// `disconnect` was registered on. What the operator saw was a connect that hung,
+// or a QR modal for a session that was already live.
 async function getWalletConnectProvider() {
-  await loadWalletConnect();
-  const WCProvider = globalThis['@walletconnect/ethereum-provider']?.EthereumProvider;
-  if (!WCProvider?.init) throw new Error('WalletConnect not available');
   if (_walletConnectProvider) return _walletConnectProvider;
-  const { chains, optionalChains, rpcMap } = _wcSessionConfig();
-  const p = await WCProvider.init({
-    projectId: WC_PROJECT_ID,
-    chains, optionalChains, rpcMap,
-    showQrModal: true,
-    metadata: { name: _appName, description: _appName, url: window.location.origin, icons: [] }
-  });
-  // A session can also end from the other side — disconnected in the wallet, or
-  // simply expired — and nothing here would have noticed: the provider stayed
-  // installed, the header still said connected, and the next signature went to a
-  // session that was gone. Registered on the instance, once, so the listener
-  // cannot stack up across reconnects.
-  p.on('disconnect', () => {
-    if (_connectedWalletProvider === p) window.disconnectWallet();
-    else if (_walletConnectProvider === p) _walletConnectProvider = null;
-  });
-  _walletConnectProvider = p;
-  return p;
+  if (_wcProviderPromise) return _wcProviderPromise;
+  _wcProviderPromise = (async () => {
+    await loadWalletConnect();
+    const WCProvider = globalThis['@walletconnect/ethereum-provider']?.EthereumProvider;
+    if (!WCProvider?.init) throw new Error('WalletConnect not available');
+    if (_walletConnectProvider) return _walletConnectProvider;
+    const { chains, optionalChains, rpcMap } = _wcSessionConfig();
+    const p = await WCProvider.init({
+      projectId: WC_PROJECT_ID,
+      chains, optionalChains, rpcMap,
+      showQrModal: true,
+      metadata: { name: _appName, description: _appName, url: window.location.origin, icons: [] }
+    });
+    // A session can also end from the other side — disconnected in the wallet, or
+    // simply expired — and nothing here would have noticed: the provider stayed
+    // installed, the header still said connected, and the next signature went to a
+    // session that was gone. Registered on the instance, once, so the listener
+    // cannot stack up across reconnects.
+    p.on('disconnect', () => {
+      if (_connectedWalletProvider === p) window.disconnectWallet();
+      // The cached init is dropped alongside the instance it resolved to, or
+      // the next caller is handed back a provider whose session has ended.
+      else if (_walletConnectProvider === p) { _walletConnectProvider = null; _wcProviderPromise = null; }
+    });
+    _walletConnectProvider = p;
+    return p;
+  })();
+  // Cleared on failure only, so a retry is a retry rather than the same
+  // rejection handed out for the rest of the page.
+  _wcProviderPromise.catch(() => { _wcProviderPromise = null; });
+  return _wcProviderPromise;
 }
 
 // Quotes are escaped as well as markup: every _esc() below lands in an HTML
@@ -201,6 +224,7 @@ window._connectedWalletProvider = null;
 window.eip6963Providers = new Map();
 
 let _walletConnectProvider = null;
+let _wcProviderPromise = null;
 let _isConnecting = false;
 let _walletEventHandlers = null;
 let _onConnectCallbacks = [];
@@ -619,6 +643,9 @@ window.disconnectWallet = function() {
     try { _walletConnectProvider.disconnect(); } catch (e) {}
     _walletConnectProvider = null;
   }
+  // The cached init goes with it, or the next connect is handed back the
+  // provider whose session was just ended.
+  _wcProviderPromise = null;
   // The smart wallet's session outlives this page unless it is ended here.
   // Dropping the saved choice stops auto-reconnect, but it would not stop the
   // next Connect from coming back authorised with no passkey prompt — so

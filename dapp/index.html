@@ -3241,7 +3241,31 @@ let _session = null;
 let _sessionInFlight = null;
 // A refusal is remembered for the session. Re-asking on the next load, and the
 // one after, turns a considered "no" into nagging; the app works without it.
-let _sessionDeclined = false;
+//
+// Held as the ADDRESS that declined, not as a flag, and only for an actual
+// decline. Two things were collapsed into one boolean:
+//
+//   Which account said no. A declined prompt latched for the page, so switching
+//   to another account — a different person at the same machine, or the second
+//   key of a 2-of-2 — inherited a refusal it had never been asked for, and
+//   could not get a read session without reloading.
+//
+//   Whether it was said at all. signTypedData rejects for a user decline AND
+//   for every transient wallet fault there is: a WalletConnect relay that
+//   dropped between the prompt and the answer, a provider mid-reconnect, a
+//   locked hardware wallet. Those latched identically, and the cost is not
+//   cosmetic — see ensureSession: without a token the signature column is not
+//   readable, and a proposal with no readable signature that the chain does not
+//   hold queued is HIDDEN. One blip at connect time therefore emptied the
+//   pending queue for the rest of the page.
+let _sessionDeclinedBy = null;
+// A refusal from the far side — the verifier asleep, a clock skewed past its
+// 300s window — is not a decline and must not latch. But it must not re-prompt
+// on every load either: loadVaultQueue runs after every sign, submit, execute
+// and cancel, and each attempt costs a wallet prompt that was always going to
+// fail. Wait out a cooldown and try again.
+const SESSION_RETRY_MS = 60000;
+let _sessionFailedAt = 0;
 function sessionToken() {
   if(!_session) return null;
   // A minute of slack, so a token does not expire between being chosen and used.
@@ -3249,16 +3273,23 @@ function sessionToken() {
   if(_session.address !== String(window._connectedAddress || '').toLowerCase()) { _session = null; return null; }
   return _session.token;
 }
+// Does this client hold a token that can read the `signature` column? Every
+// caller that has to tell "nobody signed this" apart from "we are not allowed to
+// see who did" asks through here rather than reading _session, so the two
+// questions cannot drift apart.
+function sigsReadable() { return !!sessionToken(); }
 // Best effort, always. A refused prompt or an unreachable verifier costs the
 // signer list's bytes and nothing else — every other read still works, and every
 // write is verified on its own terms and does not consult this.
 async function ensureSession() {
   if(sessionToken()) return true;
-  if(_sessionDeclined) return false;
+  const who = String(window._connectedAddress || '').toLowerCase();
+  if(_sessionDeclinedBy && _sessionDeclinedBy === who) return false;
+  if(_sessionFailedAt && Date.now() - _sessionFailedAt < SESSION_RETRY_MS) return false;
   if(_sessionInFlight) return _sessionInFlight;
   _sessionInFlight = (async () => {
   const signer = window._signer;
-  const addr = String(window._connectedAddress || '').toLowerCase();
+  const addr = who;
   if(!signer || !/^0x[0-9a-f]{40}$/.test(addr)) return false;
   const issuedAt = Math.floor(Date.now() / 1000);
   let sig;
@@ -3266,19 +3297,37 @@ async function ensureSession() {
     sig = normalizeSigV(await signer.signTypedData(
       { ...EIP712_DOMAIN, chainId: S.chainId },
       EIP712_SESSION_TYPES, { address: addr, issuedAt }));
-  } catch(e) { console.warn('Read session declined:', e && e.message); _sessionDeclined = true; return false; }
+  } catch(e) {
+    // A decline is this account's answer and is kept. Anything else is the
+    // wallet failing to carry the question, which is a different fact and is
+    // retried — see _sessionDeclinedBy.
+    const code = e && (e.code !== undefined ? e.code : (e.info && e.info.error && e.info.error.code));
+    if(code === 'ACTION_REJECTED' || code === 4001) {
+      console.warn('Read session declined by', addr);
+      _sessionDeclinedBy = addr;
+    } else {
+      console.warn('Read session could not be signed:', e && e.message);
+      _sessionFailedAt = Date.now();
+    }
+    return false;
+  }
   try {
     const res = await pgFetch('session', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify({ address: addr, chain_id: S.chainId, issued_at: issuedAt, signature: sig }),
     }, PROPOSAL_API_URL);
-    if(!res.ok) { console.warn('Read session refused:', res.status); return false; }
+    if(!res.ok) { console.warn('Read session refused:', res.status); _sessionFailedAt = Date.now(); return false; }
     const j = JSON.parse(await res.text());
-    if(!j || typeof j.token !== 'string') return false;
+    if(!j || typeof j.token !== 'string') { _sessionFailedAt = Date.now(); return false; }
     _session = { token: j.token, address: addr, exp: Number(j.exp) || 0 };
+    _sessionFailedAt = 0;
     return true;
-  } catch(e) { console.warn('Read session unavailable:', e && e.message); return false; }
+  } catch(e) {
+    console.warn('Read session unavailable:', e && e.message);
+    _sessionFailedAt = Date.now();
+    return false;
+  }
   })();
   try { return await _sessionInFlight; } finally { _sessionInFlight = null; }
 }
@@ -10443,12 +10492,32 @@ async function dbGetTxByHash(txHash) {
 // anyone. Either way it cannot be checked here the way verifySigs checks an
 // ECDSA sig, and counting it toward a threshold buys a reverted transaction at
 // the submitter's expense. Drop it, and let verifySigs judge the rest.
+// Throws when the signatures could not be read, rather than answering with an
+// empty list. Its three callers — cancel, reject and accelerate — use the
+// answer to decide whether the quorum is already there, and an empty list is a
+// specific claim: nobody has signed this companion yet. Two things made that
+// claim falsely. The `signature` column is granted to `reader` and not to `anon`
+// (db/roles.sql), so asking for it without a token is an error and not a null
+// — and the error was dropped on the floor by destructuring only `data`. A
+// signed-out operator was therefore told SIGNED CANCEL (1/2) on a companion that
+// already held both signatures, every time, with no way to ever reach the
+// threshold through this interface: each attempt re-collected from zero. So ask
+// for what is readable, and say when that is not enough to answer with.
 async function dbGetSigs(txId) {
-  const { data } = await sb.from('signatures')
-    .select('signer, signature, sig_type')
+  // Mint one if the hour has run out. The three callers all hold a signer by
+  // this point — each is past requireSigner() — so the prompt this may open is
+  // one the operator is already in the middle of a flow for.
+  await ensureSession();
+  const { data, error } = await sb.from('signatures')
+    .select(sigsReadable() ? 'signer, signature, sig_type' : 'signer, sig_type')
     .eq('tx_id', txId)
     .order('signer', { ascending: true });
-  return (data || []).filter(s => {
+  if(error || !Array.isArray(data)) throw dbError('SIGNATURES NOT READ', error);
+  // Without a token the bytes are not there to verify, so the count this would
+  // produce is zero whatever the row holds. Refusing is the honest answer: the
+  // caller is about to tell an owner how close the quorum is.
+  if(!sigsReadable()) throw dbError('SIGNATURES NOT READ — APPROVE THE SIGN-IN PROMPT AND TRY AGAIN', null);
+  return data.filter(s => {
     const st = s.sig_type || s.sigType;
     return st !== 'approval' && st !== 'sender';
   });
@@ -10512,6 +10581,8 @@ async function dbGetSigsByTxIds(txIds) {
 // chain. It is self-healing — loadVaultQueue re-reads the vault and reconciles
 // every row against it — so the honest report is a notice that says so, once,
 // rather than one per call in a cascade.
+// Said once per page. See the report at the end of loadVaultQueue.
+let _sigsUnreadableWarned = false;
 let _dbLagWarnedAt = 0;
 function dbWriteLagged(op, error) {
   console.error('DB ' + op + ':', error);
@@ -11175,6 +11246,21 @@ async function loadVaultQueue(vi) {
     // vault still holds queued is live no matter what any row says, and the
     // vault is already being asked about the queued ones — so ask it about the
     // retired ones too, in the same call, and put back anything it still has.
+    // A read session, before the rows rather than only on the first load.
+    //
+    // The reader token lasts an hour and loadAllVaults was the only thing that
+    // ever minted one, so a tab left open longer than that went on reading the
+    // queue with no token — and this function cannot do its job without one.
+    // The `signature` column is granted to `reader` and not to `anon`
+    // (db/roles.sql), so without a token the bytes do not come back, verifySigs
+    // has nothing to recover, and the hide-check below drops every proposal that
+    // the chain does not hold queued. Which is all of them, until one is
+    // submitted. The queue emptied itself on the hour, and reloadQueue — which
+    // runs after every sign, submit, execute and cancel — was the path that
+    // showed it. Idempotent and already satisfied on the first load: it returns
+    // immediately while a token is held.
+    await ensureSession();
+    if(!stillOurs()) return;
     const [live, gone] = await Promise.all([
       dbGetPending(v.dbId),
       dbGetRecentTerminal(v.dbId, v.nonce),
@@ -11252,6 +11338,12 @@ async function loadVaultQueue(vi) {
 
     // Track stale txs to clean up in DB
     const staleTxIds = [];
+    // How many proposals the hide-check below dropped. It is the right call when
+    // the signatures were read and there were none; it is a lie about the vault
+    // when they could not be read at all, and the operator is the only one who
+    // can tell those apart — so the count is kept and reported rather than left
+    // in the console. See the report after the loop.
+    let hiddenUnsigned = 0;
 
     // Build accelerate/cancel/reject sig counts: map original nonce → set of signers.
     //
@@ -11458,6 +11550,7 @@ async function loadVaultQueue(vi) {
       // check for legacy rows and later anonymous signature removal.
       if(!validSigs.length && onchainQueued[t.id] === 0) {
         console.warn('Hiding unsigned proposal (no valid owner signature, not queued on chain):', t.id, t.target);
+        hiddenUnsigned++;
         continue;
       }
 
@@ -11556,6 +11649,25 @@ async function loadVaultQueue(vi) {
     // Stable, so contested nonces keep the tie-break dbGetPending just fixed.
     queue.sort((a, b) => a.nonce - b.nonce);
     v.queue = queue;
+
+    // A queue that is short because the signatures could not be read must say
+    // so. Hiding an unsigned proposal is deliberate — propose_tx authenticates
+    // its caller by a supplied string, so a row naming any owner as its author
+    // costs one anonymous HTTP request, and a plausible one only has to hold up
+    // until somebody presses SIGN. But the test for "unsigned" is a signature
+    // that did not verify, and without a reader token none of them can: the
+    // bytes are granted to `reader` and withheld from `anon` (db/roles.sql).
+    // So the same branch that drops a forgery drops every real proposal in the
+    // vault, silently, leaving a dashboard that reads as an empty queue — which
+    // is the one thing a co-signer must never be shown when it is not true.
+    //
+    // Both halves are needed before this is said: rows were actually dropped,
+    // and the bytes were actually unreadable. Latched per page so a queue that
+    // reloads after every action does not say it five times.
+    if(hiddenUnsigned && !sigsReadable() && !_sigsUnreadableWarned) {
+      _sigsUnreadableWarned = true;
+      flash(`${hiddenUnsigned} PROPOSAL${hiddenUnsigned === 1 ? '' : 'S'} CANNOT BE SHOWN — READING THE STORED SIGNATURES NEEDS A SIGNED-IN ADDRESS, AND THIS ONE IS NOT. RELOAD AND APPROVE THE SIGN-IN PROMPT TO SEE THE FULL QUEUE.`, 9000);
+    }
 
     // Background: retire superseded rows so they don't reappear. Recorded as
     // 'stale' rather than executed — see dbPruneTx. Owner-gated server-side, so

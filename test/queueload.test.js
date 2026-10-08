@@ -222,9 +222,28 @@ sandbox.getMC3 = () => ({
 });
 
 // ── the database, answering whatever a test wants it to ───────────
+// ── the read session ─────────────────────────
+// The `signature` column is granted to `reader` and withheld from `anon`
+// (db/roles.sql), so whether this client holds a token decides whether the bytes
+// come back at all — and therefore whether "no valid signature" means what the
+// hide-check reads it as. Held as a flag a test can turn off, because the
+// signed-out shape is the one that used to empty the queue in silence.
+const session = { held: true, minted: 0 };
+sandbox.ensureSession = async () => { session.minted++; return session.held; };
+sandbox.sigsReadable = () => session.held;
+const flashes = [];
+sandbox.flash = (msg) => { flashes.push(String(msg)); };
+
 const db = { pending: [], terminal: [], pruned: [] };
-sandbox.dbGetPending = async () => ({ rows: db.pending, sigs: true });
-sandbox.dbGetRecentTerminal = async () => ({ rows: db.terminal, sigs: true });
+// What a signed-out client is actually handed: the rows, with the one column it
+// has no grant on missing from them. Not an empty signature list — who signed
+// stays readable, and the queue would reach a different conclusion if it did not
+// — just no bytes to recover an address from. Stripped here rather than in the
+// subject, so the subject sees exactly the shape PostgREST would send.
+const gate = (rows) => session.held ? rows : rows.map(t => ({ ...t,
+  signatures: (t.signatures || []).map(({ signature, ...rest }) => rest) }));
+sandbox.dbGetPending = async () => ({ rows: gate(db.pending), sigs: true });
+sandbox.dbGetRecentTerminal = async () => ({ rows: gate(db.terminal), sigs: true });
 sandbox.dbGetSigsByTxIds = async () => new Map();
 sandbox.dbPruneTx = async (id) => { db.pruned.push(id); };
 
@@ -250,8 +269,11 @@ const digestFor = (v, t) => ethers.TypedDataEncoder.hash(
 const sign = (v, t, who) => ({ signer: who, signature: fakeSig(who, digestFor(v, t)), sig_type: 'ecdsa' });
 
 // Run one load and hand back the queue it produced.
-async function load(v, { pending = [], terminal = [], you = A } = {}) {
+async function load(v, { pending = [], terminal = [], you = A, session: held = true } = {}) {
   db.pending = pending; db.terminal = terminal; db.pruned = [];
+  session.held = held; session.minted = 0;
+  sandbox._sigsUnreadableWarned = false;
+  flashes.length = 0;
   sandbox.S.vaults = [v];
   sandbox.window._connectedAddress = you;
   await loadVaultQueue(0);
@@ -384,6 +406,55 @@ test('one owner signature is enough to show it, because then it is not forged', 
   const q = await load(v, { pending: [real] });
   assert.deepEqual(q.map(t => t.nonce), [6]);
   assert.equal(q[0].approvals[A], true);
+});
+
+// ── the read session the hide-check depends on 
+
+// The hide-check above reads "no signature verified" as "nobody signed this",
+// and that reading is only available to a client that could have read the
+// signatures. The bytes live in a column granted to `reader` and withheld from
+// `anon`, and the reader token lasts an hour — so a tab open longer than that
+// asked for the queue with no token, got rows whose signatures it could not see,
+// verified none of them, and hid every proposal the vault was not already
+// holding queued. Which is every proposal still collecting signatures: the ones
+// the queue exists for. It emptied itself on the hour, and reloadQueue — after
+// every sign, submit, execute and cancel — was where it showed.
+test('the queue mints a read session before it judges a signature', async () => {
+  resetChain();
+  const v = vault();
+  const real = row({ nonce: 6 });
+  real.signatures = [sign(v, real, A)];
+  const q = await load(v, { pending: [real] });
+  assert.ok(session.minted > 0, 'the queue read the signatures without ensuring it could');
+  assert.deepEqual(q.map(t => t.nonce), [6]);
+});
+
+// Hiding is still the right call — a signed-out client cannot tell a planted row
+// from a real one either, and showing it is the direction that gets somebody to
+// press SIGN. What must not happen is hiding it in silence: an empty dashboard is
+// read as "the vault has nothing pending", which is the one thing a co-signer
+// must never be told when it is not true.
+test('a signed-out load says why the queue is short instead of showing an empty one', async () => {
+  resetChain();
+  const v = vault();
+  const real = row({ nonce: 6 });
+  real.signatures = [sign(v, real, A)];
+  const q = await load(v, { pending: [real], session: false });
+  assert.deepEqual(q.map(t => t.nonce), [], 'an unverifiable row was shown as if it had been checked');
+  assert.equal(flashes.length, 1, 'the queue went short without saying so');
+  assert.match(flashes[0], /SIGNED-IN ADDRESS/);
+});
+
+// And it is said only when both halves hold. A planted row dropped by a client
+// that COULD read the signatures is the check working, not a failure to report —
+// saying "approve the sign-in prompt" there sends the operator after a prompt
+// they already answered, for a row that is meant to be gone.
+test('a verified client that drops a forgery says nothing about sessions', async () => {
+  resetChain();
+  const v = vault();
+  const q = await load(v, { pending: [row({ nonce: 6 })] });
+  assert.deepEqual(q.map(t => t.nonce), []);
+  assert.deepEqual(flashes, []);
 });
 
 test('a signature from a stranger does not make a planted row real', async () => {
