@@ -74,13 +74,15 @@ function sessionCtx({ sign, post } = {}) {
     console: { warn() {}, error() {} },
     S: { chainId: 1 },
     PROPOSAL_API_URL: 'https://verifier.example',
+    flashes: [],
     PGRST_URL: 'https://pgrst.example',
     JSON, Date, Math, Number, String,
   };
+  ctx.flash = (msg) => { ctx.flashes.push(String(msg)); };
   ctx.window = ctx;
   ctx.globalThis = ctx;
   vm.createContext(ctx);
-  for (const name of ['EIP712_DOMAIN', 'EIP712_SESSION_TYPES', 'normalizeSigV',
+  for (const name of ['EIP712_DOMAIN', 'EIP712_SESSION_TYPES', 'normalizeSigV', 'SESSION_PROOF_WINDOW_MS',
     '_session', '_sessionInFlight', '_sessionDeclinedBy', 'SESSION_RETRY_MS',
     '_sessionFailedAt', 'sessionToken', 'sigsReadable', 'ensureSession'])
     vm.runInContext(grabApp(name), ctx);
@@ -177,6 +179,28 @@ test('a refusal from the verifier waits out a cooldown rather than re-prompting'
   assert.equal(prompts.length, 1, 'a doomed prompt was fired again immediately');
   ctx.Date = { now: () => now + 60001 };
   assert.equal(await ctx.ensureSession(), true, 'the cooldown never expired');
+  assert.equal(prompts.length, 2);
+});
+
+test('a prompt answered after the proof aged out says so, and is retried at once', async () => {
+  // The one prompt nobody asked for: it opens by itself on load. Noticed minutes
+  // later — a tab switch, a hardware wallet to find — it is answered honestly
+  // and refused anyway, because the proof is older than the verifier accepts.
+  // Indistinguishable from a broken sign-in, and a retry away from working.
+  const clock = { t: Date.now() };
+  const { ctx, prompts } = sessionCtx({
+    post: n => n === 1 ? { ok: false, status: 400, text: async () => 'expired' } : null,
+  });
+  ctx.Date = { now: () => clock.t };
+  // A prompt answered, honestly, four hundred seconds after it opened.
+  ctx._signer = { signTypedData: async () => { prompts.push(1); clock.t += 400000; return SIG; } };
+  assert.equal(await ctx.ensureSession(), false);
+  assert.equal(ctx.flashes.length, 1, 'a refused sign-in said nothing at all');
+  assert.match(ctx.flashes[0], /ANSWERED TOO LATE/);
+  // And no cooldown: the next ask is the fix, so holding it back for a minute
+  // would make a slow answer look like a service that is down.
+  ctx._signer = { signTypedData: async () => { prompts.push(1); return SIG; } };
+  assert.equal(await ctx.ensureSession(), true);
   assert.equal(prompts.length, 2);
 });
 

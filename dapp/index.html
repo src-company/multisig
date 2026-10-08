@@ -3266,6 +3266,19 @@ let _sessionDeclinedBy = null;
 // fail. Wait out a cooldown and try again.
 const SESSION_RETRY_MS = 60000;
 let _sessionFailedAt = 0;
+// Mirrors META_WINDOW_SECONDS in api/proposals.cjs. There is nowhere to read it
+// from at runtime, so the two are changed together and this comment is the link
+// between them.
+//
+// It matters here more than anywhere else the window applies, because this is
+// the one prompt the operator did not ask for: it opens by itself on load,
+// against a page they have only just opened. A metadata write is a deliberate
+// act and is answered in seconds; a sign-in prompt that appeared on its own is
+// routinely noticed minutes later — after a tab switch, or after the hardware
+// wallet has been found — and by then the proof it was going to make is older
+// than the verifier will accept. Which is a refusal that looks exactly like a
+// broken sign-in, and is in fact a retry away from working.
+const SESSION_PROOF_WINDOW_MS = 300000;
 function sessionToken() {
   if(!_session) return null;
   // A minute of slack, so a token does not expire between being chosen and used.
@@ -3292,6 +3305,7 @@ async function ensureSession() {
   const addr = who;
   if(!signer || !/^0x[0-9a-f]{40}$/.test(addr)) return false;
   const issuedAt = Math.floor(Date.now() / 1000);
+  const askedAt = Date.now();
   let sig;
   try {
     sig = normalizeSigV(await signer.signTypedData(
@@ -3317,7 +3331,18 @@ async function ensureSession() {
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify({ address: addr, chain_id: S.chainId, issued_at: issuedAt, signature: sig }),
     }, PROPOSAL_API_URL);
-    if(!res.ok) { console.warn('Read session refused:', res.status); _sessionFailedAt = Date.now(); return false; }
+    if(!res.ok) {
+      console.warn('Read session refused:', res.status);
+      // Answered after the proof had aged out. Say so and leave no cooldown
+      // behind: the next ask is the fix, and holding it back for a minute would
+      // make a prompt answered slowly look like a service that is down.
+      if(Date.now() - askedAt > SESSION_PROOF_WINDOW_MS) {
+        flash('THE SIGN-IN SIGNATURE WAS ANSWERED TOO LATE TO BE ACCEPTED — NOTHING IS WRONG WITH YOUR WALLET. PRESS RELOAD TO SIGN IN AGAIN.', 9000);
+        return false;
+      }
+      _sessionFailedAt = Date.now();
+      return false;
+    }
     const j = JSON.parse(await res.text());
     if(!j || typeof j.token !== 'string') { _sessionFailedAt = Date.now(); return false; }
     _session = { token: j.token, address: addr, exp: Number(j.exp) || 0 };
@@ -10820,11 +10845,6 @@ async function loadAllVaults() {
   if(S.demoMode) return;
   const addr = window._connectedAddress;
   if(!addr) return;
-  // Ask for a read session before the queue is loaded, so the first load already
-  // has the signature bytes rather than fetching them, missing them, and needing
-  // a second pass. Awaited but never required: it returns false on a declined
-  // prompt or an unreachable verifier, and everything below proceeds either way.
-  await ensureSession();
   const hadVaults = S.vaults.length > 0;
   // The chain this run is for. Two of these can be in flight at once — the
   // switcher starts one per click and switchChain awaits the wallet in between,
@@ -10843,6 +10863,19 @@ async function loadAllVaults() {
   // The same reasoning already gates the wallet's chain and account handlers;
   // it belongs here, where the loader actually is.
   if(!hadVaults && !S.deploy) showLoading('LOADING VAULTS');
+  // Ask for a read session before the queue is loaded, so the first load already
+  // has the signature bytes rather than fetching them, missing them, and needing
+  // a second pass. Awaited but never required: it returns false on a declined
+  // prompt or an unreachable verifier, and everything below proceeds either way.
+  //
+  // Under the overlay, not in front of a bare page. This used to run before
+  // showLoading, so on a first load the boot overlay's own five-second deadline
+  // expired while the sign-in prompt was still open — the app appeared, empty,
+  // with a wallet prompt on top of it, and then a spinner came back once the
+  // prompt was answered. An operator reading that saw a page that had finished
+  // loading and found nothing.
+  await ensureSession();
+  if(!stillOurs()) { hideLoading(); return; }
   try {
     const wallets = await dbMyWallets(addr);
     // Unreachable, not empty — see dbMyWallets. Leave whatever is on screen
@@ -11666,7 +11699,15 @@ async function loadVaultQueue(vi) {
     // reloads after every action does not say it five times.
     if(hiddenUnsigned && !sigsReadable() && !_sigsUnreadableWarned) {
       _sigsUnreadableWarned = true;
-      flash(`${hiddenUnsigned} PROPOSAL${hiddenUnsigned === 1 ? '' : 'S'} CANNOT BE SHOWN — READING THE STORED SIGNATURES NEEDS A SIGNED-IN ADDRESS, AND THIS ONE IS NOT. RELOAD AND APPROVE THE SIGN-IN PROMPT TO SEE THE FULL QUEUE.`, 9000);
+      // What to do about it differs, and the two cases are reached by different
+      // people: a co-signer who declined the sign-in prompt, and a visitor who
+      // followed a shared link with no wallet connected at all. Telling the
+      // second one to approve a prompt they were never shown is worse than
+      // saying nothing.
+      const how = window._connectedAddress
+        ? 'RELOAD AND APPROVE THE SIGN-IN PROMPT TO SEE THE FULL QUEUE.'
+        : 'CONNECT A WALLET TO SEE THE FULL QUEUE.';
+      flash(`${hiddenUnsigned} PROPOSAL${hiddenUnsigned === 1 ? '' : 'S'} CANNOT BE SHOWN — READING THE STORED SIGNATURES NEEDS A SIGNED-IN ADDRESS, AND THIS ONE IS NOT. ${how}`, 9000);
     }
 
     // Background: retire superseded rows so they don't reappear. Recorded as
