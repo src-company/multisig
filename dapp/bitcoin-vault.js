@@ -18,6 +18,8 @@ const lsJson = (k, d) => { try { return JSON.parse(lsGet(k)) ?? d; } catch(_) { 
 const short = s => s.length > 18 ? `${s.slice(0, 8)}…${s.slice(-6)}` : s;
 const BTC = `<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#F7931A"/><path fill="#FFF" d="M22.3 14.1c.3-2.1-1.3-3.2-3.5-4l.7-2.8-1.7-.4-.7 2.7-1.4-.3.7-2.8-1.7-.4-.7 2.8-1.1-.3-2.4-.6-.5 1.8s1.3.3 1.3.3c.7.2.8.6.8 1l-.8 3.2.2.1-.2-.1-1.1 4.5c-.1.2-.3.5-.8.4 0 0-1.3-.3-1.3-.3l-.9 2 2.3.6 1.2.3-.7 2.9 1.7.4.7-2.8 1.4.3-.7 2.8 1.7.4.7-2.9c2.9.6 5.1.3 6-2.3.8-2.1 0-3.3-1.6-4.1 1.1-.3 2-1.1 2.3-2.7zm-3.9 5.4c-.5 2.1-4.1 1-5.2.7l.9-3.7c1.2.3 4.9.9 4.3 3zm.5-5.4c-.5 1.9-3.4.9-4.4.7l.8-3.3c1 .2 4.1.7 3.6 2.6z"/></svg>`;
 
+const TAC = `<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#0a0a0a"/><circle cx="16" cy="16" r="13" fill="none" stroke="#f4efe6" stroke-width="2.5"/><path d="M17.5 7L13 22.5Q13 25 18 24" fill="none" stroke="#f7931a" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 11L21 11" stroke="#f7931a" stroke-width="2.4" stroke-linecap="round"/></svg>`;
+
 const S = {
   network: 'mainnet', dark: !lsGet('ms_light'),
   me: null, busy: false, msg: null,
@@ -288,7 +290,7 @@ function render(){
     <div class="hbar" aria-hidden="true">${'/'.repeat(120)}</div>
     <div class="hdr"><div class="logo"><a href="./index.html">MULTISIG</a></div>
       <div class="pills"><button class="theme" data-act="theme" aria-label="Switch to ${S.dark ? 'light' : 'dark'} theme">${S.dark ? '☀' : '☾'}</button>${['mainnet', 'signet'].map(k => `<button class="pill${k === S.network ? ' on' : ''}" data-act="net" data-n="${k}"${k === S.network ? ' aria-current="true"' : ''}${S.policy ? ' disabled' : ''}>${k.toUpperCase()}</button>`).join('')}</div></div>
-    <div class="hero"><div class="marks"><span class="mark">${BTC}</span><span class="mark">${ETH}</span></div>
+    <div class="hero"><div class="marks"><span class="mark">${BTC}</span><span class="mark">${ETH}</span><span class="mark">${TAC}</span></div>
       <h1>Bitcoin multisig</h1><div class="sub">Your Ethereum wallet can sign for Bitcoin. So can a Bitcoin wallet.</div><div class="free">FREE · DEADMAN SWITCH · NO NEW SEED PHRASE</div></div>
     ${renderFlow()}
     ${S.msg ? `<div class="note bad" role="status">${esc(S.msg)}</div>` : ''}
