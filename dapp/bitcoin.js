@@ -80,7 +80,7 @@ const numsKey = network => new HDKey({ publicKey: hex.decode('02' + hex.encode(T
 //
 // Owners from a hardware wallet paste the text every descriptor tool already
 // prints, [fingerprint/path]xpub, so they need no handle at all.
-const OWNER_VERSION = 0, LANE_BTC = 1, LANE_EVM = 2, LANE_PROOF = 4, LANE_WALLET = 8;
+const OWNER_VERSION = 0, LANE_BTC = 1, LANE_EVM = 2, LANE_PROOF = 4, LANE_WALLET = 8, LANE_KEY = 16;
 
 const pathText = path => path.map(n => n >= HARDENED ? `${n - HARDENED}h` : `${n}`).join('/');
 const parsePath = text => text ? text.split('/').map(p => {
@@ -105,7 +105,7 @@ function ownerOf({ network, fingerprint, path, xpub, evm = null }){
   return { fingerprint, path, xpub, evm };
 }
 
-function encodeOwner({ network, fingerprint, path, xpub, evm, proof, wallet }){
+function encodeOwner({ network, fingerprint, path, xpub, evm, proof, wallet, possession }){
   ownerOf({ network, fingerprint, path, xpub });
   const k = HDKey.fromExtendedKey(xpub, net(network).versions);
   let flags = LANE_BTC;
@@ -122,6 +122,10 @@ function encodeOwner({ network, fingerprint, path, xpub, evm, proof, wallet }){
       const a = te.encode(wallet.address), sig = base64.decode(wallet.signature);
       if(a.length > 90 || sig.length !== 65) throw new Error('cannot use that wallet signature');
       parts.push(new Uint8Array([a.length]), a, sig); flags |= LANE_WALLET;
+    }
+    if(possession){
+      if(!proof) throw new Error('a key proof needs the Ethereum proof beside it');
+      parts.push(hex.decode(possession)); flags |= LANE_KEY;
     }
   }
   const body = concat(...parts);
@@ -147,7 +151,9 @@ function decodeOwner(text, network){
   let want = at + 32 + 33 + 8 + (b[1] & LANE_EVM ? 20 : 0) + (b[1] & LANE_PROOF ? 65 : 0);
   const walletAt = want;
   if(b[1] & LANE_WALLET) want += 1 + (b[walletAt] ?? 0) + 65;
-  if(b[1] & ~(LANE_BTC | LANE_EVM | LANE_PROOF | LANE_WALLET) ? b.length < want : b.length !== want) throw new Error('owner handle has the wrong length');
+  const keyAt = want;
+  if(b[1] & LANE_KEY) want += 64;
+  if(b[1] & ~(LANE_BTC | LANE_EVM | LANE_PROOF | LANE_WALLET | LANE_KEY) ? b.length < want : b.length !== want) throw new Error('owner handle has the wrong length');
   const dv = new DataView(b.buffer, b.byteOffset), path = [];
   for(let i = 0; i < depth; i++) path.push(dv.getUint32(7 + 4 * i));
   let k;
@@ -167,7 +173,21 @@ function decodeOwner(text, network){
     if(!bitcoinSigners(linkMessage(network, evm), sig, network).includes(address)) throw new Error('owner handle was not signed by the Bitcoin wallet it names');
     owner.wallet = address;
   }
+  // The address signing for the key is half of it, and anyone can sign for a key they
+  // saw. This half is the key signing for the address, which only its holder can do.
+  if(b[1] & LANE_KEY){
+    const sig = b.subarray(keyAt, keyAt + 64);
+    if(!(b[1] & LANE_PROOF) || !schnorr.verify(sig, possessionHash(network, evm), k.publicKey.subarray(1))) throw new Error('owner handle has a bad key proof');
+    owner.possession = hex.encode(sig);
+    owner.possessed = true;
+  }
   return owner;
+}
+const possessionHash = (network, evm) => sha256(concat(te.encode('multisig-owner-possession-v1\0'), te.encode(net(network).name), hex.decode(evm.slice(2))));
+function signPossession(signer, network, evm){
+  const account = signer.derive(`m/87'/${net(network).coin}'/0'`), sig = hex.encode(schnorr.sign(possessionHash(network, evm), account.privateKey));
+  account.wipePrivateData();
+  return sig;
 }
 
 // The embedded key. A wallet that speaks Ethereum cannot produce a BIP-340
@@ -541,12 +561,28 @@ const HOW_IT_WORKS = [
   ['The backup is the way out', 'It holds no private key. With it and enough keys, the coins can be spent without this site.'],
 ];
 const aboutBlocks = b => { const d = Math.round(b / 144); return d >= 2 ? `about ${d} days` : `about ${Math.max(1, Math.round(b / 6))} hours`; };
+const sameKeys = (a, b, network) => a.length === b.length && a.every(k => b.some(o => sameKey(k, o, network)));
 function describePolicy(policy){
   return policy.paths.map(p => {
-    const same = p.keys.every(k => policy.paths[0].keys.some(o => o.xpub === k.xpub)), one = same ? 'owner' : 'recovery key';
+    const one = sameKeys(p.keys, policy.paths[0].keys, policy.network) ? 'owner' : 'recovery key';
     const who = p.keys.length === 1 ? `The ${one}` : p.threshold === p.keys.length ? `All ${p.keys.length} ${one}s` : `Any ${p.threshold} of ${p.keys.length} ${one}s`;
     return p.older ? `${who} can also spend any coin unmoved for ${p.older} blocks, ${aboutBlocks(p.older)}.` : `${who} can spend at any time.`;
   });
+}
+
+// What a vault is, read from nothing but its own rules, so a vault from a stranger's link
+// is named the same way as one made here.
+function policySummary(policy){
+  const [first, later, ...rest] = policy.paths, n = first.keys.length;
+  const base = { rules: describePolicy(policy), delay: later?.older || 0 };
+  if(rest.length || (later && !later.older)) return { ...base, kind: 'custom', name: 'CUSTOM', note: 'This vault has its own rules. Read each one.' };
+  if(!later) return { ...base, kind: 'standard', name: 'STANDARD',
+    note: n === 1 ? 'One key. A single-signature wallet.' : first.threshold === n ? 'Needs every owner, so one lost wallet locks the coins.' : first.threshold === 1 ? 'Any one owner can spend alone.' : `Still spends if ${n - first.threshold === 1 ? 'one wallet is' : `${n - first.threshold} wallets are`} lost.` };
+  if(sameKeys(later.keys, first.keys, policy.network)){
+    if(first.threshold === n && later.threshold < n) return { ...base, kind: 'aged', name: 'AGED COINS', note: `A lost wallet delays the coins and does not lock them.` };
+    return { ...base, kind: 'custom', name: 'CUSTOM', note: 'This vault has its own rules. Read each one.' };
+  }
+  return { ...base, kind: 'deadman', name: 'DEADMAN SWITCH', note: 'If the owners stop moving coins, the recovery keys can take over after the delay.' };
 }
 
 async function readEvmVault(chainId, address, doFetch = (...a) => root.fetch(...a)){
@@ -608,7 +644,7 @@ async function ownersOf(policy, doFetch = (...a) => root.fetch(...a)){
   for(const row of await r.json()){
     try {
       const h = decodeOwner(row.handle, network), xpub = ids.get(keyId(h, network));
-      if(h.proven && xpub) out[xpub] = { evm: h.evm, wallet: typeof h.wallet === 'string' ? h.wallet : h.wallet?.address };
+      if(h.possessed && xpub) out[xpub] = { evm: h.evm, wallet: h.wallet };
     } catch(_) {}
   }
   return out;
@@ -1198,7 +1234,7 @@ async function scan(policy, c, gap = GAP){
       // Deposits can be spread out on purpose to make a scan run on. It stops here and
       // says so, and the coins it found stay usable.
       if(index >= MAX_INDEX){ truncated = true; break; }
-      const batch = Array.from({ length: Math.min(5, gap - idle) }, (_, i) => index + i);
+      const batch = Array.from({ length: Math.min(5, gap - idle, MAX_INDEX - index) }, (_, i) => index + i);
       const seen = await Promise.all(batch.map(i => c.used(vaultOf(policy, branch, i).address)));
       for(let i = 0; i < batch.length; i++){
         if(!seen[i]){ idle++; continue; }
@@ -1264,7 +1300,8 @@ function concat(...parts){
   return out;
 }
 
-root.BitcoinVault = Object.freeze({ ownersOf, HOW_IT_WORKS, describePolicy, keyId, isName, resolveName, exportAccountKey, recoveryText, sameKey, TACIT_ASSETS, signOwnerAuth, verifyOwnerAuth, saveVault, listVaults, assertSpendable, isProtected, hasTacitEnvelope, walletMessage, linkMessage, keyFromWalletSignature, evmSignHash, evmSignMessage, bitcoinMessageHash, bitcoinSigners, handleForWallet, proposalId, vaultId, publishProposal, fetchProposals, openProposals, publishHandle, fetchHandles, MAX_INDEX, txidOf, seatMisdescribed, EVM_CHAINS, selectors: { threshold: selector('threshold()') }, readEvmVault, mirror, bindingMessage, evmMessageHash, NETWORKS, DUST, GAP, MAX_OWNERS, MAX_OLDER, MAX_FEE_RATE, encodeOwner, decodeOwner, originText, ownerMessage, deriveOwnerKey, keyFromSignature, fingerprintOf,
+const keyPoint = (owner, network) => HDKey.fromExtendedKey(owner.xpub, net(network).versions).publicKey;
+root.BitcoinVault = Object.freeze({ policySummary, aboutBlocks, signPossession, keyPoint, ownersOf, HOW_IT_WORKS, describePolicy, keyId, isName, resolveName, exportAccountKey, recoveryText, sameKey, TACIT_ASSETS, signOwnerAuth, verifyOwnerAuth, saveVault, listVaults, assertSpendable, isProtected, hasTacitEnvelope, walletMessage, linkMessage, keyFromWalletSignature, evmSignHash, evmSignMessage, bitcoinMessageHash, bitcoinSigners, handleForWallet, proposalId, vaultId, publishProposal, fetchProposals, openProposals, publishHandle, fetchHandles, MAX_INDEX, txidOf, seatMisdescribed, EVM_CHAINS, selectors: { threshold: selector('threshold()') }, readEvmVault, mirror, bindingMessage, evmMessageHash, NETWORKS, DUST, GAP, MAX_OWNERS, MAX_OLDER, MAX_FEE_RATE, encodeOwner, decodeOwner, originText, ownerMessage, deriveOwnerKey, keyFromSignature, fingerprintOf,
   policyOf, descriptor, descriptorChecksum, parseDescriptor, walletPolicy, vaultOf, vsize, coinsFor, propose, inspect, sign, combine, finalize, chain, scan, evmSigner });
 
 })(typeof window !== 'undefined' ? window : globalThis);

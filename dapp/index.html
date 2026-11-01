@@ -8942,7 +8942,7 @@ function toggleBtc(){ S.cf.btc = !S.cf.btc; render(); }
 window.toggleBtc = toggleBtc;
 function setBtcPolicy(kind, older){ S.cf.btcKind = kind; if(older) S.cf.btcOlder = older; render(); }
 window.setBtcPolicy = setBtcPolicy;
-const BTC_KINDS = [['plain', 'STANDARD', 'These owners can spend at any time.'], ['recovery', 'DEADMAN SWITCH', 'Recovery keys can spend any coin left unmoved past a delay. You add them on the next page.'], ['hold', 'AGED COINS', 'Everyone signs for now. The threshold above can spend coins older than a delay.']];
+const BTC_KINDS = [['plain', 'STANDARD', 'These owners can spend at any time.'], ['recovery', 'DEADMAN SWITCH', 'Recovery keys can spend any coin left unmoved past a delay. You add them on the next page.'], ['hold', 'AGED COINS', 'Everyone signs for now. Fewer owners can spend coins older than a delay.']];
 const BTC_DELAYS = [['7D', 1008], ['30D', 4320], ['90D', 12960], ['1Y', 52560]];
 // Testnets go with signet. A deploy set that mixes them is warned about already, and
 // real bitcoin is only implied when every chain in it is real.
@@ -8967,11 +8967,11 @@ function renderBtcPanel(c){
   // Anything past a plain quorum is finished on /btc, which holds the recovery keys and
   // the owners' signatures. This hands over the draft, in a fragment no server sees.
   const draftTh = kind === 'hold' ? Math.min(threshold, Math.max(owners.length - 1, 1)) : threshold;
-  const draft = `./btc.html#draft/${network}/${draftTh}/${owners.map(encodeURIComponent).join(',')}${kind === 'hold' ? `/hold/${older}` : ''}`;
+  const draft = `./btc.html#draft/${network}/${draftTh}/${owners.map(encodeURIComponent).join(',')}${kind === 'hold' ? `/hold/${older}` : kind === 'recovery' ? `/recovery/${older}/1/` : ''}`;
   const policy = `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">${BTC_KINDS.map(([k, t]) => `<button class="pill${kind === k ? ' on' : ''}" aria-pressed="${kind === k}"${k === 'hold' && owners.length < 2 ? ' disabled' : ''} onclick="setBtcPolicy('${k}')">${t}</button>`).join('')}</div>
-    <div style="margin-top:6px;font-size:10px;line-height:1.6;color:var(--d)">${BTC_KINDS.find(([k]) => k === kind)[2]}</div>
+    <div style="margin-top:6px;font-size:10px;line-height:1.6;color:var(--d)">${BTC_KINDS.find(([k]) => k === kind)[2]}${kind === 'hold' ? ` On aged coins, ${draftTh} of ${owners.length} can spend.` : ''}</div>
     ${kind === 'plain' ? '' : `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">${BTC_DELAYS.map(([l, b]) => `<button class="pill${older === b ? ' on' : ''}" aria-pressed="${older === b}" onclick="setBtcPolicy('${kind}',${b})">${l}</button>`).join('')}</div>
-    <a class="btn btn-outline btn-sm" style="margin-top:8px;text-decoration:none" href="${esc(kind === 'recovery' ? `./btc.html#draft/${network}/${threshold}/${owners.map(encodeURIComponent).join(',')}` : draft)}">FINISH ON BITCOIN &#8599;</a>`}`;
+    <a class="btn btn-outline btn-sm" style="margin-top:8px;text-decoration:none" href="${esc(draft)}">FINISH ON BITCOIN &#8599;</a>`}`;
   const set = btcSet(network, owners, threshold), me = (window._connectedAddress || '').toLowerCase();
   const mine = owners.some(a => a.toLowerCase() === me), iAmReady = set.ready.includes(me);
   return `<div class="net-panel" style="margin-top:12px;padding:10px 14px">

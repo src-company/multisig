@@ -860,6 +860,8 @@ function pump() {
 function inWorker(op, input, who) {
   if (who && overShare(who)) return Promise.reject(new RequestError(429, 'Too many requests'));
   if (_queue.length >= WORKER_QUEUE) return Promise.reject(new RequestError(503, 'Please try again'));
+  // Charged a little on the way in, or a burst would all queue before the first job ended.
+  charge(who, 500);
   return new Promise((ok, no) => {
     _queue.push({ id: ++_workerId, op, input, who, ok, no });
     pump();

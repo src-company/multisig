@@ -62,7 +62,7 @@ Limits:
 - The EVM timelock does not carry over, for the reasons under Timelocks.
 - Contract owners, such as a Safe, cannot take part, because they cannot make a repeatable signature.
 - The owner list comes from one RPC. A lying RPC could name different owners, so the page shows them before creating anything.
-- A handle can be replaced only until its owner confirms a vault. After that it stays, so a twin's address cannot be moved or rolled back by republishing. Handles do not prove the publisher holds the Bitcoin key, so an owner can burn their own seat. Handles are published to `btc_owner_handles` by `POST /handle`, which checks the signature with the same code the dapp runs. Every client checks them again on reading, so the table can lose a handle but cannot forge one.
+- An address keeps its first key, so a twin's address cannot be moved or rolled back by republishing. A newer handle for the same key replaces an older one. Handles do not prove the publisher holds the Bitcoin key, so an owner can burn their own seat. Handles are published to `btc_owner_handles` by `POST /handle`, which checks the signature with the same code the dapp runs. Every client checks them again on reading, so the table can lose a handle but cannot forge one.
 
 ## What came from Tacit
 

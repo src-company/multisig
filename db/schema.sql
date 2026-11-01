@@ -1878,7 +1878,7 @@ CREATE INDEX IF NOT EXISTS btc_owner_handles_key ON btc_owner_handles (network, 
 CREATE OR REPLACE FUNCTION btc_handles_by_key(p_network text, p_keys text[])
 RETURNS TABLE (key_id text, handle text) AS $$
   SELECT h.key_id, h.handle FROM btc_owner_handles h
-  WHERE h.network = p_network AND h.key_id = ANY (p_keys) AND coalesce(cardinality(p_keys), 0) <= 64;
+  WHERE h.network = p_network AND h.key_id = ANY (p_keys) AND coalesce(cardinality(p_keys), 0) <= 64 LIMIT 256;
 $$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
 
 CREATE OR REPLACE FUNCTION btc_handles(p_network text, p_addresses text[])

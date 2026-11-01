@@ -86,14 +86,16 @@ const curDesc = () => S.policy ? BV.descriptor(S.policy) : null;
 const backedUp = () => !!noteOf('backup', curDesc());
 const labelOf = k => noteOf('labels', k.xpub) || k.fingerprint;
 // The wallet behind a key, once its record has been read and checked.
-function whoOf(k){
-  const w = S.who?.[k.xpub];
-  if(w?.wallet) return { mark: BTC_ICON, text: short(w.wallet) };
-  if(w) return { mark: ETH_ICON, text: short(w.evm) };
+function whoOf(k, full){
+  const w = S.who?.[k.xpub], show = t => full ? t : short(t);
+  if(w?.wallet) return { mark: BTC_ICON, text: show(w.wallet) };
+  if(w) return { mark: ETH_ICON, text: show(w.evm) };
   return { mark: KEY_ICON, text: k.fingerprint };
 }
-const chip = k => { const w = whoOf(k); return `<span class="who-c"><span class="who-i">${w.mark}</span>${esc(w.text)}${isMe(k) ? '<span class="you">YOU</span>' : ''}</span>`; };
+const chip = (k, full) => { const w = whoOf(k, full === true); return `<span class="who-c"><span class="who-i">${w.mark}</span>${esc(w.text)}${isMe(k) ? '<span class="you">YOU</span>' : ''}</span>`; };
 const isMe = k => !!S.owner && BV.sameKey(k, S.owner, S.network);
+// Dust and known notes are never moved as sats, so they cannot restart a clock.
+const movable = c => c.value > BV.DUST && c.quarantine !== 'tacit';
 const iSigned = r => r.keys.some(k => isMe(k) && r.signedAll.includes(k.xpub));
 const allKeys = p => [...new Map(p.paths.flatMap(x => x.keys).map(k => [k.xpub, k])).values()];
 
@@ -257,6 +259,9 @@ function createVault(){
   // Owners read from one RPC get the same check as any vault someone hands you.
   const fromRpc = S.mirrored;
   S.mirrored = false;
+  if(S.moving && S.moving === d) throw new Error('These are the same rules as the current vault.');
+  S.moveFrom = S.moving;
+  S.moving = null;
   return open(policy, fromRpc);
 }
 
@@ -375,6 +380,7 @@ async function persist(){
 }
 
 async function sign(){
+  if(S.pending) throw new Error('Confirm your wallet first.');
   if(!S.owner) throw new Error('Connect first: nothing here can sign without your owner key.');
   if(!S.trusted) throw new Error('Check this vault\'s owners first.');
   // Held here, so a link opened during the check cannot change what gets signed.
@@ -486,6 +492,7 @@ function renderBars(){
   if(S.truncated) out.push('<div class="attn"><b>THIS VAULT HAS MORE ADDRESSES THAN THE SCAN COVERS</b><span>LATER COINS ARE NOT SHOWN. A DESCRIPTOR WALLET CAN FIND THEM</span></div>');
   if(m) out.push(`<div class="attn ${m.kind === 'ok' ? 'ok' : 'bad'}" role="status"><b>${esc(m.text)}</b>${m.href ? `<a href="${esc(m.href)}" target="_blank" rel="noopener">VIEW ↗</a>` : ''}<button class="end" data-act="dismiss" aria-label="Dismiss">✕</button></div>`);
   if(S.policy && S.owner && BV.seatMisdescribed(S.policy, S.owner)) out.push(`<div class="attn"><b>YOUR KEY IS MISDESCRIBED IN THIS VAULT</b><span>IT STILL SIGNS HERE, BUT ASK WHO CREATED IT WHY</span></div>`);
+  if(S.view === 'dash' && S.moveFrom && S.policy) out.push('<div class="attn ok"><b>NEW VAULT READY</b><span>SAVE ITS BACKUP, THEN MOVE THE COINS FROM THE OLD ONE</span><button class="end" data-act="movecoins">MOVE COINS</button></div>');
   if(S.view === 'dash' && S.policy && S.trusted && !backedUp() && S.coins?.length) out.push(`<div class="attn"><b>BACK UP THIS VAULT</b><span>WITHOUT IT THE COINS CANNOT BE SPENT, EVEN WITH EVERY KEY</span></div>`);
   return out.join('');
 }
@@ -618,6 +625,7 @@ function renderQueue(){
 function renderReceive(){
   if(!S.trusted) return `<div class="head"><span>CHECK BEFORE YOU USE THIS</span></div>
     <div class="note warn"><b>Someone else gave you this vault, and they chose these keys.</b> Compare every key below in full, with its owner, over a channel you trust. A close match is not a match.</div>
+    ${(s => `<div class="rule"><b>${esc(s.name)}</b><span>${esc(s.rules.join(' '))} ${esc(s.note)}</span></div>`)(BV.policySummary(S.policy))}
     ${renderPaths()}
     <div class="btns"><button class="btn btn-fill" data-act="trust">I HAVE CHECKED EVERY KEY</button></div>`;
   if(!backedUp()) return `<div class="head"><span>RECEIVE</span></div>
@@ -668,16 +676,16 @@ function renderCoins(){
 // a stranger's key on the delayed path is a different thing from one in the quorum.
 function renderPaths(){
   return S.policy.paths.map((x, i) => `<div class="tx-sub" style="padding:10px 8px 0">${i ? `SECOND PATH · ${x.threshold} OF ${x.keys.length} AFTER ${x.older} BLOCKS, ABOUT ${days(x.older)}` : `FIRST PATH · ${x.threshold} OF ${x.keys.length} AT ANY TIME`}</div>
-    ${x.keys.map(k => `<div class="row"><span>${S.who?.[k.xpub] ? `<span class="who">${chip(k)}</span>` : ''}<span class="mono" style="font-size:11px;font-weight:400">${esc(BV.originText(k))}${isMe(k) && !S.who?.[k.xpub] ? '<span class="you">YOU</span>' : ''}</span></span></div>`).join('')}`).join('');
+    ${x.keys.map(k => `<div class="row"><span>${S.who?.[k.xpub] && S.trusted ? `<span class="who">${chip(k, true)}</span>` : ''}<span class="mono" style="font-size:11px;font-weight:400">${esc(BV.originText(k))}${isMe(k) && !(S.who?.[k.xpub] && S.trusted) ? '<span class="you">YOU</span>' : ''}</span></span></div>`).join('')}`).join('');
 }
 
 // The deadman switch is the point of a delayed vault, so its clock is out in the open.
 // It follows the oldest coin, the first one the second path can reach.
 function renderClock(){
-  const later = S.policy.paths[1], coins = (S.coins || []).filter(c => c.height);
+  const later = S.policy.paths[1], coins = (S.coins || []).filter(c => c.height && movable(c));
   if(!later || !S.coins) return '';
-  const same = later.keys.every(k => S.policy.paths[0].keys.some(o => o.xpub === k.xpub));
-  const name = same ? 'AGED COINS' : 'DEADMAN SWITCH', who = same ? `${later.threshold} of ${later.keys.length} owners` : `The recovery key${later.keys.length > 1 ? 's' : ''}`;
+  const { kind, name } = BV.policySummary(S.policy);
+  const who = kind === 'aged' ? `${later.threshold} of ${later.keys.length} owners` : `${later.threshold === later.keys.length ? 'The' : `${later.threshold} of ${later.keys.length}`} recovery key${later.keys.length > 1 ? 's' : ''}`;
   const left = coins.length ? Math.min(...coins.map(c => c.height + later.older - S.tip - 1)) : null;
   if(left !== null && left <= 0) return '';
   const pct = left === null ? 0 : Math.max(2, Math.round(100 * (1 - left / later.older))), late = left !== null && left < later.older * 0.1;
@@ -690,17 +698,18 @@ function renderClock(){
 }
 
 function renderWho(){
-  const [first, later] = S.policy.paths;
-  const other = later && !later.keys.every(k => first.keys.some(o => o.xpub === k.xpub));
-  return `<div class="who">${first.keys.map(chip).join('')}${other ? `<span class="who-l">RECOVERY</span>${later.keys.map(chip).join('')}` : ''}</div>`;
+  const [first, ...later] = S.policy.paths, s = BV.policySummary(S.policy), plain = k => chip(k);
+  const rest = s.kind === 'aged' ? [] : later;
+  return `<div class="who">${first.keys.map(plain).join('')}${rest.map(p => `<span class="who-l">${p.older ? `AFTER ${days(p.older)}` : 'OR'}</span>${p.keys.map(plain).join('')}`).join('')}</div>
+    <div class="rule"><b>${esc(s.name)}</b><span>${esc(s.rules.join(' '))} ${esc(s.note)}</span></div>`;
 }
 
 function renderDash(){
   if(!S.policy) return renderEmpty();
   const p = S.policy, coins = S.coins, delayed = p.paths[1];
   const total = (coins || []).filter(c => !BV.isProtected(c)).reduce((n, c) => n + c.value, 0), pending = (coins || []).filter(c => !c.height).length;
-  const open = delayed && coins ? coins.filter(c => c.height && c.height + delayed.older - S.tip - 1 <= 0).length : 0;
-  const mine = S.owner && allKeys(p).some(isMe);
+  const open = delayed && coins ? coins.filter(c => c.height && movable(c) && c.height + delayed.older - S.tip - 1 <= 0).length : 0;
+  const mine = S.owner && allKeys(p).some(isMe), seated = S.owner && p.paths[0].keys.some(isMe);
   return `<div class="stats">
       <div class="stat-row"><span class="btc">${BTC_ICON}</span><span class="stat-big">${coins ? btcOf(total) : '<span class="pulse">…</span>'}</span><span class="stat-token">BTC</span>
       ${coins ? `<button class="addrline" data-act="refresh" aria-label="Scan again">↻</button>` : ''}
@@ -710,7 +719,7 @@ function renderDash(){
         ${delayed ? `<span><b>${pathLabel(delayed)}</b> ${open ? '<span class="y">OPEN</span>' : ''}</span>` : ''}
         <span>${S.network === 'mainnet' ? 'BITCOIN' : 'SIGNET'}</span>
         ${pending ? `<span class="y">${pending} UNCONFIRMED</span>` : ''}
-        ${S.owner ? `<span class="${mine ? 'g' : ''}">${mine ? 'YOU ARE AN OWNER' : 'NOT AN OWNER'}</span>` : ''}
+        ${S.owner ? `<span class="${mine ? 'g' : ''}">${seated ? 'YOU ARE AN OWNER' : mine ? 'RECOVERY KEY ONLY' : 'NOT AN OWNER'}</span>` : ''}
       </div>
       ${renderWho()}
     </div>
@@ -725,11 +734,13 @@ function renderDash(){
 function renderAdmin(){
   if(!S.policy) return renderEmpty();
   const p = S.policy, d = BV.descriptor(p), list = saved(), i = list.indexOf(d);
+  const s = BV.policySummary(p);
   return `<div class="head"><span>THIS VAULT'S RULES</span></div>
-    ${BV.describePolicy(p).map(l => `<p class="small" style="padding:8px 8px 0">${esc(l)}</p>`).join('')}
+    <div class="rule"><b>${esc(s.name)}</b><span>${esc(s.rules.join(' '))} ${esc(s.note)}</span></div>
+    <div class="btns"><button class="btn btn-outline btn-sm" data-act="changerules">CHANGE THESE RULES</button></div>
+    <p class="small" style="padding:8px">Rules are part of the address, so a change is a new vault. This sets one up with the same owners, then helps you move the coins across.</p>
     <div class="head"><span>OWNERS</span></div>
     ${renderPaths()}
-    <p class="small" style="padding:12px 8px">Rules are part of the address, so they cannot change. Different owners or a different threshold means a new vault, and sending the coins to it.</p>
     ${renderHow()}
     <div class="head"><span>BACKUP</span></div>
     <p class="small" style="padding:12px 8px 0">The file spends this vault without this site. Every owner should keep a copy.</p>
@@ -773,6 +784,7 @@ function renderCreate(){
     : q.keys.length === 1 ? 'One owner and one key. This is a single-signature wallet, not a multisig.' : null;
   return `<div class="create">
     <div>
+      ${S.moving ? '<div class="note"><b>Changing the rules.</b> Set the new rules here. The old vault stays as it is until the owners sign a move.</div>' : ''}
       <label class="lbl" for="name">VAULT NAME <span class="dim">kept in this browser</span></label>
       <input class="inp" id="name" data-field="name" maxlength="24" placeholder="TREASURY" autocomplete="off" value="${esc(f.name)}">
       <span class="lbl">POLICY</span>
@@ -843,7 +855,7 @@ function renderOverlay(){
     <div class="ovl-head"><span>ONE LAST SIGNATURE</span><button class="x-btn" data-act="disconnect" aria-label="Forget this key">✕</button></div>
     <p class="small">This checks your wallet makes the same key every time. It only happens once.</p>
     ${S.progress ? `<div class="connecting" role="status">${esc(S.progress)}<button class="btn btn-ghost btn-sm" data-act="cancelconnect">CANCEL</button></div>` : '<button class="btn btn-fill btn-w" style="margin-top:12px" data-act="finish">CONFIRM</button>'}
-    ${S.unanswered && !S.progress ? '<div class="btns"><button class="addrline" data-act="skipcheck">My wallet will not show this. Continue without the check</button></div>' : ''}
+    ${S.unanswered && !S.progress ? '<div class="btns"><button class="addrline" data-act="skipcheck">My wallet will not show this. Continue anyway. If it cannot repeat this key, this address cannot be fixed later</button></div>' : ''}
   </div></div>`;
   if(S.ovl === 'connect') return `<div class="ovl" data-act="close-bg"><div class="ovl-card" role="dialog" aria-modal="true" aria-label="Connect">
     <div class="ovl-head"><span>CONNECT AN OWNER KEY</span><button class="x-btn" data-act="close" aria-label="Close">✕</button></div>
@@ -914,7 +926,7 @@ const ACT = {
   skipcheck(){ return finishConnect(true); },
   refresh(){ scanned = refresh(); },
   theme(){ S.dark = !S.dark; lsSet('ms_light', S.dark ? '' : '1'); },
-  wallet(){ S.ovl = S.owner ? 'me' : 'connect'; },
+  wallet(){ S.ovl = S.pending ? 'confirm' : S.owner ? 'me' : 'connect'; },
   disconnect(){ forget(); S.ovl = null; },
   // For spending without this site. An xprv is the key itself, so it is asked for first.
   exportkey(){
@@ -925,7 +937,7 @@ const ACT = {
   'close-bg'(el, e){ if(e.target === el) S.ovl = null; },
   ovl(el){ S.ovl = el.dataset.o; },
   dismiss(){ S.msg = null; },
-  view(el){ S.view = el.dataset.v; S.msg = null; S.form.rename = undefined; },
+  view(el){ S.view = el.dataset.v; S.msg = null; S.form.rename = undefined; if(S.view !== 'create') S.moving = null; },
   trust(){
     remember(S.policy);
     S.trusted = true;
@@ -969,7 +981,24 @@ const ACT = {
     const first = saved()[0];
     if(first) return open(BV.parseDescriptor(first, S.network));
   },
-  'copy-owner'(){ return copy(myHandle(), 'HANDLE COPIED'); },
+  'copy-owner'(){ if(S.pending) throw new Error('Confirm your wallet first.'); return copy(myHandle(), 'HANDLE COPIED'); },
+  // A vault's rules cannot change, so this is a new vault with the old one's owners,
+  // and the coins follow once it exists. Nothing moves until the owners sign that.
+  changerules(){
+    const p = S.policy, s = BV.policySummary(p), [first, later] = p.paths;
+    Object.assign(S.form, { kind: s.kind === 'deadman' ? 'recovery' : s.kind === 'aged' ? 'hold' : 'plain', owners: first.keys.map(BV.originText).join('\n'),
+      threshold: String(s.kind === 'aged' ? later.threshold : first.threshold), second: s.kind === 'deadman' ? later.keys.map(BV.originText).join('\n') : '', secondThreshold: String(later?.threshold || 1), older: String(later?.older || 4320) });
+    S.moving = BV.descriptor(p);
+    S.view = 'create';
+  },
+  async movecoins(){
+    const to = BV.vaultOf(S.policy, 0, 0).address, from = S.moveFrom;
+    S.moveFrom = null;
+    await open(BV.parseDescriptor(from, S.network));
+    await scanned;
+    Object.assign(S.form, { to, amt: 'all', path: '0' });
+    S.compose = true;
+  },
   'copy-evm'(){ return copy(S.owner.evm, 'ADDRESS COPIED'); },
   'copy-address'(){ return copy(BV.vaultOf(S.policy, 0, S.receive).address, 'ADDRESS COPIED'); },
   async 'copy-descriptor'(){ await copy(BV.descriptor(S.policy), 'DESCRIPTOR COPIED'); setNote('backup', curDesc(), 1); },
@@ -1008,7 +1037,7 @@ document.addEventListener('input', e => {
   if(k === 'owners' || k === 'second') resolveWallets(k);
   if(S.view === 'create' || k === 'rate' || k === 'amt') render();
 });
-document.addEventListener('keydown', e => { if(e.key === 'Escape' && S.ovl){ S.ovl = null; render(); } });
+document.addEventListener('keydown', e => { if(e.key === 'Escape' && S.ovl && S.ovl !== 'confirm'){ S.ovl = null; render(); } });
 window.addEventListener('hashchange', readHash);
 // Coming back to a tab: the key may be past its time, and the coins may have moved.
 document.addEventListener('visibilitychange', () => {

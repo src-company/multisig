@@ -523,6 +523,27 @@ test('a vault describes its own rules in the same words everywhere', () => {
   assert.ok(BV.HOW_IT_WORKS.length >= 5);
 });
 
+test('a vault names its own policy, and only a key can claim a wallet label', () => {
+  const [a, b, c] = seats('signet'), [x, y] = owners(a, b), [z] = owners(c), P = paths => BV.policySummary(BV.policyOf({ network: 'signet', paths }));
+  assert.equal(P([{ threshold: 2, keys: [x, y] }]).kind, 'standard');
+  assert.match(P([{ threshold: 2, keys: [x, y] }]).note, /lost wallet locks/);
+  assert.equal(P([{ threshold: 2, keys: [x, y] }, { threshold: 1, keys: [z], older: 144 }]).kind, 'deadman');
+  assert.equal(P([{ threshold: 2, keys: [x, y] }, { threshold: 1, keys: [x], older: 144 }]).kind, 'deadman');
+  assert.equal(P([{ threshold: 2, keys: [x, y] }, { threshold: 1, keys: [x, y], older: 144 }]).kind, 'aged');
+  assert.equal(P([{ threshold: 1, keys: [x, y] }, { threshold: 1, keys: [x, y], older: 144 }]).kind, 'custom');
+  const evm = '0x' + '12'.repeat(20), sign = BV.signPossession(a.signer, 'signet', evm);
+  assert.equal(sign.length, 128);
+  assert.notEqual(sign, BV.signPossession(b.signer, 'signet', evm));
+});
+
+test('a scan never reads an address past the ceiling', async () => {
+  const policy = plain('signet'), seen = [];
+  const last = new Set([1995, 1996, 1997, 1998, 1999].map(i => BV.vaultOf(policy, 0, i).address));
+  await BV.scan(policy, { used: async a => { seen.push(a); return true; }, utxos: async () => [] });
+  assert.ok(seen.some(a => last.has(a)));
+  assert.equal(seen.length, BV.MAX_INDEX * 2);
+});
+
 test('names on the object prototype are not networks', () => {
   for(const n of ['constructor', '__proto__', 'toString'])
     assert.throws(() => BV.policyOf({ network: n, paths: [{ threshold: 1, keys: owners(A) }] }), /unknown network/);

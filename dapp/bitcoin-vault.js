@@ -60,18 +60,21 @@ function inviteLink(){
 // to 1 would quietly be a vault any single owner can empty.
 function readInvite(){
   // `draft` is the same text from the deploy wizard: a start to edit, not an invitation.
-  const [kind, network, th, list, rule, older, recTh, recList] = location.hash.slice(1).split('/');
+  const parts = location.hash.slice(1).split('/'), [kind, network, th, list, rule, older, recTh, recList] = parts;
   if(kind !== 'join' && kind !== 'draft') return false;
   try {
-    const owners = list.split(',').map(decodeURIComponent).filter(Boolean);
+    const clean = l => l.split(',').map(t => decodeURIComponent(t).trim()).filter(Boolean);
+    const owners = clean(list);
+    if(parts.length > (rule === 'recovery' ? 8 : rule ? 6 : 4)) throw new Error('bad link');
     if(!Object.hasOwn(BV.NETWORKS, network) || !/^[1-9]\d*$/.test(th) || +th > owners.length || owners.length > BV.MAX_OWNERS || new Set(owners.map(o => o.toLowerCase())).size !== owners.length) throw new Error();
     if(rule){
-      if(!['recovery', 'hold'].includes(rule) || !/^[1-9]\d*$/.test(older) || +older > BV.MAX_OLDER) throw new Error('bad rule');
+      // A delay of a block or two is no delay, and no one chooses it. Only a link would.
+      if(!['recovery', 'hold'].includes(rule) || !/^[1-9]\d*$/.test(older) || +older > BV.MAX_OLDER || +older < 144) throw new Error('bad rule');
       if(rule === 'hold' && +th >= owners.length) throw new Error('bad rule');
       if(rule === 'recovery'){
-        const rec = recList.split(',').map(decodeURIComponent).filter(Boolean);
-        if(!/^[1-9]\d*$/.test(recTh) || +recTh > rec.length || rec.length > BV.MAX_OWNERS) throw new Error('bad rule');
-        S.recRows = rec.map(text => ({ text, owner: null, state: 'checking', rec: true }));
+        const rec = clean(recList || '');
+        if(!/^[1-9]\d*$/.test(recTh) || rec.length > BV.MAX_OWNERS || (rec.length ? +recTh > rec.length : kind !== 'draft')) throw new Error('bad rule');
+        if(rec.length) S.recRows = rec.map(text => ({ text, owner: null, state: 'checking', rec: true }));
         S.recTh = +recTh;
       }
       S.kind = rule;
@@ -81,6 +84,7 @@ function readInvite(){
     S.threshold = +th;
     S.rows = owners.map(text => ({ text, owner: null, state: 'checking' }));
     S.invite = kind === 'join';
+    S.draft = kind === 'draft';
     return true;
   } catch(_) {
     S.msg = 'That invite link is not valid. Ask for a new one.';
@@ -109,19 +113,23 @@ function pathsOf(){
 // cannot be worked out, so they are looked up, and wait if that owner has not connected.
 async function resolve(row){
   let t = row.text.trim();
+  // A slow answer for what this row used to say must not land on what it says now.
+  const seq = row.seq = (row.seq || 0) + 1, stale = () => seq !== row.seq;
   Object.assign(row, { owner: null, error: null, addr: null });
   if(!t) return void (row.state = 'empty');
   try {
     // A name is shown with the address it reached, since that is who gets the seat.
-    if(BV.isName(t)) t = row.addr = await BV.resolveName(t);
+    if(BV.isName(t)){ const a = await BV.resolveName(t); if(stale()) return; t = row.addr = a; }
     if(/^0x[0-9a-fA-F]{40}$/.test(t)){
       const [h] = await BV.fetchHandles(S.network, [t]);
+      if(stale()) return;
       if(h) Object.assign(row, { owner: BV.decodeOwner(h, S.network), handle: h, state: 'ready' }); else row.state = 'waiting';
     } else if(/^(bc1|tb1)[a-z0-9]{20,}$/i.test(t)){
       const f = await BV.handleForWallet(S.network, t);
+      if(stale()) return;
       if(f) Object.assign(row, { owner: BV.decodeOwner(f.handle, S.network), handle: f.handle, state: 'ready' }); else row.state = 'waiting';
     } else Object.assign(row, { owner: BV.decodeOwner(t, S.network), handle: t, state: 'ready' });
-  } catch(e) { Object.assign(row, { state: 'bad', error: e.message }); }
+  } catch(e) { if(stale()) return; Object.assign(row, { state: 'bad', error: e.message }); }
   // One key cannot take two seats. Said here, not as an error on the last step.
   const taken = row.rec ? S.recRows.filter(r => r !== row).map(r => r.owner?.xpub) : [...(S.me ? [S.me.owner.xpub] : []), ...S.rows.filter(r => r !== row).map(r => r.owner?.xpub)];
   if(row.owner && taken.includes(row.owner.xpub) && !row.mine) Object.assign(row, { owner: null, state: 'bad', error: 'That owner is already on this vault.' });
@@ -192,7 +200,7 @@ function renderFlow(){
 function renderConfirm(){
   return `<h2>One last signature</h2><p class="lead">This checks your wallet makes the same key every time, so your seat can't be lost. It only happens once.</p>
     ${S.progress ? `<div class="connecting" role="status">${esc(S.progress)}<button class="btn line" data-act="cancelconnect">CANCEL</button></div>` : `<button class="btn fill w" data-act="finish">CONFIRM</button>`}
-    ${S.unanswered && !S.progress ? '<button class="link" data-act="skipcheck">My wallet will not show this. Continue without the check</button>' : ''}`;
+    ${S.unanswered && !S.progress ? '<button class="link" data-act="skipcheck">My wallet will not show this. Continue anyway. If it cannot repeat this key, this address cannot be fixed later</button>' : ''}`;
 }
 
 function renderConnect(){
@@ -219,7 +227,7 @@ function renderPolicy(n){
   const rec = recFilled().length;
   return `<div class="policy"><div class="plbl">HOW IT SPENDS</div>
     <div role="radiogroup" aria-label="Policy">${kinds.map(([k, t, d]) => `<button class="opt${S.kind === k ? ' on' : ''}" role="radio" aria-checked="${S.kind === k}" data-act="kind" data-k="${k}"${k === 'hold' && n < 2 ? ' disabled' : ''}><b>${t}</b><span>${d}</span></button>`).join('')}</div>
-    ${S.kind === 'plain' ? '' : `<div class="plbl">DELAY</div><div class="pills wrap">${DELAYS.map(([l, b]) => `<button class="pill${S.older === b ? ' on' : ''}" data-act="delay" data-b="${b}">${l}</button>`).join('')}</div>`}
+    ${S.kind === 'plain' ? '' : `<div class="plbl">DELAY · ${S.older} BLOCKS, ${esc(BV.aboutBlocks(S.older).toUpperCase())}</div><div class="pills wrap">${DELAYS.map(([l, b]) => `<button class="pill${S.older === b ? ' on' : ''}" data-act="delay" data-b="${b}">${l}</button>`).join('')}</div>`}
     ${S.kind === 'recovery' ? `<div class="plbl">RECOVERY KEYS</div>${S.recRows.map(recRow).join('')}
       <div class="btns"><button class="link" data-act="addrec">+ Add recovery key</button></div>
       ${rec > 1 ? `<div class="th"><div class="stepper"><button data-act="rth" data-d="-1" aria-label="Fewer">−</button><output>${Math.min(S.recTh, rec)} OF ${rec}</output><button data-act="rth" data-d="1" aria-label="More">+</button></div><span>to recover</span></div>` : ''}` : ''}
@@ -234,11 +242,12 @@ function renderOwners(){
   if(S.invite){
     // Whoever sent this chose every line of it. A vault someone hands you can be one they
     // alone control, so the rule is said plainly and nothing is saved until it is checked.
-    const rows = S.rows.map(r => `<div class="row"><span class="n">${markOf(r.text)}</span><span class="inp full">${esc(r.text)}</span>${r.mine ? '<span class="st ok">YOU</span>' : statusOf(r)}</div>`).join('');
+    const rows = S.rows.map(r => `<div class="row"><span class="n">${markOf(r.text)}</span><span class="inp full">${esc(r.addr ? `${r.text} · ${r.addr}` : r.text)}</span>${r.mine ? '<span class="st ok">YOU</span>' : statusOf(r)}</div>`).join('');
     const onRec = recFilled().some(r => r.mine), seated = S.rows.some(r => r.mine) || onRec, others = n - (S.rows.some(r => r.mine) ? 1 : 0);
-    const warn = th === 1 && n > 1 ? 'Any one owner can spend everything alone.' : others >= th ? `The other ${others === 1 ? 'owner' : `${others} owners`} can spend without you.` : null;
+    const warn = th === 1 && n > 1 ? 'Any one owner can spend everything alone.' : others >= th ? `The other ${others === 1 ? 'owner' : `${others} owners`} can spend without you.` : S.kind === 'recovery' && m - (onRec ? 1 : 0) >= rt ? 'After the delay, the recovery keys can spend without you.' : null;
     const recs = recFilled().map(r => `<div class="row"><span class="n">${markOf(r.text)}</span><span class="inp full">${esc(r.text)}</span>${r.mine ? '<span class="st ok">YOU</span>' : statusOf(r)}</div>`).join('');
-    const days = Math.round(S.older / 144), rule = S.kind === 'hold' ? `All ${n} must sign now, or <strong>${th} of ${n}</strong> for coins unmoved for about ${days} days.` : S.kind === 'recovery' ? `<strong>${th} of ${n}</strong> must sign. After about ${days} days unmoved, the recovery keys below can also spend.` : `<strong>${th} of ${n}</strong> must sign.`;
+    const m = recFilled().length, rt = Math.min(S.recTh, Math.max(m, 1)), wait = esc(BV.aboutBlocks(S.older));
+    const rule = S.kind === 'hold' ? `All ${n} must sign now, or <strong>${th} of ${n}</strong> for coins unmoved for ${S.older} blocks, ${wait}.` : S.kind === 'recovery' ? `<strong>${th} of ${n}</strong> must sign. Or <strong>${rt} of ${m}</strong> recovery keys below, for coins unmoved for ${S.older} blocks, ${wait}.` : `<strong>${th} of ${n}</strong> must sign.`;
     return `<h2>${seated ? 'You are in' : 'You are invited'}</h2><p class="lead">${rule} ${waiting || !allReady() ? 'Waiting for the others. This updates by itself.' : 'Every owner is ready.'}</p>
       ${rows}${recs ? `<div class="plbl">RECOVERY KEYS</div>${recs}` : ''}
       ${S.me && !seated ? '<div class="note bad">This wallet is not one of the owners on this invite. Connect the one that is.</div>' : ''}
@@ -255,16 +264,27 @@ function renderOwners(){
     ${n > 1 ? `<div class="th"><div class="stepper"><button data-act="th" data-d="-1" aria-label="Fewer">−</button><output>${th} OF ${n}</output><button data-act="th" data-d="1" aria-label="More">+</button></div><span>${S.kind === 'hold' ? 'on aged coins' : 'must sign'}</span></div>` : ''}
     ${risk ? `<div class="note">${risk}</div>` : ''}
     ${renderPolicy(n)}
-    <button class="btn fill w" data-act="next"${allReady() ? '' : ' disabled'}>CONTINUE</button>
+    ${S.draft ? `<button class="tick" data-act="confirm" aria-pressed="${S.checked}"><span>${S.checked ? '✓' : ''}</span>These settings came from a link. I know every owner above, and these are the rules I want</button>` : ''}
+    <button class="btn fill w" data-act="next"${allReady() && (!S.draft || S.checked) ? '' : ' disabled'}>CONTINUE</button>
     ${renderHow()}`;
+}
+
+// The last look before the vault exists: its rules in words, and the key in every seat.
+function renderSummary(){
+  try {
+    const s = BV.policySummary(BV.policyOf({ network: S.network, paths: pathsOf() }));
+    const row = (label, r) => `<div class="idline"><span>${esc(label)}</span><span>key ${esc(r.owner.fingerprint)}</span></div>`;
+    return `<div class="note"><strong>${esc(s.name)}.</strong> ${esc(s.rules.join(' '))}</div>
+      ${filled().map(r => row(r.addr || r.text || S.me?.evm || S.me?.label || '', r)).join('')}${recFilled().map(r => row(`Recovery: ${r.addr || r.text}`, r)).join('')}`;
+  } catch(e) { return `<div class="note bad">${esc(e.message)}</div>`; }
 }
 
 function renderBackup(){
   const name = `<input class="inp boxed" id="name" data-name="1" aria-label="Vault name" maxlength="24" placeholder="Vault name (optional)" autocomplete="off" value="${esc(S.name)}">`;
   if(S.progress) return `<h2>One moment</h2><div class="connecting" role="status">${esc(S.progress)}<button class="btn line" data-act="cancelconnect">CANCEL</button></div>`;
-  if(S.me?.signer) return `<h2>Name your vault</h2><p class="lead">It stays on your wallet's record, so connecting on any device finds it.</p>${name}
+  if(S.me?.signer) return `<h2>Name your vault</h2><p class="lead">It stays on your wallet's record, so connecting on any device finds it.</p>${renderSummary()}${name}
     <button class="btn fill w" data-act="make">CREATE VAULT</button>`;
-  return `<h2>Save your backup</h2><p class="lead">Without this file the coins can't be spent, even with every key. It holds no private key.</p>${name}
+  return `<h2>Save your backup</h2><p class="lead">Without this file the coins can't be spent, even with every key. It holds no private key.</p>${renderSummary()}${name}
     <button class="btn fill w" data-act="backup">CREATE AND SAVE</button>`;
 }
 
@@ -342,7 +362,7 @@ const ACT = {
   skip(){ S.step = 1; },
   confirm(){ S.checked = !S.checked; },
   next(){ S.step = 2; },
-  go(el){ S.step = +el.dataset.s; if(S.step === 0){ wipe(); S.me = null; } },
+  go(el){ S.step = +el.dataset.s; if(S.step === 0){ wipe(); S.me = null; [...S.rows, ...S.recRows].forEach(r => { r.mine = false; }); } },
   async connect(el){
     const w = el.dataset.w;
     if(window.top !== window || window.opener) throw new Error('Open this page in its own tab to use a key.');

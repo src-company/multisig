@@ -99,16 +99,18 @@ async function ask(fn){
 
 // A key that differs from the one on record means this wallet is not repeating itself,
 // or is another account. Either way it is said now, not when the owner goes to sign.
-// Returns whether a record matched: a wallet that matched has proved it repeats.
+// Says whether a record matched, since a wallet that matched has proved it repeats, and
+// whether that record predates the proof a handle now carries.
 async function checkOnRecord(BV, network, evm, xpub, walletAddress){
   if(walletAddress){
     const found = await BV.handleForWallet(network, walletAddress).catch(() => null);
     if(found && found.evm !== evm) throw new Error('This wallet gave a different key from the one on record for this address, so it cannot sign for that seat. Nothing was changed.');
   }
   const [known] = await BV.fetchHandles(network, [evm]).catch(() => []);
-  if(!known) return false;
-  if(BV.decodeOwner(known, network).xpub !== xpub) throw new Error('This wallet gave a different key from the one on record for this address, so it cannot sign for that seat. Nothing was changed.');
-  return true;
+  if(!known) return { repeats: false };
+  const on = BV.decodeOwner(known, network);
+  if(on.xpub !== xpub) throw new Error('This wallet gave a different key from the one on record for this address, so it cannot sign for that seat. Nothing was changed.');
+  return { repeats: true, stale: !on.possessed };
 }
 const gap = async () => { await sleep(GAP_MS); if(_cancelled) throw new Error('Cancelled. Nothing was changed.'); };
 
@@ -123,7 +125,7 @@ async function connectWallet(wallet, network, onStep = () => {}){
   const sign = () => ask(() => wallet.sign(BV.walletMessage(), address, network));
   const key = BV.keyFromWalletSignature(await sign(), network);
   try {
-    const repeats = await checkOnRecord(BV, network, key.evm, key.owner.xpub, address);
+    const { repeats, stale } = await checkOnRecord(BV, network, key.evm, key.owner.xpub, address);
     await gap();
     onStep(2, 2);
     const signature = await ask(() => wallet.sign(BV.linkMessage(network, key.evm), address, network));
@@ -131,8 +133,9 @@ async function connectWallet(wallet, network, onStep = () => {}){
     // Only a BIP-137 signature can be checked here. Leather answers in BIP-322, and that
     // owner is still a full owner: they just cannot be found by their bc1 address.
     const provable = BV.bitcoinSigners(BV.linkMessage(network, key.evm), window.btc.base64.decode(signature), network).includes(address);
-    const owner = { ...key.owner, evm: key.evm, proof, ...(provable ? { wallet: { address, signature } } : {}) };
+    const owner = { ...key.owner, evm: key.evm, proof, possession: BV.signPossession(key.signer, network, key.evm), ...(provable ? { wallet: { address, signature } } : {}) };
     const handle = BV.encodeOwner({ network, ...owner });
+    if(stale) BV.publishHandle(handle, network).catch(() => {});
     const finish = confirmer(BV, network, handle, key.owner.xpub, repeats, async () => { const k = BV.keyFromWalletSignature(await sign(), network); k.signer.wipePrivateData(); k.evmPriv.fill(0); return k.owner.xpub; });
     return { ...key, owner, handle, address, repeats, finish };
   } catch(e) { key.signer.wipePrivateData(); key.evmPriv.fill(0); throw e; }
@@ -177,15 +180,16 @@ async function connectEvmForHandle(eth, network, { keep = false, onStep = () => 
   onStep(1, 2);
   const key = await derive();
   try {
-    const repeats = await checkOnRecord(BV, network, evm, key.owner.xpub);
+    const { repeats, stale } = await checkOnRecord(BV, network, evm, key.owner.xpub);
     await gap();
     onStep(2, 2);
     const proof = await ask(() => eth.request({ method: 'personal_sign', params: [hexMsg(BV.bindingMessage(network, key.owner)), raw] }));
     // A contract wallet on a chain it is not deployed on passes the code check, and
     // signs in a way that recovers to nobody.
     if(BV.evmSigner(BV.bindingMessage(network, key.owner), window.btc.hex.decode(proof.replace(/^0x/, ''))) !== evm) throw new Error('This wallet signs in a way that does not prove its address, so it cannot hold a Bitcoin key here. Nothing was changed.');
+    const owner = { ...key.owner, evm, proof, possession: BV.signPossession(key.signer, network, evm) }, handle = BV.encodeOwner({ network, ...owner });
     if(!keep) key.signer.wipePrivateData();
-    const owner = { ...key.owner, evm, proof }, handle = BV.encodeOwner({ network, ...owner });
+    if(stale) BV.publishHandle(handle, network).catch(() => {});
     const finish = confirmer(BV, network, handle, key.owner.xpub, repeats, async () => { const k = await derive(); k.signer.wipePrivateData(); return k.owner.xpub; });
     return { owner, handle, evm, repeats, finish, signer: keep ? key.signer : null, label: `0x${evm.slice(2, 6)}…${evm.slice(-4)}` };
   } catch(e) { key.signer.wipePrivateData(); throw e; }
