@@ -10,7 +10,8 @@ How Bitcoin fits beside the EVM vaults, what was taken from Tacit, and what a ti
 | Owners are read from | the chain | the descriptor. The chain says nothing until the first spend |
 | Changing owners | a transaction | a new address, and a sweep to it |
 | Replay protection | a nonce | a signature names the coins it spends |
-| A proposal is | a row in Postgres plus EIP-712 signatures | a PSBT |
+| A proposal is | a row in Postgres plus EIP-712 signatures | a PSBT, in a Postgres queue found by a hash of the descriptor |
+| A proposal closes when | it executes or is cancelled | any of its coins is spent |
 | Losing the record | re-read it from the chain | **the coins are stuck, even with every key** |
 
 The descriptor is `tr(NUMS/<0;1>/*,multi_a(k,[fp/path]xpub/<0;1>/*,…))`. `NUMS` is the BIP-341 point `H` written as an extended key with an all-zero chain code, because BIP-388 cannot express a bare point; every child is `H` plus a public tweak, so it stays provably unspendable. Every spend therefore reveals its leaf and shows k signatures. It costs more than a key-path spend and reveals the owners when it spends, as an EVM vault always does. In exchange each owner signs alone, offline, in any order. MuSig2 and FROST would hide the policy, but both need signers online together for nonces.
@@ -22,6 +23,12 @@ Receive and change walk separate chains and a scan stops after 20 unused address
 Why extended keys: a hardware wallet finds its key by fingerprint and path, and refuses change it cannot prove is its own. Static keys could not offer either.
 
 **An owner needs no embedded key.** Anyone holding `[fingerprint/path]xpub` can be an owner: copy the PSBT, sign it in any wallet that handles Taproot script paths, and paste the result back. The page also exports the BIP-388 wallet policy that Ledger registers.
+
+## The queue
+
+Proposals are shared as on Ethereum, and the rule is the same: `POST /btc-proposal` admits a PSBT only with a valid owner signature for that descriptor, and merges it with the stored copy. Links and pasted PSBTs still work, so a hardware wallet owner needs no connection and the queue being down loses nothing.
+
+Nothing in the table is believed. Each client re-reads every PSBT against its own policy. There is no status column, because spent coins are what end a proposal, and the chain says that. Dismiss only hides a proposal in one browser: on Bitcoin a signed proposal stays valid until its coins move, so cancelling for everyone means spending them.
 
 ## The same owners as an Ethereum vault
 

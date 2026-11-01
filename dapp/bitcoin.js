@@ -456,6 +456,38 @@ async function fetchHandles(network, addresses, doFetch = (...a) => root.fetch(.
   return out;
 }
 
+// The queue. A proposal is known by its unsigned transaction, so every signed copy of
+// one is the same proposal, and a vault by a hash of its descriptor, so the queue can
+// be read only by someone who holds the vault. What comes back is re-read against the
+// policy: a row that does not parse, or does not belong, is simply not there.
+const proposalId = psbt => hex.encode(sha256(load(psbt).unsignedTx));
+const vaultId = policy => hex.encode(sha256(te.encode(descriptor(policy))));
+async function publishProposal(psbt, policy, doFetch = (...a) => root.fetch(...a)){
+  const r = await doFetch(`${API}/btc-proposal`, { method: 'POST', headers: { 'content-type': 'application/json' }, signal: root.AbortSignal?.timeout(TIMEOUT_MS),
+    body: JSON.stringify({ psbt, descriptor: descriptor(policy), network: policy.network }) });
+  if(!r.ok) throw new Error('Could not save this proposal to the queue');
+}
+async function fetchProposals(policy, doFetch = (...a) => root.fetch(...a)){
+  const r = await doFetch(`${STORE}/rpc/btc_vault_proposals`, { method: 'POST', headers: { 'content-type': 'application/json' }, signal: root.AbortSignal?.timeout(TIMEOUT_MS),
+    body: JSON.stringify({ p_vault: vaultId(policy) }) });
+  if(!r.ok) throw new Error('Could not read the queue');
+  const out = [];
+  for(const row of await r.json()){
+    try { if(proposalId(row.psbt) === row.id){ inspect(row.psbt, policy); out.push(row.psbt); } } catch(_) {}
+  }
+  return out;
+}
+// Proposals still able to happen. For a page without a coin list: one with a coin
+// already spent can never confirm, so it is over, whichever way it went.
+async function openProposals(policy, c, doFetch){
+  const out = [];
+  for(const psbt of await fetchProposals(policy, doFetch)){
+    const { inputs } = inspect(psbt, policy);
+    if(!(await Promise.all(inputs.map(i => c.spent(i.txid, i.vout)))).some(Boolean)) out.push(psbt);
+  }
+  return out;
+}
+
 // `missing` is who has not published yet. A proven handle from someone who is not an
 // owner is an error rather than ignored, since it is probably the wrong vault.
 function mirror({ network, vault, handles }){
@@ -879,7 +911,7 @@ function concat(...parts){
   return out;
 }
 
-root.BitcoinVault = { publishHandle, fetchHandles, MAX_INDEX, txidOf, seatMisdescribed, EVM_CHAINS, selectors: { threshold: selector('threshold()') }, readEvmVault, mirror, bindingMessage, evmMessageHash, NETWORKS, DUST, GAP, MAX_OWNERS, MAX_OLDER, MAX_FEE_RATE, encodeOwner, decodeOwner, originText, ownerMessage, deriveOwnerKey, keyFromSignature, fingerprintOf,
+root.BitcoinVault = { proposalId, vaultId, publishProposal, fetchProposals, openProposals, publishHandle, fetchHandles, MAX_INDEX, txidOf, seatMisdescribed, EVM_CHAINS, selectors: { threshold: selector('threshold()') }, readEvmVault, mirror, bindingMessage, evmMessageHash, NETWORKS, DUST, GAP, MAX_OWNERS, MAX_OLDER, MAX_FEE_RATE, encodeOwner, decodeOwner, originText, ownerMessage, deriveOwnerKey, keyFromSignature, fingerprintOf,
   policyOf, descriptor, descriptorChecksum, parseDescriptor, walletPolicy, vaultOf, vsize, coinsFor, propose, inspect, sign, combine, finalize, chain, scan };
 
 })(typeof window !== 'undefined' ? window : globalThis);

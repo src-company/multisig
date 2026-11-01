@@ -736,6 +736,12 @@ function dependencies({ postgrestUrl, jwtSecret, rpcUrls }, fetcher = fetch) {
     // request, so this cannot be steered at another RPC by anything a caller
     // sends. The role travels with it for the same reason: a token minted to
     // rename a vault must not reach the one that deletes a signature.
+    async readBtcProposal(vault, id) {
+      const rows = await json(`${postgrestUrl}/rpc/btc_vault_proposals`, { method: 'POST', headers: {
+        'Content-Type': 'application/json',
+      }, body: JSON.stringify({ p_vault: vault }) }, 'readBtcProposal');
+      return rows.find(row => row.id === id)?.psbt ?? null;
+    },
     async saveMetadata({ fn, args }, role = 'metadata_writer') {
       return postRpc(fn, args, role);
     },
@@ -754,6 +760,25 @@ function verifyHandle(input) {
   return { fn: 'put_btc_handle', args: { p_address: owner.evm, p_network: input.network, p_handle: input.handle.trim() } };
 }
 
+// Same rule as an Ethereum proposal: nothing enters the queue without an owner's
+// signature. The stored copy is merged here, so two owners signing at once both land.
+async function admitBitcoinProposal(input, deps) {
+  check(input && typeof input.psbt === 'string' && input.psbt.length <= 72000, 'Invalid proposal');
+  check(typeof input.descriptor === 'string' && input.descriptor.length <= 8000, 'Invalid vault');
+  check(input.network === 'mainnet' || input.network === 'signet', 'Invalid network');
+  let policy, view;
+  try {
+    policy = BitcoinVault.parseDescriptor(input.descriptor, input.network);
+    view = BitcoinVault.inspect(input.psbt, policy);
+  } catch (error) { throw new RequestError(403, error.message); }
+  if (!view.signedBy.length) throw new RequestError(403, 'A proposal needs an owner signature');
+  const vault = BitcoinVault.vaultId(policy), id = BitcoinVault.proposalId(input.psbt);
+  let psbt = input.psbt;
+  const prior = await deps.readBtcProposal(vault, id);
+  if (prior) { try { psbt = BitcoinVault.combine([prior, psbt], policy); } catch (_) {} }
+  return { fn: 'put_btc_proposal', args: { p_vault: vault, p_id: id, p_network: input.network, p_psbt: psbt } };
+}
+
 function createHandler(deps, allowedOrigins = []) {
   let active = 0;
   return async (req, res) => {
@@ -767,7 +792,7 @@ function createHandler(deps, allowedOrigins = []) {
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     }
     if (req.url === '/health' && req.method === 'GET') { res.writeHead(200); res.end('ok'); return; }
-    if (!['/proposals', '/metadata', '/action', '/signature', '/reconcile', '/register', '/confirm', '/session', '/handle'].includes(req.url)) { res.writeHead(404); res.end(); return; }
+    if (!['/proposals', '/metadata', '/action', '/signature', '/reconcile', '/register', '/confirm', '/session', '/handle', '/btc-proposal'].includes(req.url)) { res.writeHead(404); res.end(); return; }
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
     if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
     if (active >= 32) { res.writeHead(503); res.end(); return; }
@@ -786,6 +811,12 @@ function createHandler(deps, allowedOrigins = []) {
       catch (_) { throw new RequestError(400, 'Invalid JSON'); }
       if (req.url === '/metadata') {
         await deps.saveMetadata(await verifyMetadata(input, deps));
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+      if (req.url === '/btc-proposal') {
+        await deps.saveMetadata(await admitBitcoinProposal(input, deps));
         res.writeHead(204);
         res.end();
         return;
@@ -864,4 +895,4 @@ if (require.main === module) {
   server.listen(Number(PORT), '0.0.0.0');
 }
 
-module.exports = { verifyHandle, verifyProposal, verifyMetadata, verifyAction, verifySignature, verifyReconcile, verifyRegistration, verifyConfirm, verifySession, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, ACTION_TYPES, SESSION_TYPES, iface };
+module.exports = { admitBitcoinProposal, verifyHandle, verifyProposal, verifyMetadata, verifyAction, verifySignature, verifyReconcile, verifyRegistration, verifyConfirm, verifySession, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, ACTION_TYPES, SESSION_TYPES, iface };

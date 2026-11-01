@@ -339,3 +339,11 @@ REVOKE ALL ON FUNCTION btc_handles(text, text[]) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION put_btc_handle(text, text, text) TO metadata_writer;
 GRANT EXECUTE ON FUNCTION btc_handles(text, text[]) TO anon;
 
+-- Bitcoin proposals: the same split. The service writes what it has verified, and
+-- reading takes a hash of the descriptor, which only a holder of the vault has.
+REVOKE ALL ON btc_proposals FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION put_btc_proposal(text, text, text, text) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION btc_vault_proposals(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION put_btc_proposal(text, text, text, text) TO metadata_writer;
+GRANT EXECUTE ON FUNCTION btc_vault_proposals(text) TO anon;
+

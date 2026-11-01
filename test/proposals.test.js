@@ -848,3 +848,27 @@ test('a Bitcoin handle is stored only when its address signed it', async () => {
   assert.throws(() => verifyHandle({ handle: BV.encodeOwner({ network: 'signet', ...owner, evm: stranger, proof: sign(BV.bindingMessage('signet', owner)) }), network: 'signet' }), /not signed by/);
 });
 
+test('a Bitcoin proposal needs an owner signature, and copies merge', async () => {
+  const { admitBitcoinProposal } = require('../api/proposals.cjs');
+  const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
+  const c = vm.createContext({ TextEncoder, TextDecoder, Uint8Array, crypto: globalThis.crypto });
+  c.globalThis = c;
+  for (const f of ['btc.min.js', 'bitcoin.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, '../dapp', f), 'utf8'), c);
+  const BV = c.BitcoinVault;
+  const seat = n => BV.keyFromSignature('0x' + String(n).repeat(128) + '1b', 'signet');
+  const [a, b, x] = [1, 2, 3].map(seat);
+  const policy = BV.policyOf({ network: 'signet', paths: [{ threshold: 2, keys: [a.owner, b.owner] }] });
+  const psbt = BV.propose({ policy, utxos: [{ txid: '11'.repeat(32), vout: 0, value: 100000, height: 100, branch: 0, index: 0 }], tip: 200, sweep: 'tb1pqqqqp399et2xygdj5xreqhjjvcmzhxw4aywxecjdzew6hylgvsesf3hn0c', feeRate: 2 });
+  const descriptor = BV.descriptor(policy), input = p => ({ psbt: p, descriptor, network: 'signet' });
+  const none = { readBtcProposal: async () => null };
+  await assert.rejects(admitBitcoinProposal(input(psbt), none), /owner signature/);
+  await assert.rejects(admitBitcoinProposal(input('junk'), none));
+  const signedA = BV.sign(psbt, a.signer, policy), first = await admitBitcoinProposal(input(signedA), none);
+  assert.equal(first.fn, 'put_btc_proposal');
+  assert.equal(first.args.p_id, BV.proposalId(psbt));
+  assert.equal(first.args.p_vault, BV.vaultId(policy));
+  const second = await admitBitcoinProposal(input(BV.sign(psbt, b.signer, policy)), { readBtcProposal: async () => first.args.p_psbt });
+  assert.equal(BV.inspect(second.args.p_psbt, policy).ready, true);
+  assert.throws(() => BV.sign(psbt, x.signer, policy), /not an owner/);
+});
+

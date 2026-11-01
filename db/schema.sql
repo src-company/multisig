@@ -1871,3 +1871,39 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
 
+-- ── BITCOIN PROPOSALS ───────────────────────────────────────
+-- The Bitcoin queue. `vault` is a hash of the descriptor, so a proposal can be found
+-- only by someone who already holds the vault. Nothing here is believed: the service
+-- admits a PSBT only with a valid owner signature for that descriptor, and every
+-- client re-reads every PSBT against its own policy, so a row can be missing or stale
+-- but cannot change what anyone signs. Spent coins are what close a proposal, and
+-- clients work that out from the chain, so there is no status column to go wrong.
+CREATE TABLE IF NOT EXISTS btc_proposals (
+  vault      text NOT NULL CHECK (vault ~ '^[0-9a-f]{64}$'),
+  id         text NOT NULL CHECK (id ~ '^[0-9a-f]{64}$'),
+  network    text NOT NULL CHECK (network IN ('mainnet', 'signet')),
+  psbt       text NOT NULL CHECK (length(psbt) BETWEEN 1 AND 72000),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (vault, id)
+);
+ALTER TABLE btc_proposals ENABLE ROW LEVEL SECURITY;
+
+CREATE OR REPLACE FUNCTION put_btc_proposal(p_vault text, p_id text, p_network text, p_psbt text)
+RETURNS void AS $$
+BEGIN
+  IF coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb->>'role', '') <> 'metadata_writer' THEN
+    RAISE EXCEPTION 'A verified owner signature is required' USING ERRCODE = '42501';
+  END IF;
+  PERFORM rate_gate('btc_proposal:' || client_ip(), 60, interval '1 minute');
+  INSERT INTO btc_proposals (vault, id, network, psbt) VALUES (p_vault, p_id, p_network, p_psbt)
+  ON CONFLICT (vault, id) DO UPDATE SET psbt = EXCLUDED.psbt, updated_at = now();
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+CREATE OR REPLACE FUNCTION btc_vault_proposals(p_vault text)
+RETURNS TABLE (id text, psbt text) AS $$
+  SELECT p.id, p.psbt FROM btc_proposals p WHERE p.vault = p_vault
+  ORDER BY p.created_at DESC LIMIT 50;
+$$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
+

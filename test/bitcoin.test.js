@@ -520,6 +520,27 @@ test('a mirror takes checksummed owner addresses from a contract', () => {
   assert.ok(r.policy);
 });
 
+test('a proposal is one proposal however many copies are signed', () => {
+  const policy = plain('signet'), psbt = sweepOf(policy);
+  assert.equal(BV.proposalId(BV.sign(psbt, A.signer, policy)), BV.proposalId(psbt));
+  assert.notEqual(BV.proposalId(sweepOf(policy, { feeRate: 3 })), BV.proposalId(psbt));
+  assert.notEqual(BV.vaultId(policy), BV.vaultId(withDelay('signet', 144)));
+});
+
+test('the queue is re-read against the vault, and spent coins close a proposal', async () => {
+  const policy = plain('signet'), good = BV.sign(sweepOf(policy), A.signer, policy);
+  const other = BV.policyOf({ network: 'signet', paths: [{ threshold: 1, keys: owners(D) }] });
+  const foreign = BV.sign(BV.propose({ policy: other, utxos: [fakeCoin(90000)], tip: 200, sweep: payee, feeRate: 2 }), D.signer, other);
+  const rows = [
+    { id: BV.proposalId(good), psbt: good }, { id: BV.proposalId(foreign), psbt: foreign },
+    { id: '00'.repeat(32), psbt: good }, { id: 'ab'.repeat(32), psbt: 'junk' },
+  ];
+  const f = async () => ({ ok: true, json: async () => rows });
+  assert.deepEqual([...await BV.fetchProposals(policy, f)], [good]);
+  assert.equal((await BV.openProposals(policy, { spent: async () => false }, f)).length, 1);
+  assert.equal((await BV.openProposals(policy, { spent: async () => true }, f)).length, 0);
+});
+
 test('two different proposals do not merge', () => {
   const policy = plain('signet');
   const one = BV.propose({ policy, utxos: [fakeCoin(100000)], tip: 200, sweep: payee, feeRate: 2 });

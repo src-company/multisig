@@ -40,7 +40,9 @@ const S = {
   ovl: null,         // connect | me | share
   policy: null, trusted: false,
   coins: null, tip: null, fees: {}, receive: 0, change: 0,
-  psbt: null, review: null, compose: false,
+  // The queue: every proposal on this vault still able to happen. psbt and review are
+  // whichever one an action is acting on.
+  queue: [], psbt: null, review: null, compose: false,
   mirror: null,
   form: { name: '', kind: 'plain', evmChain: '1', evmVault: '', owners: '', threshold: '2', second: '', secondThreshold: '1', older: '4320', to: '', amt: '', rate: '', path: '0', paste: '', merge: '', import: '', hw: '' },
   msg: null, busy: false,
@@ -162,7 +164,7 @@ function createVault(){
 async function open(policy, fromLink = false){
   const trusted = !fromLink || saved().includes(BV.descriptor(policy));
   if(trusted) remember(policy);
-  Object.assign(S, { policy, trusted, view: 'dash', compose: false, coins: null, tip: null, psbt: null, review: null, msg: null });
+  Object.assign(S, { policy, trusted, view: 'dash', compose: false, coins: null, tip: null, queue: [], psbt: null, review: null, msg: null });
   syncHash();
   render();
   // In the background: a click's busy lock must not outlast the click, or every button
@@ -179,11 +181,27 @@ async function refresh(){
     const [found, tip, fees] = await Promise.all([BV.scan(S.policy, c), c.tip(), c.fees().catch(() => ({}))]);
     if(run !== scanning) return;
     Object.assign(S, { coins: found.coins, receive: found.receive, change: found.change, tip, fees });
-    // Change is judged against how far the scan reached, so a proposal opened before
-    // it finished is read again now that it has.
-    if(S.psbt) S.review = BV.inspect(S.psbt, S.policy, known());
+    await syncQueue();
+    if(run !== scanning) return;
     render();
   } catch(e) { if(run === scanning) say(`Could not read the chain: ${e.message}`); }
+}
+
+// What the vault's queue holds, joined with anything only this browser has. A copy held
+// on both sides is merged, so a signature made anywhere shows up everywhere. A proposal
+// whose coin is gone can no longer happen, so it leaves the queue: that is what closes
+// one on Bitcoin, whether it confirmed or lost to another.
+async function syncQueue(){
+  const remote = await BV.fetchProposals(S.policy).catch(() => []);
+  const byId = new Map(S.queue.map(q => [q.id, q.psbt]));
+  for(const psbt of remote){
+    const id = BV.proposalId(psbt);
+    byId.set(id, byId.has(id) ? BV.combine([byId.get(id), psbt], S.policy) : psbt);
+  }
+  const live = psbt => BV.inspect(psbt, S.policy, known()).inputs.every(i => S.coins.some(c => c.txid === i.txid && c.vout === i.vout));
+  S.queue = [...byId].filter(([id, psbt]) => !noteOf('hidden', id) && live(psbt)).map(([id, psbt]) => ({ id, psbt, review: BV.inspect(psbt, S.policy, known()) }));
+  const on = S.psbt && S.queue.find(q => q.id === BV.proposalId(S.psbt));
+  Object.assign(S, on ? { psbt: on.psbt, review: on.review } : { psbt: null, review: null });
 }
 
 // A vault link carries everything a co-signer needs, proposal included, and the
@@ -202,7 +220,7 @@ async function readHash(){
     const next = decodeURIComponent(d), proposal = psbt ? decodeURIComponent(psbt) : null;
     // Another tab that opened this one can change its fragment. A proposal someone is
     // reading does not get replaced underneath them without asking.
-    if(S.psbt && S.psbt !== proposal && !window.confirm('This link replaces the proposal on screen. Continue?')){ syncHash(); return true; }
+    if(S.psbt && proposal && S.psbt !== proposal && !window.confirm('This link replaces the proposal on screen. Continue?')){ syncHash(); return true; }
     const policy = BV.parseDescriptor(next, network);
     // A key is per network, so a link to the other one does not carry it across.
     if(network !== S.network){ forget(); S.network = network; }
@@ -215,8 +233,11 @@ async function readHash(){
 
 // ── PROPOSALS ──────────────────────────────────────────────
 function load(psbt){
-  S.review = BV.inspect(psbt, S.policy, known());
-  S.psbt = psbt;
+  const review = BV.inspect(psbt, S.policy, known()), id = BV.proposalId(psbt);
+  setNote('hidden', id, undefined);
+  const at = S.queue.findIndex(q => q.id === id);
+  if(at >= 0) S.queue[at] = { id, psbt, review }; else S.queue.unshift({ id, psbt, review });
+  Object.assign(S, { psbt, review });
   S.compose = false;
   S.msg = null;
   syncHash();
@@ -236,20 +257,26 @@ function propose(){
   Object.assign(S.form, { to: '', amt: '', rate: '', path: '0' });
 }
 
-function sign(){
+// Into the shared queue, or, if that cannot be reached, by hand. A signature is never
+// lost to a failed save, only less convenient.
+async function persist(){
+  try { await BV.publishProposal(S.psbt, S.policy); toast('SAVED TO THE QUEUE'); }
+  catch(_) { if(!S.review.ready) S.ovl = 'share'; }
+}
+
+async function sign(){
   if(!S.owner) throw new Error('Connect first: nothing here can sign without your owner key.');
   load(BV.sign(S.psbt, S.owner.signer, S.policy, known()));
   touch();
-  // The next thing to do after signing is nearly always to pass it on.
-  if(!S.review.ready) S.ovl = 'share';
+  await persist();
 }
 
-function merge(){
+async function merge(){
   const more = S.form.merge.trim();
   if(!more) return;
   load(BV.combine([S.psbt, more], S.policy));
   S.form.merge = '';
-  toast('SIGNATURES ADDED');
+  await persist();
 }
 
 async function broadcast(){
@@ -260,6 +287,7 @@ async function broadcast(){
   const raw = BV.finalize(S.psbt, S.policy), txid = BV.txidOf(raw), said = (await c.broadcast(raw)).trim();
   // The signatures are not thrown away on an explorer's word.
   if(said !== txid) throw new Error('The explorer gave an unexpected reply, so this may not have been sent. The proposal is still here.');
+  S.queue = S.queue.filter(q => q.psbt !== S.psbt);
   Object.assign(S, { psbt: null, review: null });
   syncHash();
   S.msg = { text: `SENT ${short(txid)}`, kind: 'ok', href: `${BV.NETWORKS[S.network].explorer}/tx/${txid}` };
@@ -341,8 +369,8 @@ function renderTabs(){
   if(!list.length && !S.policy) return '';
   const tabs = list.map((d, i) => {
     const p = BV.parseDescriptor(d, S.network), on = d === cur;
-    const total = on && S.coins ? `${btcOf(S.coins.reduce((n, c) => n + c.value, 0))} BTC` : `${p.paths[0].threshold}/${p.paths[0].keys.length} SIG`;
-    return `<button class="vtab${on ? ' on' : ''}" data-act="open" data-i="${i}"${on ? ' aria-current="true"' : ''}><div class="vtab-name">${esc(nameOf(d, i))}${on && S.psbt ? '<span class="vtab-dot" aria-hidden="true"></span>' : ''}</div><div class="vtab-info">${esc(total)}</div></button>`;
+    const total = on && S.queue.length ? `${S.queue.length} PENDING` : on && S.coins ? `${btcOf(S.coins.reduce((n, c) => n + c.value, 0))} BTC` : `${p.paths[0].threshold}/${p.paths[0].keys.length} SIG`;
+    return `<button class="vtab${on ? ' on' : ''}" data-act="open" data-i="${i}"${on ? ' aria-current="true"' : ''}><div class="vtab-name">${esc(nameOf(d, i))}${on && S.queue.length ? '<span class="vtab-dot" aria-hidden="true"></span>' : ''}</div><div class="vtab-info">${esc(total)}</div></button>`;
   });
   if(S.policy && !S.trusted) tabs.unshift(`<button class="vtab on" aria-current="true"><div class="vtab-name">FROM A LINK<span class="vtab-dot" aria-hidden="true"></span></div><div class="vtab-info">NOT SAVED</div></button>`);
   return `<div class="vtabs"><div class="vtabs-inner">${tabs.join('')}</div></div>`;
@@ -370,8 +398,9 @@ const chips = (r) => `<div class="approvals">${r.keys.map(k => {
   return `<span class="${did ? 'ap-ok' : 'ap-no'}"><span aria-hidden="true">${did ? '✓' : '○'}</span><span class="sr">${did ? 'Signed:' : 'Not signed:'}</span>${esc(labelOf(k).toUpperCase())}${isMe(k) ? ' ★' : ''}</span>`;
 }).join('')}</div>`;
 
-function renderProposal(){
-  const r = S.review;
+function renderProposal(item, i){
+  const r = item.review, n = S.queue.length - i;
+  const clash = S.queue.some(q => q.id !== item.id && q.review.inputs.some(a => r.inputs.some(b => a.txid === b.txid && a.vout === b.vout)));
   const mine = S.owner && r.keys.some(k => k.xpub === S.owner.xpub), signed = S.owner && r.signedAll.includes(S.owner.xpub);
   const stranded = r.outputs.some(o => o.stranded);
   const sends = r.outputs.filter(o => !o.change), back = r.outputs.filter(o => o.change);
@@ -382,10 +411,13 @@ function renderProposal(){
   const early = validAt > (S.tip || 0) + 1;
   const have = r.signedAll.length, status = stranded ? ['bad', 'DO NOT SIGN'] : r.ready ? ['ok', 'READY'] : ['wait', `${have} OF ${r.threshold} SIGNED`];
   const canSign = mine && !signed && S.trusted && !stranded;
-  return `<div class="tx${r.ready ? ' ready' : ''}">
+  return `<div class="tx${r.ready ? ' ready' : ''}" data-pid="${esc(item.id)}">
     <div class="tx-top">
       <div>
+        <span class="tx-nonce">#${n}</span>
         <span class="tag">${sends.length ? 'BTC TRANSFER' : 'CLOCK RESET'}${r.older ? ' · DELAYED PATH' : ''}</span>
+        ${clash ? '<span class="tag" title="These spend the same coins, so only one can happen">CONFLICT</span>' : ''}
+        ${r.signedBy.length ? '' : '<span class="tag">DRAFT · ONLY ON THIS DEVICE</span>'}
         <div class="tx-val"><span class="btc" style="width:18px;height:18px">${BTC_ICON}</span>${btcOf(sends.length ? value : back.reduce((n, o) => n + o.sats, 0))} BTC</div>
       </div>
       <span class="tx-status ${status[0]}">${status[1]}</span>
@@ -394,21 +426,21 @@ function renderProposal(){
     <div class="tx-sub">FEE ${btcOf(r.fee)} BTC · ${r.feeRate.toFixed(1)} SAT/VB${back.length ? ` · ${btcOf(back.reduce((n, o) => n + o.sats, 0))} BTC BACK TO THE VAULT` : ''}</div>
     ${chips(r)}
     ${early ? `<div class="note warn"><b>Not valid until block ${validAt}.</b> Once signed it can be sent any time after that, even if it is discarded here.</div>` : ''}
-    ${r.signedBy.length ? '<p class="tx-sub">DISCARD ONLY CLEARS THIS PAGE. SIGNATURES ALREADY SHARED STAY VALID UNTIL THESE COINS MOVE.</p>' : ''}
+    ${r.signedBy.length ? '<p class="tx-sub">TO CANCEL THIS FOR EVERYONE, SPEND THESE COINS. DISMISS ONLY HIDES IT HERE.</p>' : ''}
     ${r.feeRate > 200 ? '<div class="note warn"><b>That fee is unusually high.</b> Check it before signing.</div>' : ''}
     ${stranded ? '<div class="note bad">This sends coins to a vault address so far along that no scan would find them. Do not sign it.</div>' : ''}
     ${mine && !S.trusted ? '<div class="note warn">Confirm the owners above before signing.</div>' : ''}
     <div class="btns">
       <button class="btn btn-ghost btn-sm" data-act="ovl" data-o="share">SHARE</button>
       <div class="right">
-        <button class="btn btn-ghost" data-act="discard">DISCARD</button>
+        <button class="btn btn-ghost" data-act="discard">${r.signedBy.length ? 'DISMISS' : 'DELETE'}</button>
         ${!S.owner && !r.ready ? '<button class="btn btn-outline" data-act="wallet">CONNECT TO SIGN</button>' : ''}
         ${canSign ? `<button class="btn btn-fill" data-act="sign"${S.coins ? '' : ' disabled'}>${S.coins ? 'SIGN' : 'SCANNING…'}</button>` : ''}
         ${r.ready ? '<button class="btn btn-green btn-big" data-act="broadcast">BROADCAST</button>' : ''}
       </div>
     </div>
     <details><summary>ADD A SIGNATURE FROM ANOTHER WALLET</summary>
-      <textarea class="inp" id="merge" data-field="merge" spellcheck="false" aria-label="Signed PSBT" placeholder="Paste a PSBT signed elsewhere, such as Sparrow with a hardware wallet">${esc(S.form.merge)}</textarea>
+      <textarea class="inp" id="merge-${i}" data-field="merge" spellcheck="false" aria-label="Signed PSBT" placeholder="Paste a PSBT signed elsewhere, such as Sparrow with a hardware wallet">${esc(S.form.merge)}</textarea>
       <div class="btns"><button class="btn btn-outline btn-sm" data-act="merge">ADD</button></div>
     </details>
   </div>`;
@@ -441,12 +473,12 @@ function renderCompose(){
 const pathLabel = x => `${x.threshold}/${x.keys.length}${x.older ? ` AFTER ${days(x.older)}` : ''}`;
 
 function renderQueue(){
-  const body = S.review ? renderProposal() : S.compose ? renderCompose()
-    : `<div class="empty-row">NOTHING PENDING<details><summary>OPEN A PROPOSAL SOMEONE SENT YOU</summary>
+  const cards = S.queue.map(renderProposal).join('');
+  const body = (S.compose ? renderCompose() : '') + (cards || (S.compose ? '' : `<div class="empty-row">NOTHING PENDING<details><summary>OPEN A PROPOSAL SOMEONE SENT YOU</summary>
         <textarea class="inp" id="paste" data-field="paste" spellcheck="false" aria-label="PSBT" placeholder="Paste a PSBT">${esc(S.form.paste)}</textarea>
         <div class="btns"><button class="btn btn-outline btn-sm" data-act="paste">OPEN</button></div>
-      </details></div>`;
-  return `<div class="head"><span>QUEUE</span>${S.review || S.compose ? '' : `<button class="btn btn-outline btn-sm" data-act="compose"${S.coins && S.coins.length ? '' : ' disabled'}>+ NEW</button>`}</div>${body}`;
+      </details></div>`));
+  return `<div class="head"><span>QUEUE</span>${S.compose ? '' : `<button class="btn btn-outline btn-sm" data-act="compose"${S.coins && S.coins.length ? '' : ' disabled'}>+ NEW</button>`}</div>${body}`;
 }
 
 function renderReceive(){
@@ -668,7 +700,7 @@ const copy = async (text, label = 'COPIED') => {
 function goNet(network){
   // A key is per network, so it does not carry across.
   forget();
-  Object.assign(S, { network, view: 'dash', ovl: null, policy: null, psbt: null, review: null, msg: null, coins: null, tip: null });
+  Object.assign(S, { network, view: 'dash', ovl: null, policy: null, queue: [], psbt: null, review: null, msg: null, coins: null, tip: null });
   lsSet('ms_btc_net', network);
   syncHash();
   const first = saved()[0];
@@ -706,13 +738,19 @@ const ACT = {
   // Sending coins to the vault's own next address is how their clock restarts.
   reset(){ Object.assign(S.form, { to: BV.vaultOf(S.policy, 0, S.receive).address, amt: 'all', path: '0' }); S.compose = true; },
   paste(){ load(S.form.paste.trim()); S.form.paste = ''; },
-  discard(){ Object.assign(S, { psbt: null, review: null }); syncHash(); },
+  discard(){
+    const id = BV.proposalId(S.psbt);
+    setNote('hidden', id, 1);
+    S.queue = S.queue.filter(q => q.id !== id);
+    Object.assign(S, { psbt: null, review: null });
+    syncHash();
+  },
   rename(){ const v = (S.form.rename ?? '').trim(); if(v){ setNote('names', curDesc(), v.slice(0, 24).toUpperCase().replace(/\s+/g, '_')); toast('SAVED'); } },
   remove(){
     if(!window.confirm('Remove this vault from this browser? The coins are not touched, but you will need its backup to open it again.')) return;
     const d = curDesc();
     lsSet(`ms_btc_vaults_${S.network}`, JSON.stringify(rawSaved().filter(x => x !== d)));
-    Object.assign(S, { policy: null, view: 'dash', psbt: null, review: null, coins: null });
+    Object.assign(S, { policy: null, view: 'dash', queue: [], psbt: null, review: null, coins: null });
     syncHash();
     const first = saved()[0];
     if(first) return open(BV.parseDescriptor(first, S.network));
@@ -730,7 +768,13 @@ document.addEventListener('click', async e => {
   touch();
   if(!el || S.busy) return;
   S.busy = true;
-  try { await ACT[el.dataset.act](el, e); render(); }
+  try {
+    // A card's buttons act on that card.
+    const card = el.closest('[data-pid]'), item = card && S.queue.find(q => q.id === card.dataset.pid);
+    if(item) Object.assign(S, { psbt: item.psbt, review: item.review });
+    await ACT[el.dataset.act](el, e);
+    render();
+  }
   catch(err) { S.ovl = null; say(err?.message || String(err)); }
   finally { S.busy = false; }
 });

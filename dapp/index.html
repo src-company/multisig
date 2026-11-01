@@ -17,7 +17,7 @@
      provider is initialised with an rpcMap for the one chain it is given, so
      chain reads stay on the RPC hosts listed here; letting the fallback
      through would put a vault's traffic on a host that is not one of them. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://multisig-proposals.onrender.com https://multisig-postgrest.onrender.com https://sourcify.dev https://*.publicnode.com https://1rpc.io https://*.drpc.org https://sepolia.gateway.tenderly.co https://api.coinbase.com https://mainnet.base.org https://sepolia.base.org https://arb1.arbitrum.io https://mainnet.optimism.io https://mainnet.megaeth.com https://rpc-megaeth-mainnet.globalstake.io https://rpc.mainnet.chain.robinhood.com https://api.dotmega.domains https://keys.coinbase.com https://rpc.wallet.coinbase.com https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org; img-src 'self' data: https://explorer-api.walletconnect.com; frame-src https://verify.walletconnect.com https://verify.walletconnect.org; upgrade-insecure-requests">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://mempool.space https://blockstream.info https://multisig-proposals.onrender.com https://multisig-postgrest.onrender.com https://sourcify.dev https://*.publicnode.com https://1rpc.io https://*.drpc.org https://sepolia.gateway.tenderly.co https://api.coinbase.com https://mainnet.base.org https://sepolia.base.org https://arb1.arbitrum.io https://mainnet.optimism.io https://mainnet.megaeth.com https://rpc-megaeth-mainnet.globalstake.io https://rpc.mainnet.chain.robinhood.com https://api.dotmega.domains https://keys.coinbase.com https://rpc.wallet.coinbase.com https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org; img-src 'self' data: https://explorer-api.walletconnect.com; frame-src https://verify.walletconnect.com https://verify.walletconnect.org; upgrade-insecure-requests">
 <title>multisig</title>
 <meta name="description" content="Multichain multisig with an embedded timelock. A mandatory delay between queuing and execution, so a compromised key or a social-engineered signature can be seen and cancelled before it lands.">
 <!-- Unfurl metadata. Vault links get passed between co-signers and pasted into
@@ -8907,8 +8907,15 @@ function btcSet(network, owners, threshold){
     loadBitcoin().then(BV => BV.fetchHandles(network, list).then(handles => {
       const { missing, policy } = BV.mirror({ network, vault: { owners: list, threshold }, handles });
       const link = policy ? `./bitcoin.html#${network}/${encodeURIComponent(BV.descriptor(policy))}` : null;
-      _btcSets.set(key, { loading: false, handles, ready: list.filter(a => !missing.includes(a)), link });
+      _btcSets.set(key, { loading: false, handles, ready: list.filter(a => !missing.includes(a)), link, pending: 0 });
       render();
+      // The queue on a Bitcoin twin counts as this vault's work too, so it is said here
+      // rather than left to be found.
+      if(policy) BV.openProposals(policy, BV.chain(network)).then(open => {
+        if(!open.length) return;
+        _btcSets.set(key, { ..._btcSets.get(key), pending: open.length });
+        render();
+      }).catch(() => {});
     })).catch(e => { console.error('Bitcoin owners:', e); _btcSets.set(key, { loading: false, failed: true, handles: [], ready: [], link: null }); render(); });
   }
   return _btcSets.get(key);
@@ -8964,7 +8971,7 @@ function renderBtcMeta(v){
   const network = btcNetworkOf([NETS.find(n => n.id === S.chainId)]);
   const set = btcSet(network, owners, Number(v.threshold)), me = (window._connectedAddress || '').toLowerCase();
   if(set.failed || set.loading) return '';
-  if(set.link) return `<span><a href="${esc(set.link)}" style="color:inherit;border-bottom:1px solid var(--ln);text-decoration:none">BITCOIN &#8599;</a></span>`;
+  if(set.link) return `<span><a href="${esc(set.link)}" style="color:inherit;border-bottom:1px solid var(--ln);text-decoration:none">BITCOIN &#8599;</a>${set.pending ? ` <span style="color:var(--y)">${set.pending} PENDING</span>` : ''}</span>`;
   const mine = owners.some(a => a.toLowerCase() === me) && !set.ready.includes(me);
   return `<span>BITCOIN ${set.ready.length}/${owners.length}${mine ? ` <button class="alt-link" onclick="publishMyBitcoinKey('${network}')">SET UP</button>` : ''}</span>`;
 }
