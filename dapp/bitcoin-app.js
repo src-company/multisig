@@ -95,7 +95,8 @@ async function connect(el){
   if(choice.startsWith('btc:')){
     checkPlace();
     const wallet = window.BitcoinWallets.detect().find(w => w.key === choice.slice(4));
-    const key = await window.BitcoinWallets.connectWallet(wallet, S.network);
+    const key = await window.BitcoinWallets.connectWallet(wallet, S.network, onStep);
+    S.progress = null;
     forget();
     S.owner = { ...key.owner, signer: key.signer, evm: key.evm, via: `${wallet.name} ${short(key.address)}` };
     key.evmPriv.fill(0);
@@ -118,21 +119,15 @@ function checkPlace(){
 async function connectEvm(eth){
   checkPlace();
   if(!eth) throw new Error('No Ethereum wallet in this browser. Owners on a hardware wallet need no connection here: copy the PSBT and sign it there.');
-  const [evm] = await eth.request({ method: 'eth_requestAccounts' });
-  const hexMsg = m => '0x' + window.btc.hex.encode(new TextEncoder().encode(m));
-  const key = await BV.deriveOwnerKey(m => eth.request({ method: 'personal_sign', params: [hexMsg(m), evm] }), S.network);
-  // A third signature, but a harmless one: this is the one that gets published, and
-  // it is what lets an owner's handle count towards a vault mirrored from Ethereum.
-  const proof = await eth.request({ method: 'personal_sign', params: [hexMsg(BV.bindingMessage(S.network, key.owner)), evm] });
+  const got = await window.BitcoinWallets.connectEvmForHandle(eth, S.network, { keep: true, onStep });
   forget();
-  S.owner = { ...key.owner, signer: key.signer, evm: evm.toLowerCase(), proof };
+  S.owner = { ...got.owner, signer: got.signer };
+  S.progress = null;
   S.msg = null;
   S.ovl = 'me';
   touch();
-  // So that every vault this address sits on can find this key. A handle is public
-  // and proves itself, and a failure here costs nothing: it can still be pasted.
-  BV.publishHandle(myHandle(), S.network).catch(() => {});
 }
+const onStep = (n, of) => { S.progress = `APPROVE ${n} OF ${of} IN YOUR WALLET`; render(); };
 
 // ── VAULTS ─────────────────────────────────────────────────
 const words = text => text.split(/[\s,]+/).filter(Boolean);
@@ -705,9 +700,9 @@ function walletRows(){
 function renderOverlay(){
   if(S.ovl === 'connect') return `<div class="ovl" data-act="close-bg"><div class="ovl-card" role="dialog" aria-modal="true" aria-label="Connect">
     <div class="ovl-head"><span>CONNECT AN OWNER KEY</span><button class="x-btn" data-act="close" aria-label="Close">✕</button></div>
-    <p class="small">Your wallet signs a message and your vault key is derived from that signature. Same wallet, same key, on any device. Expect three prompts. Your public key is then published, so vaults you sit on can find it.</p>
+    <p class="small">Your wallet signs a message and your vault key is derived from that signature. Same wallet, same key, on any device. Expect two prompts, the same however many owners a vault has. Your public key is then published, so vaults you sit on can find it.</p>
     <div class="note warn"><b>The key sits in this page while you use it,</b> so a hardware wallet protects the derivation, not each spend. Any site that gets you to sign the same text gets this key. It clears after 15 idle minutes or a reload.</div>
-    ${walletRows()}
+    ${S.progress ? `<div class="connecting" role="status">${esc(S.progress)}<button class="btn btn-ghost btn-sm" data-act="cancelconnect">CANCEL</button></div>` : walletRows()}
     <p class="small" style="margin-top:14px">On a hardware wallet? Skip this. Paste your <span class="lk">[fingerprint/path]xpub</span> as an owner, and sign each PSBT in your wallet.</p>
   </div></div>`;
   if(S.ovl === 'me' && S.owner) return `<div class="ovl" data-act="close-bg"><div class="ovl-card" role="dialog" aria-modal="true" aria-label="Your owner key">
@@ -823,6 +818,8 @@ const ACT = {
 document.addEventListener('click', async e => {
   const el = e.target.closest('[data-act]');
   touch();
+  // Past the busy lock on purpose: the lock is what a stuck wallet would be holding.
+  if(el?.dataset.act === 'cancelconnect'){ window.BitcoinWallets.cancelPrompt(); return; }
   if(!el || S.busy) return;
   S.busy = true;
   try {
@@ -835,7 +832,7 @@ document.addEventListener('click', async e => {
     await ACT[el.dataset.act](el, e);
     render();
   }
-  catch(err) { S.ovl = null; say(err?.message || String(err)); }
+  catch(err) { S.ovl = null; S.progress = null; say(err?.message || String(err)); }
   finally { S.busy = false; }
 });
 document.addEventListener('input', e => {

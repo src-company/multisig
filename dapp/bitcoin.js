@@ -291,14 +291,14 @@ function bitcoinSigners(text, sig, network){
   } catch(_) { return []; }
 }
 
-// Asks twice. A signer that is not deterministic (a smart account, some hardware
-// paths) would hand back a key the owner could never derive again, and the first
-// they would hear of it is when they try to sign.
+// Asks once. This used to ask twice in a row to prove the wallet repeats itself, and
+// Rainbow answers a second identical request with an empty popup and a rejection. So a
+// wallet is held to it another way: connecting compares this key with the one on record
+// for the address, and contract accounts, the usual ones that cannot repeat, are refused.
 async function deriveOwnerKey(signMessage, network){
-  const msg = ownerMessage(network);
-  const a = await signMessage(msg), b = await signMessage(msg);
-  if(!a || !b || hex.encode(canonicalSignature(a)) !== hex.encode(canonicalSignature(b))) throw new Error('This wallet signs differently each time, so it cannot hold a Bitcoin key here. Nothing was derived.');
-  return keyFromSignature(a, network);
+  const sig = await signMessage(ownerMessage(network));
+  if(!sig) throw new Error('The wallet returned no signature.');
+  return keyFromSignature(sig, network);
 }
 
 // BIP-87, the path for multisig accounts, so this key could be found again by any

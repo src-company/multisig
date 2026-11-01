@@ -66,16 +66,49 @@ function checkPlace(){
   if(window.top !== window || window.opener) throw new Error('Open this page in its own tab to use a key.');
 }
 
-async function connectWallet(wallet, network){
+// One wallet prompt. Wallets go quiet, queue, or close a popup and call it a rejection,
+// and a page that simply awaits them sits there with every button dead. So a prompt can
+// be cancelled, times out, waits its turn if the wallet says one is pending, and is
+// reported in words that do not accuse anyone of declining.
+const PROMPT_MS = 120000, GAP_MS = 600;
+const sleep = ms => new Promise(ok => setTimeout(ok, ms));
+let _cancel = null;
+const cancelPrompt = () => _cancel?.(new Error('Cancelled. Nothing was changed.'));
+async function ask(fn){
+  for(let tries = 0; ; tries++){
+    let timer;
+    try {
+      return await Promise.race([fn(), new Promise((_, no) => {
+        _cancel = no;
+        timer = setTimeout(() => no(new Error('Your wallet did not answer. Open it, look for a waiting request, and try again.')), PROMPT_MS);
+      })]);
+    } catch(e) {
+      const text = String(e?.message || '');
+      if((e?.code === -32002 || /already pending/i.test(text)) && tries < 3){ await sleep(1500); continue; }
+      if(e?.code === 4001 || /reject|denied/i.test(text)) throw new Error('Your wallet closed that request, so nothing was changed. Try again.');
+      throw e;
+    } finally { clearTimeout(timer); _cancel = null; }
+  }
+}
+
+// A key that differs from the one on record means this wallet is not repeating itself,
+// or is another account. Either way it is said now, not when the owner goes to sign.
+async function checkOnRecord(BV, network, evm, xpub){
+  const [known] = await BV.fetchHandles(network, [evm]).catch(() => []);
+  if(known && BV.decodeOwner(known, network).xpub !== xpub) throw new Error('This wallet gave a different key from the one on record for this address, so it cannot sign for that seat. Nothing was changed.');
+}
+
+async function connectWallet(wallet, network, onStep = () => {}){
   checkPlace();
   const BV = await loadBitcoinLibs();
-  const address = await wallet.account();
+  const address = await ask(() => wallet.account());
   if(!onNetwork(address, network)) throw new Error(`${wallet.name} is not on ${network === 'mainnet' ? 'Bitcoin mainnet' : 'signet'}. Switch it, then connect again.`);
-  // Twice, as with an Ethereum wallet: a key that cannot be derived again is lost.
-  const msg = BV.walletMessage(), one = await wallet.sign(msg, address, network), two = await wallet.sign(msg, address, network);
-  if(one !== two) throw new Error(`${wallet.name} signs differently each time, so it cannot hold a key here. Nothing was derived.`);
-  const key = BV.keyFromWalletSignature(one, network);
-  const signature = await wallet.sign(BV.linkMessage(network, key.evm), address, network);
+  onStep(1, 2);
+  const key = BV.keyFromWalletSignature(await ask(() => wallet.sign(BV.walletMessage(), address, network)), network);
+  await checkOnRecord(BV, network, key.evm, key.owner.xpub);
+  await sleep(GAP_MS);
+  onStep(2, 2);
+  const signature = await ask(() => wallet.sign(BV.linkMessage(network, key.evm), address, network));
   const proof = BV.evmSignMessage(BV.bindingMessage(network, key.owner), key.evmPriv);
   const owner = { ...key.owner, evm: key.evm, proof, wallet: { address, signature } };
   const handle = BV.encodeOwner({ network, ...owner });
@@ -83,19 +116,29 @@ async function connectWallet(wallet, network){
   return { ...key, owner, handle, address };
 }
 
-// An Ethereum wallet on the page that only sets a vault up. The key is needed for one
-// moment, to make the public handle, and is wiped straight after.
-async function connectEvmForHandle(eth, network){
+// An Ethereum wallet: one signature makes the key, a second says it belongs to this
+// address. The number does not depend on the vault. The setup page wipes the key as soon
+// as the handle exists; a page that goes on to sign asks to keep it.
+async function connectEvmForHandle(eth, network, { keep = false, onStep = () => {} } = {}){
   checkPlace();
   const BV = await loadBitcoinLibs();
-  const [raw] = await eth.request({ method: 'eth_requestAccounts' }), evm = raw.toLowerCase();
+  const [raw] = await ask(() => eth.request({ method: 'eth_requestAccounts' }));
+  if(!raw) throw new Error('Your wallet shared no account. Unlock it, then connect again.');
+  const evm = raw.toLowerCase();
+  const code = await eth.request({ method: 'eth_getCode', params: [raw, 'latest'] }).catch(() => '0x');
+  // 7702 delegations start 0xef0100 and still sign as the key behind them.
+  if(typeof code === 'string' && code !== '0x' && !code.startsWith('0xef0100')) throw new Error('Contract wallets cannot hold a Bitcoin key here, because they do not repeat a signature. Nothing was changed.');
   const hexMsg = m => '0x' + window.btc.hex.encode(new TextEncoder().encode(m));
-  const key = await BV.deriveOwnerKey(m => eth.request({ method: 'personal_sign', params: [hexMsg(m), raw] }), network);
-  key.signer.wipePrivateData();
-  const proof = await eth.request({ method: 'personal_sign', params: [hexMsg(BV.bindingMessage(network, key.owner)), raw] });
+  onStep(1, 2);
+  const key = await BV.deriveOwnerKey(m => ask(() => eth.request({ method: 'personal_sign', params: [hexMsg(m), raw] })), network);
+  await checkOnRecord(BV, network, evm, key.owner.xpub);
+  await sleep(GAP_MS);
+  onStep(2, 2);
+  const proof = await ask(() => eth.request({ method: 'personal_sign', params: [hexMsg(BV.bindingMessage(network, key.owner)), raw] }));
+  if(!keep) key.signer.wipePrivateData();
   const owner = { ...key.owner, evm, proof }, handle = BV.encodeOwner({ network, ...owner });
   await BV.publishHandle(handle, network).catch(() => {});
-  return { owner, handle, evm, label: `0x${evm.slice(2, 6)}…${evm.slice(-4)}` };
+  return { owner, handle, evm, signer: keep ? key.signer : null, label: `0x${evm.slice(2, 6)}…${evm.slice(-4)}` };
 }
 
 // WalletConnect is only fetched by someone who picks it, so a page that can hold a key
@@ -180,6 +223,6 @@ function announce(){
 window.addEventListener('eip6963:requestProvider', () => loadBitcoinLibs().then(announce, () => {}));
 if(detect().length) loadBitcoinLibs().then(announce, () => {});
 
-window.BitcoinWallets = { detect, connectWallet, connectEvmForHandle, walletConnect, loadBitcoinLibs, providerFor };
+window.BitcoinWallets = { detect, connectWallet, connectEvmForHandle, cancelPrompt, walletConnect, loadBitcoinLibs, providerFor };
 
 })();

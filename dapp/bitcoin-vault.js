@@ -109,7 +109,8 @@ function renderFlow(){
 function renderConnect(){
   const btc = BW.detect(), evm = [...evmWallets];
   const opt = (w, name, icon) => `<button class="wal" data-act="connect" data-w="${esc(w)}"${S.busy ? ' disabled' : ''}>${icon || ICONS.connect}<span>${esc(name)}</span></button>`;
-  return `<h2>Connect a wallet</h2><p class="lead">Free. It signs a message, not a transaction.</p>
+  if(S.progress) return `<h2>Connect a wallet</h2><div class="connecting" role="status">${esc(S.progress)}<button class="btn line" data-act="cancelconnect">CANCEL</button></div>`;
+  return `<h2>Connect a wallet</h2><p class="lead">Free. Two signed messages, no transaction.</p>
     <div class="wals">${btc.map(w => opt(`btc:${w.key}`, w.name, BTC)).join('')}
     ${evm.map(([k, w]) => opt(k, w.name, w.icon ? `<img src="${esc(w.icon)}" alt="">` : '')).join('')}
     ${!evm.length && window.ethereum ? opt('eth', 'Browser wallet') : ''}
@@ -165,6 +166,8 @@ function render(){
   if(id && $(id)){ $(id).focus(); if(at != null) try { $(id).setSelectionRange(at, at); } catch(_) {} }
 }
 
+const onStep = (n, of) => { S.progress = `Approve ${n} of ${of} in your wallet`; render(); };
+
 const ACT = {
   theme(){ S.dark = !S.dark; lsSet('ms_light', S.dark ? '' : '1'); },
   skip(){ S.step = 1; },
@@ -175,12 +178,12 @@ const ACT = {
     if(window.top !== window || window.opener) throw new Error('Open this page in its own tab to use a key.');
     if(/^\/ip[fn]s\//.test(location.pathname)) throw new Error('Open this page from its own domain to use a key.');
     if(w.startsWith('btc:')){
-      const wallet = BW.detect().find(x => x.key === w.slice(4)), key = await BW.connectWallet(wallet, S.network);
+      const wallet = BW.detect().find(x => x.key === w.slice(4)), key = await BW.connectWallet(wallet, S.network, onStep);
       key.signer.wipePrivateData(); key.evmPriv.fill(0);
       S.me = { owner: key.owner, handle: key.handle, label: `${wallet.name} ${short(key.address)}` };
     } else {
       const eth = w === 'wc' ? await BW.walletConnect() : w === 'eth' ? window.ethereum : evmWallets.get(w).provider;
-      S.me = await BW.connectEvmForHandle(eth, S.network);
+      S.me = await BW.connectEvmForHandle(eth, S.network, { onStep });
     }
     S.step = 1;
   },
@@ -200,11 +203,14 @@ const ACT = {
 
 document.addEventListener('click', async e => {
   const el = e.target.closest('[data-act]');
+  // Past the busy lock on purpose: the lock is what a stuck wallet would be holding.
+  if(el?.dataset.act === 'cancelconnect'){ BW.cancelPrompt(); return; }
   if(!el || el.disabled || S.busy) return;
   S.busy = true;
   try { await ACT[el.dataset.act](el); S.msg = null; }
   catch(err) { S.msg = err?.message || String(err); }
   S.busy = false;
+  S.progress = null;
   render();
 });
 let _typing;

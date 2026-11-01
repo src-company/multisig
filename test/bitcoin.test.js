@@ -193,13 +193,15 @@ test('reading an address with no vault says so', async () => {
   await assert.rejects(BV.readEvmVault(1, 'nope', empty), /not an Ethereum/);
 });
 
-test('a key is derived only from a wallet that signs the same way twice', async () => {
+test('a key comes from one signature, and the same one gives the same key', async () => {
   const sig = '0x' + 'cd'.repeat(64) + '1c';
   const one = await BV.deriveOwnerKey(async () => sig, 'signet');
   const two = await BV.deriveOwnerKey(async () => sig.toUpperCase().replace('0X', '0x'), 'signet');
   assert.equal(one.owner.xpub, two.owner.xpub);
-  let n = 0;
-  await assert.rejects(BV.deriveOwnerKey(async () => '0x' + String(n++).repeat(128) + '1b', 'signet'), /differently/);
+  let asked = 0;
+  await BV.deriveOwnerKey(async () => { asked++; return sig; }, 'signet');
+  assert.equal(asked, 1, 'a repeated identical prompt breaks Rainbow');
+  await assert.rejects(BV.deriveOwnerKey(async () => null, 'signet'), /no signature/);
   assert.notEqual(BV.ownerMessage('signet'), BV.ownerMessage('mainnet'));
 });
 
