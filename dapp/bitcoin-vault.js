@@ -240,7 +240,6 @@ function render(){
     <div class="hero"><div class="marks"><span class="mark">${BTC}</span><span class="mark">${TAC}</span></div>
       <h1>Bitcoin multisig</h1><div class="free">FREE · NOTHING TO DEPLOY</div></div>
     ${renderFlow()}
-    ${S.network === 'mainnet' && S.step < 3 ? '<div class="note">Real bitcoin. Not independently reviewed, and your key sits in this page while you use it. Start with an amount you can lose.</div>' : ''}
     ${S.msg ? `<div class="note bad" role="status">${esc(S.msg)}</div>` : ''}
     <section class="pane">${pane()}</section>
     <div class="foot"><a href="./index.html">ETHEREUM AND L2 ↗</a><a href="./bitcoin.html">MY VAULTS</a></div>

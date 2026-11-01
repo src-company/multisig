@@ -428,7 +428,6 @@ function renderBars(){
   const out = [];
   const m = S.msg;
   if(m) out.push(`<div class="attn ${m.kind === 'ok' ? 'ok' : 'bad'}" role="status"><b>${esc(m.text)}</b>${m.href ? `<a href="${esc(m.href)}" target="_blank" rel="noopener">VIEW ↗</a>` : ''}<button class="end" data-act="dismiss" aria-label="Dismiss">✕</button></div>`);
-  if(S.network === 'mainnet') out.push(`<div class="attn"><b>REAL BITCOIN</b><span>NOT INDEPENDENTLY REVIEWED · START WITH AN AMOUNT YOU CAN LOSE</span></div>`);
   if(S.policy && S.owner && BV.seatMisdescribed(S.policy, S.owner)) out.push(`<div class="attn"><b>YOUR KEY IS MISDESCRIBED IN THIS VAULT</b><span>IT STILL SIGNS HERE, BUT ASK WHO CREATED IT WHY</span></div>`);
   if(S.view === 'dash' && S.policy && S.trusted && !backedUp()) out.push(`<div class="attn"><b>BACK UP THIS VAULT</b><span>WITHOUT IT THE COINS CANNOT BE SPENT, EVEN WITH EVERY KEY</span></div>`);
   return out.join('');
@@ -748,7 +747,7 @@ function renderOverlay(){
   if(S.ovl === 'connect') return `<div class="ovl" data-act="close-bg"><div class="ovl-card" role="dialog" aria-modal="true" aria-label="Connect">
     <div class="ovl-head"><span>CONNECT AN OWNER KEY</span><button class="x-btn" data-act="close" aria-label="Close">✕</button></div>
     <p class="small">Your wallet signs a message and your vault key is derived from that signature. Same wallet, same key, on any device. Expect two prompts, the same however many owners a vault has. Your public key is published, and vaults you are on are saved to your wallet's record, so any device can find them.</p>
-    <div class="note warn"><b>The key sits in this page while you use it,</b> so a hardware wallet protects the derivation, not each spend. Any site that gets you to sign the same text gets this key. It clears after 15 idle minutes or a reload.</div>
+    <p class="small">Your key stays in this page while you use it and clears after 15 idle minutes. Only sign this message here.</p>
     ${S.progress ? `<div class="connecting" role="status">${esc(S.progress)}<button class="btn btn-ghost btn-sm" data-act="cancelconnect">CANCEL</button></div>` : walletRows()}
     <p class="small" style="margin-top:14px">On a hardware wallet? Skip this. Paste your <span class="lk">[fingerprint/path]xpub</span> as an owner, and sign each PSBT in your wallet.</p>
   </div></div>`;
