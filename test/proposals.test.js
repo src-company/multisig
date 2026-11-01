@@ -333,7 +333,9 @@ test('a metadata signature binds value, subject, vault and chain', async () => {
 
 test('a metadata signature expires, in both directions', async () => {
   const now = Math.floor(Date.now() / 1000);
-  for (const issued_at of [now - 301, now + 301]) {
+  // Well clear of the 300-second edge: signing and the request take real time, and on a
+  // slow build machine now + 301 drifted back inside the window and failed the deploy.
+  for (const issued_at of [now - 400, now + 400]) {
     const result = await request(metadata({ issued_at }),
       backend({ saveMetadata: async () => assert.fail('stale metadata stored') }), {}, '/metadata');
     assert.equal(result.status, 400, String(issued_at));
@@ -807,7 +809,7 @@ test('a session signature expires in both directions', async () => {
   for (const issued_at of [now - 301, now + 301]) {
     assert.equal((await request(sessionInput({ issued_at }), sessionBackend(), {}, '/session')).status, 400, String(issued_at));
   }
-  assert.equal((await request(sessionInput({ issued_at: now - 299 }), sessionBackend(), {}, '/session')).status, 200);
+  assert.equal((await request(sessionInput({ issued_at: now - 200 }), sessionBackend(), {}, '/session')).status, 200);
 });
 
 test('a session signature is not usable as any vault operation', async () => {

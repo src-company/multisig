@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <!-- The same policy as bitcoin.html: this page briefly derives a key. -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://explorer-api.walletconnect.com; frame-src https://verify.walletconnect.com https://verify.walletconnect.org; connect-src https://api.tacit.finance https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org https://multisig-proposals.onrender.com https://multisig-postgrest.onrender.com https://mempool.space https://blockstream.info https://*.publicnode.com https://mainnet.megaeth.com https://rpc.mainnet.chain.robinhood.com; form-action 'none'; base-uri 'none'; upgrade-insecure-requests">
-<title>multisig — new bitcoin vault</title>
+<title>multisig</title>
 <meta name="description" content="Create a k-of-n Bitcoin vault with an Ethereum or Bitcoin wallet. Free: nothing is deployed.">
 <link rel="canonical" href="https://www.multisig.software/btc">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&display=swap" rel="stylesheet">
@@ -24,6 +24,7 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--a);outline-offset:2
 button{cursor:pointer}button:active{transform:scale(.97)}button:disabled{opacity:.45;cursor:default}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;transition-duration:.001ms!important}}
 .scan{position:fixed;inset:0;pointer-events:none;z-index:100;background:repeating-linear-gradient(0deg,transparent,transparent 3px,#0A0A0A04 3px,#0A0A0A04 6px)}
+.light .scan{background:repeating-linear-gradient(0deg,transparent,transparent 3px,#0099B302 3px,#0099B302 6px)}
 .frame{max-width:520px;margin:0 auto;padding:0 12px 48px}
 .hdr{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:22px 0 8px}
 .logo{font-size:22px;font-weight:700;letter-spacing:-1px}.logo a{text-decoration:none}
