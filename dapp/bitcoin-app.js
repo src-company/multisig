@@ -426,6 +426,9 @@ async function sign(){
   // The key is already in this page, so no wallet prompt follows. This is the prompt.
   const sends = S.review.outputs.filter(o => !o.change).map(o => `${btcOf(o.sats)} BTC to ${o.address}`).join('\n');
   if(!window.confirm(`Sign with your vault key?\n\n${sends}\nFee ${S.review.fee.toLocaleString('en-US')} sats\n\nYour wallet will not ask again. This is your approval.`)) return;
+  // A coin's first check can take a while, and a page that sits still reads as broken.
+  S.msg = { text: 'CHECKING THE COINS, THEN SIGNING. THIS CAN TAKE A MINUTE', kind: 'ok' };
+  render();
   await BV.assertSpendable(inputs, BV.chain(S.network));
   if(S.psbt !== psbt) throw new Error('This proposal changed. Check it again.');
   load(BV.sign(psbt, S.owner.signer, policy, known()));
