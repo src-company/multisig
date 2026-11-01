@@ -25,6 +25,8 @@ const S = {
   // text is what was typed. owner is set once a row is a key that can go in the vault.
   rows: [{ text: '', owner: null, state: 'empty' }, { text: '', owner: null, state: 'empty' }],
   threshold: 2, name: '', policy: null, saved: false, step: 0,
+  // True when this page was opened from someone's invite: the owners are theirs to set.
+  invite: false,
 };
 let _t;
 const toast = t => { $('toast').innerHTML = `<div class="toast">${esc(t)}</div>`; clearTimeout(_t); _t = setTimeout(() => { $('toast').innerHTML = ''; }, 1600); };
@@ -37,7 +39,32 @@ window.addEventListener('eip6963:announceProvider', e => {
   if(document.getElementById('app').firstChild) render();
 });
 
-const filled = () => [...(S.me ? [{ owner: S.me.owner, state: 'ready' }] : []), ...S.rows.filter(r => r.text.trim())];
+const filled = () => [...(S.me && !S.invite ? [{ owner: S.me.owner, state: 'ready' }] : []), ...S.rows.filter(r => r.text.trim())];
+
+// An invite carries the draft itself: network, threshold and the owners' public
+// addresses. So there is nothing to coordinate. Everyone holding it works out the same
+// vault the moment every owner has connected, in a fragment no server ever sees.
+function inviteLink(){
+  const list = [...(S.me ? [S.me.evm] : []), ...S.rows.map(r => r.text.trim()).filter(Boolean)];
+  const th = Math.min(S.threshold, Math.max(list.length, 1));
+  return `${location.origin}${location.pathname}#join/${S.network}/${th}/${list.map(encodeURIComponent).join(',')}`;
+}
+function readInvite(){
+  const [kind, network, th, list] = location.hash.slice(1).split('/');
+  if(kind !== 'join' || !Object.hasOwn(BV.NETWORKS, network) || !list) return false;
+  S.network = network;
+  S.threshold = Math.max(1, +th || 1);
+  S.rows = list.split(',').map(decodeURIComponent).map(text => ({ text, owner: null, state: 'checking' }));
+  S.invite = true;
+  return true;
+}
+// An owner's own row is theirs the moment they connect, whichever way they did.
+function takeSeat(){
+  const me = S.me, row = S.rows.find(r => r.text.toLowerCase() === me.evm || r.text === me.wallet);
+  if(row) Object.assign(row, { owner: me.owner, state: 'ready', mine: true, error: null });
+  else S.msg = 'This wallet is not one of the owners on this invite. Connect the one that is.';
+  return !!row;
+}
 const total = () => filled().length;
 const allReady = () => total() > 0 && filled().every(r => r.state === 'ready');
 
@@ -56,6 +83,9 @@ async function resolve(row){
       if(f) Object.assign(row, { owner: BV.decodeOwner(f.handle, S.network), state: 'ready' }); else row.state = 'waiting';
     } else Object.assign(row, { owner: BV.decodeOwner(t, S.network), state: 'ready' });
   } catch(e) { Object.assign(row, { state: 'bad', error: e.message }); }
+  // One key cannot take two seats. Said here, not as an error on the last step.
+  const taken = [...(S.me ? [S.me.owner.xpub] : []), ...S.rows.filter(r => r !== row).map(r => r.owner?.xpub)];
+  if(row.owner && taken.includes(row.owner.xpub) && !row.mine) Object.assign(row, { owner: null, state: 'bad', error: 'That owner is already on this vault.' });
 }
 
 function statusOf(r){
@@ -110,7 +140,7 @@ function renderConnect(){
   const btc = BW.detect(), evm = [...evmWallets];
   const opt = (w, name, icon) => `<button class="wal" data-act="connect" data-w="${esc(w)}"${S.busy ? ' disabled' : ''}>${icon || ICONS.connect}<span>${esc(name)}</span></button>`;
   if(S.progress) return `<h2>Connect a wallet</h2><div class="connecting" role="status">${esc(S.progress)}<button class="btn line" data-act="cancelconnect">CANCEL</button></div>`;
-  return `<h2>Connect a wallet</h2><p class="lead">Free. Two signed messages, no transaction.</p>
+  return `<h2>${S.invite ? 'You are invited to a Bitcoin vault' : 'Connect a wallet'}</h2><p class="lead">${S.invite ? 'Connect the wallet you were invited with to take your seat. ' : ''}Free. Two signed messages, no transaction.</p>
     <div class="wals">${btc.map(w => opt(`btc:${w.key}`, w.name, BTC)).join('')}
     ${evm.map(([k, w]) => opt(k, w.name, w.icon ? `<img src="${esc(w.icon)}" alt="">` : '')).join('')}
     ${!evm.length && window.ethereum ? opt('eth', 'Browser wallet') : ''}
@@ -122,11 +152,16 @@ function renderOwners(){
   const n = total(), th = Math.min(S.threshold, Math.max(n, 1));
   const risk = n > 1 && th === n ? 'One lost key freezes the coins.' : n > 1 && th === 1 ? 'Any one owner can spend alone.' : null;
   const waiting = filled().some(r => r.state === 'waiting');
+  if(S.invite){
+    const rows = S.rows.map(r => `<div class="row"><span class="n">${ICONS.owners}</span><span class="inp">${esc(short(r.text))}</span>${r.mine ? '<span class="st ok">YOU</span>' : statusOf(r)}</div>`).join('');
+    return `<h2>${S.me ? 'You are in' : 'You are invited'}</h2><p class="lead">A ${th} of ${n} Bitcoin vault. ${waiting ? 'Waiting for the others. This updates by itself.' : 'Every owner is ready.'}</p>
+      ${rows}<button class="btn fill w" data-act="next"${allReady() ? '' : ' disabled'}>CONTINUE</button>`;
+  }
   return `<h2>Add owners</h2><p class="lead">A 0x address, a Bitcoin address, or an xpub.</p>
     ${S.me ? `<div class="row"><span class="n">${ICONS.owners}</span><span class="inp">${esc(S.me.label)}</span><span class="st ok">YOU</span></div>` : ''}
     ${S.rows.map((r, i) => `<div class="row"><span class="n">${ICONS.owners}</span><input class="inp" id="o${i}" data-row="${i}" aria-label="Owner" spellcheck="false" autocomplete="off" placeholder="${S.network === 'mainnet' ? '0x… or bc1…' : '0x… or tb1…'}" value="${esc(r.text)}">${statusOf(r)}${S.rows.length > 1 ? `<button class="x" data-act="drop" data-i="${i}" aria-label="Remove">✕</button>` : ''}</div>${r.error ? `<div class="st bad" style="padding:4px 0">${esc(r.error)}</div>` : ''}`).join('')}
     <div class="btns"><button class="link" data-act="add">+ Add owner</button></div>
-    ${waiting ? `<div class="wait">Waiting owners connect once at this link.<div class="btns"><button class="btn line" data-act="invite">COPY LINK</button><button class="btn line" data-act="check">CHECK AGAIN</button></div></div>` : ''}
+    ${waiting ? `<div class="wait">Send your co-owners this link. They connect once, and this updates by itself.<div class="btns"><button class="btn fill" data-act="invite">COPY INVITE LINK</button></div></div>` : ''}
     ${n > 1 ? `<div class="th"><div class="stepper"><button data-act="th" data-d="-1" aria-label="Fewer">−</button><output>${th} OF ${n}</output><button data-act="th" data-d="1" aria-label="More">+</button></div><span>must sign</span></div>` : ''}
     ${risk ? `<div class="note">${risk}</div>` : ''}
     <button class="btn fill w" data-act="next"${allReady() ? '' : ' disabled'}>CONTINUE</button>`;
@@ -143,7 +178,7 @@ function renderReceive(){
   return `<h2>Your vault is ready</h2><p class="lead">Share the backup with every owner, then send sats here.</p>
     <div class="qr" role="img" aria-label="QR code of the address">${window.btc.encodeQR(a.toUpperCase(), 'svg')}</div>
     <div class="addr">${esc(a)}</div>
-    <div class="btns center"><button class="btn line" data-act="copy">COPY ADDRESS</button>${S.network === 'signet' ? '<a class="btn line asbtn" href="https://faucet.coinbin.org" target="_blank" rel="noopener">GET TEST COINS ↗</a>' : ''}</div>
+    <div class="btns center"><button class="btn line" data-act="copy">COPY ADDRESS</button><button class="btn line" data-act="vaultlink">COPY VAULT LINK</button>${S.network === 'signet' ? '<a class="btn line asbtn" href="https://faucet.coinbin.org" target="_blank" rel="noopener">GET TEST COINS ↗</a>' : ''}</div>
     <div class="note">Sats only. Tacit assets sent here are set aside, and this vault cannot move them.</div>
     <a class="btn go w" href="./bitcoin.html#${S.network}/${encodeURIComponent(BV.descriptor(S.policy))}">OPEN VAULT</a>`;
 }
@@ -180,12 +215,15 @@ const ACT = {
     if(w.startsWith('btc:')){
       const wallet = BW.detect().find(x => x.key === w.slice(4)), key = await BW.connectWallet(wallet, S.network, onStep);
       key.signer.wipePrivateData(); key.evmPriv.fill(0);
-      S.me = { owner: key.owner, handle: key.handle, label: `${wallet.name} ${short(key.address)}` };
+      S.me = { owner: key.owner, handle: key.handle, evm: key.evm, wallet: key.address, published: key.published, label: `${wallet.name} ${short(key.address)}` };
     } else {
       const eth = w === 'wc' ? await BW.walletConnect() : w === 'eth' ? window.ethereum : evmWallets.get(w).provider;
       S.me = await BW.connectEvmForHandle(eth, S.network, { onStep });
     }
     S.step = 1;
+    if(S.invite) takeSeat();
+    // Others find an owner through this, so a failed save is worth saying.
+    if(!S.me.published) S.msg = 'Connected, but your key could not be published. Co-owners will see you as WAITING. Reconnect to try again.';
   },
   net(el){
     S.network = el.dataset.n; S.me = null; S.step = 0;
@@ -195,8 +233,9 @@ const ACT = {
   add(){ S.rows.push({ text: '', owner: null, state: 'empty' }); },
   drop(el){ S.rows.splice(+el.dataset.i, 1); },
   th(el){ const max = Math.max(total(), 1); S.threshold = Math.max(1, Math.min(max, Math.min(S.threshold, max) + +el.dataset.d)); },
-  async check(){ await Promise.all(S.rows.map(resolve)); },
-  invite(){ return navigator.clipboard.writeText(`${location.origin}${location.pathname}`).then(() => toast('LINK COPIED'), () => toast('THE BROWSER REFUSED THE CLIPBOARD')); },
+  async check(){ await Promise.all(S.rows.filter(r => !r.mine).map(resolve)); },
+  vaultlink(){ return navigator.clipboard.writeText(`${location.origin}${location.pathname.replace(/\/[^/]*$/, '/')}bitcoin.html#${S.network}/${encodeURIComponent(BV.descriptor(S.policy))}`).then(() => toast('LINK COPIED'), () => toast('THE BROWSER REFUSED THE CLIPBOARD')); },
+  invite(){ return navigator.clipboard.writeText(inviteLink()).then(() => toast('LINK COPIED'), () => toast('THE BROWSER REFUSED THE CLIPBOARD')); },
   backup(){ create(); backup(); S.step = 3; },
   copy(){ return navigator.clipboard.writeText(BV.vaultOf(S.policy).address).then(() => toast('ADDRESS COPIED'), () => toast('THE BROWSER REFUSED THE CLIPBOARD')); },
 };
@@ -207,7 +246,8 @@ document.addEventListener('click', async e => {
   if(el?.dataset.act === 'cancelconnect'){ BW.cancelPrompt(); return; }
   if(!el || el.disabled || S.busy) return;
   S.busy = true;
-  try { await ACT[el.dataset.act](el); S.msg = null; }
+  S.msg = null;
+  try { await ACT[el.dataset.act](el); }
   catch(err) { S.msg = err?.message || String(err); }
   S.busy = false;
   S.progress = null;
@@ -232,6 +272,14 @@ if(/(^|\.)multisig\.software$/.test(location.hostname) && location.pathname === 
   try { history.replaceState(null, '', `/btc${location.search}${location.hash}`); } catch(_) {}
 }
 window.dispatchEvent(new Event('eip6963:requestProvider'));
+const invited = readInvite();
 render();
+if(invited) ACT.check().then(render);
+// Nobody should have to keep pressing a button to see a friend arrive.
+setInterval(async () => {
+  if(S.step !== 1 || S.busy || !filled().some(r => r.state === 'waiting')) return;
+  await Promise.all(S.rows.filter(r => r.state === 'waiting').map(resolve));
+  render();
+}, 12000);
 
 })();

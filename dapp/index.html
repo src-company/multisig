@@ -603,6 +603,10 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
    switcher rather than a chain in it: it goes to bitcoin.html, and it cannot reach
    S.cf.net or switchChain. An <a> needs telling what a <button> gets for free. */
 .net-row.btc-row{text-decoration:none;color:inherit}
+.btc-banner{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 8px;border-bottom:1px solid var(--ln);font-size:10px;letter-spacing:2px;color:var(--d)}
+.btc-banner a{display:flex;align-items:center;gap:8px;color:inherit;text-decoration:none;min-width:0}
+.btc-banner strong{color:var(--y);font-weight:700}
+.btc-banner .x-btn{margin:0;flex-shrink:0}
 .net-row.btc-row .net-id{margin-left:auto}
 
 /* admin */
@@ -5735,6 +5739,7 @@ ${/* This control copies the shareable URL, not the address it sits beside \u201
     <nav class="nav">
       ${[{k:"DASH",l:"DASHBOARD",m:"DASH"},{k:"ADMIN",l:"ADMIN",m:"ADMIN"},{k:"CREATE",l:"CREATE",m:"CREATE"}].map(i=>`<button class="${S.view===i.k?"on":""}"${S.view===i.k?' aria-current="page"':''} onclick="S.view='${i.k}';S.showTx=false;render()">${mob?i.m:i.l}</button>`).join("")}
     </nav>
+    ${renderBtcBanner()}
     ${renderResumeBanner()}
     <div class="content">${S.view==="DASH"?renderDash(v,mob):S.view==="CREATE"?renderCreate(mob):renderAdmin(v,mob)}</div>
     <div class="footer">
@@ -8926,6 +8931,12 @@ window.toggleBtc = toggleBtc;
 // Testnets go with signet. A deploy set that mixes them is warned about already, and
 // real bitcoin is only implied when every chain in it is real.
 const btcNetworkOf = sel => sel.some(n => n && n.test) ? 'signet' : 'mainnet';
+
+// The way in to the new page, until someone closes it.
+function renderBtcBanner(){
+  if(S.demoMode || lsGet('ms_btc_banner')) return '';
+  return `<div class="btc-banner"><a href="./btc.html"><span class="tok-ico">${BTC_LOGO}</span><span><strong>NEW</strong> BITCOIN MULTISIG, FROM ANY WALLET. FREE TO SET UP &#8599;</span></a><button class="x-btn" onclick="lsSet('ms_btc_banner','1');render()" aria-label="Close">&#10005;</button></div>`;
+}
 
 function renderBtcPill(c){
   return `<button class="pill${c.btc?' on':''}" aria-pressed="${!!c.btc}" onclick="toggleBtc()"><span class="tok-ico">${BTC_LOGO}</span> BITCOIN</button>`;

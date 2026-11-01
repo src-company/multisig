@@ -129,6 +129,7 @@ const sandbox = {
   txDecodeLink: () => '',
   renderSlowOutbound: () => '',
   renderBtcMeta: () => '',
+  renderBtcBanner: () => '',
   renderTxBuilder: () => '<div id="txb"></div>',
   renderSim: () => '',
   vaultRef: v => v.address,

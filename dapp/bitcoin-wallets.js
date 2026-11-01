@@ -110,10 +110,13 @@ async function connectWallet(wallet, network, onStep = () => {}){
   onStep(2, 2);
   const signature = await ask(() => wallet.sign(BV.linkMessage(network, key.evm), address, network));
   const proof = BV.evmSignMessage(BV.bindingMessage(network, key.owner), key.evmPriv);
-  const owner = { ...key.owner, evm: key.evm, proof, wallet: { address, signature } };
+  // Only a BIP-137 signature can be checked here. Leather answers in BIP-322, and that
+  // owner is still a full owner: they just cannot be found by their bc1 address.
+  const provable = BV.bitcoinSigners(BV.linkMessage(network, key.evm), window.btc.base64.decode(signature), network).includes(address);
+  const owner = { ...key.owner, evm: key.evm, proof, ...(provable ? { wallet: { address, signature } } : {}) };
   const handle = BV.encodeOwner({ network, ...owner });
-  BV.publishHandle(handle, network).catch(() => {});
-  return { ...key, owner, handle, address };
+  const published = await BV.publishHandle(handle, network).then(() => true, () => false);
+  return { ...key, owner, handle, address, published };
 }
 
 // An Ethereum wallet: one signature makes the key, a second says it belongs to this
@@ -137,8 +140,8 @@ async function connectEvmForHandle(eth, network, { keep = false, onStep = () => 
   const proof = await ask(() => eth.request({ method: 'personal_sign', params: [hexMsg(BV.bindingMessage(network, key.owner)), raw] }));
   if(!keep) key.signer.wipePrivateData();
   const owner = { ...key.owner, evm, proof }, handle = BV.encodeOwner({ network, ...owner });
-  await BV.publishHandle(handle, network).catch(() => {});
-  return { owner, handle, evm, signer: keep ? key.signer : null, label: `0x${evm.slice(2, 6)}…${evm.slice(-4)}` };
+  const published = await BV.publishHandle(handle, network).then(() => true, () => false);
+  return { owner, handle, evm, published, signer: keep ? key.signer : null, label: `0x${evm.slice(2, 6)}…${evm.slice(-4)}` };
 }
 
 // WalletConnect is only fetched by someone who picks it, so a page that can hold a key

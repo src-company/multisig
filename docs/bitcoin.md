@@ -24,6 +24,10 @@ Why extended keys: a hardware wallet finds its key by fingerprint and path, and 
 
 **An owner needs no embedded key.** Anyone holding `[fingerprint/path]xpub` can be an owner: copy the PSBT, sign it in any wallet that handles Taproot script paths, and paste the result back. The page also exports the BIP-388 wallet policy that Ledger registers.
 
+## Inviting co-owners
+
+An invite link carries the draft in its fragment: network, threshold and the owners' public addresses. A co-owner opens it, connects once, and takes their seat. Nothing coordinates this: everyone holding the link works out the same vault as soon as every owner has connected, and the creator's page updates by itself. Owners can be `0x` addresses or Bitcoin addresses, which resolve once that wallet has connected.
+
 ## The queue
 
 Proposals are shared as on Ethereum, and the rule is the same. They are readable by anyone who can compute the vault, which for a mirrored vault is anyone, since its owners and their handles are public. They are also signed-transaction drafts, so assume amounts and payees are public. The rule: `POST /btc-proposal` admits a PSBT only with a valid owner signature for that descriptor, and merges it with the stored copy. Links and pasted PSBTs still work, so a hardware wallet owner needs no connection and the queue being down loses nothing.
