@@ -1,0 +1,96 @@
+# Bitcoin vaults
+
+How Bitcoin fits beside the EVM vaults, what was taken from Tacit, and what a timelock can and cannot mean without a contract.
+
+## The model
+
+| | EVM vault | Bitcoin vault |
+|---|---|---|
+| The vault is | a contract at an address | a descriptor; each address is a hash of one derivation of it |
+| Owners are read from | the chain | the descriptor. The chain says nothing until the first spend |
+| Changing owners | a transaction | a new address, and a sweep to it |
+| Replay protection | a nonce | a signature names the coins it spends |
+| A proposal is | a row in Postgres plus EIP-712 signatures | a PSBT |
+| Losing the record | re-read it from the chain | **the coins are stuck, even with every key** |
+
+The descriptor is `tr(NUMS/<0;1>/*,multi_a(k,[fp/path]xpub/<0;1>/*,…))`. `NUMS` is the BIP-341 point `H` written as an extended key with an all-zero chain code, because BIP-388 cannot express a bare point; every child is `H` plus a public tweak, so it stays provably unspendable. Every spend therefore reveals its leaf and shows k signatures. It costs more than a key-path spend and reveals the owners when it spends, as an EVM vault always does. In exchange each owner signs alone, offline, in any order. MuSig2 and FROST would hide the policy, but both need signers online together for nonces.
+
+Keys are sorted by xpub, so the same owners in any order are the same vault. `multi_a` is used rather than `sortedmulti_a` because miniscript, which the delayed leaf needs, has only the former.
+
+Receive and change walk separate chains and a scan stops after 20 unused addresses. A key on both leaves walks `<2;3>` on the second, as BIP-388 requires. The embedded key lives at `m/87'/coin'/0'`.
+
+Why extended keys: a hardware wallet finds its key by fingerprint and path, and refuses change it cannot prove is its own. Static keys could not offer either.
+
+**An owner needs no embedded key.** Anyone holding `[fingerprint/path]xpub` can be an owner: copy the PSBT, sign it in any wallet that handles Taproot script paths, and paste the result back. The page also exports the BIP-388 wallet policy that Ledger registers.
+
+## The same owners as an Ethereum vault
+
+A Bitcoin vault can be derived from an Ethereum vault. `getOwners()` and `threshold()` come from the contract, and each owner supplies a signed handle. Owners are sorted, so everyone holding the same handles reaches the same descriptor, and no one has to create it.
+
+Each owner must take part once. A Bitcoin owner key comes from that owner's signature, so it cannot be computed from an address. An Ethereum public key could be recovered from a past transaction, but no Ethereum wallet can produce the signature a Bitcoin script needs, so coins sent to it could never move.
+
+The handle has to carry proof. It holds the Ethereum address's signature over the Bitcoin key, in a message separate from the one that derives the key: the first is published, the second must never leave the page. Without proof, anyone could put an owner's address beside their own key and take that seat.
+
+Limits:
+
+- It is a snapshot. Changing owners on Ethereum does not change the Bitcoin vault, and a new owner set means a new vault and a sweep.
+- The EVM timelock does not carry over, for the reasons under Timelocks.
+- Contract owners, such as a Safe, cannot take part, because they cannot make a repeatable signature.
+- The owner list comes from one RPC. A lying RPC could name different owners, so the page shows them before creating anything.
+- Handles travel by paste. Publishing them, in Postgres or a `.wei` text record as Tacit does, is not built.
+
+## What came from Tacit
+
+Tacit's `tacit1` address is bech32m over `[version][flags][lanes]`, and its embedded key is a hash of a wallet signature over a fixed message. `src-company/tacit` and `z0r0z/tacit` are identical in these modules.
+
+- **Taken: the lane encoding.** An owner handle is `msig1…` (`tmsig1…` on signet): a required Bitcoin lane (fingerprint, path, chain code, key) and an optional Ethereum address lane, a lane proving that address signed the key, and unknown lanes skipped by old readers. The HRP differs per network, so a key from the wrong network is refused at the paste. The Ethereum lane alone is a label; only the proof lane makes it a fact.
+- **Taken: signature-derived keys,** including asking twice and refusing a wallet that does not repeat itself. This is how an Ethereum wallet becomes a Bitcoin owner, since no Ethereum wallet can sign a BIP-341 sighash.
+- **Not taken: the `tacit1` address itself.** It has scan and pool lanes a vault has no use for, and spending from it would mean asking for Tacit's identity message here. That signature controls all of a person's Tacit funds, so this app must never request it. The message here is its own, so the two keys are unrelated.
+- **Not taken: hand-written transaction code.** `dapp/btc.min.js` is `@scure/btc-signer`. Only the witness for a multi_a leaf is assembled here, because the library's finalizer does not cover a delayed one.
+
+**The cost of the embedded key.** It sits in page memory while signing. A hardware wallet protects the derivation, not each Bitcoin spend, and any site that gets an owner to sign the same text has that key. For a multisig this is a real step down from the EVM side, where a Ledger confirms every signature. It is acceptable for one key of several. An owner who wants the hardware guarantee uses the PSBT route instead, which never touches this key.
+
+## Timelocks
+
+The EVM timelock has four properties: k owners **queue** a transaction; the delay runs **from the proposal**; anyone can see it and owners can **cancel**; unanimity skips the delay.
+
+Bitcoin has two relevant opcodes. `OP_CHECKSEQUENCEVERIFY` counts from when a coin confirmed. `OP_CHECKLOCKTIMEVERIFY` compares to a fixed height. Neither knows about proposals, and without a covenant no script can restrict where a coin goes, so a queue step cannot be forced: keys able to move a coin into the queue can move it anywhere.
+
+| Approach | Delay from proposal | Cancel | Trustless | Interaction | Status |
+|---|---|---|---|---|---|
+| **Recovery path:** k-of-n now, r-of-m after `d` | n/a | n/a | yes | none | **built** |
+| **Hold:** all owners now, k-of-n on coins older than `d` | no, from arrival | no | yes | none | **built** |
+| Co-signer: k-of-n + service key, with a slow escape leaf | yes | yes | no, but the service alone cannot spend | online service | not built |
+| Presigned unvault (Revault shape) | yes | yes, presigned | yes | **all n owners, per coin** | not built |
+| CTV or OP_VAULT | yes | yes | yes | none | not active on mainnet |
+
+- **Recovery** is exact: it is `DeadmanSwitch` and `SocialRecovery`, enforced by consensus. The price is that a coin left idle past `d` opens the second path, so an idle vault must move coins to itself to reset the clock.
+- **Hold** has the same routing as `TimelockExecutor` and much weaker protection. A coin older than `d` has no delay left, so it suits lock-ups and not a treasury at rest. The page says this before anyone picks it.
+- **Co-signer** is the shortest route to the EVM experience: the service signs only `d` after a proposal, and refuses once cancelled. It adds a trust assumption this project has so far avoided: if the service and k owners collude, the delay is gone.
+- **Presigned** is the only trustless route today. All owners presign an unvault and a cancel for every coin, one offline owner stops new deposits being spendable, and presigned fees need anchors. It is not simple, and it is a separate piece of work.
+- **Covenants.** CTV had a 2026 activation client, and miner signalling was reported at 0% in May 2026. Nothing should be built on it yet. A vault cannot gain a leaf later, so adopting one would be a sweep to a new address.
+
+## Threat notes
+
+- A proposal comes from someone else. `inspect` derives everything shown from the PSBT and refuses inputs outside this vault, unknown paths, non-default sighashes, any locktime, any version but 2, any sequence but the path's own, repeated coins, finalized inputs, and signatures that do not verify.
+- The address shown is the bytes signed: an output whose script does not re-encode exactly is refused. A non-minimal push would otherwise read as the payee and be spendable by anyone.
+- Signing rebuilds each input from the policy and offers the signer one leaf.
+- A vault address past the scan gap is refused rather than called change.
+- A vault opened from a link is not saved and shows no receive address until the owner confirms the listed owners, because the sender chose those keys.
+- A key is derived from a canonical signature, so v as 0/1, v as 27/28 and the 64-byte form give one key.
+- A PSBT's derivations only say where to look. Change is re-derived from the policy, so a stranger's address cannot pose as change.
+- Merging takes signatures only. Another owner's file cannot change what a proposal says, and a signer that rewrites metadata (Bitcoin Core adds every leaf and reorders the tree) does no harm. Only signatures for the leaf being spent count.
+- Amounts in a PSBT are claims, but BIP-341 signs every input's amount, so understating one to hide a fee gives signatures the network rejects.
+- An Esplora server can lie about coins and fee estimates. It can make a proposal that cannot confirm, suggest a fee up to the 1000 sat/vB ceiling (review warns above 200), or steer an address to be reused. It cannot make anyone sign outputs the review does not show.
+- Two proposals over one coin cannot both land. The page checks before broadcast and calls the loser void.
+- `bitcoin.html` has its own CSP: scripts from `'self'` only, and connections only to `mempool.space` and `blockstream.info`.
+- `@scure/btc-signer` was audited by cure53 at 0.3.0 (2023) and self-audited at 2.2.0 (April 2026). This page runs 2.4.1, which neither audit covers, and its UTXO module is unaudited (it is not used here).
+
+## Not done
+
+- **Mainnet is off.** `MAINNET` in `bitcoin-app.js` is the switch. It stays off until a real wallet has signed on signet and someone other than the author has reviewed this.
+- **A real device.** Interoperability is proven with Bitcoin Core as the outside signer, on regtest. No Ledger, Coldcard, Trezor or Sparrow has signed one of these PSBTs, and whether each accepts a `multi_a` Taproot policy with an xpub internal key has to be tried per device. Ledger registration from this page (WebHID) is not built; the policy export is untested on a device.
+- A real signet spend. The page has read live signet, but the funded flow has only run against a mocked explorer.
+- Native Bitcoin wallets (Xverse, Leather, UniSat), WalletConnect, and the passkey signer Tacit has. A passkey is bound to its domain, so the same passkey on `multisig.software` and the IPFS gateway gives different keys.
+- Proposal storage in Postgres. `chain_id` is an `int > 0`, and the verifier reads EVM state.
+- Independent review. Do this before mainnet use at any size.

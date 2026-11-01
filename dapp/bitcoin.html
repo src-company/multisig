@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<!-- The one page here that holds a private key, so the tightest policy of the
+     three: no inline script at all, and it can reach two block explorers and
+     the Ethereum RPCs that read a vault's owners, and nothing else. A key that got
+     loose in this page has nowhere to go. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src https://mempool.space https://blockstream.info https://*.publicnode.com https://mainnet.megaeth.com https://rpc.mainnet.chain.robinhood.com; form-action 'none'; base-uri 'none'; upgrade-insecure-requests">
+<title>multisig — bitcoin</title>
+<meta name="description" content="k-of-n Bitcoin vaults. Taproot, no contract and no server: a vault is a descriptor and a proposal is a PSBT.">
+<link rel="canonical" href="https://www.multisig.software/bitcoin">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+/* Ink ladder — the same one docs.html and index.html use, copied rather than
+   diverged. If it changes there it changes here. */
+:root{
+  --a:#F5FBFF;--bg:#2D5FE8;--d:#D6E6FF;--m:#EAF4FF;
+  --ln:#FFFFFF2E;--fr:#FFFFFF47;--g:#7DFFBA;--gc:#0A0A0A;--r:#FFB1AC;--y:#FFD600;
+  --on:#0A0A0A;
+  --f:'IBM Plex Mono','Courier New',monospace;
+}
+body{font-family:var(--f);background:var(--bg);color:var(--a);min-height:100vh;padding:10px}
+a{color:var(--a)}
+button,input,select,textarea{font-family:var(--f);color:var(--a)}
+button{cursor:pointer}
+button:active{transform:scale(.97)}
+@media(hover:hover){button:hover{opacity:.75}}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--a);outline-offset:2px}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;transition-duration:.001ms!important}}
+.frame{max-width:780px;margin:0 auto;padding:0 24px}
+.hdr{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:22px 0 16px;flex-wrap:wrap}
+.logo{font-size:28px;font-weight:700;letter-spacing:-1px;line-height:1}
+.logo a{text-decoration:none}
+.logo-sub{font-size:10px;letter-spacing:2px;color:var(--m);margin-top:4px}
+.nets{display:flex;gap:8px}
+.pill{background:transparent;border:1px solid var(--ln);font-size:10px;font-weight:700;letter-spacing:2px;padding:8px 12px;color:var(--d)}
+.pill.on{background:var(--a);color:var(--bg);border-color:var(--a)}
+.sec{border-top:1px solid var(--ln);padding:24px 0}
+h2{font-size:12px;font-weight:700;letter-spacing:2px;margin-bottom:14px;text-transform:uppercase}
+h3{font-size:10px;font-weight:700;letter-spacing:2px;color:var(--d);margin:18px 0 8px;text-transform:uppercase}
+p{font-size:12px;line-height:1.8;color:var(--m);margin-bottom:12px}
+.note{font-size:11px;color:var(--m);border-left:2px solid var(--a);padding:8px 0 8px 14px;margin:12px 0;line-height:1.7}
+.note.warn{border-left-color:var(--y);color:var(--y)}
+.note.bad{border-left-color:var(--r);color:var(--r)}
+.note.ok{border-left-color:var(--g);color:var(--g)}
+.btn{font-size:11px;font-weight:700;letter-spacing:2px;min-height:40px;padding:0 18px;text-transform:uppercase;border:1px solid var(--a);background:transparent;margin:4px 8px 4px 0}
+.btn.fill{background:var(--a);color:var(--bg)}
+.btn.go{background:var(--g);color:var(--gc);border-color:var(--g)}
+.btn:disabled{opacity:.4;cursor:default}
+label{display:block;font-size:10px;font-weight:700;letter-spacing:2px;color:var(--d);margin:14px 0 6px;text-transform:uppercase}
+input,select,textarea{width:100%;background:transparent;border:1px solid var(--ln);font-size:12px;padding:10px;line-height:1.5}
+select option{color:#0A0A0A}
+textarea{min-height:84px;resize:vertical}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.mono{font-size:12px;word-break:break-all;line-height:1.7}
+.big{font-size:22px;font-weight:700;margin:6px 0}
+.item{display:block;width:100%;text-align:left;background:transparent;border:none;border-bottom:1px solid var(--ln);padding:12px 0;font-size:12px}
+.kv{display:flex;justify-content:space-between;gap:16px;font-size:12px;padding:8px 0;border-bottom:1px solid var(--ln)}
+.kv span:last-child{word-break:break-all;text-align:right}
+.dim{color:var(--d)}
+@media(max-width:560px){.frame{padding:0 8px}.row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="frame">
+  <header class="hdr">
+    <div><div class="logo"><a href="./index.html">multisig</a></div><div class="logo-sub">BITCOIN</div></div>
+    <div class="nets" id="nets"></div>
+  </header>
+  <main id="app"></main>
+  <noscript><p class="note warn">This page needs JavaScript. Nothing here talks to a server of ours.</p></noscript>
+</div>
+<!-- btc.min.js is @scure/btc-signer 2.4.1 with @scure/bip32 2.4.0, @noble/curves and @scure/base,
+     vendored like ethers so there is no package tree. To rebuild, bundle an entry
+     that re-exports Transaction, Script, Address, OutScript, NETWORK, TEST_NETWORK,
+     TAPROOT_UNSPENDABLE_KEY and p2tr from the signer, HDKey from @scure/bip32,
+     keccak_256 from @noble/hashes/sha3.js, schnorr and secp256k1 from
+     @noble/curves/secp256k1.js, sha256 from @noble/hashes/sha2.js, and bech32m, hex
+     and base64 from @scure/base:
+     esbuild entry.mjs --bundle --minify --format=iife --global-name=btc --target=es2022 --legal-comments=none -->
+<script src="./btc.min.js"></script>
+<script src="./bitcoin.js"></script>
+<script src="./bitcoin-app.js"></script>
+</body>
+</html>

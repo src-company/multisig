@@ -279,7 +279,7 @@ test('the vendored libraries are copied, not processed', () => {
 test('every file the deployed pages ask for is in the directory that gets deployed', () => {
   // A page that references an asset the build did not copy is a 404 in
   // production and nothing at all in development, where dapp/ is served whole.
-  const pages = ['index.html', 'docs.html', 'brand.html'];
+  const pages = ['index.html', 'docs.html', 'brand.html', 'bitcoin.html'];
   const missing = [];
   for (const page of pages) {
     const html = fs.readFileSync(path.join(DIST, page), 'utf8');
@@ -296,7 +296,7 @@ test('the content security policy survives the build, character for character', 
   // an entry is an RPC that silently stops answering in production and works
   // everywhere else; one that gained a wildcard is worse.
   const csp = f => (fs.readFileSync(f, 'utf8').match(/<meta http-equiv="Content-Security-Policy" content="([^"]*)"/) || [])[1];
-  for (const page of ['index.html', 'docs.html', 'brand.html']) {
+  for (const page of ['index.html', 'docs.html', 'brand.html', 'bitcoin.html']) {
     const a = csp(path.join(DAPP, page));
     assert.ok(a, `${page} carries no CSP meta tag`);
     assert.equal(csp(path.join(DIST, page)), a, `the build changed ${page}'s CSP`);

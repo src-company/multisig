@@ -254,6 +254,20 @@ Safe's remaining overhead buys gas refunds, `safeTxGas` metering, an arbitrary n
 
 > `forge test --mc GasTest -vv` reports `gasleft()` deltas with warm storage and no intrinsic or calldata cost. Those numbers are useful for tracking regressions in this repo, but they are not comparable to Safe's published benchmarks, which report `receipt.gasUsed`. Use `SafeComparisonTest` for any comparison.
 
+## Bitcoin
+
+Bitcoin has no contract to deploy, so a vault there is a Taproot
+[descriptor](docs/bitcoin.md) over extended keys: k-of-n in a `multi_a` leaf, an
+unspendable key path, and an optional second path behind a relative timelock.
+`dapp/bitcoin.html` creates vaults and moves proposals between owners as PSBTs, with
+no server, and an owner can sign in any outside wallet that handles the PSBT. The EVM timelock
+cannot be reproduced without a covenant; [docs/bitcoin.md](docs/bitcoin.md) says
+what is enforced instead.
+
+```bash
+BITCOIND=/path/to/bitcoind node --test test/bitcoin.test.js   # judged by Bitcoin Core
+```
+
 ## Deployments
 
 | Contract | Address |

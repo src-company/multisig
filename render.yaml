@@ -132,6 +132,15 @@ services:
       - path: /*
         name: Content-Security-Policy
         value: "frame-ancestors 'none'"
+      # The Bitcoin page holds a key, and a site that opened it could otherwise reach
+      # it through window.opener and change its fragment. Not on /*: the wallet popups
+      # on the main app rely on that link.
+      - path: /bitcoin.html
+        name: Cross-Origin-Opener-Policy
+        value: same-origin
+      - path: /bitcoin
+        name: Cross-Origin-Opener-Policy
+        value: same-origin
       - path: /*
         name: X-Frame-Options
         value: DENY
