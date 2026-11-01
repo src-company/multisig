@@ -69,14 +69,17 @@ function checkPlace(){
 // One wallet prompt. Wallets go quiet, queue, or close a popup and call it a rejection,
 // and a page that simply awaits them sits there with every button dead. So a prompt can
 // be cancelled, times out, waits its turn if the wallet says one is pending, and is
-// reported in words that do not accuse anyone of declining.
-const PROMPT_MS = 120000, GAP_MS = 600;
+// reported in words that do not accuse anyone of declining. UniSat runs one popup at a
+// time, and a late close event from the last one rejects whatever came next, as if the
+// owner had said no. Nobody answers a prompt that fast, so that gets one more try.
+const PROMPT_MS = 120000, GAP_MS = 1000, FAST_MS = 700;
 const sleep = ms => new Promise(ok => setTimeout(ok, ms));
 let _cancel = null, _cancelled = false;
 const cancelPrompt = () => { _cancelled = true; _cancel?.(new Error('Cancelled. Nothing was changed.')); };
 async function ask(fn){
-  for(let tries = 0; ; tries++){
+  for(let tries = 0, closed = 0; ; tries++){
     let timer;
+    const asked = Date.now();
     try {
       return await Promise.race([fn(), new Promise((_, no) => {
         _cancel = no;
@@ -85,7 +88,10 @@ async function ask(fn){
     } catch(e) {
       const text = String(e?.message || '');
       if((e?.code === -32002 || /already pending/i.test(text)) && tries < 3){ await sleep(1500); continue; }
-      if(e?.code === 4001 || /reject|denied/i.test(text)) throw new Error('Your wallet closed that request, so nothing was changed. Try again.');
+      if(e?.code === 4001 || /reject|denied/i.test(text)){
+        if(Date.now() - asked < FAST_MS && !closed++){ await gap(); continue; }
+        throw new Error('Your wallet closed that request, so nothing was changed. Try again.');
+      }
       throw e;
     } finally { clearTimeout(timer); _cancel = null; }
   }
@@ -112,6 +118,7 @@ async function connectWallet(wallet, network, onStep = () => {}){
   const BV = await loadBitcoinLibs();
   const address = await ask(() => wallet.account());
   if(!onNetwork(address, network)) throw new Error(`${wallet.name} is not on ${network === 'mainnet' ? 'Bitcoin mainnet' : 'signet'}. Switch it, then connect again.`);
+  await gap();
   onStep(1, 2);
   const sign = () => ask(() => wallet.sign(BV.walletMessage(), address, network));
   const key = BV.keyFromWalletSignature(await sign(), network);

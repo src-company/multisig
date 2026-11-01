@@ -494,6 +494,26 @@ test('an explorer cannot walk a scan forever, or past the gap alone', async () =
   assert.equal(BV.inspect(huge, policy, { receive: 0, change: BV.MAX_INDEX }).outputs[1].stranded, true);
 });
 
+test('a popup rejected too fast to be a person gets one more try', async () => {
+  const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
+  const c = vm.createContext({ setTimeout, clearTimeout, Date, Promise, location: { pathname: '/' }, addEventListener() {}, dispatchEvent() {}, Event: class {} });
+  c.window = c.top = c;
+  c.BitcoinVault = { walletMessage: () => 'm', keyFromWalletSignature: () => { throw new Error('signed'); } };
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../dapp/bitcoin-wallets.js'), 'utf8'), c);
+  const closed = Object.assign(new Error('User rejected the request.'), { code: 4001 });
+  const wallet = sign => ({ name: 'UniSat', account: async () => 'tb1qabc', sign });
+  let calls = 0;
+  await assert.rejects(c.BitcoinWallets.connectWallet(wallet(async () => { if(!calls++) throw closed; return 'sig'; }), 'signet'), /signed/);
+  assert.equal(calls, 2);
+  // Twice over is an answer, and so is a person taking their time.
+  calls = 0;
+  await assert.rejects(c.BitcoinWallets.connectWallet(wallet(async () => { calls++; throw closed; }), 'signet'), /closed that request/);
+  assert.equal(calls, 2);
+  calls = 0;
+  await assert.rejects(c.BitcoinWallets.connectWallet(wallet(async () => { calls++; await new Promise(r => setTimeout(r, 750)); throw closed; }), 'signet'), /closed that request/);
+  assert.equal(calls, 1);
+});
+
 test('names on the object prototype are not networks', () => {
   for(const n of ['constructor', '__proto__', 'toString'])
     assert.throws(() => BV.policyOf({ network: n, paths: [{ threshold: 1, keys: owners(A) }] }), /unknown network/);
