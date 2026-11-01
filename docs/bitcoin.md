@@ -74,16 +74,16 @@ Bitcoin has two relevant opcodes. `OP_CHECKSEQUENCEVERIFY` counts from when a co
 
 - A proposal comes from someone else. `inspect` derives everything shown from the PSBT and refuses inputs outside this vault, unknown paths, non-default sighashes, any locktime, any version but 2, any sequence but the path's own, repeated coins, finalized inputs, and signatures that do not verify.
 - The address shown is the bytes signed: an output whose script does not re-encode exactly is refused. A non-minimal push would otherwise read as the payee and be spendable by anyone.
-- Signing rebuilds each input from the policy and offers the signer one leaf.
+- Signing happens on a transaction rebuilt from the reviewed fields, with one leaf and this key's seat found by xpub. A descriptor's fingerprint and path are unverifiable text, so altering them cannot stop an embedded owner signing.
 - A vault address past the scan gap is refused rather than called change.
-- A vault opened from a link is not saved and shows no receive address until the owner confirms the listed owners, because the sender chose those keys.
+- A vault opened from a link or a pasted descriptor is not saved and shows no receive address until the owner has compared every full key, per path, because the sender chose those keys.
 - A key is derived from a canonical signature, so v as 0/1, v as 27/28 and the 64-byte form give one key.
 - A PSBT's derivations only say where to look. Change is re-derived from the policy, so a stranger's address cannot pose as change.
 - Merging takes signatures only. Another owner's file cannot change what a proposal says, and a signer that rewrites metadata (Bitcoin Core adds every leaf and reorders the tree) does no harm. Only signatures for the leaf being spent count.
 - Amounts in a PSBT are claims, but BIP-341 signs every input's amount, so understating one to hide a fee gives signatures the network rejects.
-- An Esplora server can lie about coins and fee estimates. It can make a proposal that cannot confirm, suggest a fee up to the 1000 sat/vB ceiling (review warns above 200), or steer an address to be reused. It cannot make anyone sign outputs the review does not show.
+- An Esplora server can lie about coins and fee estimates. It can make a proposal that cannot confirm, suggest a fee up to the 1000 sat/vB ceiling (review warns above 200), or steer an address to be reused. A scan that puts a vault past the 20-address gap must be confirmed by the second operator, so one explorer alone cannot steer change out of reach, but two colluding could; such coins are found by a wide rescan in a descriptor wallet. Broadcast compares the returned txid to one computed here. It cannot make anyone sign outputs the review does not show.
 - Two proposals over one coin cannot both land. The page checks before broadcast and calls the loser void.
-- `bitcoin.html` has its own CSP: scripts from `'self'` only, and connections only to `mempool.space` and `blockstream.info`.
+- `bitcoin.html` has its own CSP: scripts from `'self'` only, and connections only to `mempool.space`, `blockstream.info` and the Ethereum RPCs. Those hosts accept data, so the CSP narrows a theft and does not prevent one. Google Fonts' stylesheet is the one third-party file on this page.
 - `@scure/btc-signer` was audited by cure53 at 0.3.0 (2023) and self-audited at 2.2.0 (April 2026). This page runs 2.4.1, which neither audit covers, and its UTXO module is unaudited (it is not used here).
 
 ## Not done

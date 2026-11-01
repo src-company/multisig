@@ -41,7 +41,7 @@ const NETWORKS = {
   signet:  { name: 'signet',  params: TEST_NETWORK, owner: 'tmsig', versions: TPUB, coin: 1, explorer: 'https://mempool.space/signet',
              api: ['https://mempool.space/signet/api', 'https://blockstream.info/signet/api'] },
 };
-const net = n => { if(!NETWORKS[n]) throw new Error(`unknown network ${n}`); return NETWORKS[n]; };
+const net = n => { if(!Object.hasOwn(NETWORKS, n)) throw new Error(`unknown network ${n}`); return NETWORKS[n]; };
 
 const MAX_OWNERS = 20;
 const MAX_OLDER = 0xffff;        // BIP-68 keeps 16 bits of blocks
@@ -50,6 +50,7 @@ const MAX_FEE_RATE = 1000;       // sat/vB. A typo here spends the vault on fees
 const FINAL_RBF = 0xfffffffd;
 const HARDENED = 0x80000000;
 const GAP = 20;                  // BIP-44's gap limit: unused addresses before a scan stops
+const MAX_INDEX = 5000;          // past this a scan stops, and nothing is called change
 const COOLDOWN_MS = 60000, TIMEOUT_MS = 8000;
 const te = new TextEncoder();
 
@@ -94,7 +95,8 @@ function ownerOf({ network, fingerprint, path, xpub, evm = null }){
   catch(_) { throw new Error(`not a ${network} extended public key`); }
   if(k.privateKey) throw new Error('that is a private key. Never paste it anywhere.');
   if(!/^[0-9a-f]{8}$/.test(fingerprint)) throw new Error('bad key fingerprint');
-  if(k.depth !== path.length) throw new Error('the key path does not match the key');
+  if(k.depth !== path.length || (path.length && path[path.length - 1] !== k.index)) throw new Error('the key path does not match the key');
+  if(k.depth > 253) throw new Error('that key is too deep to derive addresses from');
   return { fingerprint, path, xpub, evm };
 }
 
@@ -224,18 +226,26 @@ function canonicalSignature(sig){
   if(raw.length === 64){ out[64] = 27 + (raw[32] >> 7); out[32] &= 0x7f; }
   else if(raw.length === 65 && [0, 1, 27, 28].includes(raw[64])) out[64] = raw[64] < 27 ? raw[64] + 27 : raw[64];
   else throw new Error('This wallet returned a signature in a form this page cannot use. Nothing was derived.');
+  // (r, s, v) and (r, n-s, v^1) are one signature, so they are one spelling too.
+  const s = BigInt('0x' + hex.encode(out.subarray(32, 64)));
+  if(s > CURVE_N / 2n){
+    out.set(hex.decode((CURVE_N - s).toString(16).padStart(64, '0')), 32);
+    out[64] = out[64] === 27 ? 28 : 27;
+  }
   return out;
 }
 function keyFromSignature(sig, network){
   const bytes = canonicalSignature(sig);
   const n = net(network);
   const signer = HDKey.fromMasterSeed(sha256(concat(te.encode('multisig-bitcoin-owner-v1\0'), bytes)), n.versions);
-  const path = [87 + HARDENED, n.coin + HARDENED, HARDENED];
+  const path = ownPath(network);
   const account = signer.derive(`m/87'/${n.coin}'/0'`);
   const xpub = account.publicExtendedKey;
   account.wipePrivateData();
   return { signer, owner: { fingerprint: fingerprintOf(signer), path, xpub, evm: null } };
 }
+const CURVE_N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
+const ownPath = network => [87 + HARDENED, net(network).coin + HARDENED, HARDENED];
 const fingerprintOf = k => k.fingerprint.toString(16).padStart(8, '0');
 
 // ── POLICY ─────────────────────────────────────────────────
@@ -434,6 +444,8 @@ function mirror({ network, vault, handles }){
     const h = decodeOwner(text, network);
     if(!h.proven) throw new Error('every handle must be signed by its Ethereum address. Ask that owner to connect again and copy a fresh one.');
     if(!vault.owners.includes(h.evm)) throw new Error(`${h.evm} is not an owner of that vault`);
+    // One address, one key, or the same handles could give two different vaults.
+    if(byOwner.has(h.evm) && byOwner.get(h.evm).xpub !== h.xpub) throw new Error(`${h.evm} has two different keys here`);
     byOwner.set(h.evm, h);
   }
   const missing = vault.owners.filter(o => !byOwner.has(o));
@@ -650,7 +662,7 @@ function inspect(psbtText, policy, known = { receive: 0, change: 0 }){
     // Ours, and also somewhere a scan will find it. An address far past the gap is
     // this vault's on paper and lost in practice, so it does not count as change.
     const slot = locate(policy, o.script, o.tapBip32Derivation);
-    const reach = slot && slot.index < (slot.branch ? known.change : known.receive) + GAP;
+    const reach = slot && slot.index < MAX_INDEX && slot.index < (slot.branch ? known.change : known.receive) + GAP;
     outputs.push({ address: Address(params).encode(decoded), sats: Number(o.amount), change: !!reach, stranded: !!slot && !reach, index: slot ? slot.index : null, branch: slot ? slot.branch : null });
   }
   if(outTotal > inTotal) throw new Error('outputs exceed inputs');
@@ -683,16 +695,40 @@ function sign(psbtText, signer, policy, known){
   const view = inspect(psbtText, policy, known);
   if(view.feeRate > MAX_FEE_RATE) throw new Error(`refusing to sign: the fee is ${view.feeRate.toFixed(0)} sat/vB`);
   if(view.outputs.some(o => o.stranded)) throw new Error('refusing to sign: this sends coins to a vault address no scan would ever find');
-  if(!view.keys.some(k => k.fingerprint === fingerprintOf(signer))) throw new Error('this key is not an owner on that path');
-  const tx = load(psbtText);
-  // The signer signs whatever it is offered, so it is offered only what was reviewed:
-  // the one leaf, with derivations from the policy rather than from the proposal.
+  const account = signer.derive(`m/${pathText(ownPath(policy.network)).replace(/h/g, "'")}`), xpub = account.publicExtendedKey;
+  account.wipePrivateData();
+  if(!view.keys.some(k => k.xpub === xpub)) throw new Error('this key is not an owner on that path');
+  // Signed on a transaction built from what was reviewed and nothing else: one leaf,
+  // and this key's own seat found by its xpub. A descriptor's fingerprint and path
+  // are text that no one can check, so a creator who altered them, or a co-owner
+  // borrowing this fingerprint, must not be able to stop an owner signing.
+  const src = load(psbtText);
+  const clean = new Transaction({ version: 2, allowUnknownInputs: true, allowUnknownOutputs: true });
   view.inputs.forEach((inp, i) => {
-    const leaf = inp.slot.paths[view.path];
-    tx.updateInput(i, { tapLeafScript: [leaf.leaf], tapBip32Derivation: derivations(inp.slot, [leaf]) }, true);
+    const leaf = inp.slot.paths[view.path], mine = leaf.keys.find(k => k.owner.xpub === xpub);
+    const from = src.getInput(i);
+    clean.addInput({
+      txid: from.txid, index: from.index, sequence: from.sequence, witnessUtxo: from.witnessUtxo,
+      tapInternalKey: inp.slot.internal, tapMerkleRoot: inp.slot.merkleRoot, tapLeafScript: [leaf.leaf],
+      tapBip32Derivation: [[mine.pubkey, { hashes: [leaf.hash], der: { fingerprint: signer.fingerprint, path: [...ownPath(policy.network), mine.chain, inp.slot.index] } }]],
+    });
   });
-  if(tx.sign(signer, [0]) !== tx.inputsLength) throw new Error('could not sign every input');
-  return base64.encode(tx.toPSBT());
+  for(let i = 0; i < src.outputsLength; i++){ const o = src.getOutput(i); clean.addOutput({ script: o.script, amount: o.amount }); }
+  if(clean.sign(signer, [0]) !== src.inputsLength) throw new Error('could not sign every input');
+  // The signatures go back on the proposal as it arrived, so what a co-signer's
+  // wallet needs from it is still there.
+  addSignatures(src, clean);
+  return base64.encode(src.toPSBT());
+}
+
+// Signing is randomized, so one key can make two valid signatures for one input. The
+// first one in stays, or two copies of a proposal could never merge.
+function addSignatures(to, from){
+  for(let i = 0; i < to.inputsLength; i++){
+    const have = new Set((to.getInput(i).tapScriptSig || []).map(([k]) => hex.encode(k.pubKey) + hex.encode(k.leafHash)));
+    const fresh = (from.getInput(i).tapScriptSig || []).filter(([k]) => !have.has(hex.encode(k.pubKey) + hex.encode(k.leafHash)));
+    if(fresh.length) to.updateInput(i, { tapScriptSig: fresh }, true);
+  }
 }
 
 // Signatures are collected by merging copies of one proposal. Only signatures are
@@ -703,12 +739,7 @@ function combine(psbts, policy){
   const [first, ...rest] = psbts.map(load);
   for(const other of rest){
     if(hex.encode(other.unsignedTx) !== hex.encode(first.unsignedTx)) throw new Error('those are two different proposals');
-    for(let i = 0; i < first.inputsLength; i++){
-      const all = new Map();
-      for(const row of [...(first.getInput(i).tapScriptSig || []), ...(other.getInput(i).tapScriptSig || [])])
-        all.set(hex.encode(row[0].pubKey) + hex.encode(row[0].leafHash), row);
-      if(all.size) first.updateInput(i, { tapScriptSig: [...all.values()] }, true);
-    }
+    addSignatures(first, other);
   }
   const out = base64.encode(first.toPSBT());
   inspect(out, policy);
@@ -735,6 +766,12 @@ function finalize(psbtText, policy){
   }
   return hex.encode(tx.extract());
 }
+const txidOf = raw => Transaction.fromRaw(hex.decode(raw), { allowUnknownInputs: true }).id;
+
+// True when a seat holds this owner's key but describes it wrongly. The key still
+// signs here, but a hardware wallet finds keys by exactly that text.
+const seatMisdescribed = (policy, owner) => policy.paths.some(p => p.keys.some(k => k.xpub === owner.xpub
+  && (k.fingerprint !== owner.fingerprint || pathText(k.path) !== pathText(owner.path))));
 
 // ── CHAIN ──────────────────────────────────────────────────
 // An Esplora API, with a second operator for when the first is down. It can lie
@@ -770,6 +807,15 @@ function chain(network, doFetch = (...a) => root.fetch(...a), bases = net(networ
       const a = await get(`/address/${address}`);
       return a.chain_stats.tx_count + a.mempool_stats.tx_count > 0;
     },
+    // Every operator, not the first that answers.
+    async usedByAll(address){
+      for(const b of bases){
+        const r = await doFetch(`${b}/address/${address}`, { signal: root.AbortSignal?.timeout(TIMEOUT_MS) });
+        const a = await r.json();
+        if(a.chain_stats.tx_count + a.mempool_stats.tx_count <= 0) return false;
+      }
+      return true;
+    },
     async utxos(address){
       return (await get(`/address/${address}/utxo`)).map(u => ({ txid: u.txid, vout: u.vout, value: u.value, height: u.status?.confirmed ? u.status.block_height : 0 }));
     },
@@ -786,6 +832,7 @@ async function scan(policy, c, gap = GAP){
   for(const branch of [0, 1]){
     let index = 0, idle = 0;
     while(idle < gap){
+      if(index >= MAX_INDEX) throw new Error('that explorer says every address has been used, which cannot be right');
       const batch = Array.from({ length: Math.min(5, gap - idle) }, (_, i) => index + i);
       const seen = await Promise.all(batch.map(i => c.used(vaultOf(policy, branch, i).address)));
       for(let i = 0; i < batch.length; i++){
@@ -795,6 +842,12 @@ async function scan(policy, c, gap = GAP){
         for(const u of await c.utxos(vaultOf(policy, branch, batch[i]).address)) coins.push({ ...u, branch, index: batch[i] });
       }
       index += batch.length;
+    }
+    // How far along a vault is decides what counts as change, so one explorer alone
+    // does not get to move it past the gap: another operator must agree.
+    if(next[branch] > gap && c.usedByAll){
+      const sure = await c.usedByAll(vaultOf(policy, branch, next[branch] - 1).address).catch(() => false);
+      if(!sure) throw new Error('the explorers disagree about this vault, so its balance cannot be trusted right now');
     }
   }
   return { coins, receive: next[0], change: next[1] };
@@ -806,7 +859,7 @@ function concat(...parts){
   return out;
 }
 
-root.BitcoinVault = { EVM_CHAINS, selectors: { threshold: selector('threshold()') }, readEvmVault, mirror, bindingMessage, evmMessageHash, NETWORKS, DUST, GAP, MAX_OWNERS, MAX_OLDER, MAX_FEE_RATE, encodeOwner, decodeOwner, originText, ownerMessage, deriveOwnerKey, keyFromSignature, fingerprintOf,
+root.BitcoinVault = { MAX_INDEX, txidOf, seatMisdescribed, EVM_CHAINS, selectors: { threshold: selector('threshold()') }, readEvmVault, mirror, bindingMessage, evmMessageHash, NETWORKS, DUST, GAP, MAX_OWNERS, MAX_OLDER, MAX_FEE_RATE, encodeOwner, decodeOwner, originText, ownerMessage, deriveOwnerKey, keyFromSignature, fingerprintOf,
   policyOf, descriptor, descriptorChecksum, parseDescriptor, walletPolicy, vaultOf, vsize, coinsFor, propose, inspect, sign, combine, finalize, chain, scan };
 
 })(typeof window !== 'undefined' ? window : globalThis);

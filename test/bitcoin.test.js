@@ -328,8 +328,12 @@ test('a vault address past the scan is not change, and is not signed', () => {
   assert.equal(v.outputs[1].change, false);
   assert.equal(v.outputs[1].stranded, true);
   assert.throws(() => BV.sign(far, A.signer, policy), /no scan would/);
-  // The same output is fine once a scan has reached that far.
-  assert.equal(BV.inspect(far, policy, { receive: 0, change: 2000000000 }).outputs[1].change, true);
+  // Past the ceiling, no scan's word makes it change.
+  assert.equal(BV.inspect(far, policy, { receive: 0, change: 2000000000 }).outputs[1].change, false);
+  // Within it, an address is fine once a scan has reached that far.
+  const later = BV.propose({ policy, utxos: [fakeCoin(100000)], tip: 200, outputs: [{ address: payee, sats: 30000 }], feeRate: 2, change: 300 });
+  assert.equal(BV.inspect(later, policy).outputs[1].stranded, true);
+  assert.equal(BV.inspect(later, policy, { receive: 0, change: 300 }).outputs[1].change, true);
   const edge = BV.propose({ policy, utxos: [fakeCoin(100000)], tip: 200, outputs: [{ address: payee, sats: 30000 }], feeRate: 2, change: BV.GAP });
   assert.equal(BV.inspect(edge, policy).outputs[1].stranded, true);
 });
@@ -386,7 +390,7 @@ test('signing touches only the reviewed leaf, and a near-miss sequence is refuse
 test('one key cannot take two seats by changing its xpub metadata', () => {
   const k = HDKey.fromExtendedKey(A.owner.xpub, BV.NETWORKS.signet.versions);
   const twin = new HDKey({ versions: BV.NETWORKS.signet.versions, depth: 2, index: 7, parentFingerprint: 1234, chainCode: k.chainCode, publicKey: k.publicKey });
-  const fake = { fingerprint: 'aabbccdd', path: [1, 2], xpub: twin.publicExtendedKey };
+  const fake = { fingerprint: 'aabbccdd', path: [1, 7], xpub: twin.publicExtendedKey };
   assert.notEqual(fake.xpub, A.owner.xpub);
   assert.throws(() => BV.policyOf({ network: 'signet', paths: [{ threshold: 2, keys: [A.owner, fake] }] }), /twice/);
 });
@@ -414,6 +418,91 @@ test('a wallet policy writes a depth-0 key without a stray separator', () => {
   const root = new HDKey({ versions: BV.NETWORKS.signet.versions, chainCode: k.chainCode, publicKey: k.publicKey });
   const policy = BV.policyOf({ network: 'signet', paths: [{ threshold: 1, keys: [{ fingerprint: 'aabbccdd', path: [], xpub: root.publicExtendedKey }] }] });
   assert.ok(BV.walletPolicy(policy).keys[1].startsWith('[aabbccdd]'));
+});
+
+// ── FROM THE SECOND AUDIT ──────────────────────────────────
+const rebuilt = (seats, fix) => BV.policyOf({ network: 'signet', paths: [{ threshold: 2, keys: seats.map(s => fix(s.owner)) }] });
+
+test('altering a seat\'s origin in a descriptor cannot stop its owner signing', () => {
+  const policy = rebuilt([A, B, C], o => o === A.owner ? { ...o, path: [86 + 0x80000000, ...o.path.slice(1)] } : o);
+  assert.equal(BV.vaultOf(policy).address, BV.vaultOf(plain('signet')).address);
+  const psbt = sweepOf(policy);
+  assert.deepEqual([...BV.inspect(BV.sign(psbt, A.signer, policy), policy).signedAll], [A.owner.xpub]);
+  assert.equal(BV.seatMisdescribed(policy, A.owner), true);
+  assert.equal(BV.seatMisdescribed(policy, B.owner), false);
+});
+
+test('a co-owner borrowing a fingerprint cannot stop an owner signing', () => {
+  const policy = rebuilt([A, B, C], o => o === C.owner ? { ...o, fingerprint: A.owner.fingerprint } : o);
+  const psbt = sweepOf(policy);
+  assert.deepEqual([...BV.inspect(BV.sign(psbt, A.signer, policy), policy).signedAll], [A.owner.xpub]);
+});
+
+test('hostile derivations in a proposal change nothing about what is signed', () => {
+  const policy = BV.policyOf({ network: 'signet', paths: [{ threshold: 3, keys: owners(A, B, C) }, { threshold: 2, keys: owners(A, B, C), older: 144 }] });
+  const slot = BV.vaultOf(policy, 0, 0), src = reopen(sweepOf(policy));
+  const all = slot.paths.flatMap(p => p.keys.map(k => [k.pubkey, { hashes: [p.hash], der: { fingerprint: parseInt(A.owner.fingerprint, 16), path: [...A.owner.path, k.chain, 0] } }]));
+  const tx = new Transaction({ version: 2, allowUnknownInputs: true });
+  tx.addInput({ ...src.getInput(0), tapLeafScript: slot.paths.map(p => p.leaf), tapBip32Derivation: all });
+  tx.addOutput(src.getOutput(0));
+  const signed = reopen(BV.sign(reseal(tx), A.signer, policy));
+  const rows = signed.getInput(0).tapScriptSig;
+  assert.equal(rows.length, 1);
+  assert.equal(hex.encode(rows[0][0].leafHash), hex.encode(slot.paths[0].hash));
+  // The proposal keeps what a co-signer's wallet needs from it.
+  const honest = reopen(BV.sign(sweepOf(policy), A.signer, policy));
+  assert.equal(honest.getInput(0).tapBip32Derivation.length, 3);
+});
+
+test('one key signing twice does not break a merge', () => {
+  const policy = plain('signet'), psbt = sweepOf(policy);
+  const one = BV.sign(psbt, A.signer, policy), two = BV.sign(psbt, A.signer, policy);
+  const merged = BV.combine([one, two, BV.sign(psbt, B.signer, policy)], policy);
+  assert.equal(BV.inspect(merged, policy).ready, true);
+});
+
+test('a high-s signature is the same key as its low-s twin', () => {
+  const n = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
+  const r = 'ab'.repeat(32), low = 0x1234n, high = (n - low).toString(16).padStart(64, '0');
+  const x = BV.keyFromSignature(`0x${r}${low.toString(16).padStart(64, '0')}1b`, 'signet').owner.xpub;
+  assert.equal(BV.keyFromSignature(`0x${r}${high}1c`, 'signet').owner.xpub, x);
+  assert.notEqual(BV.keyFromSignature(`0x${r}${high}1b`, 'signet').owner.xpub, x);
+});
+
+test('a path that disagrees with its key, and a key too deep to use, are refused', () => {
+  assert.throws(() => BV.decodeOwner(`[aabbccdd/1/2/3]${A.owner.xpub}`, 'signet'), /does not match/);
+  const k = HDKey.fromExtendedKey(A.owner.xpub, BV.NETWORKS.signet.versions);
+  const deep = new HDKey({ versions: BV.NETWORKS.signet.versions, depth: 254, index: 7, parentFingerprint: 1, chainCode: k.chainCode, publicKey: k.publicKey });
+  assert.throws(() => BV.policyOf({ network: 'signet', paths: [{ threshold: 1, keys: [{ fingerprint: 'aabbccdd', path: Array(254).fill(7), xpub: deep.publicExtendedKey }] }] }), /too deep/);
+});
+
+test('an explorer cannot walk a scan forever, or past the gap alone', async () => {
+  const policy = plain('signet');
+  const liar = { used: async () => true, utxos: async () => [] };
+  await assert.rejects(BV.scan(policy, liar), /every address/);
+  const far = BV.vaultOf(policy, 1, 25).address, near = new Set([...Array(26)].map((_, i) => BV.vaultOf(policy, 1, i).address));
+  const steered = { used: async a => near.has(a), utxos: async () => [], usedByAll: async a => { assert.equal(a, far); return false; } };
+  await assert.rejects(BV.scan(policy, steered), /disagree/);
+  assert.equal((await BV.scan(policy, { ...steered, usedByAll: async () => true })).change, 26);
+  const huge = BV.propose({ policy, utxos: [fakeCoin(100000)], tip: 200, outputs: [{ address: payee, sats: 30000 }], feeRate: 2, change: BV.MAX_INDEX });
+  assert.equal(BV.inspect(huge, policy, { receive: 0, change: BV.MAX_INDEX }).outputs[1].stranded, true);
+});
+
+test('names on the object prototype are not networks', () => {
+  for(const n of ['constructor', '__proto__', 'toString'])
+    assert.throws(() => BV.policyOf({ network: n, paths: [{ threshold: 1, keys: owners(A) }] }), /unknown network/);
+});
+
+test('one Ethereum address cannot bring two keys to a mirror', async () => {
+  const alice = account(1);
+  const vault = await BV.readEvmVault(1, '0x' + '12'.repeat(20), rpcFor([alice.address], 1));
+  assert.throws(() => BV.mirror({ network: 'signet', vault, handles: [handleFor(A, alice), handleFor(B, alice)] }), /two different keys/);
+});
+
+test('a txid is worked out from the transaction itself', () => {
+  const policy = plain('signet'), psbt = sweepOf(policy);
+  const raw = BV.finalize(BV.combine([A, B].map(k => BV.sign(psbt, k.signer, policy)), policy), policy);
+  assert.match(BV.txidOf(raw), /^[0-9a-f]{64}$/);
 });
 
 test('two different proposals do not merge', () => {
@@ -577,6 +666,15 @@ test('Bitcoin Core agrees', { skip: !BITCOIND && 'set BITCOIND to run' }, async 
     await rpc('generatetoaddress', [2, mine]);
     const psbt = BV.propose({ policy, path: 1, utxos: [coin], tip: await rpc('getblockcount'), sweep: sink, feeRate: 2 });
     await spend(policy, BV.finalize(BV.sign(psbt, C.signer, policy), policy));
+  });
+
+  await t.test('Core accepts the id we compute, and a corrected signer still confirms', async () => {
+    const policy = BV.policyOf({ network: 'signet', paths: [{ threshold: 2, keys: [{ ...A.owner, path: [86 + 0x80000000, ...A.owner.path.slice(1)] }, B.owner, C.owner] }] });
+    const coin = await fund(policy, 0.3);
+    const psbt = BV.propose({ policy, utxos: [coin], tip: coin.height, sweep: sink, feeRate: 2 });
+    const raw = BV.finalize(BV.combine([A, C].map(k => BV.sign(psbt, k.signer, policy)), policy), policy);
+    assert.equal((await rpc('decoderawtransaction', [raw])).txid, BV.txidOf(raw));
+    await spend(policy, raw);
   });
 
   await t.test('refuses one signature short', async () => {

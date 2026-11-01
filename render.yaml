@@ -141,6 +141,9 @@ services:
       - path: /bitcoin
         name: Cross-Origin-Opener-Policy
         value: same-origin
+      - path: /bitcoin/
+        name: Cross-Origin-Opener-Policy
+        value: same-origin
       - path: /*
         name: X-Frame-Options
         value: DENY
@@ -198,6 +201,11 @@ services:
       - path: /multisig-card-1200x630.png
         name: Cache-Control
         value: "public, max-age=604800"
+    # /bitcoin/ would serve the page with its relative scripts pointing at nothing.
+    routes:
+      - type: redirect
+        source: /bitcoin/
+        destination: /bitcoin
     # The full CSP is served from the <meta> tag in each page instead of here,
     # so it stays next to the code whose origins it lists. If you move it, point
     # connect-src at the PostgREST service URL above.
