@@ -42,7 +42,7 @@ const S = {
   coins: null, tip: null, fees: {}, receive: 0, change: 0,
   // The queue: every proposal on this vault still able to happen. psbt and review are
   // whichever one an action is acting on.
-  queue: [], psbt: null, review: null, compose: false,
+  queue: [], psbt: null, review: null, compose: false, invited: [],
   mirror: null,
   form: { name: '', kind: 'plain', evmChain: '1', evmVault: '', owners: '', threshold: '2', second: '', secondThreshold: '1', older: '4320', to: '', amt: '', rate: '', path: '0', paste: '', merge: '', import: '', hw: '' },
   msg: null, busy: false,
@@ -103,6 +103,7 @@ async function connect(el){
     S.msg = null;
     S.ovl = 'me';
     touch();
+    findVaults();
     return;
   }
   return connectEvm(choice === 'wc' ? await walletConnect() : choice ? evmWallets.get(choice).provider : window.ethereum);
@@ -126,6 +127,25 @@ async function connectEvm(eth){
   S.msg = null;
   S.ovl = 'me';
   touch();
+  findVaults();
+}
+// The vaults on this owner's record. Their own go straight on the list. One that names
+// them but they never agreed to is an invitation, and opens through the owner check,
+// because handles are public and anyone could build a vault around someone's key.
+// Vaults kept only in this browser are added to the record while we are here.
+async function findVaults(){
+  if(!S.owner?.signer) return;
+  const list = await BV.listVaults(S.network, S.owner.signer, myHandle()).catch(() => null);
+  if(!list || !S.owner) return;
+  for(const { policy, confirmed } of list) if(confirmed){ remember(policy); setNote('backup', BV.descriptor(policy), 1); }
+  const known = new Set(list.filter(v => v.confirmed).map(v => BV.descriptor(v.policy)));
+  S.invited = list.filter(v => !v.confirmed).map(v => BV.descriptor(v.policy)).filter(d => !saved().includes(d));
+  for(const d of saved().filter(x => !known.has(x))){
+    const p = BV.parseDescriptor(d, S.network);
+    if(allKeys(p).some(isMe)) BV.saveVault(p, S.owner.signer, myHandle(), [myHandle()]).then(() => setNote('backup', d, 1)).catch(() => {});
+  }
+  if(!S.policy && saved()[0]) open(BV.parseDescriptor(saved()[0], S.network));
+  render();
 }
 const onStep = (n, of) => { S.progress = `APPROVE ${n} OF ${of} IN YOUR WALLET`; render(); };
 
@@ -407,13 +427,14 @@ function renderBars(){
 
 function renderTabs(){
   const list = saved(), cur = curDesc();
-  if(!list.length && !S.policy) return '';
+  if(!list.length && !S.policy && !S.invited.length) return '';
   const tabs = list.map((d, i) => {
     const p = BV.parseDescriptor(d, S.network), on = d === cur;
     const total = on && S.queue.length ? `${S.queue.length} PENDING` : on && S.coins ? `${btcOf(S.coins.reduce((n, c) => n + c.value, 0))} BTC` : `${p.paths[0].threshold}/${p.paths[0].keys.length} SIG`;
     return `<button class="vtab${on ? ' on' : ''}" data-act="open" data-i="${i}"${on ? ' aria-current="true"' : ''}><div class="vtab-name">${esc(nameOf(d, i))}${on && S.queue.length ? '<span class="vtab-dot" aria-hidden="true"></span>' : ''}</div><div class="vtab-info">${esc(total)}</div></button>`;
   });
   if(S.policy && !S.trusted) tabs.unshift(`<button class="vtab on" aria-current="true"><div class="vtab-name">FROM A LINK<span class="vtab-dot" aria-hidden="true"></span></div><div class="vtab-info">NOT SAVED</div></button>`);
+  S.invited.forEach((d, i) => { if(d !== cur) tabs.push(`<button class="vtab" data-act="invited" data-i="${i}"><div class="vtab-name">INVITED<span class="vtab-dot" aria-hidden="true"></span></div><div class="vtab-info">CHECK THE OWNERS</div></button>`); });
   return `<div class="vtabs"><div class="vtabs-inner">${tabs.join('')}</div></div>`;
 }
 
@@ -422,6 +443,7 @@ function renderEmpty(){
     <div class="empty-title">NO VAULTS</div>
     <div class="empty-sub">${S.network === 'signet' ? 'TRY ONE ON SIGNET. COINS ARE FREE AND WORTH NOTHING.' : 'K-OF-N BITCOIN. NO CONTRACT, NOTHING TO DEPLOY.'}</div>
     <a class="btn btn-fill" style="text-decoration:none" href="./btc.html">CREATE A VAULT</a>
+    ${S.owner ? '' : '<div class="btns" style="justify-content:center"><button class="btn btn-outline" data-act="wallet">CONNECT TO FIND YOUR VAULTS</button></div>'}
     <details><summary>OPEN AN EXISTING VAULT</summary>
       <textarea class="inp" id="import" data-field="import" spellcheck="false" aria-label="Vault descriptor" placeholder="Paste a descriptor, tr(…">${esc(S.form.import)}</textarea>
       <div class="btns"><button class="btn btn-outline btn-sm" data-act="import">OPEN</button></div>
@@ -752,7 +774,7 @@ const copy = async (text, label = 'COPIED') => {
 function goNet(network){
   // A key is per network, so it does not carry across.
   forget();
-  Object.assign(S, { network, view: 'dash', ovl: null, policy: null, queue: [], psbt: null, review: null, msg: null, coins: null, tip: null });
+  Object.assign(S, { network, invited: [], view: 'dash', ovl: null, policy: null, queue: [], psbt: null, review: null, msg: null, coins: null, tip: null });
   lsSet('ms_btc_net', network);
   syncHash();
   const first = saved()[0];
@@ -770,7 +792,13 @@ const ACT = {
   ovl(el){ S.ovl = el.dataset.o; },
   dismiss(){ S.msg = null; },
   view(el){ S.view = el.dataset.v; S.msg = null; S.form.rename = undefined; },
-  trust(){ remember(S.policy); S.trusted = true; },
+  trust(){
+    remember(S.policy);
+    S.trusted = true;
+    S.invited = S.invited.filter(d => d !== curDesc());
+    if(S.owner && allKeys(S.policy).some(isMe)) BV.saveVault(S.policy, S.owner.signer, myHandle(), [myHandle()]).catch(() => {});
+  },
+  invited(el){ return open(BV.parseDescriptor(S.invited[+el.dataset.i], S.network), true); },
   net(el){ if(S.network !== el.dataset.n) return goNet(el.dataset.n); },
   open(el){ return open(BV.parseDescriptor(saved()[+el.dataset.i], S.network)); },
   // Someone who pastes a descriptor already holds the backup, but it may be a stranger's

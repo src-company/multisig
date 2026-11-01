@@ -736,6 +736,12 @@ function dependencies({ postgrestUrl, jwtSecret, rpcUrls }, fetcher = fetch) {
     // request, so this cannot be steered at another RPC by anything a caller
     // sends. The role travels with it for the same reason: a token minted to
     // rename a vault must not reach the one that deletes a signature.
+    async readBtcVaults(address, network) {
+      return json(`${postgrestUrl}/rpc/btc_vaults_for`, { method: 'POST', headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${serviceToken(jwtSecret, 'metadata_writer')}`,
+      }, body: JSON.stringify({ p_address: address, p_network: network }) }, 'readBtcVaults');
+    },
     async readBtcProposal(vault, id) {
       return json(`${postgrestUrl}/rpc/btc_proposal_row`, { method: 'POST', headers: {
         'Content-Type': 'application/json',
@@ -775,6 +781,39 @@ function verifyHandle(input) {
   return write;
 }
 
+// An owner proving who they are, with the key behind their handle. Returns that owner.
+function btcOwner(input, action) {
+  check(input && (input.network === 'mainnet' || input.network === 'signet'), 'Invalid network');
+  check(typeof input.handle === 'string' && input.handle.length <= 700, 'Invalid handle');
+  let owner;
+  try { owner = BitcoinVault.decodeOwner(input.handle, input.network); }
+  catch (error) { throw new RequestError(403, error.message); }
+  if (!owner.proven) throw new RequestError(403, 'A handle must be signed by its Ethereum address');
+  if (!BitcoinVault.verifyOwnerAuth(owner, input.network, action(owner), input.at, input.sig)) throw new RequestError(403, 'Signature has expired or does not verify');
+  return owner;
+}
+
+// Records a vault for the owner who signed, and offers it to the others named. A row is
+// marked confirmed only for the signer: handles are public, so anyone could name anyone.
+function saveBitcoinVault(input) {
+  check(input && typeof input.descriptor === 'string' && input.descriptor.length <= 8000, 'Invalid vault');
+  check(input.network === 'mainnet' || input.network === 'signet', 'Invalid network');
+  let policy;
+  try { policy = BitcoinVault.parseDescriptor(input.descriptor, input.network); }
+  catch (error) { throw new RequestError(403, error.message); }
+  const vault = BitcoinVault.vaultId(policy), onVault = x => policy.paths.some(p => p.keys.some(k => k.xpub === x));
+  const signer = btcOwner(input, () => `save:${vault}`);
+  if (!onVault(signer.xpub)) throw new RequestError(403, 'That owner is not on this vault');
+  const row = (address, confirmed) => ({ fn: 'put_btc_vault', args: { p_address: address, p_network: input.network, p_vault: vault, p_descriptor: input.descriptor.trim(), p_confirmed: confirmed } });
+  const writes = [row(signer.evm, true)], seen = new Set([signer.evm]);
+  for (const text of (Array.isArray(input.handles) ? input.handles : []).slice(0, 40)) {
+    let h;
+    try { h = BitcoinVault.decodeOwner(String(text), input.network); } catch (_) { continue; }
+    if (h.proven && onVault(h.xpub) && !seen.has(h.evm)) { seen.add(h.evm); writes.push(row(h.evm, false)); }
+  }
+  return writes;
+}
+
 // Same rule as an Ethereum proposal: nothing enters the queue without an owner's
 // signature. The stored copy is merged here, so two owners signing at once both land.
 async function admitBitcoinProposal(input, deps) {
@@ -812,7 +851,7 @@ function createHandler(deps, allowedOrigins = []) {
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     }
     if (req.url === '/health' && req.method === 'GET') { res.writeHead(200); res.end('ok'); return; }
-    if (!['/proposals', '/metadata', '/action', '/signature', '/reconcile', '/register', '/confirm', '/session', '/handle', '/btc-proposal'].includes(req.url)) { res.writeHead(404); res.end(); return; }
+    if (!['/proposals', '/metadata', '/action', '/signature', '/reconcile', '/register', '/confirm', '/session', '/handle', '/btc-proposal', '/btc-vault', '/btc-vaults'].includes(req.url)) { res.writeHead(404); res.end(); return; }
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
     if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
     if (active >= 32) { res.writeHead(503); res.end(); return; }
@@ -835,7 +874,20 @@ function createHandler(deps, allowedOrigins = []) {
         res.end();
         return;
       }
-      if (req.url === '/btc-proposal' || req.url === '/handle') btcRateLimit(req);
+      if (['/btc-proposal', '/handle', '/btc-vault', '/btc-vaults'].includes(req.url)) btcRateLimit(req);
+      if (req.url === '/btc-vault') {
+        for (const write of saveBitcoinVault(input)) await deps.saveMetadata(write);
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+      if (req.url === '/btc-vaults') {
+        const owner = btcOwner(input, () => 'list');
+        const rows = await deps.readBtcVaults(owner.evm, input.network);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(rows));
+        return;
+      }
       if (req.url === '/btc-proposal') {
         await deps.saveMetadata(await admitBitcoinProposal(input, deps));
         res.writeHead(204);
@@ -918,4 +970,4 @@ if (require.main === module) {
   server.listen(Number(PORT), '0.0.0.0');
 }
 
-module.exports = { admitBitcoinProposal, verifyHandle, verifyProposal, verifyMetadata, verifyAction, verifySignature, verifyReconcile, verifyRegistration, verifyConfirm, verifySession, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, ACTION_TYPES, SESSION_TYPES, iface };
+module.exports = { saveBitcoinVault, btcOwner, admitBitcoinProposal, verifyHandle, verifyProposal, verifyMetadata, verifyAction, verifySignature, verifyReconcile, verifyRegistration, verifyConfirm, verifySession, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, ACTION_TYPES, SESSION_TYPES, iface };

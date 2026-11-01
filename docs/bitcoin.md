@@ -28,6 +28,14 @@ Why extended keys: a hardware wallet finds its key by fingerprint and path, and 
 
 An invite link carries the draft in its fragment: network, threshold and the owners' public addresses. A co-owner opens it, connects once, and takes their seat. Nothing coordinates this: everyone holding the link works out the same vault as soon as every owner has connected, and the creator's page updates by itself. Owners can be `0x` addresses or Bitcoin addresses, which resolve once that wallet has connected.
 
+## Finding your vaults
+
+Each vault is recorded against its owners' `0x` addresses, so connecting a wallet on any device lists them. Owners with a Bitcoin wallet have a `0x` address too, from the same seed. Reading needs a signature by the owner's key, which the page makes without a wallet prompt, so the list of who sits on what is not open to anyone. It is open to this service, and to a breach of it.
+
+A row is confirmed only by that owner's own signature. Handles are public, so anyone can build a vault around someone's key: such a row shows as INVITED and opens through the owner check. The service's list is re-read against the owner's key on arrival. An owner with no connected wallet, such as a hardware-only one, has no record, and the backup file stays required.
+
+The backup is still worth keeping. It works if this site is gone, in Bitcoin Core or any descriptor wallet, and any one owner's copy serves everyone.
+
 ## The queue
 
 Proposals are shared as on Ethereum, and the rule is the same. They are readable by anyone who can compute the vault, which for a mirrored vault is anyone, since its owners and their handles are public. They are also signed-transaction drafts, so assume amounts and payees are public. The rule: `POST /btc-proposal` admits a PSBT only with a valid owner signature for that descriptor, and merges it with the stored copy. Links and pasted PSBTs still work, so a hardware wallet owner needs no connection and the queue being down loses nothing.

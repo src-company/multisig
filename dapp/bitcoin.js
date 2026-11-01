@@ -552,6 +552,45 @@ async function fetchHandles(network, addresses, doFetch = (...a) => root.fetch(.
   return out;
 }
 
+// An owner saying "this is me" to the service without another wallet prompt. The account
+// key behind their handle signs, so the wallet is asked nothing, and the service checks
+// it against the xpub in the handle. Dated, and bound to one action.
+const AUTH_WINDOW = 300;
+const authHash = (network, action, at) => sha256(te.encode(`multisig owner auth v1\n${network}\n${action}\n${at}`));
+function signOwnerAuth(signer, network, action, at = Math.floor(Date.now() / 1000)){
+  const account = signer.derive(`m/${pathText(ownPath(network)).replace(/h/g, "'")}`);
+  const sig = hex.encode(schnorr.sign(authHash(network, action, at), account.privateKey));
+  account.wipePrivateData();
+  return { at, sig };
+}
+function verifyOwnerAuth(owner, network, action, at, sig, now = Math.floor(Date.now() / 1000)){
+  if(!Number.isInteger(at) || Math.abs(now - at) > AUTH_WINDOW || !/^[0-9a-f]{128}$/.test(String(sig))) return false;
+  try { return schnorr.verify(hex.decode(sig), authHash(network, action, at), HDKey.fromExtendedKey(owner.xpub, net(network).versions).publicKey.subarray(1)); }
+  catch(_) { return false; }
+}
+const postJson = (doFetch, url, body) => doFetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: root.AbortSignal?.timeout(TIMEOUT_MS) });
+// `handles` are the other owners', so the vault can be offered to them. Only the signer
+// is recorded as having agreed.
+async function saveVault(policy, signer, handle, handles = [], doFetch = (...a) => root.fetch(...a)){
+  const auth = signOwnerAuth(signer, policy.network, `save:${vaultId(policy)}`);
+  const r = await postJson(doFetch, `${API}/btc-vault`, { network: policy.network, descriptor: descriptor(policy), handle, handles, ...auth });
+  if(!r.ok) throw new Error('Could not save this vault');
+}
+// What the service says this owner sits on, kept only where this owner's key really is.
+async function listVaults(network, signer, handle, doFetch = (...a) => root.fetch(...a)){
+  const auth = signOwnerAuth(signer, network, 'list');
+  const r = await postJson(doFetch, `${API}/btc-vaults`, { network, handle, ...auth });
+  if(!r.ok) throw new Error('Could not read your vaults');
+  const { xpub } = decodeOwner(handle, network), out = [];
+  for(const row of await r.json()){
+    try {
+      const policy = parseDescriptor(row.descriptor, network);
+      if(policy.paths.some(p => p.keys.some(k => k.xpub === xpub))) out.push({ policy, confirmed: !!row.confirmed });
+    } catch(_) {}
+  }
+  return out;
+}
+
 // The queue. A proposal is known by its unsigned transaction, so every signed copy of
 // one is the same proposal, and a vault by a hash of its descriptor, so the queue can
 // be found only by someone who can compute that. For a vault mirrored from Ethereum that
@@ -1087,7 +1126,7 @@ function concat(...parts){
   return out;
 }
 
-root.BitcoinVault = { assertSpendable, isProtected, hasTacitEnvelope, walletMessage, linkMessage, keyFromWalletSignature, evmSignHash, evmSignMessage, bitcoinMessageHash, bitcoinSigners, handleForWallet, proposalId, vaultId, publishProposal, fetchProposals, openProposals, publishHandle, fetchHandles, MAX_INDEX, txidOf, seatMisdescribed, EVM_CHAINS, selectors: { threshold: selector('threshold()') }, readEvmVault, mirror, bindingMessage, evmMessageHash, NETWORKS, DUST, GAP, MAX_OWNERS, MAX_OLDER, MAX_FEE_RATE, encodeOwner, decodeOwner, originText, ownerMessage, deriveOwnerKey, keyFromSignature, fingerprintOf,
+root.BitcoinVault = { signOwnerAuth, verifyOwnerAuth, saveVault, listVaults, assertSpendable, isProtected, hasTacitEnvelope, walletMessage, linkMessage, keyFromWalletSignature, evmSignHash, evmSignMessage, bitcoinMessageHash, bitcoinSigners, handleForWallet, proposalId, vaultId, publishProposal, fetchProposals, openProposals, publishHandle, fetchHandles, MAX_INDEX, txidOf, seatMisdescribed, EVM_CHAINS, selectors: { threshold: selector('threshold()') }, readEvmVault, mirror, bindingMessage, evmMessageHash, NETWORKS, DUST, GAP, MAX_OWNERS, MAX_OLDER, MAX_FEE_RATE, encodeOwner, decodeOwner, originText, ownerMessage, deriveOwnerKey, keyFromSignature, fingerprintOf,
   policyOf, descriptor, descriptorChecksum, parseDescriptor, walletPolicy, vaultOf, vsize, coinsFor, propose, inspect, sign, combine, finalize, chain, scan };
 
 })(typeof window !== 'undefined' ? window : globalThis);

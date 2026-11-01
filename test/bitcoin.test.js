@@ -672,6 +672,24 @@ test('only a plain verdict releases a coin that tripped the envelope check', asy
   await BV.assertSpendable([{ txid: 'ee'.repeat(32), vout: 0, sats: 50000 }], c);
 });
 
+test('an owner proves who they are without a wallet prompt, for one action, briefly', () => {
+  const at = Math.floor(Date.now() / 1000), { sig } = BV.signOwnerAuth(A.signer, 'signet', 'list', at);
+  assert.equal(BV.verifyOwnerAuth(A.owner, 'signet', 'list', at, sig), true);
+  assert.equal(BV.verifyOwnerAuth(B.owner, 'signet', 'list', at, sig), false);
+  assert.equal(BV.verifyOwnerAuth(A.owner, 'signet', 'save:x', at, sig), false);
+  assert.equal(BV.verifyOwnerAuth(A.owner, 'signet', 'list', at, sig, at + 301), false);
+  assert.equal(BV.verifyOwnerAuth(A.owner, 'signet', 'list', at, 'zz'), false);
+});
+
+test('the vault list keeps only vaults holding this owner\'s key', async () => {
+  const alice = account(1), handle = handleFor(A, alice);
+  const mine = BV.descriptor(plain('signet')), not = BV.descriptor(BV.policyOf({ network: 'signet', paths: [{ threshold: 1, keys: owners(D) }] }));
+  const f = async () => ({ ok: true, json: async () => [{ descriptor: mine, confirmed: true }, { descriptor: not, confirmed: true }, { descriptor: 'junk', confirmed: true }] });
+  const got = await BV.listVaults('signet', A.signer, handle, f);
+  assert.equal(got.length, 1);
+  assert.equal(BV.descriptor(got[0].policy), mine);
+});
+
 test('two different proposals do not merge', () => {
   const policy = plain('signet');
   const one = BV.propose({ policy, utxos: [fakeCoin(100000)], tip: 200, sweep: payee, feeRate: 2 });

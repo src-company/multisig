@@ -355,3 +355,10 @@ GRANT EXECUTE ON FUNCTION btc_handle_for_wallet(text, text) TO anon;
 
 REVOKE ALL ON FUNCTION btc_proposal_row(text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION btc_proposal_row(text, text) TO anon;
+
+REVOKE ALL ON btc_vault_owners FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION put_btc_vault(text, text, text, text, boolean) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION btc_vaults_for(text, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION put_btc_vault(text, text, text, text, boolean) TO metadata_writer;
+GRANT EXECUTE ON FUNCTION btc_vaults_for(text, text) TO metadata_writer;
+

@@ -1953,3 +1953,44 @@ RETURNS TABLE (address text, handle text) AS $$
   WHERE l.wallet = p_wallet AND l.network = p_network;
 $$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
 
+-- ── BITCOIN VAULT LIST ──────────────────────────────────────
+-- Which vaults an owner sits on, so connecting a wallet on any device finds them. A
+-- descriptor spends nothing, and it is re-read against the owner's own key on arrival.
+-- `confirmed` is set only by that owner's own signature. Handles are public, so anyone
+-- could name someone in a vault; those rows are invitations, and go through the check.
+CREATE TABLE IF NOT EXISTS btc_vault_owners (
+  address    text NOT NULL CHECK (address ~ '^0x[0-9a-f]{40}$'),
+  network    text NOT NULL CHECK (network IN ('mainnet', 'signet')),
+  vault      text NOT NULL CHECK (vault ~ '^[0-9a-f]{64}$'),
+  descriptor text NOT NULL CHECK (length(descriptor) BETWEEN 1 AND 8000),
+  confirmed  boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (address, network, vault)
+);
+ALTER TABLE btc_vault_owners ENABLE ROW LEVEL SECURITY;
+
+CREATE OR REPLACE FUNCTION put_btc_vault(p_address text, p_network text, p_vault text, p_descriptor text, p_confirmed boolean)
+RETURNS void AS $$
+BEGIN
+  IF coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb->>'role', '') <> 'metadata_writer' THEN
+    RAISE EXCEPTION 'A verified owner signature is required' USING ERRCODE = '42501';
+  END IF;
+  -- Invitations stop at a limit, so nobody can fill an owner's list. Their own never do.
+  IF NOT p_confirmed AND (SELECT count(*) FROM btc_vault_owners WHERE address = p_address AND network = p_network AND NOT confirmed) >= 50 THEN
+    RETURN;
+  END IF;
+  INSERT INTO btc_vault_owners (address, network, vault, descriptor, confirmed)
+  VALUES (p_address, p_network, p_vault, p_descriptor, p_confirmed)
+  ON CONFLICT (address, network, vault) DO UPDATE SET confirmed = btc_vault_owners.confirmed OR EXCLUDED.confirmed;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+-- Not granted to anon: this is read through the service, which checks the owner's
+-- signature first. The list of who sits on what stays behind that.
+CREATE OR REPLACE FUNCTION btc_vaults_for(p_address text, p_network text)
+RETURNS TABLE (descriptor text, confirmed boolean) AS $$
+  SELECT v.descriptor, v.confirmed FROM btc_vault_owners v
+  WHERE v.address = p_address AND v.network = p_network
+  ORDER BY v.confirmed DESC, v.created_at DESC LIMIT 200;
+$$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
+

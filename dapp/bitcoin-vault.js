@@ -61,7 +61,7 @@ function readInvite(){
 // An owner's own row is theirs the moment they connect, whichever way they did.
 function takeSeat(){
   const me = S.me, row = S.rows.find(r => r.text.toLowerCase() === me.evm || r.text === me.wallet);
-  if(row) Object.assign(row, { owner: me.owner, state: 'ready', mine: true, error: null });
+  if(row) Object.assign(row, { owner: me.owner, handle: me.handle, state: 'ready', mine: true, error: null });
   else S.msg = 'This wallet is not one of the owners on this invite. Connect the one that is.';
   return !!row;
 }
@@ -77,11 +77,11 @@ async function resolve(row){
   try {
     if(/^0x[0-9a-fA-F]{40}$/.test(t)){
       const [h] = await BV.fetchHandles(S.network, [t]);
-      if(h) Object.assign(row, { owner: BV.decodeOwner(h, S.network), state: 'ready' }); else row.state = 'waiting';
+      if(h) Object.assign(row, { owner: BV.decodeOwner(h, S.network), handle: h, state: 'ready' }); else row.state = 'waiting';
     } else if(/^(bc1|tb1)[a-z0-9]{20,}$/i.test(t)){
       const f = await BV.handleForWallet(S.network, t);
-      if(f) Object.assign(row, { owner: BV.decodeOwner(f.handle, S.network), state: 'ready' }); else row.state = 'waiting';
-    } else Object.assign(row, { owner: BV.decodeOwner(t, S.network), state: 'ready' });
+      if(f) Object.assign(row, { owner: BV.decodeOwner(f.handle, S.network), handle: f.handle, state: 'ready' }); else row.state = 'waiting';
+    } else Object.assign(row, { owner: BV.decodeOwner(t, S.network), handle: t, state: 'ready' });
   } catch(e) { Object.assign(row, { state: 'bad', error: e.message }); }
   // One key cannot take two seats. Said here, not as an error on the last step.
   const taken = [...(S.me ? [S.me.owner.xpub] : []), ...S.rows.filter(r => r !== row).map(r => r.owner?.xpub)];
@@ -92,7 +92,7 @@ function statusOf(r){
   return { ready: '<span class="st ok">READY</span>', waiting: '<span class="st">WAITING</span>', bad: '<span class="st bad">NOT VALID</span>', empty: '', checking: '<span class="st">…</span>' }[r.state] || '';
 }
 
-function create(){
+async function create(){
   const keys = filled().map(r => r.owner);
   S.policy = BV.policyOf({ network: S.network, paths: [{ threshold: Math.min(S.threshold, keys.length), keys }] });
   const d = BV.descriptor(S.policy), k = `ms_btc_vaults_${S.network}`, list = lsJson(k, []);
@@ -101,6 +101,18 @@ function create(){
     const nk = `ms_btc_names_${S.network}`, n = lsJson(nk, {});
     n[d] = S.name.trim().slice(0, 24).toUpperCase().replace(/\s+/g, '_');
     lsSet(nk, JSON.stringify(n));
+  }
+  // On the owner's own record, so any device finds it. The key was only kept this long
+  // for that. Without a connected wallet there is no record, and the file is the backup.
+  if(S.me?.signer){
+    const handles = [S.me.handle, ...S.rows.map(r => r.handle).filter(Boolean)];
+    try {
+      await BV.saveVault(S.policy, S.me.signer, S.me.handle, handles);
+      S.recorded = true;
+      const bk = `ms_btc_backup_${S.network}`, m = lsJson(bk, {}); m[d] = 1; lsSet(bk, JSON.stringify(m));
+    } catch(_) {}
+    S.me.signer.wipePrivateData();
+    S.me.signer = null;
   }
 }
 
@@ -168,17 +180,20 @@ function renderOwners(){
 }
 
 function renderBackup(){
-  return `<h2>Save your backup</h2><p class="lead">Without this file the coins can't be spent, even with every key. It holds no private key.</p>
-    <input class="inp boxed" id="name" data-name="1" aria-label="Vault name" maxlength="24" placeholder="Vault name (optional)" autocomplete="off" value="${esc(S.name)}">
+  const name = `<input class="inp boxed" id="name" data-name="1" aria-label="Vault name" maxlength="24" placeholder="Vault name (optional)" autocomplete="off" value="${esc(S.name)}">`;
+  if(S.me) return `<h2>Name your vault</h2><p class="lead">It stays on your wallet's record, so connecting on any device finds it.</p>${name}
+    <button class="btn fill w" data-act="make">CREATE VAULT</button>`;
+  return `<h2>Save your backup</h2><p class="lead">Without this file the coins can't be spent, even with every key. It holds no private key.</p>${name}
     <button class="btn fill w" data-act="backup">CREATE AND SAVE</button>`;
 }
 
 function renderReceive(){
   const a = BV.vaultOf(S.policy).address;
-  return `<h2>Your vault is ready</h2><p class="lead">Share the backup with every owner, then send sats here.</p>
+  return `<h2>Your vault is ready</h2><p class="lead">Send sats here to fund it.</p>
     <div class="qr" role="img" aria-label="QR code of the address">${window.btc.encodeQR(a.toUpperCase(), 'svg')}</div>
     <div class="addr">${esc(a)}</div>
     <div class="btns center"><button class="btn line" data-act="copy">COPY ADDRESS</button><button class="btn line" data-act="vaultlink">COPY VAULT LINK</button>${S.network === 'signet' ? '<a class="btn line asbtn" href="https://faucet.coinbin.org" target="_blank" rel="noopener">GET TEST COINS ↗</a>' : ''}</div>
+    ${S.recorded ? '<div class="note ok">Saved to your wallet. Connect on any device to find it. Keep a backup file too, in case this site is ever gone. <button class="link" data-act="savefile">Download backup</button></div>' : S.saved ? '' : '<div class="note">This vault could not be saved to your wallet, so the file is its only record. <button class="link" data-act="savefile">Download backup</button></div>'}
     <div class="note">Sats only. Tacit assets sent here are set aside, and this vault cannot move them.</div>
     <a class="btn go w" href="./bitcoin.html#${S.network}/${encodeURIComponent(BV.descriptor(S.policy))}">OPEN VAULT</a>`;
 }
@@ -207,18 +222,18 @@ const ACT = {
   theme(){ S.dark = !S.dark; lsSet('ms_light', S.dark ? '' : '1'); },
   skip(){ S.step = 1; },
   next(){ S.step = 2; },
-  go(el){ S.step = +el.dataset.s; if(S.step === 0) S.me = null; },
+  go(el){ S.step = +el.dataset.s; if(S.step === 0){ S.me?.signer?.wipePrivateData(); S.me = null; } },
   async connect(el){
     const w = el.dataset.w;
     if(window.top !== window || window.opener) throw new Error('Open this page in its own tab to use a key.');
     if(/^\/ip[fn]s\//.test(location.pathname)) throw new Error('Open this page from its own domain to use a key.');
     if(w.startsWith('btc:')){
       const wallet = BW.detect().find(x => x.key === w.slice(4)), key = await BW.connectWallet(wallet, S.network, onStep);
-      key.signer.wipePrivateData(); key.evmPriv.fill(0);
-      S.me = { owner: key.owner, handle: key.handle, evm: key.evm, wallet: key.address, published: key.published, label: `${wallet.name} ${short(key.address)}` };
+      key.evmPriv.fill(0);
+      S.me = { signer: key.signer, owner: key.owner, handle: key.handle, evm: key.evm, wallet: key.address, published: key.published, label: `${wallet.name} ${short(key.address)}` };
     } else {
       const eth = w === 'wc' ? await BW.walletConnect() : w === 'eth' ? window.ethereum : evmWallets.get(w).provider;
-      S.me = await BW.connectEvmForHandle(eth, S.network, { onStep });
+      S.me = await BW.connectEvmForHandle(eth, S.network, { onStep, keep: true });
     }
     S.step = 1;
     if(S.invite) takeSeat();
@@ -226,6 +241,7 @@ const ACT = {
     if(!S.me.published) S.msg = 'Connected, but your key could not be published. Co-owners will see you as WAITING. Reconnect to try again.';
   },
   net(el){
+    S.me?.signer?.wipePrivateData();
     S.network = el.dataset.n; S.me = null; S.step = 0;
     S.rows.forEach(r => { r.owner = null; r.state = r.text.trim() ? 'checking' : 'empty'; });
     return ACT.check();
@@ -236,7 +252,9 @@ const ACT = {
   async check(){ await Promise.all(S.rows.filter(r => !r.mine).map(resolve)); },
   vaultlink(){ return navigator.clipboard.writeText(`${location.origin}${location.pathname.replace(/\/[^/]*$/, '/')}bitcoin.html#${S.network}/${encodeURIComponent(BV.descriptor(S.policy))}`).then(() => toast('LINK COPIED'), () => toast('THE BROWSER REFUSED THE CLIPBOARD')); },
   invite(){ return navigator.clipboard.writeText(inviteLink()).then(() => toast('LINK COPIED'), () => toast('THE BROWSER REFUSED THE CLIPBOARD')); },
-  backup(){ create(); backup(); S.step = 3; },
+  async backup(){ await create(); backup(); S.step = 3; },
+  async make(){ await create(); S.step = 3; },
+  savefile(){ backup(); },
   copy(){ return navigator.clipboard.writeText(BV.vaultOf(S.policy).address).then(() => toast('ADDRESS COPIED'), () => toast('THE BROWSER REFUSED THE CLIPBOARD')); },
 };
 
