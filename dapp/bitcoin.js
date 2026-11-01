@@ -1183,6 +1183,7 @@ const seatMisdescribed = (policy, owner) => policy.paths.some(p => p.keys.some(k
 // as long as forty failures. It is moved back, not dropped: if the other is down too,
 // it is still asked.
 const _down = new Map();
+const _plain = Object.create(null);
 function chain(network, doFetch = (...a) => root.fetch(...a), bases = net(network).api){
   const isDown = b => (_down.get(b) || 0) > Date.now();
   // Public explorers limit a browser without warning, so each one that does is left alone
@@ -1215,6 +1216,7 @@ function chain(network, doFetch = (...a) => root.fetch(...a), bases = net(networ
     throw got.busy ? new Error(EXPLORERS_BUSY) : got.last;
   };
   return {
+    plain: bases === net(network).api ? (_plain[network] ??= new Set()) : undefined,
     async tip(){
       const height = await get('/blocks/tip/height');
       if(!Number.isSafeInteger(height) || height < 0) throw new Error('the explorer sent a bad block height');
@@ -1303,8 +1305,13 @@ async function classifyCoins(coins, c){
   const hits = [];
   // Dust is never spent anyway, so a flood of it costs no lookups. Anything larger is
   // asked about a few at a time, so a flood just over the line stays a slow page.
+  // What a coin's creating transaction holds never changes, so a clear answer holds for
+  // this page's lifetime, and only a clear one: anything else is asked again.
+  const known = c.plain, idOf = u => `${u.txid}:${u.vout}`;
   const spendable = coins.filter(u => u.value > DUST);
-  for(let i = 0; i < spendable.length; i += 8) await Promise.all(spendable.slice(i, i + 8).map(async u => {
+  const fresh = spendable.filter(u => !known?.has(idOf(u)));
+  for(const u of spendable) if(!fresh.includes(u)) u.quarantine = undefined;
+  for(let i = 0; i < fresh.length; i += 8) await Promise.all(fresh.slice(i, i + 8).map(async u => {
     u.quarantine = undefined;
     try { if(hasTacitEnvelope(await c.tx(u.txid))) hits.push(u); }
     catch(_) { u.quarantine = 'unknown'; }
@@ -1322,6 +1329,7 @@ async function classifyCoins(coins, c){
       else u.quarantine = 'unknown';
     }
   }
+  if(known && known.size < 20000) for(const u of fresh) if(!u.quarantine) known.add(idOf(u));
 }
 
 // The same check on exactly what is about to be signed. A coin list can be minutes old,

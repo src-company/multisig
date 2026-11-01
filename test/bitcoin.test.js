@@ -562,6 +562,18 @@ test('a rate limit moves on to the next explorer, and is said calmly when all ar
   assert.equal(await mirror.usedByAll('x'), true);
 });
 
+test('a coin cleared once is not looked up again, and an unclear one is', async () => {
+  let looks = 0, up = false;
+  const plain = new Set(), coin = () => ({ txid: 'ab'.repeat(32), vout: 0, sats: 5000 });
+  const c = { plain, tx: async () => { looks++; if(!up) throw new Error('down'); return { vin: [{ witness: ['00'] }] }; } };
+  await assert.rejects(BV.assertSpendable([coin()], c));
+  assert.equal(plain.size, 0);
+  up = true;
+  await BV.assertSpendable([coin()], c);
+  await BV.assertSpendable([coin()], c);
+  assert.equal(looks, 2);
+});
+
 test('names on the object prototype are not networks', () => {
   for(const n of ['constructor', '__proto__', 'toString'])
     assert.throws(() => BV.policyOf({ network: n, paths: [{ threshold: 1, keys: owners(A) }] }), /unknown network/);
