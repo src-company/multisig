@@ -16,9 +16,10 @@ const btcOf = sats => (sats / 1e8).toFixed(8);
 const short = s => s.length > 20 ? `${s.slice(0, 10)}…${s.slice(-8)}` : s;
 const days = blocks => { const d = blocks / 144; return d < 2 ? `about ${Math.round(blocks / 6)} hours` : `about ${Math.round(d)} days`; };
 
-// Off until a real wallet has signed on signet and someone other than the author has
-// reviewed this. bitcoin.js is network-agnostic; this is the one switch.
-const MAINNET = false;
+// bitcoin.js is network-agnostic, so this is the one switch. Turning it off stops new
+// use of mainnet from this page. It moves no one's coins, and any descriptor tool can
+// still spend them.
+const MAINNET = true;
 // A key left in an open tab is a key at risk for no benefit.
 const IDLE_MS = 15 * 60 * 1000;
 
@@ -309,7 +310,8 @@ function renderVault(){
     ${pending ? `<p class="dim">${pending} unconfirmed, not spendable yet.</p>` : ''}
     ${S.trusted ? `<label>Receive at</label>
     <div class="mono">${coins ? esc(v.address) : '…'}</div>
-    <button class="btn" data-act="copy-address"${coins ? '' : ' disabled'}>Copy address</button>` : `<div class="note warn">This vault came from a link. Check that you know every owner below before you pay it or sign for it. Whoever sent the link chose these keys.</div>
+    <button class="btn" data-act="copy-address"${coins ? '' : ' disabled'}>Copy address</button>
+    ${S.network === 'signet' ? `<p class="dim">Signet coins are free and worth nothing. Copy the address, then get some from a <a href="https://faucet.coinbin.org" target="_blank" rel="noopener">faucet</a> to try this vault.</p>` : ''}` : `<div class="note warn">This vault came from a link. Check that you know every owner below before you pay it or sign for it. Whoever sent the link chose these keys.</div>
     <button class="btn fill" data-act="trust">I know these owners</button>`}
     <h3>Owners</h3>
     ${S.owner ? `<p class="${p.paths.some(x => x.keys.some(k => k.xpub === S.owner.xpub)) ? '' : 'dim'}">${p.paths.some(x => x.keys.some(k => k.xpub === S.owner.xpub)) ? 'You are an owner.' : 'You are not an owner of this vault.'}</p>` : ''}

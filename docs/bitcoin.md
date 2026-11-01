@@ -88,7 +88,7 @@ Bitcoin has two relevant opcodes. `OP_CHECKSEQUENCEVERIFY` counts from when a co
 
 ## Not done
 
-- **Mainnet is off.** `MAINNET` in `bitcoin-app.js` is the switch. It stays off until a real wallet has signed on signet and someone other than the author has reviewed this.
+- **Mainnet opened before these were done.** It is open by the owner's decision, with a warning on the page. `MAINNET` in `bitcoin-app.js` is the switch.
 - **A real device.** Interoperability is proven with Bitcoin Core as the outside signer, on regtest. No Ledger, Coldcard, Trezor or Sparrow has signed one of these PSBTs, and whether each accepts a `multi_a` Taproot policy with an xpub internal key has to be tried per device. Ledger registration from this page (WebHID) is not built; the policy export is untested on a device.
 - A real signet spend. The page has read live signet, but the funded flow has only run against a mocked explorer.
 - Native Bitcoin wallets (Xverse, Leather, UniSat), WalletConnect, and the passkey signer Tacit has. A passkey is bound to its domain, so the same passkey on `multisig.software` and the IPFS gateway gives different keys.
