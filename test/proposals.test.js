@@ -893,7 +893,7 @@ test('a Bitcoin proposal that cannot merge is refused, not stored over the queue
   await assert.rejects(admitBitcoinProposal({ psbt: bad, descriptor: BV.descriptor(policy), network: 'signet' }, { readBtcProposal: async () => BV.sign(psbt, a.signer, policy) }), e => e.status === 409);
 });
 
-test('a vault is confirmed only for the owner who signed, and others are invited', () => {
+test('a vault is confirmed only for the owner who signed, and others are invited', async () => {
   const { saveBitcoinVault, btcOwner } = require('../api/proposals.cjs');
   const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
   const c = vm.createContext({ TextEncoder, TextDecoder, Uint8Array, crypto: globalThis.crypto });
@@ -909,11 +909,11 @@ test('a vault is confirmed only for the owner who signed, and others are invited
   const [a, b, x] = [1, 2, 3].map(person);
   const policy = BV.policyOf({ network: 'signet', paths: [{ threshold: 2, keys: [a.owner, b.owner] }] });
   const descriptor = BV.descriptor(policy), action = `save:${BV.vaultId(policy)}`;
-  const writes = saveBitcoinVault({ network: 'signet', descriptor, handle: a.handle, handles: [a.handle, b.handle, x.handle], ...BV.signOwnerAuth(a.signer, 'signet', action) });
+  const writes = await saveBitcoinVault({ network: 'signet', descriptor, handle: a.handle, handles: [a.handle, b.handle, x.handle], ...BV.signOwnerAuth(a.signer, 'signet', action) });
   assert.deepEqual(writes.map(w => [w.args.p_address, w.args.p_confirmed]), [[a.evm, true], [b.evm, false]]);
   // A stranger cannot record a vault they are not on, or claim another owner's seat.
-  assert.throws(() => saveBitcoinVault({ network: 'signet', descriptor, handle: x.handle, ...BV.signOwnerAuth(x.signer, 'signet', action) }), /not on this vault/);
-  assert.throws(() => saveBitcoinVault({ network: 'signet', descriptor, handle: b.handle, ...BV.signOwnerAuth(x.signer, 'signet', action) }), /does not verify/);
+  await assert.rejects(saveBitcoinVault({ network: 'signet', descriptor, handle: x.handle, ...BV.signOwnerAuth(x.signer, 'signet', action) }), /not on this vault/);
+  await assert.rejects(saveBitcoinVault({ network: 'signet', descriptor, handle: b.handle, ...BV.signOwnerAuth(x.signer, 'signet', action) }), /does not verify/);
   // Reading a list needs that owner's own signature.
   assert.equal(btcOwner({ network: 'signet', handle: a.handle, ...BV.signOwnerAuth(a.signer, 'signet', 'list') }, () => 'list').evm, a.evm);
   assert.throws(() => btcOwner({ network: 'signet', handle: a.handle, ...BV.signOwnerAuth(x.signer, 'signet', 'list') }, () => 'list'), /does not verify/);

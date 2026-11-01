@@ -45,7 +45,7 @@ const filled = () => [...(S.me && !S.invite ? [{ owner: S.me.owner, state: 'read
 // addresses. So there is nothing to coordinate. Everyone holding it works out the same
 // vault the moment every owner has connected, in a fragment no server ever sees.
 function inviteLink(){
-  const list = [...(S.me ? [S.me.evm] : []), ...S.rows.map(r => r.text.trim()).filter(Boolean)];
+  const list = [...(S.me ? [S.me.evm] : []), ...S.rows.map(r => r.addr || r.text.trim()).filter(Boolean)];
   const th = Math.min(S.threshold, Math.max(list.length, 1));
   return `${location.origin}${location.pathname}#join/${S.network}/${th}/${list.map(encodeURIComponent).join(',')}`;
 }
@@ -79,10 +79,12 @@ const allReady = () => total() > 0 && filled().every(r => r.state === 'ready');
 // Whatever was typed, turned into a key if that can be done now. 0x and bc1 addresses
 // cannot be worked out, so they are looked up, and wait if that owner has not connected.
 async function resolve(row){
-  const t = row.text.trim();
-  Object.assign(row, { owner: null, error: null });
+  let t = row.text.trim();
+  Object.assign(row, { owner: null, error: null, addr: null });
   if(!t) return void (row.state = 'empty');
   try {
+    // A name is shown with the address it reached, since that is who gets the seat.
+    if(BV.isName(t)) t = row.addr = await BV.resolveName(t);
     if(/^0x[0-9a-fA-F]{40}$/.test(t)){
       const [h] = await BV.fetchHandles(S.network, [t]);
       if(h) Object.assign(row, { owner: BV.decodeOwner(h, S.network), handle: h, state: 'ready' }); else row.state = 'waiting';
@@ -146,6 +148,10 @@ const ICONS = {
   backup: svg('<path d="M12 3l8 3v6c0 4.5-3.2 7.6-8 9-4.8-1.4-8-4.5-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/>'),
   receive: svg('<path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M4 20h16"/>'),
 };
+const ETH = `<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><polygon fill="#80D8FF" points="7.62,18.83 16.01,30.5 16.01,24.1"/><polygon fill="#42A5F5" points="16.01,30.5 24.38,18.78 16.01,24.1"/><polygon fill="#FFF176" points="16.01,1.5 7.62,16.23 16.01,12.3"/><polygon fill="#FF8A80" points="24.38,16.18 16.01,1.5 16.01,12.3"/><polygon fill="#C1AEE1" points="16.01,21.5 24.38,16.18 16.01,12.3"/><polygon fill="#55FB9B" points="16.01,12.3 7.62,16.23 16.01,21.5"/></svg>`;
+// Every owner row says which world that owner came from. A vault mixing the two is the
+// point of this page, so it should be visible at a glance.
+const markOf = text => /^0x/i.test(text) || BV.isName(text) ? ETH : /^(bc1|tb1)/i.test(text) ? BTC : ICONS.owners;
 const STEPS = [['connect', 'CONNECT'], ['owners', 'OWNERS'], ['backup', 'BACK UP'], ['receive', 'RECEIVE']];
 
 function renderFlow(){
@@ -182,7 +188,7 @@ function renderOwners(){
   if(S.invite){
     // Whoever sent this chose every line of it. A vault someone hands you can be one they
     // alone control, so the rule is said plainly and nothing is saved until it is checked.
-    const rows = S.rows.map(r => `<div class="row"><span class="n">${ICONS.owners}</span><span class="inp full">${esc(r.text)}</span>${r.mine ? '<span class="st ok">YOU</span>' : statusOf(r)}</div>`).join('');
+    const rows = S.rows.map(r => `<div class="row"><span class="n">${markOf(r.text)}</span><span class="inp full">${esc(r.text)}</span>${r.mine ? '<span class="st ok">YOU</span>' : statusOf(r)}</div>`).join('');
     const seated = S.rows.some(r => r.mine), others = n - (seated ? 1 : 0);
     const warn = th === 1 && n > 1 ? 'Any one owner can spend everything alone.' : others >= th ? `The other ${others === 1 ? 'owner' : `${others} owners`} can spend without you.` : null;
     return `<h2>${seated ? 'You are in' : 'You are invited'}</h2><p class="lead"><strong>${th} of ${n}</strong> must sign. ${waiting ? 'Waiting for the others. This updates by itself.' : 'Every owner is ready.'}</p>
@@ -192,9 +198,10 @@ function renderOwners(){
       <button class="tick" data-act="confirm" aria-pressed="${S.checked}"><span>${S.checked ? '✓' : ''}</span>I know every owner above, and this is the rule I agreed to</button>
       <button class="btn fill w" data-act="next"${allReady() && seated && S.checked ? '' : ' disabled'}>CONTINUE</button>`;
   }
-  return `<h2>Add owners</h2><p class="lead">A 0x address, a Bitcoin address, or an xpub.</p>
-    ${S.me ? `<div class="row"><span class="n">${ICONS.owners}</span><span class="inp">${esc(S.me.label)}</span><span class="st ok">YOU</span></div>` : ''}
-    ${S.rows.map((r, i) => `<div class="row"><span class="n">${ICONS.owners}</span><input class="inp" id="o${i}" data-row="${i}" aria-label="Owner" spellcheck="false" autocomplete="off" placeholder="${S.network === 'mainnet' ? '0x… or bc1…' : '0x… or tb1…'}" value="${esc(r.text)}">${statusOf(r)}${S.rows.length > 1 ? `<button class="x" data-act="drop" data-i="${i}" aria-label="Remove">✕</button>` : ''}</div>${r.error ? `<div class="st bad" style="padding:4px 0">${esc(r.error)}</div>` : ''}`).join('')}
+  return `<h2>Add owners</h2><p class="lead">Mix Ethereum and Bitcoin wallets freely. Each owner signs with the wallet they already have.</p>
+    ${S.me ? `<div class="row"><span class="n">${S.me.wallet ? BTC : ETH}</span><span class="inp">${esc(S.me.label)}</span><span class="st ok">YOU</span></div>
+    ${S.me.wallet ? `<div class="idline"><span>Your address on Ethereum multisigs</span><button class="link" data-act="copyevm">${esc(short(S.me.evm))} ⧉</button></div>` : ''}` : ''}
+    ${S.rows.map((r, i) => `<div class="row"><span class="n">${markOf(r.text)}</span><input class="inp" id="o${i}" data-row="${i}" aria-label="Owner" spellcheck="false" autocomplete="off" placeholder="${S.network === 'mainnet' ? '0x…, name.wei, bc1… or xpub' : '0x…, name.wei, tb1… or xpub'}" value="${esc(r.text)}">${statusOf(r)}${S.rows.length > 1 ? `<button class="x" data-act="drop" data-i="${i}" aria-label="Remove">✕</button>` : ''}</div>${r.addr ? `<div class="idline"><span>${esc(r.text.trim())} is</span><span>${esc(r.addr)}</span></div>` : ''}${r.error ? `<div class="st bad" style="padding:4px 0">${esc(r.error)}</div>` : ''}`).join('')}
     <div class="btns"><button class="link" data-act="add">+ Add owner</button></div>
     ${waiting ? `<div class="wait">Send your co-owners this link. They connect once, and this updates by itself.<div class="btns"><button class="btn fill" data-act="invite">COPY INVITE LINK</button></div></div>` : ''}
     ${n > 1 ? `<div class="th"><div class="stepper"><button data-act="th" data-d="-1" aria-label="Fewer">−</button><output>${th} OF ${n}</output><button data-act="th" data-d="1" aria-label="More">+</button></div><span>must sign</span></div>` : ''}
@@ -221,7 +228,8 @@ function renderReceive(){
     <div class="btns center"><button class="btn line" data-act="copy">COPY ADDRESS</button><button class="btn line" data-act="vaultlink">COPY VAULT LINK</button>${S.network === 'signet' ? '<a class="btn line asbtn" href="https://faucet.coinbin.org" target="_blank" rel="noopener">GET TEST COINS ↗</a>' : ''}</div>
     ${S.recorded && !S.saved ? '<div class="note ok">Saved to your wallet, so connecting on any device finds it. Keep a backup too: it works if this site is ever gone. <button class="link" data-act="savefile">Download backup</button></div>' : ''}
     <div class="note">Sats only. Tacit assets sent here are set aside, and this vault cannot move them.</div>
-    <a class="btn go w" href="./bitcoin.html#${S.network}/${encodeURIComponent(BV.descriptor(S.policy))}">OPEN VAULT</a>`;
+    <a class="btn go w" href="./bitcoin.html#${S.network}/${encodeURIComponent(BV.descriptor(S.policy))}">OPEN VAULT</a>
+    <a class="link center" href="./index.html">Same owners on Ethereum or an L2 ↗</a>`;
 }
 
 function render(){
@@ -233,7 +241,7 @@ function render(){
     <div class="hdr"><div class="logo"><a href="./index.html">MULTISIG</a></div>
       <div class="pills"><button class="theme" data-act="theme" aria-label="Switch to ${S.dark ? 'light' : 'dark'} theme">${S.dark ? '☀' : '☾'}</button>${['mainnet', 'signet'].map(k => `<button class="pill${k === S.network ? ' on' : ''}" data-act="net" data-n="${k}"${k === S.network ? ' aria-current="true"' : ''}${S.policy ? ' disabled' : ''}>${k.toUpperCase()}</button>`).join('')}</div></div>
     <div class="hero"><div class="marks"><span class="mark">${BTC}</span><span class="mark">${TAC}</span></div>
-      <h1>Bitcoin multisig</h1><div class="free">FREE · NOTHING TO DEPLOY</div></div>
+      <h1>Bitcoin multisig</h1><div class="sub">Any Ethereum or Bitcoin wallet can own one.</div><div class="free">FREE · NOTHING TO DEPLOY</div></div>
     ${renderFlow()}
     ${S.msg ? `<div class="note bad" role="status">${esc(S.msg)}</div>` : ''}
     <section class="pane">${pane()}</section>
@@ -272,6 +280,7 @@ async function finish(skip){
 }
 
 const ACT = {
+  copyevm(){ return navigator.clipboard.writeText(S.me.evm).then(() => toast('ADDRESS COPIED'), () => toast('THE BROWSER REFUSED THE CLIPBOARD')); },
   finish(){ return finish(false); },
   skipcheck(){ return finish(true); },
   theme(){ S.dark = !S.dark; lsSet('ms_light', S.dark ? '' : '1'); },
@@ -296,7 +305,7 @@ const ACT = {
   },
   net(el){
     wipe();
-    S.network = el.dataset.n; S.me = null; S.step = 0;
+    S.network = el.dataset.n; S.me = null; S.step = 0; S.confirming = false;
     S.rows.forEach(r => { r.owner = null; r.state = r.text.trim() ? 'checking' : 'empty'; });
     return ACT.check();
   },
@@ -326,7 +335,6 @@ document.addEventListener('click', async e => {
   touch();
   render();
 });
-let _typing;
 document.addEventListener('input', e => {
   if(e.target.dataset.name){ S.name = e.target.value; return; }
   const i = e.target.dataset.row;
@@ -335,8 +343,9 @@ document.addEventListener('input', e => {
   row.text = e.target.value;
   row.state = row.text.trim() ? 'checking' : 'empty';
   render();
-  clearTimeout(_typing);
-  _typing = setTimeout(async () => { await resolve(row); render(); }, 350);
+  // One timer per row: a shared one let typing in the next row cancel this row's lookup.
+  clearTimeout(row.typing);
+  row.typing = setTimeout(async () => { await resolve(row); render(); }, 350);
 });
 
 // The address is /btc. Links stay btc.html, the only spelling an IPFS gateway resolves,

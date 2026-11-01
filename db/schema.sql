@@ -1847,8 +1847,11 @@ CREATE TABLE IF NOT EXISTS btc_owner_handles (
   PRIMARY KEY (address, network)
 );
 ALTER TABLE btc_owner_handles ENABLE ROW LEVEL SECURITY;
+-- The key a handle carries, as the service read it. Filled in for older rows by hand.
+ALTER TABLE btc_owner_handles ADD COLUMN IF NOT EXISTS key_id text;
 
-CREATE OR REPLACE FUNCTION put_btc_handle(p_address text, p_network text, p_handle text)
+DROP FUNCTION IF EXISTS put_btc_handle(text, text, text);
+CREATE OR REPLACE FUNCTION put_btc_handle(p_address text, p_network text, p_handle text, p_key text)
 RETURNS void AS $$
 BEGIN
   IF coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb->>'role', '') <> 'metadata_writer' THEN
@@ -1857,12 +1860,15 @@ BEGIN
   -- Keyed on the owner: only the service calls this, so client_ip() is one bucket for
   -- everyone, and a busy minute would turn honest owners away.
   PERFORM rate_gate('btc_handle:' || p_address, 30, interval '1 minute');
-  INSERT INTO btc_owner_handles (address, network, handle) VALUES (p_address, p_network, p_handle)
-  -- A key stays once it is on a vault its owner confirmed: a twin is derived from this
-  -- table, so changing it then would move a funded vault's address. Before that an owner
-  -- can still replace it, or a first bad key would hold the address for good.
+  -- An address keeps its first key: a twin is derived from this table, so a change would
+  -- move a funded vault's address, and a proof carries no date to say which is newer. A
+  -- new handle for the same key is fine, which is how an older handle gets its new proof.
+  INSERT INTO btc_owner_handles (address, network, handle, key_id) VALUES (p_address, p_network, p_handle, p_key)
   ON CONFLICT (address, network) DO UPDATE SET handle = EXCLUDED.handle, updated_at = now()
-  WHERE NOT EXISTS (SELECT 1 FROM btc_vault_owners v WHERE v.address = EXCLUDED.address AND v.network = EXCLUDED.network AND v.confirmed);
+  WHERE btc_owner_handles.key_id = EXCLUDED.key_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'This address already holds a different key' USING ERRCODE = '23505';
+  END IF;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
@@ -1903,14 +1909,16 @@ BEGIN
   END IF;
   -- Rows are never needed for long: a proposal ends when its coins move.
   DELETE FROM btc_proposals WHERE updated_at < now() - interval '30 days';
-  -- This database also serves Ethereum vaults, so this table has a ceiling of its own.
-  IF (SELECT count(*) FROM btc_proposals) >= 20000 THEN
-    RAISE EXCEPTION 'The Bitcoin queue is full' USING ERRCODE = '54000';
-  END IF;
-  -- A full vault refuses new rows rather than pushing real ones out of the window.
-  IF NOT EXISTS (SELECT 1 FROM btc_proposals WHERE vault = p_vault AND id = p_id)
-     AND (SELECT count(*) FROM btc_proposals WHERE vault = p_vault) >= 50 THEN
-    RAISE EXCEPTION 'This vault has too many open proposals' USING ERRCODE = '54000';
+  -- Limits fall on new rows only, so a full queue can still gather signatures.
+  IF NOT EXISTS (SELECT 1 FROM btc_proposals WHERE vault = p_vault AND id = p_id) THEN
+    -- This database also serves Ethereum vaults, so this table has a ceiling of its own.
+    IF (SELECT count(*) FROM btc_proposals) >= 20000 THEN
+      RAISE EXCEPTION 'The Bitcoin queue is full' USING ERRCODE = '54000';
+    END IF;
+    -- A full vault refuses new rows rather than pushing real ones out of the window.
+    IF (SELECT count(*) FROM btc_proposals WHERE vault = p_vault) >= 50 THEN
+      RAISE EXCEPTION 'This vault has too many open proposals' USING ERRCODE = '54000';
+    END IF;
   END IF;
   INSERT INTO btc_proposals (vault, id, network, psbt) VALUES (p_vault, p_id, p_network, p_psbt)
   ON CONFLICT (vault, id) DO UPDATE SET psbt = EXCLUDED.psbt, updated_at = now();
@@ -1993,6 +2001,13 @@ BEGIN
   END IF;
   IF p_confirmed AND (SELECT count(*) FROM btc_vault_owners WHERE address = p_address AND network = p_network AND confirmed) >= 200 THEN
     RAISE EXCEPTION 'Too many vaults on this address' USING ERRCODE = '54000';
+  END IF;
+  -- Unanswered invitations age out, and the table has a ceiling of its own. A vault spends
+  -- from its backup, so a full list costs convenience and never coins.
+  DELETE FROM btc_vault_owners WHERE NOT confirmed AND created_at < now() - interval '90 days';
+  IF (SELECT count(*) FROM btc_vault_owners) >= (CASE WHEN p_confirmed THEN 200000 ELSE 100000 END) THEN
+    IF NOT p_confirmed THEN RETURN; END IF;
+    RAISE EXCEPTION 'The vault list is full' USING ERRCODE = '54000';
   END IF;
   INSERT INTO btc_vault_owners (address, network, vault, descriptor, confirmed, at, sig)
   VALUES (p_address, p_network, p_vault, p_descriptor, p_confirmed, p_at, p_sig)

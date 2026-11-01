@@ -510,6 +510,27 @@ const EVM_CHAINS = {
 };
 const selector = sig => '0x' + hex.encode(keccak_256(te.encode(sig)).subarray(0, 4));
 
+// A .wei or .gwei name to the address it points at, the way the main app does it. Each
+// service hashes its own suffix away, so the service is picked by suffix first.
+const NAME_SERVICES = { wei: '0x0000000000696760E15f265e828DB644A0c242EB', gwei: '0x9D51D507BC7264d4fE8Ad1cf7Fe191933A0a81d6' };
+const isName = t => /^[a-z0-9_-]+(?:\.[a-z0-9_-]+)*\.g?wei$/i.test(t);
+async function resolveName(name, doFetch = (...a) => root.fetch(...a)){
+  const to = NAME_SERVICES[name.toLowerCase().split('.').pop()];
+  const call = async data => {
+    const r = await doFetch(EVM_CHAINS[1].rpc, { method: 'POST', headers: { 'content-type': 'application/json' }, signal: root.AbortSignal?.timeout(TIMEOUT_MS),
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to, data }, 'latest'] }) });
+    const j = await r.json();
+    if(j.error || !/^0x[0-9a-f]{64}$/i.test(j.result || '')) throw new Error('That name could not be read.');
+    return j.result.slice(2);
+  };
+  const bytes = te.encode(name.toLowerCase()), padded = hex.encode(bytes).padEnd(Math.ceil(bytes.length / 32) * 64, '0');
+  const id = await call(selector('computeId(string)') + (32).toString(16).padStart(64, '0') + bytes.length.toString(16).padStart(64, '0') + padded);
+  const word = await call(selector('resolve(uint256)') + id);
+  const address = '0x' + word.slice(24);
+  if(/^0x0+$/.test(address)) throw new Error('That name is not registered.');
+  return address;
+}
+
 async function readEvmVault(chainId, address, doFetch = (...a) => root.fetch(...a)){
   const c = EVM_CHAINS[chainId];
   if(!c) throw new Error('unknown chain');
@@ -587,17 +608,19 @@ function recoveryText(network){
     `Owners on a hardware wallet: sign with your wallet, using account m/87'/${n.coin}'/0'-style paths in the descriptor.`,
     '',
     'Owners who connected a wallet: your key comes from one signature, and you can make it again.',
-    '  Ethereum wallet: personal_sign this exact text.',
+    '  Ethereum wallet: personal_sign this exact text, without the indent.',
     lines(ownerMessage(network)),
     '    Take r||s||v as 65 bytes, s low, v 27 or 28.',
     '    seed = sha256("multisig-bitcoin-owner-v1" || 0x00 || signature)',
-    '  Bitcoin wallet: sign this exact text, BIP-137.',
+    '  Bitcoin wallet: sign this exact text, without the indent, BIP-137. Leather signs in BIP-322,',
+    '  so a Leather owner exports their key from the wallet menu instead, and keeps that copy.',
     lines(walletMessage()),
     '    Take r||s from the 65 bytes, s low.',
     '    seed = sha256("multisig-wallet-v1" || 0x00 || r || s)',
     `  The BIP-32 master of that seed, at m/87'/${n.coin}'/0', is your key. Put its xprv where your`,
     '  xpub is in the descriptor, import it to Bitcoin Core, and sign there. The app can also',
-    '  export this key for you, from your wallet menu, and runs from any IPFS mirror.',
+    '  export this key for you, from your wallet menu, and runs from an IPFS gateway that gives',
+    '  each site its own origin, such as a dweb.link subdomain.',
   ].join('\n');
 }
 function verifyOwnerAuth(owner, network, action, at, sig, now = Math.floor(Date.now() / 1000)){
@@ -729,12 +752,12 @@ const derivations = (slot, which) => {
 // item never needs more than two, and the whole proposal has a budget. Spending it just
 // makes an item read as not ours.
 const MAX_CLAIMS = 2;
-function locate(policy, script, entries, budget){
+function locate(policy, script, entries, budget, limit = MAX_INDEX){
   const tried = new Set();
   for(const [, { der }] of (entries || []).slice(0, 64)){
     if(der.path.length < 2) continue;
     const [chain, index] = der.path.slice(-2);
-    if(chain >= HARDENED || index >= MAX_INDEX) continue;
+    if(chain >= HARDENED || index >= limit) continue;
     const id = `${chain % 2}/${index}`;
     if(tried.has(id)) continue;
     if(tried.size >= MAX_CLAIMS || budget.left <= 0) return null;
@@ -940,7 +963,7 @@ function inspect(psbtText, policy, known = { receive: 0, change: 0 }){
     if(hex.encode(OutScript.encode(decoded)) !== hex.encode(o.script)) throw new Error(`output ${i} is not a standard address`);
     // Ours, and also somewhere a scan will find it. An address far past the gap is
     // this vault's on paper and lost in practice, so it does not count as change.
-    const slot = locate(policy, o.script, o.tapBip32Derivation, budget);
+    const slot = locate(policy, o.script, o.tapBip32Derivation, budget, HARDENED);
     const reach = slot && slot.index < MAX_INDEX && slot.index < (slot.branch ? known.change : known.receive) + GAP;
     outputs.push({ address: Address(params).encode(decoded), sats: Number(o.amount), change: !!reach, stranded: !!slot && !reach, index: slot ? slot.index : null, branch: slot ? slot.branch : null });
   }
@@ -973,6 +996,7 @@ function inspect(psbtText, policy, known = { receive: 0, change: 0 }){
 function sign(psbtText, signer, policy, known){
   const view = inspect(psbtText, policy, known);
   if(view.feeRate > MAX_FEE_RATE) throw new Error(`refusing to sign: the fee is ${view.feeRate.toFixed(0)} sat/vB`);
+  if(view.vsize > MAX_VSIZE) throw new Error('refusing to sign: this is too large for a node to relay');
   if(view.outputs.some(o => o.stranded)) throw new Error('refusing to sign: this sends coins to a vault address no scan would ever find');
   if(view.inputs.some(i => i.sats <= DUST)) throw new Error('refusing to sign: this spends a dust coin, which may hold a token');
   if(view.inputs.some(i => known?.quarantined?.includes(`${i.txid}:${i.vout}`))) throw new Error('refusing to sign: this spends a quarantined coin, which may hold a token');
@@ -1138,7 +1162,7 @@ async function scan(policy, c, gap = GAP){
     while(idle < gap){
       // Deposits can be spread out on purpose to make a scan run on. It stops here and
       // says so, and the coins it found stay usable.
-      if(index >= MAX_INDEX){ next[branch] = Math.max(next[branch], MAX_INDEX - gap); truncated = true; break; }
+      if(index >= MAX_INDEX){ truncated = true; break; }
       const batch = Array.from({ length: Math.min(5, gap - idle) }, (_, i) => index + i);
       const seen = await Promise.all(batch.map(i => c.used(vaultOf(policy, branch, i).address)));
       for(let i = 0; i < batch.length; i++){
@@ -1155,6 +1179,9 @@ async function scan(policy, c, gap = GAP){
       const sure = await c.usedByAll(vaultOf(policy, branch, next[branch] - 1).address).catch(() => false);
       if(!sure) throw new Error('the explorers disagree about this vault, so its balance cannot be trusted right now');
     }
+    // A vault pushed to the end reuses addresses inside the range, not ones past it: the
+    // next deposit and the next change must land where a scan and a signer will look.
+    next[branch] = Math.min(next[branch], MAX_INDEX - gap);
   }
   if(c.tx) await classifyCoins(coins, c);
   return { coins, receive: next[0], change: next[1], truncated };
@@ -1165,8 +1192,10 @@ async function scan(policy, c, gap = GAP){
 async function classifyCoins(coins, c){
   if(!c.tx) throw new Error('cannot check coins for tokens');
   const hits = [];
-  // Dust is never spent anyway, so a flood of it costs no lookups.
-  await Promise.all(coins.filter(u => u.value > DUST).map(async u => {
+  // Dust is never spent anyway, so a flood of it costs no lookups. Anything larger is
+  // asked about a few at a time, so a flood just over the line stays a slow page.
+  const spendable = coins.filter(u => u.value > DUST);
+  for(let i = 0; i < spendable.length; i += 8) await Promise.all(spendable.slice(i, i + 8).map(async u => {
     u.quarantine = undefined;
     try { if(hasTacitEnvelope(await c.tx(u.txid))) hits.push(u); }
     catch(_) { u.quarantine = 'unknown'; }
@@ -1200,7 +1229,7 @@ function concat(...parts){
   return out;
 }
 
-root.BitcoinVault = Object.freeze({ exportAccountKey, recoveryText, sameKey, TACIT_ASSETS, signOwnerAuth, verifyOwnerAuth, saveVault, listVaults, assertSpendable, isProtected, hasTacitEnvelope, walletMessage, linkMessage, keyFromWalletSignature, evmSignHash, evmSignMessage, bitcoinMessageHash, bitcoinSigners, handleForWallet, proposalId, vaultId, publishProposal, fetchProposals, openProposals, publishHandle, fetchHandles, MAX_INDEX, txidOf, seatMisdescribed, EVM_CHAINS, selectors: { threshold: selector('threshold()') }, readEvmVault, mirror, bindingMessage, evmMessageHash, NETWORKS, DUST, GAP, MAX_OWNERS, MAX_OLDER, MAX_FEE_RATE, encodeOwner, decodeOwner, originText, ownerMessage, deriveOwnerKey, keyFromSignature, fingerprintOf,
+root.BitcoinVault = Object.freeze({ keyId, isName, resolveName, exportAccountKey, recoveryText, sameKey, TACIT_ASSETS, signOwnerAuth, verifyOwnerAuth, saveVault, listVaults, assertSpendable, isProtected, hasTacitEnvelope, walletMessage, linkMessage, keyFromWalletSignature, evmSignHash, evmSignMessage, bitcoinMessageHash, bitcoinSigners, handleForWallet, proposalId, vaultId, publishProposal, fetchProposals, openProposals, publishHandle, fetchHandles, MAX_INDEX, txidOf, seatMisdescribed, EVM_CHAINS, selectors: { threshold: selector('threshold()') }, readEvmVault, mirror, bindingMessage, evmMessageHash, NETWORKS, DUST, GAP, MAX_OWNERS, MAX_OLDER, MAX_FEE_RATE, encodeOwner, decodeOwner, originText, ownerMessage, deriveOwnerKey, keyFromSignature, fingerprintOf,
   policyOf, descriptor, descriptorChecksum, parseDescriptor, walletPolicy, vaultOf, vsize, coinsFor, propose, inspect, sign, combine, finalize, chain, scan, evmSigner });
 
 })(typeof window !== 'undefined' ? window : globalThis);

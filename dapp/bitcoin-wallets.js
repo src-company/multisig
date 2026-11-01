@@ -227,10 +227,14 @@ function providerFor(wallet){
       switch(method){
         case 'eth_requestAccounts':
           if(!key){
-            key = await connectWallet(wallet, 'mainnet');
+            const got = await connectWallet(wallet, 'mainnet');
             // Only the Ethereum key is used here, so the Bitcoin root goes at once.
-            key.signer.wipePrivateData();
-            key.signer = null;
+            got.signer.wipePrivateData();
+            got.signer = null;
+            // That key can hold a seat here, so it repeats itself before it does.
+            try { await gap(); await got.finish(); }
+            catch(e) { got.evmPriv.fill(0); throw e; }
+            key = got;
             touch();
           }
           return [key.evm];

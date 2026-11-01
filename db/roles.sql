@@ -334,9 +334,9 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON FUNCTIONS FROM PUBLIC;
 -- Bitcoin owner handles: written only by the service that has checked the signature,
 -- read by anyone, because a handle is public and proves itself.
 REVOKE ALL ON btc_owner_handles FROM PUBLIC, anon;
-REVOKE ALL ON FUNCTION put_btc_handle(text, text, text) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION put_btc_handle(text, text, text, text) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION btc_handles(text, text[]) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION put_btc_handle(text, text, text) TO metadata_writer;
+GRANT EXECUTE ON FUNCTION put_btc_handle(text, text, text, text) TO metadata_writer;
 GRANT EXECUTE ON FUNCTION btc_handles(text, text[]) TO anon;
 
 -- Bitcoin proposals: the same split. The service writes what it has verified, and

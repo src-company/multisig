@@ -758,10 +758,11 @@ function dependencies({ postgrestUrl, jwtSecret, rpcUrls }, fetcher = fetch) {
 // database's own rate gates cannot do this: they see only this service.
 const BTC_WINDOW_MS = 60000, BTC_PER_WINDOW = 20;
 const _btcCalls = new Map();
+// The host's edge sets this one itself. Failing that the rightmost forwarded entry, the
+// hop it wrote: the leftmost is whatever a caller sent.
+const callerOf = req => String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').split(',').pop().trim();
 function btcRateLimit(req) {
-  // The host's edge sets this one itself. Failing that the rightmost forwarded entry, the
-  // hop it wrote: the leftmost is whatever a caller sent.
-  const ip = String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').split(',').pop().trim();
+  const ip = callerOf(req);
   const now = Date.now();
   if (_btcCalls.size > 10000) _btcCalls.clear();
   const seen = _btcCalls.get(ip);
@@ -778,7 +779,7 @@ function verifyHandle(input) {
   try { owner = BitcoinVault.decodeOwner(input.handle, input.network); }
   catch (error) { throw new RequestError(403, error.message); }
   if (!owner.proven) throw new RequestError(403, 'A handle must be signed by its Ethereum address');
-  const write = { fn: 'put_btc_handle', args: { p_address: owner.evm, p_network: input.network, p_handle: input.handle.trim() } };
+  const write = { fn: 'put_btc_handle', args: { p_address: owner.evm, p_network: input.network, p_handle: input.handle.trim(), p_key: BitcoinVault.keyId(owner, input.network) } };
   if (owner.wallet) write.link = { fn: 'put_btc_wallet_link', args: { p_wallet: owner.wallet, p_network: input.network, p_address: owner.evm } };
   return write;
 }
@@ -795,76 +796,88 @@ function btcOwner(input, action) {
   return owner;
 }
 
-// Records a vault for the owner who signed, and offers it to the others named. A row is
-// marked confirmed only for the signer: handles are public, so anyone could name anyone.
-function saveBitcoinVault(input) {
+// The signature checks run in the worker, since one request can name forty owners.
+async function saveBitcoinVault(input, who) {
   check(input && typeof input.descriptor === 'string' && input.descriptor.length <= 8000, 'Invalid vault');
   check(input.network === 'mainnet' || input.network === 'signet', 'Invalid network');
-  let policy;
-  try { policy = BitcoinVault.parseDescriptor(input.descriptor, input.network); }
-  catch (error) { throw new RequestError(403, error.message); }
-  const vault = BitcoinVault.vaultId(policy), onVault = x => policy.paths.some(p => p.keys.some(k => k.xpub === x));
-  const signer = btcOwner(input, () => `save:${vault}`);
-  if (!onVault(signer.xpub)) throw new RequestError(403, 'That owner is not on this vault');
+  check(typeof input.handle === 'string' && input.handle.length <= 700, 'Invalid handle');
+  const handles = Array.isArray(input.handles) ? input.handles.slice(0, 40) : [];
+  const { vault, signer, offered } = await inWorker('save', { descriptor: input.descriptor, network: input.network, handle: input.handle, at: input.at, sig: input.sig, handles }, who);
   const row = (address, confirmed) => ({ fn: 'put_btc_vault', args: { p_address: address, p_network: input.network, p_vault: vault, p_descriptor: input.descriptor.trim(), p_confirmed: confirmed, p_at: confirmed ? input.at : null, p_sig: confirmed ? input.sig : null } });
-  const writes = [row(signer.evm, true)], seen = new Set([signer.evm]);
-  for (const text of (Array.isArray(input.handles) ? input.handles : []).slice(0, 40)) {
-    let h;
-    try { h = BitcoinVault.decodeOwner(String(text), input.network); } catch (_) { continue; }
-    if (h.proven && onVault(h.xpub) && !seen.has(h.evm)) { seen.add(h.evm); writes.push(row(h.evm, false)); }
-  }
-  return writes;
+  return [row(signer, true), ...offered.map(a => row(a, false))];
 }
 
 // Same rule as an Ethereum proposal: nothing enters the queue without an owner's
 // signature. The stored copy is merged here, so two owners signing at once both land.
 const { Worker } = require('node:worker_threads');
-const WORKER_MS = 3000, WORKER_QUEUE = 4;
-let _worker = null, _workerId = 0;
-const _waiting = new Map();
+const WORKER_MS = 3000, WORKER_QUEUE = 4, WORKER_SHARE_MS = 4000;
+let _worker = null, _workerId = 0, _running = null;
+const _queue = [], _spent = new Map();
+// One job at a time, clocked from when it starts, so a job that runs long costs only
+// itself. Each caller gets a share of the thread per window, charged by the time their
+// jobs took, so nobody keeps it for themselves by sending the slowest thing allowed.
+const overShare = who => { const s = _spent.get(who); return !!s && Date.now() - s.at <= BTC_WINDOW_MS && s.ms >= WORKER_SHARE_MS; };
+function charge(who, ms) {
+  if (!who) return;
+  const now = Date.now(), s = _spent.get(who);
+  if (_spent.size > 10000) _spent.clear();
+  if (!s || now - s.at > BTC_WINDOW_MS) _spent.set(who, { at: now, ms }); else s.ms += ms;
+}
+function endJob() {
+  const job = _running;
+  _running = null;
+  if (job) { clearTimeout(job.timer); charge(job.who, Date.now() - job.at); }
+  return job;
+}
 function stopWorker() {
   const w = _worker;
   _worker = null;
   w?.terminate();
-  for (const { no, timer } of _waiting.values()) { clearTimeout(timer); no(new RequestError(503, 'Please try again')); }
-  _waiting.clear();
+  endJob()?.no(new RequestError(503, 'Please try again'));
+  pump();
+}
+function pump() {
+  if (_running) return;
+  // Idle, it must not hold the process open.
+  if (!_queue.length) { _worker?.unref(); return; }
+  if (!_worker) {
+    const w = _worker = new Worker(path.join(__dirname, 'btc-worker.cjs'));
+    w.on('message', ({ id, result, error }) => {
+      if (id !== _running?.id) return;
+      const job = endJob();
+      if (error) job.no(new RequestError(403, error)); else job.ok(result);
+      pump();
+    });
+    w.on('error', () => { if (w === _worker) stopWorker(); });
+  }
+  const job = _running = _queue.shift();
+  job.at = Date.now();
+  job.timer = setTimeout(stopWorker, WORKER_MS);
+  _worker.ref();
+  _worker.postMessage({ id: job.id, op: job.op, input: job.input });
 }
 // The work in its own thread, with a hard stop. Too much at once is refused, not queued.
-function inWorker(op, input) {
-  if (_waiting.size >= WORKER_QUEUE) return Promise.reject(new RequestError(503, 'Please try again'));
-  if (!_worker) {
-    _worker = new Worker(path.join(__dirname, 'btc-worker.cjs'));
-    _worker.on('message', ({ id, result, error }) => {
-      const job = _waiting.get(id);
-      if (!job) return;
-      _waiting.delete(id);
-      clearTimeout(job.timer);
-      // Idle, it must not hold the process open.
-      if (!_waiting.size) _worker?.unref();
-      if (error) job.no(new RequestError(403, error)); else job.ok(result);
-    });
-    _worker.on('error', stopWorker);
-  }
+function inWorker(op, input, who) {
+  if (who && overShare(who)) return Promise.reject(new RequestError(429, 'Too many requests'));
+  if (_queue.length >= WORKER_QUEUE) return Promise.reject(new RequestError(503, 'Please try again'));
   return new Promise((ok, no) => {
-    const id = ++_workerId, timer = setTimeout(stopWorker, WORKER_MS);
-    _worker.ref();
-    _waiting.set(id, { ok, no, timer });
-    _worker.postMessage({ id, op, input });
+    _queue.push({ id: ++_workerId, op, input, who, ok, no });
+    pump();
   });
 }
 
-async function admitBitcoinProposal(input, deps) {
+async function admitBitcoinProposal(input, deps, who) {
   check(input && typeof input.psbt === 'string' && input.psbt.length <= 72000, 'Invalid proposal');
   check(typeof input.descriptor === 'string' && input.descriptor.length <= 8000, 'Invalid vault');
   check(input.network === 'mainnet' || input.network === 'signet', 'Invalid network');
   const job = { descriptor: input.descriptor, network: input.network, psbt: input.psbt };
-  const { vault, id } = await inWorker('admit', job);
+  const { vault, id } = await inWorker('admit', job, who);
   let psbt = input.psbt;
   const prior = await deps.readBtcProposal(vault, id);
   // A copy that cannot merge is refused, never stored over what is there: replacing the
   // row would throw away every signature on it.
   if (prior) {
-    try { psbt = (await inWorker('merge', { ...job, prior })).psbt; }
+    try { psbt = (await inWorker('merge', { ...job, prior }, who)).psbt; }
     catch (error) {
       if (error.status === 503) throw error;
       throw new RequestError(409, 'That copy disagrees with the proposal in the queue');
@@ -875,6 +888,8 @@ async function admitBitcoinProposal(input, deps) {
 
 function createHandler(deps, allowedOrigins = []) {
   let active = 0;
+  // A slow body holds a slot, so one caller cannot take them all.
+  const open = new Map();
   return async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -889,8 +904,10 @@ function createHandler(deps, allowedOrigins = []) {
     if (!['/proposals', '/metadata', '/action', '/signature', '/reconcile', '/register', '/confirm', '/session', '/handle', '/btc-proposal', '/btc-vault', '/btc-vaults'].includes(req.url)) { res.writeHead(404); res.end(); return; }
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
     if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
-    if (active >= 32) { res.writeHead(503); res.end(); return; }
+    const caller = callerOf(req);
+    if (active >= 32 || (open.get(caller) || 0) >= 8) { res.writeHead(503); res.end(); return; }
     active++;
+    open.set(caller, (open.get(caller) || 0) + 1);
     try {
       check(/^application\/json(?:;|$)/i.test(req.headers['content-type'] || ''), 'Expected application/json');
       let size = 0;
@@ -911,7 +928,7 @@ function createHandler(deps, allowedOrigins = []) {
       }
       if (['/btc-proposal', '/handle', '/btc-vault', '/btc-vaults'].includes(req.url)) btcRateLimit(req);
       if (req.url === '/btc-vault') {
-        for (const write of saveBitcoinVault(input)) await deps.saveMetadata(write);
+        for (const write of await saveBitcoinVault(input, caller)) await deps.saveMetadata(write);
         res.writeHead(204);
         res.end();
         return;
@@ -924,7 +941,7 @@ function createHandler(deps, allowedOrigins = []) {
         return;
       }
       if (req.url === '/btc-proposal') {
-        await deps.saveMetadata(await admitBitcoinProposal(input, deps));
+        await deps.saveMetadata(await admitBitcoinProposal(input, deps, caller));
         res.writeHead(204);
         res.end();
         return;
@@ -987,7 +1004,10 @@ function createHandler(deps, allowedOrigins = []) {
     } catch (error) {
       res.writeHead(error.status || 503, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ message: error.status ? error.message : 'Proposal verification is unavailable' }));
-    } finally { active--; }
+    } finally {
+      active--;
+      if (open.get(caller) > 1) open.set(caller, open.get(caller) - 1); else open.delete(caller);
+    }
   };
 }
 

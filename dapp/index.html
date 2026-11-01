@@ -7734,11 +7734,23 @@ function resolveWalletOwner(i){
   if(!/^(bc1|tb1)[a-z0-9]{20,}$/i.test(raw) || _walletAsked.has(raw)) return;
   _walletAsked.add(raw);
   loadBitcoin().then(BV => BV.handleForWallet(/^tb1/i.test(raw) ? 'signet' : 'mainnet', raw)).then(found => {
-    if(!found){ flash('THAT BITCOIN WALLET HAS NOT CONNECTED YET'); _walletAsked.delete(raw); return; }
+    if(!found){ flash('ASK THEM TO CONNECT THAT WALLET AT /BTC FIRST'); _walletAsked.delete(raw); return; }
     if((S.cf.owners[i] || {}).addr?.trim() === raw){ S.cf.owners[i].addr = found.evm; if(!S.cf.owners[i].label) S.cf.owners[i].label = 'BITCOIN WALLET'; render(); }
   }).catch(() => { _walletAsked.delete(raw); });
 }
 window.resolveWalletOwner = resolveWalletOwner;
+// The same for adding an owner to a vault that already exists.
+function resolveAdminWallet(){
+  const el = document.getElementById('admin-add-owner'), raw = (el?.value || '').trim();
+  if(!/^(bc1|tb1)[a-z0-9]{20,}$/i.test(raw)) return;
+  loadBitcoin().then(BV => BV.handleForWallet(/^tb1/i.test(raw) ? 'signet' : 'mainnet', raw)).then(found => {
+    if(!found){ flash('ASK THEM TO CONNECT THAT WALLET AT /BTC FIRST'); return; }
+    if((document.getElementById('admin-add-owner')?.value || '').trim() !== raw) return;
+    el.value = found.evm;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }).catch(() => {});
+}
+window.resolveAdminWallet = resolveAdminWallet;
 
 function retryOwnerName(i){
   const raw = ((S.cf.owners[i] || {}).addr || '').trim();
@@ -8174,7 +8186,7 @@ function renderCreate(mob){
         // operator is typing an address drops them out of the field mid-paste.
         return`<div class="owner-row">
         <span class="o-num" style="color:${note.num}">${String(i+1).padStart(2,"0")}</span>
-        <input class="inp o-addr" id="cf-own-${i}" onblur="resolveWalletOwner(${i})" aria-label="Owner ${i+1} address or name" aria-invalid="${bad}"${note.html?` aria-describedby="cf-own-note-${i}"`:''} style="${bad?'border-bottom-color:var(--r)':''}" placeholder="0x... or a name" value="${esc(shortAddr(o.addr))}" onpaste="pasteOwners(event,${i})" onfocus="this.value=S.cf.owners[${i}].addr" onblur="this.value=shortAddr(S.cf.owners[${i}].addr)" oninput="S.cf.owners[${i}].addr=this.value;const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;if(+S.cf.threshold>fc){S.cf.threshold=String(fc)}" onchange="S.cf.owners[${i}].addr=this.value;render()">
+        <input class="inp o-addr" id="cf-own-${i}" onblur="resolveWalletOwner(${i})" aria-label="Owner ${i+1} address or name" aria-invalid="${bad}"${note.html?` aria-describedby="cf-own-note-${i}"`:''} style="${bad?'border-bottom-color:var(--r)':''}" placeholder="0x..., a name or bc1..." value="${esc(shortAddr(o.addr))}" onpaste="pasteOwners(event,${i})" onfocus="this.value=S.cf.owners[${i}].addr" onblur="this.value=shortAddr(S.cf.owners[${i}].addr)" oninput="S.cf.owners[${i}].addr=this.value;const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;if(+S.cf.threshold>fc){S.cf.threshold=String(fc)}" onchange="S.cf.owners[${i}].addr=this.value;render()">
         <input class="inp o-label" id="cf-own-lbl-${i}" maxlength="64" aria-label="Owner ${i+1} label" placeholder="LABEL" value="${esc(o.label)}" oninput="S.cf.owners[${i}].label=this.value" onchange="render()">
         ${c.owners.length>1?`<button class="x-btn red o-del" aria-label="Remove owner ${i+1}" title="Remove this owner" onclick="S.cf.owners.splice(${i},1);const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;S.cf.threshold=String(Math.min(+S.cf.threshold||1,fc));render()">&#10005;</button>`:""}
       </div>${note.html?`<div class="owner-note" id="cf-own-note-${i}" style="color:${note.color}">${note.html}</div>`:''}`}).join("")}
@@ -8411,7 +8423,7 @@ ${/* You cannot propose removing yourself from here, and the row still has to
     </div>`}).join("")}
     <div class="sep"></div>
     <div class="fhead"><label class="lbl" for="admin-add-owner"><span class="dim">ADD &middot;</span> OWNER</label><span class="fhint" id="admin-add-owner-status" role="status"></span></div>
-    <input class="inp" id="admin-add-owner" style="margin-top:8px" placeholder="0x... or a name" aria-describedby="admin-add-owner-status" value="${esc(S.adminAddOwner)}" oninput="onAdminAddOwner(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();doAdminPropose('addOwner')}">
+    <input class="inp" id="admin-add-owner" onblur="resolveAdminWallet()" style="margin-top:8px" placeholder="0x..., a name or bc1..." aria-describedby="admin-add-owner-status" value="${esc(S.adminAddOwner)}" oninput="onAdminAddOwner(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();doAdminPropose('addOwner')}">
     <input class="inp" id="admin-add-label" maxlength="64" style="font-size:11px;letter-spacing:1px" placeholder="LABEL (OPTIONAL)" aria-label="Label for the new owner (optional)" value="${esc(S.adminAddLabel)}" oninput="S.adminAddLabel=this.value" onkeydown="if(event.key==='Enter'){event.preventDefault();doAdminPropose('addOwner')}">
     <button class="btn btn-outline btn-w" onclick="doAdminPropose('addOwner')">PROPOSE OWNER</button>
   </div>`:`<div>

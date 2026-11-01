@@ -20,6 +20,24 @@ const ops = {
     if (!view.signedBy.length) throw Object.assign(new Error('A proposal needs an owner signature'), { refused: true });
     return { vault: BV.vaultId(policy), id: BV.proposalId(psbt) };
   },
+  // Records a vault for the owner who signed, and offers it to the others named. A row is
+  // marked confirmed only for the signer: handles are public, so anyone could name anyone.
+  save(input) {
+    const fail = message => Object.assign(new Error(message), { refused: true });
+    const { network } = input, policy = BV.parseDescriptor(input.descriptor, network), vault = BV.vaultId(policy);
+    const onVault = x => policy.paths.some(p => p.keys.some(k => BV.sameKey(k, x, network)));
+    const signer = BV.decodeOwner(input.handle, network);
+    if (!signer.proven) throw fail('A handle must be signed by its Ethereum address');
+    if (!BV.verifyOwnerAuth(signer, network, `save:${vault}`, input.at, input.sig)) throw fail('Signature has expired or does not verify');
+    if (!onVault(signer)) throw fail('That owner is not on this vault');
+    const offered = [], seen = new Set([signer.evm]);
+    for (const text of input.handles.slice(0, 40)) {
+      let h;
+      try { h = BV.decodeOwner(String(text), network); } catch (_) { continue; }
+      if (h.proven && onVault(h) && !seen.has(h.evm)) { seen.add(h.evm); offered.push(h.evm); }
+    }
+    return { vault, signer: signer.evm, offered };
+  },
   merge({ descriptor, network, prior, psbt }) {
     return { psbt: BV.combine([prior, psbt], BV.parseDescriptor(descriptor, network)) };
   },

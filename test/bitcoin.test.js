@@ -327,10 +327,10 @@ test('a vault address past the scan is not change, and is not signed', () => {
   const policy = plain('signet');
   const far = BV.propose({ policy, utxos: [fakeCoin(100000)], tip: 200, outputs: [{ address: payee, sats: 30000 }], feeRate: 2, change: 2000000000 });
   const v = BV.inspect(far, policy);
-  // Past the ceiling a claim is not even tried: it reads as a payment to a stranger,
-  // full address on screen, and no scan's word makes it change.
+  // Past the ceiling it is still recognised as ours, and no scan's word makes it change.
   assert.equal(v.outputs[1].change, false);
-  assert.equal(v.outputs[1].stranded, false);
+  assert.equal(v.outputs[1].stranded, true);
+  assert.throws(() => BV.sign(far, seats('signet')[0].signer, policy), /no scan would ever find/);
   assert.equal(BV.inspect(far, policy, { receive: 0, change: 2000000000 }).outputs[1].change, false);
   // Within it, an address is fine once a scan has reached that far.
   const later = BV.propose({ policy, utxos: [fakeCoin(100000)], tip: 200, outputs: [{ address: payee, sats: 30000 }], feeRate: 2, change: 300 });
@@ -491,7 +491,7 @@ test('an explorer cannot walk a scan forever, or past the gap alone', async () =
   await assert.rejects(BV.chain('signet', async () => ({ ok: true, json: async () => '<meta http-equiv=refresh>' }), ['https://x']).tip(), /bad block/);
   await assert.rejects(BV.chain('signet', async () => ({ ok: true, json: async () => [{ txid: '<b>', vout: 0, value: 1, status: {} }] }), ['https://y']).utxos('a'), /bad coin/);
   const huge = BV.propose({ policy, utxos: [fakeCoin(100000)], tip: 200, outputs: [{ address: payee, sats: 30000 }], feeRate: 2, change: BV.MAX_INDEX });
-  assert.equal(BV.inspect(huge, policy, { receive: 0, change: BV.MAX_INDEX }).outputs[1].change, false);
+  assert.equal(BV.inspect(huge, policy, { receive: 0, change: BV.MAX_INDEX }).outputs[1].stranded, true);
 });
 
 test('names on the object prototype are not networks', () => {
@@ -732,6 +732,17 @@ test('a backup explains how to make the key again, and the exported key matches'
   assert.ok(text.includes(BV.ownerMessage('signet').split('\n')[2]) && text.includes("m/87'/1'/0'"));
   const out = BV.exportAccountKey(A.signer, 'signet'), xprv = out.split(']')[1];
   assert.equal(HDKey.fromExtendedKey(xprv, BV.NETWORKS.signet.versions).publicExtendedKey, A.owner.xpub);
+});
+
+test('a name resolves in two steps, and a scan past its limit stays inside it', async () => {
+  const calls = [];
+  const f = async (url, o) => { const { to, data } = JSON.parse(o.body).params[0]; calls.push([to, data.slice(0, 10)]); return { json: async () => ({ result: calls.length === 1 ? '0x' + '77'.repeat(32) : '0x' + '00'.repeat(12) + 'ab'.repeat(20) }) }; };
+  assert.equal(await BV.resolveName('ross.wei', f), '0x' + 'ab'.repeat(20));
+  assert.equal(calls[0][0], '0x0000000000696760E15f265e828DB644A0c242EB');
+  await assert.rejects(BV.resolveName('ross.gwei', async () => ({ json: async () => ({ result: '0x' + '00'.repeat(32) }) })), /not registered/);
+  assert.equal(BV.isName('ross.wei') && !BV.isName('ross.eth'), true);
+  const policy = plain('signet'), r = await BV.scan(policy, { used: async () => true, utxos: async () => [] });
+  assert.ok(r.truncated && r.receive === BV.MAX_INDEX - BV.GAP && r.change === BV.MAX_INDEX - BV.GAP, `${r.receive} ${r.change}`);
 });
 
 test('two different proposals do not merge', () => {

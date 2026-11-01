@@ -54,7 +54,7 @@ const S = {
   msg: null, busy: false,
 };
 const myHandle = () => BV.encodeOwner({ network: S.network, ...S.owner });
-function forget(){ if(S.owner){ S.owner.signer.wipePrivateData(); S.owner = null; } }
+function forget(){ S.pending = null; if(S.owner){ S.owner.signer.wipePrivateData(); S.owner = null; } }
 const known = () => S.coins ? { receive: S.receive, change: S.change, quarantined: S.coins.filter(c => c.quarantine).map(c => `${c.txid}:${c.vout}`) } : undefined;
 let idle;
 // Timers stop while a device sleeps, so the wall clock is checked as well.
@@ -84,6 +84,7 @@ const curDesc = () => S.policy ? BV.descriptor(S.policy) : null;
 const backedUp = () => !!noteOf('backup', curDesc());
 const labelOf = k => noteOf('labels', k.xpub) || k.fingerprint;
 const isMe = k => !!S.owner && BV.sameKey(k, S.owner, S.network);
+const iSigned = r => r.keys.some(k => isMe(k) && r.signedAll.includes(k.xpub));
 const allKeys = p => [...new Map(p.paths.flatMap(x => x.keys).map(k => [k.xpub, k])).values()];
 
 // ── OWNER KEY ──────────────────────────────────────────────
@@ -106,10 +107,9 @@ async function connect(el){
     forget();
     S.owner = { ...key.owner, signer: key.signer, evm: key.evm, via: `${wallet.name} ${short(key.address)}` };
     key.evmPriv.fill(0);
-    S.msg = key.repeats ? null : { text: 'NEW KEY. FINISH SETTING IT UP AT /BTC', kind: 'ok' };
-    S.ovl = null;
+    S.msg = null;
     touch();
-    findVaults();
+    awaitConfirm(key);
     return;
   }
   return connectEvm(choice === 'wc' ? await walletConnect() : choice ? evmWallets.get(choice).provider : window.ethereum);
@@ -130,10 +130,34 @@ async function connectEvm(eth){
   forget();
   S.owner = { ...got.owner, signer: got.signer };
   S.progress = null;
-  S.msg = got.repeats ? null : { text: 'NEW KEY. FINISH SETTING IT UP AT /BTC', kind: 'ok' };
-  S.ovl = null;
+  S.msg = null;
   touch();
-  findVaults();
+  awaitConfirm(got);
+}
+// A wallet with no key on record repeats itself before it can do anything here, the same
+// check /btc makes, because a seat on a key it cannot make again is a seat lost.
+function awaitConfirm(got){
+  if(got.repeats){ S.ovl = null; findVaults(); return; }
+  S.pending = got.finish;
+  S.unanswered = false;
+  S.ovl = 'confirm';
+}
+async function finishConnect(skip){
+  S.progress = 'APPROVE IN YOUR WALLET';
+  render();
+  try {
+    await S.pending({ skip });
+    S.pending = null;
+    S.progress = null;
+    S.ovl = null;
+    findVaults();
+  } catch(e) {
+    S.progress = null;
+    if(e.mismatch){ forget(); S.ovl = null; throw e; }
+    S.unanswered = true;
+    S.ovl = 'confirm';
+    toast('YOUR WALLET CLOSED THAT REQUEST');
+  }
 }
 // The vaults on this owner's record. Their own go straight on the list. One that names
 // them but they never agreed to is an invitation, and opens through the owner check,
@@ -212,6 +236,7 @@ function policyFromForm(){
 }
 
 function createVault(){
+  if(S.pending) throw new Error('Confirm your wallet first.');
   const policy = policyFromForm(), d = BV.descriptor(policy), f = S.form;
   if(f.name.trim()) setNote('names', d, f.name.trim().slice(0, 24).toUpperCase().replace(/\s+/g, '_'));
   for(const t of [...words(f.owners), ...words(f.second)]){
@@ -317,6 +342,8 @@ function propose(){
   const f = S.form, addr = f.to.trim(), amt = f.amt.trim();
   const args = { policy: S.policy, utxos: S.coins || [], tip: S.tip, feeRate: +f.rate || feeOf('6'), path: +f.path, change: S.change };
   if(!addr) throw new Error('Enter an address to send to.');
+  // There is no fee bump, so a guess at the floor could leave a spend stuck.
+  if(!+f.rate && !Object.keys(S.fees || {}).length) throw new Error('Fee estimates are unavailable. Enter a rate.');
   if(amt.toLowerCase() === 'all') args.sweep = addr;
   else {
     if(!/^\d+(\.\d{1,8})?$/.test(amt)) throw new Error('Amount is in BTC, up to 8 places, or use MAX.');
@@ -324,6 +351,8 @@ function propose(){
     args.outputs = [{ address: addr, sats: Number(BigInt(whole) * 100000000n + BigInt(frac.padEnd(8, '0'))) }];
   }
   load(BV.propose(args));
+  const all = args.sweep ? BV.coinsFor(S.policy, args.path, args.utxos, args.tip).length : 0;
+  if(all > S.review.inputs.length) S.msg = { text: `MAX TAKES ${S.review.inputs.length} OF ${all} COINS. SEND AGAIN FOR THE REST`, kind: 'ok' };
   Object.assign(S.form, { to: '', amt: '', rate: '', path: '0' });
 }
 
@@ -436,6 +465,12 @@ function renderHeader(){
 function renderBars(){
   const out = [];
   const m = S.msg;
+  // The same line the Ethereum dashboard opens with: what is waiting on you.
+  if(S.view === 'dash' && S.queue.length){
+    const need = S.owner ? S.queue.filter(q => !q.review.ready && q.review.keys.some(isMe) && !iSigned(q.review)).length : 0;
+    const ready = S.queue.filter(q => q.review.ready).length;
+    if(need || ready) out.push(`<div class="attn"><b>${need + ready} ACTION${need + ready > 1 ? 'S' : ''}</b><span>${[need ? `${need} NEEDS YOUR SIG` : '', ready ? `${ready} READY TO SEND` : ''].filter(Boolean).join(' · ')}</span></div>`);
+  }
   if(SHARED) out.push('<div class="attn bad"><b>THIS ADDRESS IS SHARED WITH OTHER SITES</b><a href="https://multisig.wei.limo/bitcoin.html">OPEN IT HERE</a></div>');
   if(S.truncated) out.push('<div class="attn"><b>THIS VAULT HAS MORE ADDRESSES THAN THE SCAN COVERS</b><span>LATER COINS ARE NOT SHOWN. A DESCRIPTOR WALLET CAN FIND THEM</span></div>');
   if(m) out.push(`<div class="attn ${m.kind === 'ok' ? 'ok' : 'bad'}" role="status"><b>${esc(m.text)}</b>${m.href ? `<a href="${esc(m.href)}" target="_blank" rel="noopener">VIEW ↗</a>` : ''}<button class="end" data-act="dismiss" aria-label="Dismiss">✕</button></div>`);
@@ -483,7 +518,7 @@ const chips = (r) => `<div class="approvals">${r.keys.map(k => {
 function renderProposal(item, i){
   const r = item.review, n = S.queue.length - i;
   const clash = S.queue.some(q => q.id !== item.id && q.review.inputs.some(a => r.inputs.some(b => a.txid === b.txid && a.vout === b.vout)));
-  const mine = S.owner && r.keys.some(isMe), signed = S.owner && r.signedAll.includes(S.owner.xpub);
+  const mine = S.owner && r.keys.some(isMe), signed = iSigned(r);
   const dust = r.inputs.some(x => x.sats <= BV.DUST || S.coins?.some(c => c.quarantine && c.txid === x.txid && c.vout === x.vout));
   const stranded = r.outputs.some(o => o.stranded) || dust;
   const sends = r.outputs.filter(o => !o.change), back = r.outputs.filter(o => o.change);
@@ -755,6 +790,12 @@ function walletRows(){
 }
 
 function renderOverlay(){
+  if(S.ovl === 'confirm' && S.pending) return `<div class="ovl"><div class="ovl-card" role="dialog" aria-modal="true" aria-label="Confirm your wallet">
+    <div class="ovl-head"><span>ONE LAST SIGNATURE</span><button class="x-btn" data-act="disconnect" aria-label="Forget this key">✕</button></div>
+    <p class="small">This checks your wallet makes the same key every time. It only happens once.</p>
+    ${S.progress ? `<div class="connecting" role="status">${esc(S.progress)}<button class="btn btn-ghost btn-sm" data-act="cancelconnect">CANCEL</button></div>` : '<button class="btn btn-fill btn-w" style="margin-top:12px" data-act="finish">CONFIRM</button>'}
+    ${S.unanswered && !S.progress ? '<div class="btns"><button class="addrline" data-act="skipcheck">My wallet will not show this. Continue without the check</button></div>' : ''}
+  </div></div>`;
   if(S.ovl === 'connect') return `<div class="ovl" data-act="close-bg"><div class="ovl-card" role="dialog" aria-modal="true" aria-label="Connect">
     <div class="ovl-head"><span>CONNECT AN OWNER KEY</span><button class="x-btn" data-act="close" aria-label="Close">✕</button></div>
     <p class="small">Your wallet signs a message and your vault key is derived from that signature. Same wallet, same key, on any device. Expect two prompts, the same however many owners a vault has. Your public key is published, and vaults you are on are saved to your wallet's record, so any device can find them.</p>
@@ -765,6 +806,7 @@ function renderOverlay(){
   if(S.ovl === 'me' && S.owner) return `<div class="ovl" data-act="close-bg"><div class="ovl-card" role="dialog" aria-modal="true" aria-label="Your owner key">
     <div class="ovl-head"><span>YOUR OWNER KEY</span><button class="x-btn" data-act="close" aria-label="Close">✕</button></div>
     <p class="small">Share this with whoever is creating a vault. It is public, and it cannot move funds.</p>
+    ${S.owner.via ? `<p class="small">Your address on Ethereum multisigs: <button class="addrline" data-act="copy-evm">${esc(S.owner.evm)} ⧉</button></p>` : ''}
     <div class="mono" style="font-size:11px;font-weight:400;margin:12px 0">${esc(myHandle())}</div>
     <button class="btn btn-fill btn-w" data-act="copy-owner">COPY</button>
     <button class="btn btn-ghost btn-w" style="margin-top:8px" data-act="exportkey">EXPORT KEY</button>
@@ -819,11 +861,13 @@ function goNet(network){
 
 const ACT = {
   connect, propose, sign, merge, broadcast, download,
+  finish(){ return finishConnect(false); },
+  skipcheck(){ return finishConnect(true); },
   refresh(){ scanned = refresh(); },
   theme(){ S.dark = !S.dark; lsSet('ms_light', S.dark ? '' : '1'); },
   wallet(){ S.ovl = S.owner ? 'me' : 'connect'; },
   disconnect(){ forget(); S.ovl = null; },
-  // For spending without this site. An xprv is the key itself, so it is asked for twice.
+  // For spending without this site. An xprv is the key itself, so it is asked for first.
   exportkey(){
     if(!window.confirm('This copies your private key. Anyone who has it can sign as you. Continue?')) return;
     return copy(BV.exportAccountKey(S.owner.signer, S.network), 'KEY COPIED');
@@ -877,6 +921,7 @@ const ACT = {
     if(first) return open(BV.parseDescriptor(first, S.network));
   },
   'copy-owner'(){ return copy(myHandle(), 'HANDLE COPIED'); },
+  'copy-evm'(){ return copy(S.owner.evm, 'ADDRESS COPIED'); },
   'copy-address'(){ return copy(BV.vaultOf(S.policy, 0, S.receive).address, 'ADDRESS COPIED'); },
   async 'copy-descriptor'(){ await copy(BV.descriptor(S.policy), 'DESCRIPTOR COPIED'); setNote('backup', curDesc(), 1); },
   'copy-policy'(){ return copy(JSON.stringify(BV.walletPolicy(S.policy), null, 2), 'POLICY COPIED'); },

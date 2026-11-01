@@ -24,6 +24,10 @@ Why extended keys: a hardware wallet finds its key by fingerprint and path, and 
 
 **An owner needs no embedded key.** Anyone holding `[fingerprint/path]xpub` can be an owner: copy the PSBT, sign it in any wallet that handles Taproot script paths, and paste the result back. The page also exports the BIP-388 wallet policy that Ledger registers.
 
+## Wallets across chains
+
+Any wallet can own both kinds of vault. An Ethereum wallet gets a Bitcoin owner key from a signature. A Bitcoin wallet gets one seed, which gives it a Bitcoin owner key and a `0x` address that sits on an Ethereum multisig as an ordinary owner: `/btc` shows that address, and a `bc1...` address typed as an owner resolves to it once that wallet has connected, in the wizard and when adding an owner to a live vault. A Bitcoin wallet signs Ethereum proposals but holds no ETH, so another owner submits them.
+
 ## Inviting co-owners
 
 An invite link carries the draft in its fragment: network, threshold and the owners' public addresses. It is a stranger's text, and it can describe a vault its sender controls, so it is parsed strictly, the owners and rule are shown in full, and nothing is saved until the owner confirms them. A co-owner connects once and takes their seat. Nothing coordinates this: everyone holding the link works out the same vault as soon as every owner has connected, and the creator's page updates by itself. Owners can be `0x` addresses or Bitcoin addresses, which resolve once that wallet has connected.
@@ -119,7 +123,8 @@ A set-aside coin shows its asset id and no amount. That needs no owner to sign, 
 
 - One transaction holds up to 400 coins or about 95,000 vbytes, whichever comes first. A sweep takes the largest coins that fit; repeat it for the rest.
 - A scan covers 2,000 addresses per chain. Past that the page says so, and a descriptor wallet finds the rest.
-- There is no fee bump yet. A stuck spend needs a new proposal at a higher rate, over the same coins.
+- There is no fee bump yet, and a spend waiting in the mempool cannot be replaced from the page, because its coins no longer list as spendable. A stuck spend is replaced from the backup, in Bitcoin Core, so pick the fee with care. The page will not guess a rate when estimates are missing.
+- The shared queue takes proposals up to about 54 KB of PSBT, roughly 45 coins on a 2-of-3. Larger ones travel by link.
 - Vault names stay in the browser, and a vault's record does not carry them.
 
 ## Not done
