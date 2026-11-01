@@ -8951,7 +8951,7 @@ const btcNetworkOf = sel => sel.some(n => n && n.test) ? 'signet' : 'mainnet';
 // The way in to the new page, until someone closes it.
 function renderBtcBanner(){
   if(S.demoMode || lsGet('ms_btc_banner')) return '';
-  return `<div class="btc-banner"><a href="./btc.html"><span class="tok-ico">${BTC_LOGO}</span><span><strong>NEW</strong> BITCOIN MULTISIG, FROM ANY WALLET. FREE TO SET UP &#8599;</span></a><button class="x-btn" onclick="lsSet('ms_btc_banner','1');render()" aria-label="Close">&#10005;</button></div>`;
+  return `<div class="btc-banner"><a href="./btc.html"><span class="tok-ico">${BTC_LOGO}</span><span><strong>NEW</strong> YOUR ETHEREUM WALLET NOW SIGNS ON BITCOIN. MULTISIG WITH A DEADMAN SWITCH &#8599;</span></a><button class="x-btn" onclick="lsSet('ms_btc_banner','1');render()" aria-label="Close">&#10005;</button></div>`;
 }
 
 function renderBtcPill(c){

@@ -152,7 +152,22 @@ button:disabled{opacity:.45;cursor:default}
 .you{font-size:9px;font-weight:700;color:var(--m);letter-spacing:1px;border:1px solid var(--fr);padding:1px 6px;margin-left:8px}
 
 .empty{padding:72px 0;text-align:center}
-.empty-title{font-size:18px;font-weight:700;letter-spacing:4px}
+.empty-title{font-size:clamp(28px,6vw,44px);font-weight:700;letter-spacing:-1px}
+.who{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;align-items:center}
+.who-c{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--ln);padding:5px 8px;font-size:11px;color:var(--a)}
+.who-c .you{margin-left:2px}
+.who-i{display:inline-flex;width:14px;height:14px}
+.who-i svg{width:14px;height:14px}
+.who-l{font-size:9px;font-weight:700;letter-spacing:2px;color:var(--d);margin-left:8px}
+.row .who{margin:0 0 6px}
+.clock{margin-top:20px;border:1px solid var(--ln);padding:14px}
+.clock-top{display:flex;justify-content:space-between;gap:10px;font-size:10px;letter-spacing:2px;color:var(--d)}
+.clock-top b{color:var(--a);font-weight:700}
+.clock-bar{height:4px;background:var(--ln);margin:10px 0}
+.clock-bar i{display:block;height:100%;background:var(--a)}
+.clock.late{border-color:var(--y)}
+.clock.late .clock-bar i{background:var(--y)}
+.clock.late .clock-top span{color:var(--y)}
 .empty-sub{font-size:11px;letter-spacing:2px;color:var(--d);margin:10px 0 24px;line-height:1.8}
 .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:0;margin:52px 0 0;text-align:left;border-top:1px solid var(--ln)}
 .step{padding:18px 16px 0 0}

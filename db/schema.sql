@@ -1872,6 +1872,15 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
+CREATE INDEX IF NOT EXISTS btc_owner_handles_key ON btc_owner_handles (network, key_id);
+-- Who sits behind the keys of a vault, for the page that shows it. Each answer carries its
+-- own proof and is checked by the reader, and a descriptor is needed to ask at all.
+CREATE OR REPLACE FUNCTION btc_handles_by_key(p_network text, p_keys text[])
+RETURNS TABLE (key_id text, handle text) AS $$
+  SELECT h.key_id, h.handle FROM btc_owner_handles h
+  WHERE h.network = p_network AND h.key_id = ANY (p_keys) AND coalesce(cardinality(p_keys), 0) <= 64;
+$$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
+
 CREATE OR REPLACE FUNCTION btc_handles(p_network text, p_addresses text[])
 RETURNS TABLE (address text, handle text) AS $$
 BEGIN

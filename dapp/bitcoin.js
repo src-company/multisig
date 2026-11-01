@@ -536,14 +536,15 @@ const HOW_IT_WORKS = [
   ['A vault is an address with its rules built in', 'No contract and nothing to deploy, so it is free to make, and Bitcoin itself enforces the rules.'],
   ['The rules are fixed', 'Changing an owner or a delay means a new vault and moving the coins over. An Ethereum vault can change these in place.'],
   ['Spending is a proposal', 'One owner proposes, the others sign in any order, and anyone can send it once enough have signed. The vault pays the miner fee.'],
-  ['Each owner brings a wallet', 'An Ethereum or Bitcoin wallet signs once and that makes the owner key, the same on any device.'],
+  ['Each owner brings a wallet', 'An Ethereum or Bitcoin wallet signs once and that makes the owner key, the same on any device. So an Ethereum wallet can hold a seat on Bitcoin with no new seed phrase.'],
   ['Delays run per coin', 'A clock starts when a coin confirms, and moving the coin restarts it. So an active vault stays ahead of any delay.'],
   ['The backup is the way out', 'It holds no private key. With it and enough keys, the coins can be spent without this site.'],
 ];
 const aboutBlocks = b => { const d = Math.round(b / 144); return d >= 2 ? `about ${d} days` : `about ${Math.max(1, Math.round(b / 6))} hours`; };
 function describePolicy(policy){
   return policy.paths.map(p => {
-    const who = p.threshold === p.keys.length ? (p.keys.length === 1 ? 'The one key on this path' : `All ${p.keys.length} keys`) : `Any ${p.threshold} of ${p.keys.length} keys`;
+    const same = p.keys.every(k => policy.paths[0].keys.some(o => o.xpub === k.xpub)), one = same ? 'owner' : 'recovery key';
+    const who = p.keys.length === 1 ? `The ${one}` : p.threshold === p.keys.length ? `All ${p.keys.length} ${one}s` : `Any ${p.threshold} of ${p.keys.length} ${one}s`;
     return p.older ? `${who} can also spend any coin unmoved for ${p.older} blocks, ${aboutBlocks(p.older)}.` : `${who} can spend at any time.`;
   });
 }
@@ -592,6 +593,23 @@ async function fetchHandles(network, addresses, doFetch = (...a) => root.fetch(.
   const out = [];
   for(const row of await r.json()){
     try { const h = decodeOwner(row.handle, network); if(h.proven && h.evm === row.address && wanted.includes(h.evm)) out.push(row.handle); } catch(_) {}
+  }
+  return out;
+}
+
+// The wallets behind a vault's keys. A descriptor holds only keys, and the handle on record
+// proves which wallet made each one, so nothing here is taken on the store's word.
+async function ownersOf(policy, doFetch = (...a) => root.fetch(...a)){
+  const { network } = policy, ids = new Map();
+  for(const p of policy.paths) for(const k of p.keys) ids.set(keyId(k, network), k.xpub);
+  const r = await doFetch(`${STORE}/rpc/btc_handles_by_key`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ p_network: network, p_keys: [...ids.keys()].slice(0, 64) }), signal: root.AbortSignal?.timeout(TIMEOUT_MS) });
+  if(!r.ok) throw new Error('Could not read owner handles');
+  const out = {};
+  for(const row of await r.json()){
+    try {
+      const h = decodeOwner(row.handle, network), xpub = ids.get(keyId(h, network));
+      if(h.proven && xpub) out[xpub] = { evm: h.evm, wallet: typeof h.wallet === 'string' ? h.wallet : h.wallet?.address };
+    } catch(_) {}
   }
   return out;
 }
@@ -1246,7 +1264,7 @@ function concat(...parts){
   return out;
 }
 
-root.BitcoinVault = Object.freeze({ HOW_IT_WORKS, describePolicy, keyId, isName, resolveName, exportAccountKey, recoveryText, sameKey, TACIT_ASSETS, signOwnerAuth, verifyOwnerAuth, saveVault, listVaults, assertSpendable, isProtected, hasTacitEnvelope, walletMessage, linkMessage, keyFromWalletSignature, evmSignHash, evmSignMessage, bitcoinMessageHash, bitcoinSigners, handleForWallet, proposalId, vaultId, publishProposal, fetchProposals, openProposals, publishHandle, fetchHandles, MAX_INDEX, txidOf, seatMisdescribed, EVM_CHAINS, selectors: { threshold: selector('threshold()') }, readEvmVault, mirror, bindingMessage, evmMessageHash, NETWORKS, DUST, GAP, MAX_OWNERS, MAX_OLDER, MAX_FEE_RATE, encodeOwner, decodeOwner, originText, ownerMessage, deriveOwnerKey, keyFromSignature, fingerprintOf,
+root.BitcoinVault = Object.freeze({ ownersOf, HOW_IT_WORKS, describePolicy, keyId, isName, resolveName, exportAccountKey, recoveryText, sameKey, TACIT_ASSETS, signOwnerAuth, verifyOwnerAuth, saveVault, listVaults, assertSpendable, isProtected, hasTacitEnvelope, walletMessage, linkMessage, keyFromWalletSignature, evmSignHash, evmSignMessage, bitcoinMessageHash, bitcoinSigners, handleForWallet, proposalId, vaultId, publishProposal, fetchProposals, openProposals, publishHandle, fetchHandles, MAX_INDEX, txidOf, seatMisdescribed, EVM_CHAINS, selectors: { threshold: selector('threshold()') }, readEvmVault, mirror, bindingMessage, evmMessageHash, NETWORKS, DUST, GAP, MAX_OWNERS, MAX_OLDER, MAX_FEE_RATE, encodeOwner, decodeOwner, originText, ownerMessage, deriveOwnerKey, keyFromSignature, fingerprintOf,
   policyOf, descriptor, descriptorChecksum, parseDescriptor, walletPolicy, vaultOf, vsize, coinsFor, propose, inspect, sign, combine, finalize, chain, scan, evmSigner });
 
 })(typeof window !== 'undefined' ? window : globalThis);

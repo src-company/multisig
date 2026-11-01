@@ -33,6 +33,8 @@ const MAINNET = true;
 const IDLE_MS = 15 * 60 * 1000;
 const DELAYS = [['1D', 144], ['7D', 1008], ['30D', 4320], ['90D', 12960], ['1Y', 52560]];
 const BTC_ICON = `<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#F7931A"/><path fill="#FFF" d="M22.3 14.1c.3-2.1-1.3-3.2-3.5-4l.7-2.8-1.7-.4-.7 2.7-1.4-.3.7-2.8-1.7-.4-.7 2.8-1.1-.3-2.4-.6-.5 1.8s1.3.3 1.3.3c.7.2.8.6.8 1l-.8 3.2.2.1-.2-.1-1.1 4.5c-.1.2-.3.5-.8.4 0 0-1.3-.3-1.3-.3l-.9 2 2.3.6 1.2.3-.7 2.9 1.7.4.7-2.8 1.4.3-.7 2.8 1.7.4.7-2.9c2.9.6 5.1.3 6-2.3.8-2.1 0-3.3-1.6-4.1 1.1-.3 2-1.1 2.3-2.7zm-3.9 5.4c-.5 2.1-4.1 1-5.2.7l.9-3.7c1.2.3 4.9.9 4.3 3zm.5-5.4c-.5 1.9-3.4.9-4.4.7l.8-3.3c1 .2 4.1.7 3.6 2.6z"/></svg>`;
+const ETH_ICON = '<svg viewBox="0 0 32 32" aria-hidden="true"><polygon fill="#80D8FF" points="16,3 16,20.6 7.5,16"/><polygon fill="#B3E5FC" points="16,3 24.5,16 16,20.6"/><polygon fill="#80D8FF" points="16,22.3 7.5,17.7 16,29"/><polygon fill="#B3E5FC" points="16,22.3 24.5,17.7 16,29"/></svg>';
+const KEY_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/></svg>';
 
 const TAC_ICON = `<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#0a0a0a"/><circle cx="16" cy="16" r="13" fill="none" stroke="#f4efe6" stroke-width="2.5"/><path d="M17.5 7L13 22.5Q13 25 18 24" fill="none" stroke="#f7931a" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 11L21 11" stroke="#f7931a" stroke-width="2.4" stroke-linecap="round"/></svg>`;
 
@@ -83,6 +85,14 @@ const nameOf = (d, i) => noteOf('names', d) || `VAULT_${i + 1}`;
 const curDesc = () => S.policy ? BV.descriptor(S.policy) : null;
 const backedUp = () => !!noteOf('backup', curDesc());
 const labelOf = k => noteOf('labels', k.xpub) || k.fingerprint;
+// The wallet behind a key, once its record has been read and checked.
+function whoOf(k){
+  const w = S.who?.[k.xpub];
+  if(w?.wallet) return { mark: BTC_ICON, text: short(w.wallet) };
+  if(w) return { mark: ETH_ICON, text: short(w.evm) };
+  return { mark: KEY_ICON, text: k.fingerprint };
+}
+const chip = k => { const w = whoOf(k); return `<span class="who-c"><span class="who-i">${w.mark}</span>${esc(w.text)}${isMe(k) ? '<span class="you">YOU</span>' : ''}</span>`; };
 const isMe = k => !!S.owner && BV.sameKey(k, S.owner, S.network);
 const iSigned = r => r.keys.some(k => isMe(k) && r.signedAll.includes(k.xpub));
 const allKeys = p => [...new Map(p.paths.flatMap(x => x.keys).map(k => [k.xpub, k])).values()];
@@ -269,6 +279,7 @@ let scanning = 0, lastScan = 0, scanned = Promise.resolve(), retries = 0;
 async function refresh(){
   const c = BV.chain(S.network), run = ++scanning;
   lastScan = Date.now();
+  BV.ownersOf(S.policy).then(who => { if(run === scanning){ S.who = who; render(); } }, () => {});
   try {
     const [found, tip, fees] = await Promise.all([BV.scan(S.policy, c), c.tip(), c.fees().catch(() => ({}))]);
     if(run !== scanning) return;
@@ -475,7 +486,7 @@ function renderBars(){
   if(S.truncated) out.push('<div class="attn"><b>THIS VAULT HAS MORE ADDRESSES THAN THE SCAN COVERS</b><span>LATER COINS ARE NOT SHOWN. A DESCRIPTOR WALLET CAN FIND THEM</span></div>');
   if(m) out.push(`<div class="attn ${m.kind === 'ok' ? 'ok' : 'bad'}" role="status"><b>${esc(m.text)}</b>${m.href ? `<a href="${esc(m.href)}" target="_blank" rel="noopener">VIEW ↗</a>` : ''}<button class="end" data-act="dismiss" aria-label="Dismiss">✕</button></div>`);
   if(S.policy && S.owner && BV.seatMisdescribed(S.policy, S.owner)) out.push(`<div class="attn"><b>YOUR KEY IS MISDESCRIBED IN THIS VAULT</b><span>IT STILL SIGNS HERE, BUT ASK WHO CREATED IT WHY</span></div>`);
-  if(S.view === 'dash' && S.policy && S.trusted && !backedUp()) out.push(`<div class="attn"><b>BACK UP THIS VAULT</b><span>WITHOUT IT THE COINS CANNOT BE SPENT, EVEN WITH EVERY KEY</span></div>`);
+  if(S.view === 'dash' && S.policy && S.trusted && !backedUp() && S.coins?.length) out.push(`<div class="attn"><b>BACK UP THIS VAULT</b><span>WITHOUT IT THE COINS CANNOT BE SPENT, EVEN WITH EVERY KEY</span></div>`);
   return out.join('');
 }
 
@@ -496,8 +507,9 @@ const renderHow = () => `<details><summary>HOW BITCOIN VAULTS WORK</summary>${BV
 
 function renderEmpty(){
   return `<div class="empty">
-    <div class="empty-title">NO VAULTS</div>
-    <div class="empty-sub">${S.network === 'signet' ? 'TRY ONE ON SIGNET. COINS ARE FREE AND WORTH NOTHING.' : 'K-OF-N BITCOIN. NO CONTRACT, NOTHING TO DEPLOY.'}</div>
+    <div class="empty-title">BITCOIN VAULTS</div>
+    <div class="empty-sub">SIGN WITH YOUR ETHEREUM OR BITCOIN WALLET. DEADMAN SWITCH INCLUDED.</div>
+    ${S.network === 'signet' ? '<div class="empty-sub">SIGNET COINS ARE FREE AND WORTH NOTHING.</div>' : ''}
     <a class="btn btn-fill" style="text-decoration:none" href="./btc.html">CREATE A VAULT</a>
     ${S.owner ? '' : '<div class="btns" style="justify-content:center"><button class="btn btn-outline" data-act="wallet">CONNECT TO FIND YOUR VAULTS</button></div>'}
     ${renderHow()}
@@ -656,7 +668,31 @@ function renderCoins(){
 // a stranger's key on the delayed path is a different thing from one in the quorum.
 function renderPaths(){
   return S.policy.paths.map((x, i) => `<div class="tx-sub" style="padding:10px 8px 0">${i ? `SECOND PATH · ${x.threshold} OF ${x.keys.length} AFTER ${x.older} BLOCKS, ABOUT ${days(x.older)}` : `FIRST PATH · ${x.threshold} OF ${x.keys.length} AT ANY TIME`}</div>
-    ${x.keys.map(k => `<div class="row"><span class="mono" style="font-size:11px;font-weight:400">${esc(BV.originText(k))}${isMe(k) ? '<span class="you">YOU</span>' : ''}</span></div>`).join('')}`).join('');
+    ${x.keys.map(k => `<div class="row"><span>${S.who?.[k.xpub] ? `<span class="who">${chip(k)}</span>` : ''}<span class="mono" style="font-size:11px;font-weight:400">${esc(BV.originText(k))}${isMe(k) && !S.who?.[k.xpub] ? '<span class="you">YOU</span>' : ''}</span></span></div>`).join('')}`).join('');
+}
+
+// The deadman switch is the point of a delayed vault, so its clock is out in the open.
+// It follows the oldest coin, the first one the second path can reach.
+function renderClock(){
+  const later = S.policy.paths[1], coins = (S.coins || []).filter(c => c.height);
+  if(!later || !S.coins) return '';
+  const same = later.keys.every(k => S.policy.paths[0].keys.some(o => o.xpub === k.xpub));
+  const name = same ? 'AGED COINS' : 'DEADMAN SWITCH', who = same ? `${later.threshold} of ${later.keys.length} owners` : `The recovery key${later.keys.length > 1 ? 's' : ''}`;
+  const left = coins.length ? Math.min(...coins.map(c => c.height + later.older - S.tip - 1)) : null;
+  if(left !== null && left <= 0) return '';
+  const pct = left === null ? 0 : Math.max(2, Math.round(100 * (1 - left / later.older))), late = left !== null && left < later.older * 0.1;
+  return `<div class="clock${late ? ' late' : ''}">
+    <div class="clock-top"><b>${name}</b><span>${left === null ? `ARMED · ${days(later.older)}` : `OPENS IN ${days(left)}`}</span></div>
+    <div class="clock-bar"><i style="width:${pct}%"></i></div>
+    <p class="small">${left === null ? `The clock starts when a coin confirms. After ${days(later.older)} unmoved, ${esc(who.charAt(0).toLowerCase() + who.slice(1))} can spend it.` : `${esc(who)} can spend the oldest coin after this. Moving coins restarts the clock.`}</p>
+    ${left !== null ? '<button class="addrline" data-act="reset">RESTART THE CLOCK</button>' : ''}
+  </div>`;
+}
+
+function renderWho(){
+  const [first, later] = S.policy.paths;
+  const other = later && !later.keys.every(k => first.keys.some(o => o.xpub === k.xpub));
+  return `<div class="who">${first.keys.map(chip).join('')}${other ? `<span class="who-l">RECOVERY</span>${later.keys.map(chip).join('')}` : ''}</div>`;
 }
 
 function renderDash(){
@@ -676,8 +712,10 @@ function renderDash(){
         ${pending ? `<span class="y">${pending} UNCONFIRMED</span>` : ''}
         ${S.owner ? `<span class="${mine ? 'g' : ''}">${mine ? 'YOU ARE AN OWNER' : 'NOT AN OWNER'}</span>` : ''}
       </div>
+      ${renderWho()}
     </div>
     ${open ? `<div class="note warn"><b>The delayed path is open on ${open} coin${open > 1 ? 's' : ''}.</b> Send them back to this vault to restart the clock. <button class="addrline" data-act="reset">SET THIS UP</button></div>` : ''}
+    ${renderClock()}
     ${renderQueue()}
     ${renderAssets()}
     ${renderReceive()}
@@ -694,8 +732,12 @@ function renderAdmin(){
     <p class="small" style="padding:12px 8px">Rules are part of the address, so they cannot change. Different owners or a different threshold means a new vault, and sending the coins to it.</p>
     ${renderHow()}
     <div class="head"><span>BACKUP</span></div>
-    <div class="mono" style="font-size:11px;font-weight:400;padding:12px 8px">${esc(d)}</div>
-    <div class="btns"><button class="btn btn-fill btn-sm" data-act="download">DOWNLOAD BACKUP</button><button class="btn btn-ghost btn-sm" data-act="copy-descriptor">COPY DESCRIPTOR</button><button class="btn btn-ghost btn-sm" data-act="copy-policy">COPY WALLET POLICY</button><button class="btn btn-ghost btn-sm" data-act="copy-link">COPY LINK</button></div>
+    <p class="small" style="padding:12px 8px 0">The file spends this vault without this site. Every owner should keep a copy.</p>
+    <div class="btns"><button class="btn btn-fill btn-sm" data-act="download">DOWNLOAD BACKUP</button><button class="btn btn-ghost btn-sm" data-act="copy-link">COPY LINK</button></div>
+    <details><summary>FOR OTHER WALLETS</summary>
+      <div class="mono" style="font-size:11px;font-weight:400;padding:12px 0">${esc(d)}</div>
+      <div class="btns"><button class="btn btn-ghost btn-sm" data-act="copy-descriptor">COPY DESCRIPTOR</button><button class="btn btn-ghost btn-sm" data-act="copy-policy">COPY WALLET POLICY</button></div>
+    </details>
     ${i >= 0 ? `<div class="head"><span>THIS BROWSER</span></div>
       <label class="lbl" for="rename">VAULT NAME</label><input class="inp" id="rename" data-field="rename" value="${esc(S.form.rename ?? nameOf(d, i))}" maxlength="24">
       <div class="btns"><button class="btn btn-outline btn-sm" data-act="rename">SAVE NAME</button><div class="right"><button class="btn btn-danger btn-sm" data-act="remove">REMOVE FROM THIS BROWSER</button></div></div>` : ''}`;
