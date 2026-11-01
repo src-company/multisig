@@ -72,8 +72,8 @@ function checkPlace(){
 // reported in words that do not accuse anyone of declining.
 const PROMPT_MS = 120000, GAP_MS = 600;
 const sleep = ms => new Promise(ok => setTimeout(ok, ms));
-let _cancel = null;
-const cancelPrompt = () => _cancel?.(new Error('Cancelled. Nothing was changed.'));
+let _cancel = null, _cancelled = false;
+const cancelPrompt = () => { _cancelled = true; _cancel?.(new Error('Cancelled. Nothing was changed.')); };
 async function ask(fn){
   for(let tries = 0; ; tries++){
     let timer;
@@ -93,37 +93,53 @@ async function ask(fn){
 
 // A key that differs from the one on record means this wallet is not repeating itself,
 // or is another account. Either way it is said now, not when the owner goes to sign.
-async function checkOnRecord(BV, network, evm, xpub){
+// Returns whether a record matched: a wallet that matched has proved it repeats.
+async function checkOnRecord(BV, network, evm, xpub, walletAddress){
+  if(walletAddress){
+    const found = await BV.handleForWallet(network, walletAddress).catch(() => null);
+    if(found && found.evm !== evm) throw new Error('This wallet gave a different key from the one on record for this address, so it cannot sign for that seat. Nothing was changed.');
+  }
   const [known] = await BV.fetchHandles(network, [evm]).catch(() => []);
-  if(known && BV.decodeOwner(known, network).xpub !== xpub) throw new Error('This wallet gave a different key from the one on record for this address, so it cannot sign for that seat. Nothing was changed.');
+  if(!known) return false;
+  if(BV.decodeOwner(known, network).xpub !== xpub) throw new Error('This wallet gave a different key from the one on record for this address, so it cannot sign for that seat. Nothing was changed.');
+  return true;
 }
+const gap = async () => { await sleep(GAP_MS); if(_cancelled) throw new Error('Cancelled. Nothing was changed.'); };
 
 async function connectWallet(wallet, network, onStep = () => {}){
   checkPlace();
+  _cancelled = false;
   const BV = await loadBitcoinLibs();
   const address = await ask(() => wallet.account());
   if(!onNetwork(address, network)) throw new Error(`${wallet.name} is not on ${network === 'mainnet' ? 'Bitcoin mainnet' : 'signet'}. Switch it, then connect again.`);
   onStep(1, 2);
-  const key = BV.keyFromWalletSignature(await ask(() => wallet.sign(BV.walletMessage(), address, network)), network);
-  await checkOnRecord(BV, network, key.evm, key.owner.xpub);
-  await sleep(GAP_MS);
-  onStep(2, 2);
-  const signature = await ask(() => wallet.sign(BV.linkMessage(network, key.evm), address, network));
-  const proof = BV.evmSignMessage(BV.bindingMessage(network, key.owner), key.evmPriv);
-  // Only a BIP-137 signature can be checked here. Leather answers in BIP-322, and that
-  // owner is still a full owner: they just cannot be found by their bc1 address.
-  const provable = BV.bitcoinSigners(BV.linkMessage(network, key.evm), window.btc.base64.decode(signature), network).includes(address);
-  const owner = { ...key.owner, evm: key.evm, proof, ...(provable ? { wallet: { address, signature } } : {}) };
-  const handle = BV.encodeOwner({ network, ...owner });
-  const published = await BV.publishHandle(handle, network).then(() => true, () => false);
-  return { ...key, owner, handle, address, published };
+  const sign = () => ask(() => wallet.sign(BV.walletMessage(), address, network));
+  const key = BV.keyFromWalletSignature(await sign(), network);
+  try {
+    const repeats = await checkOnRecord(BV, network, key.evm, key.owner.xpub, address);
+    await gap();
+    onStep(2, 2);
+    const signature = await ask(() => wallet.sign(BV.linkMessage(network, key.evm), address, network));
+    const proof = BV.evmSignMessage(BV.bindingMessage(network, key.owner), key.evmPriv);
+    // Only a BIP-137 signature can be checked here. Leather answers in BIP-322, and that
+    // owner is still a full owner: they just cannot be found by their bc1 address.
+    const provable = BV.bitcoinSigners(BV.linkMessage(network, key.evm), window.btc.base64.decode(signature), network).includes(address);
+    const owner = { ...key.owner, evm: key.evm, proof, ...(provable ? { wallet: { address, signature } } : {}) };
+    const handle = BV.encodeOwner({ network, ...owner });
+    const published = await BV.publishHandle(handle, network).then(() => true, () => false);
+    const recheck = repeats ? null : async () => { const k = BV.keyFromWalletSignature(await sign(), network); k.signer.wipePrivateData(); k.evmPriv.fill(0); return k.owner.xpub; };
+    return { ...key, owner, handle, address, published, recheck };
+  } catch(e) { key.signer.wipePrivateData(); key.evmPriv.fill(0); throw e; }
 }
 
 // An Ethereum wallet: one signature makes the key, a second says it belongs to this
 // address. The number does not depend on the vault. The setup page wipes the key as soon
-// as the handle exists; a page that goes on to sign asks to keep it.
+// as the handle exists; a page that goes on to sign asks to keep it. A wallet with no key
+// on record yet gets `recheck`, asked once at the moment it matters and long after the
+// first prompt, because coins must not go to a key the wallet cannot make again.
 async function connectEvmForHandle(eth, network, { keep = false, onStep = () => {} } = {}){
   checkPlace();
+  _cancelled = false;
   const BV = await loadBitcoinLibs();
   const [raw] = await ask(() => eth.request({ method: 'eth_requestAccounts' }));
   if(!raw) throw new Error('Your wallet shared no account. Unlock it, then connect again.');
@@ -132,16 +148,23 @@ async function connectEvmForHandle(eth, network, { keep = false, onStep = () => 
   // 7702 delegations start 0xef0100 and still sign as the key behind them.
   if(typeof code === 'string' && code !== '0x' && !code.startsWith('0xef0100')) throw new Error('Contract wallets cannot hold a Bitcoin key here, because they do not repeat a signature. Nothing was changed.');
   const hexMsg = m => '0x' + window.btc.hex.encode(new TextEncoder().encode(m));
+  const derive = () => BV.deriveOwnerKey(m => ask(() => eth.request({ method: 'personal_sign', params: [hexMsg(m), raw] })), network);
   onStep(1, 2);
-  const key = await BV.deriveOwnerKey(m => ask(() => eth.request({ method: 'personal_sign', params: [hexMsg(m), raw] })), network);
-  await checkOnRecord(BV, network, evm, key.owner.xpub);
-  await sleep(GAP_MS);
-  onStep(2, 2);
-  const proof = await ask(() => eth.request({ method: 'personal_sign', params: [hexMsg(BV.bindingMessage(network, key.owner)), raw] }));
-  if(!keep) key.signer.wipePrivateData();
-  const owner = { ...key.owner, evm, proof }, handle = BV.encodeOwner({ network, ...owner });
-  const published = await BV.publishHandle(handle, network).then(() => true, () => false);
-  return { owner, handle, evm, published, signer: keep ? key.signer : null, label: `0x${evm.slice(2, 6)}…${evm.slice(-4)}` };
+  const key = await derive();
+  try {
+    const repeats = await checkOnRecord(BV, network, evm, key.owner.xpub);
+    await gap();
+    onStep(2, 2);
+    const proof = await ask(() => eth.request({ method: 'personal_sign', params: [hexMsg(BV.bindingMessage(network, key.owner)), raw] }));
+    // A contract wallet on a chain it is not deployed on passes the code check, and
+    // signs in a way that recovers to nobody.
+    if(BV.evmSigner(BV.bindingMessage(network, key.owner), window.btc.hex.decode(proof.replace(/^0x/, ''))) !== evm) throw new Error('This wallet signs in a way that does not prove its address, so it cannot hold a Bitcoin key here. Nothing was changed.');
+    if(!keep) key.signer.wipePrivateData();
+    const owner = { ...key.owner, evm, proof }, handle = BV.encodeOwner({ network, ...owner });
+    const published = await BV.publishHandle(handle, network).then(() => true, () => false);
+    const recheck = repeats ? null : async () => { const k = await derive(); k.signer.wipePrivateData(); return k.owner.xpub; };
+    return { owner, handle, evm, published, recheck, signer: keep ? key.signer : null, label: `0x${evm.slice(2, 6)}…${evm.slice(-4)}` };
+  } catch(e) { key.signer.wipePrivateData(); throw e; }
 }
 
 // WalletConnect is only fetched by someone who picks it, so a page that can hold a key
@@ -167,34 +190,52 @@ function walletConnect(){
 
 // ── AS AN ETHEREUM WALLET ──────────────────────────────────
 const RPCS = () => window.BitcoinVault.EVM_CHAINS;
+const APP_TYPES = new Set(['Execute', 'Metadata', 'Action', 'Session']);
+const READS = new Set(['eth_blockNumber', 'eth_call', 'eth_estimateGas', 'eth_feeHistory', 'eth_gasPrice', 'eth_getBalance', 'eth_getBlockByNumber', 'eth_getCode', 'eth_getStorageAt', 'eth_getTransactionByHash', 'eth_getTransactionCount', 'eth_getTransactionReceipt', 'eth_maxPriorityFeePerGas']);
 function providerFor(wallet){
-  let key = null, chain = 1;
+  let key = null, chain = 1, idle;
+  // Same limit as the Bitcoin page. A key left in an open tab is a risk for no benefit.
+  const forget = () => { clearTimeout(idle); if(key){ key.evmPriv.fill(0); key = null; } };
+  const touch = () => { clearTimeout(idle); idle = setTimeout(forget, 15 * 60 * 1000); };
   const listeners = {};
   const emit = (e, v) => (listeners[e] || []).forEach(f => { try { f(v); } catch(_) {} });
   const refuse = (code, message) => Object.assign(new Error(message), { code });
-  const signing = () => { if(!key) throw refuse(4100, 'Connect first'); return key; };
+  const signing = () => { if(!key) throw refuse(4100, 'Connect first'); touch(); return key; };
   return {
+    disconnect: forget,
     on(e, f){ (listeners[e] ||= []).push(f); },
     removeListener(e, f){ listeners[e] = (listeners[e] || []).filter(x => x !== f); },
     async request({ method, params = [] }){
       switch(method){
         case 'eth_requestAccounts':
-          key = key || await connectWallet(wallet, 'mainnet');
+          if(!key){
+            key = await connectWallet(wallet, 'mainnet');
+            // Only the Ethereum key is used here, so the Bitcoin root goes at once.
+            key.signer.wipePrivateData();
+            key.signer = null;
+            touch();
+          }
           return [key.evm];
         case 'eth_accounts': return key ? [key.evm] : [];
         case 'eth_chainId': return '0x' + chain.toString(16);
         case 'net_version': return String(chain);
-        case 'wallet_switchEthereumChain':
-          chain = parseInt(params[0].chainId, 16);
+        case 'wallet_switchEthereumChain': {
+          const id = parseInt(params[0]?.chainId, 16);
+          if(!window.BitcoinVault.EVM_CHAINS[id]) throw refuse(4902, 'That chain is not available here');
+          chain = id;
           emit('chainChanged', params[0].chainId);
           return null;
-        case 'wallet_addEthereumChain': return null;
-        case 'personal_sign': {
-          const k = signing(), raw = params[0], text = /^0x/.test(raw) ? new TextDecoder().decode(window.btc.hex.decode(raw.slice(2))) : raw;
-          return window.BitcoinVault.evmSignMessage(text, k.evmPriv);
         }
+        case 'wallet_addEthereumChain': return null;
+        // Nothing else is signed. No wallet window stands behind this key, so the page is
+        // the only review there is, and any script here could ask. It signs the app's own
+        // messages, on the account and chain it is on, and refuses everything else, so it
+        // cannot be turned on a token permit or an arbitrary text.
         case 'eth_signTypedData_v4': {
-          const k = signing(), { domain, types, message } = JSON.parse(params[1]);
+          const k = signing(), { domain, types, primaryType, message } = JSON.parse(params[1]);
+          if(String(params[0]).toLowerCase() !== k.evm) throw refuse(4100, 'That is not this account');
+          if(domain?.name !== 'Multisig' || !APP_TYPES.has(primaryType)) throw refuse(4200, 'This wallet only signs this app\'s own messages');
+          if(primaryType !== 'Session' && Number(domain.chainId) !== chain) throw refuse(4901, 'That message is for another chain');
           const { EIP712Domain, ...rest } = types;
           const hash = window.ethers.TypedDataEncoder.hash(domain, rest, message);
           return window.BitcoinVault.evmSignHash(window.btc.hex.decode(hash.slice(2)), k.evmPriv);
@@ -204,6 +245,7 @@ function providerFor(wallet){
         default: {
           const c = RPCS()[chain];
           if(!c) throw refuse(4901, 'That chain is not available here');
+          if(!READS.has(method)) throw refuse(4200, 'That is not available from this wallet');
           const r = await fetch(c.rpc, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
           const j = await r.json();
           if(j.error) throw refuse(j.error.code, j.error.message);

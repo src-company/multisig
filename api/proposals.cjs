@@ -759,7 +759,8 @@ function dependencies({ postgrestUrl, jwtSecret, rpcUrls }, fetcher = fetch) {
 const BTC_WINDOW_MS = 60000, BTC_PER_WINDOW = 20;
 const _btcCalls = new Map();
 function btcRateLimit(req) {
-  const ip = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').split(',')[0].trim();
+  // The rightmost entry, the hop the host wrote. The leftmost is whatever a caller sent.
+  const ip = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').split(',').pop().trim();
   const now = Date.now();
   if (_btcCalls.size > 10000) _btcCalls.clear();
   const seen = _btcCalls.get(ip);
@@ -804,7 +805,7 @@ function saveBitcoinVault(input) {
   const vault = BitcoinVault.vaultId(policy), onVault = x => policy.paths.some(p => p.keys.some(k => k.xpub === x));
   const signer = btcOwner(input, () => `save:${vault}`);
   if (!onVault(signer.xpub)) throw new RequestError(403, 'That owner is not on this vault');
-  const row = (address, confirmed) => ({ fn: 'put_btc_vault', args: { p_address: address, p_network: input.network, p_vault: vault, p_descriptor: input.descriptor.trim(), p_confirmed: confirmed } });
+  const row = (address, confirmed) => ({ fn: 'put_btc_vault', args: { p_address: address, p_network: input.network, p_vault: vault, p_descriptor: input.descriptor.trim(), p_confirmed: confirmed, p_at: confirmed ? input.at : null, p_sig: confirmed ? input.sig : null } });
   const writes = [row(signer.evm, true)], seen = new Set([signer.evm]);
   for (const text of (Array.isArray(input.handles) ? input.handles : []).slice(0, 40)) {
     let h;

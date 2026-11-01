@@ -26,7 +26,7 @@ const S = {
   rows: [{ text: '', owner: null, state: 'empty' }, { text: '', owner: null, state: 'empty' }],
   threshold: 2, name: '', policy: null, saved: false, step: 0,
   // True when this page was opened from someone's invite: the owners are theirs to set.
-  invite: false,
+  invite: false, checked: false, recorded: false,
 };
 let _t;
 const toast = t => { $('toast').innerHTML = `<div class="toast">${esc(t)}</div>`; clearTimeout(_t); _t = setTimeout(() => { $('toast').innerHTML = ''; }, 1600); };
@@ -49,20 +49,28 @@ function inviteLink(){
   const th = Math.min(S.threshold, Math.max(list.length, 1));
   return `${location.origin}${location.pathname}#join/${S.network}/${th}/${list.map(encodeURIComponent).join(',')}`;
 }
+// A link is a stranger's text. It is taken exactly or refused: a bad threshold defaulting
+// to 1 would quietly be a vault any single owner can empty.
 function readInvite(){
   const [kind, network, th, list] = location.hash.slice(1).split('/');
-  if(kind !== 'join' || !Object.hasOwn(BV.NETWORKS, network) || !list) return false;
-  S.network = network;
-  S.threshold = Math.max(1, +th || 1);
-  S.rows = list.split(',').map(decodeURIComponent).map(text => ({ text, owner: null, state: 'checking' }));
-  S.invite = true;
-  return true;
+  if(kind !== 'join') return false;
+  try {
+    const owners = list.split(',').map(decodeURIComponent).filter(Boolean);
+    if(!Object.hasOwn(BV.NETWORKS, network) || !/^[1-9]\d*$/.test(th) || +th > owners.length || owners.length > BV.MAX_OWNERS || new Set(owners.map(o => o.toLowerCase())).size !== owners.length) throw new Error();
+    S.network = network;
+    S.threshold = +th;
+    S.rows = owners.map(text => ({ text, owner: null, state: 'checking' }));
+    S.invite = true;
+    return true;
+  } catch(_) {
+    S.msg = 'That invite link is not valid. Ask for a new one.';
+    return false;
+  }
 }
 // An owner's own row is theirs the moment they connect, whichever way they did.
 function takeSeat(){
   const me = S.me, row = S.rows.find(r => r.text.toLowerCase() === me.evm || r.text === me.wallet);
   if(row) Object.assign(row, { owner: me.owner, handle: me.handle, state: 'ready', mine: true, error: null });
-  else S.msg = 'This wallet is not one of the owners on this invite. Connect the one that is.';
   return !!row;
 }
 const total = () => filled().length;
@@ -94,7 +102,20 @@ function statusOf(r){
 
 async function create(){
   const keys = filled().map(r => r.owner);
-  S.policy = BV.policyOf({ network: S.network, paths: [{ threshold: Math.min(S.threshold, keys.length), keys }] });
+  const policy = BV.policyOf({ network: S.network, paths: [{ threshold: Math.min(S.threshold, keys.length), keys }] });
+  // Once more before there is an address to fund, for a wallet that has no key on record.
+  // Spaced far from the first prompt, since Rainbow fails an identical one straight after.
+  // A different key stops everything. A closed popup does not: the question is unanswered,
+  // not answered badly, and the record catches it on the next connect.
+  if(S.me?.recheck){
+    S.progress = 'Approve once more in your wallet to confirm it repeats';
+    render();
+    let again = null;
+    try { again = await S.me.recheck(); } catch(_) {}
+    if(again && again !== S.me.owner.xpub) throw new Error('Your wallet gave a different key the second time, so it cannot hold a Bitcoin key here. Nothing was created.');
+    S.me.recheck = null;
+  }
+  S.policy = policy;
   const d = BV.descriptor(S.policy), k = `ms_btc_vaults_${S.network}`, list = lsJson(k, []);
   if(Array.isArray(list) && !list.includes(d)){ list.unshift(d); lsSet(k, JSON.stringify(list)); }
   if(S.name.trim()){
@@ -111,8 +132,7 @@ async function create(){
       S.recorded = true;
       const bk = `ms_btc_backup_${S.network}`, m = lsJson(bk, {}); m[d] = 1; lsSet(bk, JSON.stringify(m));
     } catch(_) {}
-    S.me.signer.wipePrivateData();
-    S.me.signer = null;
+    wipe();
   }
 }
 
@@ -157,7 +177,7 @@ function renderConnect(){
     ${evm.map(([k, w]) => opt(k, w.name, w.icon ? `<img src="${esc(w.icon)}" alt="">` : '')).join('')}
     ${!evm.length && window.ethereum ? opt('eth', 'Browser wallet') : ''}
     ${opt('wc', 'WalletConnect')}</div>
-    <button class="link" data-act="skip">Using a hardware wallet? Skip</button>`;
+    ${S.invite ? '' : '<button class="link" data-act="skip">Using a hardware wallet? Skip</button>'}`;
 }
 
 function renderOwners(){
@@ -165,9 +185,17 @@ function renderOwners(){
   const risk = n > 1 && th === n ? 'One lost key freezes the coins.' : n > 1 && th === 1 ? 'Any one owner can spend alone.' : null;
   const waiting = filled().some(r => r.state === 'waiting');
   if(S.invite){
-    const rows = S.rows.map(r => `<div class="row"><span class="n">${ICONS.owners}</span><span class="inp">${esc(short(r.text))}</span>${r.mine ? '<span class="st ok">YOU</span>' : statusOf(r)}</div>`).join('');
-    return `<h2>${S.me ? 'You are in' : 'You are invited'}</h2><p class="lead">A ${th} of ${n} Bitcoin vault. ${waiting ? 'Waiting for the others. This updates by itself.' : 'Every owner is ready.'}</p>
-      ${rows}<button class="btn fill w" data-act="next"${allReady() ? '' : ' disabled'}>CONTINUE</button>`;
+    // Whoever sent this chose every line of it. A vault someone hands you can be one they
+    // alone control, so the rule is said plainly and nothing is saved until it is checked.
+    const rows = S.rows.map(r => `<div class="row"><span class="n">${ICONS.owners}</span><span class="inp full">${esc(r.text)}</span>${r.mine ? '<span class="st ok">YOU</span>' : statusOf(r)}</div>`).join('');
+    const seated = S.rows.some(r => r.mine), others = n - (seated ? 1 : 0);
+    const warn = th === 1 && n > 1 ? 'Any one owner can spend everything alone.' : others >= th ? `The other ${others === 1 ? 'owner' : `${others} owners`} can spend without you.` : null;
+    return `<h2>${seated ? 'You are in' : 'You are invited'}</h2><p class="lead"><strong>${th} of ${n}</strong> must sign. ${waiting ? 'Waiting for the others. This updates by itself.' : 'Every owner is ready.'}</p>
+      ${rows}
+      ${S.me && !seated ? '<div class="note bad">This wallet is not one of the owners on this invite. Connect the one that is.</div>' : ''}
+      ${warn ? `<div class="note">${warn}</div>` : ''}
+      <button class="tick" data-act="confirm" aria-pressed="${S.checked}"><span>${S.checked ? '✓' : ''}</span>I know every owner above, and this is the rule I agreed to</button>
+      <button class="btn fill w" data-act="next"${allReady() && seated && S.checked ? '' : ' disabled'}>CONTINUE</button>`;
   }
   return `<h2>Add owners</h2><p class="lead">A 0x address, a Bitcoin address, or an xpub.</p>
     ${S.me ? `<div class="row"><span class="n">${ICONS.owners}</span><span class="inp">${esc(S.me.label)}</span><span class="st ok">YOU</span></div>` : ''}
@@ -181,19 +209,22 @@ function renderOwners(){
 
 function renderBackup(){
   const name = `<input class="inp boxed" id="name" data-name="1" aria-label="Vault name" maxlength="24" placeholder="Vault name (optional)" autocomplete="off" value="${esc(S.name)}">`;
-  if(S.me) return `<h2>Name your vault</h2><p class="lead">It stays on your wallet's record, so connecting on any device finds it.</p>${name}
+  if(S.progress) return `<h2>One moment</h2><div class="connecting" role="status">${esc(S.progress)}<button class="btn line" data-act="cancelconnect">CANCEL</button></div>`;
+  if(S.me?.signer) return `<h2>Name your vault</h2><p class="lead">It stays on your wallet's record, so connecting on any device finds it.</p>${name}
     <button class="btn fill w" data-act="make">CREATE VAULT</button>`;
   return `<h2>Save your backup</h2><p class="lead">Without this file the coins can't be spent, even with every key. It holds no private key.</p>${name}
     <button class="btn fill w" data-act="backup">CREATE AND SAVE</button>`;
 }
 
 function renderReceive(){
+  // With no record and no file, an address here could take coins nothing can spend.
+  if(!S.recorded && !S.saved) return `<h2>Save your backup</h2><p class="lead">This vault could not be saved to your wallet, so this file is its only record.</p><button class="btn fill w" data-act="savefile">DOWNLOAD BACKUP</button>`;
   const a = BV.vaultOf(S.policy).address;
   return `<h2>Your vault is ready</h2><p class="lead">Send sats here to fund it.</p>
     <div class="qr" role="img" aria-label="QR code of the address">${window.btc.encodeQR(a.toUpperCase(), 'svg')}</div>
     <div class="addr">${esc(a)}</div>
     <div class="btns center"><button class="btn line" data-act="copy">COPY ADDRESS</button><button class="btn line" data-act="vaultlink">COPY VAULT LINK</button>${S.network === 'signet' ? '<a class="btn line asbtn" href="https://faucet.coinbin.org" target="_blank" rel="noopener">GET TEST COINS ↗</a>' : ''}</div>
-    ${S.recorded ? '<div class="note ok">Saved to your wallet. Connect on any device to find it. Keep a backup file too, in case this site is ever gone. <button class="link" data-act="savefile">Download backup</button></div>' : S.saved ? '' : '<div class="note">This vault could not be saved to your wallet, so the file is its only record. <button class="link" data-act="savefile">Download backup</button></div>'}
+    ${S.recorded && !S.saved ? '<div class="note ok">Saved to your wallet, so connecting on any device finds it. Keep a backup too: it works if this site is ever gone. <button class="link" data-act="savefile">Download backup</button></div>' : ''}
     <div class="note">Sats only. Tacit assets sent here are set aside, and this vault cannot move them.</div>
     <a class="btn go w" href="./bitcoin.html#${S.network}/${encodeURIComponent(BV.descriptor(S.policy))}">OPEN VAULT</a>`;
 }
@@ -209,6 +240,7 @@ function render(){
     <div class="hero"><div class="marks"><span class="mark">${BTC}</span><span class="mark">${TAC}</span></div>
       <h1>Bitcoin multisig</h1><div class="free">FREE · NOTHING TO DEPLOY</div></div>
     ${renderFlow()}
+    ${S.network === 'mainnet' && S.step < 3 ? '<div class="note">Real bitcoin. Not independently reviewed, and your key sits in this page while you use it. Start with an amount you can lose.</div>' : ''}
     ${S.msg ? `<div class="note bad" role="status">${esc(S.msg)}</div>` : ''}
     <section class="pane">${pane()}</section>
     <div class="foot"><a href="./index.html">ETHEREUM AND L2 ↗</a><a href="./bitcoin.html">MY VAULTS</a></div>
@@ -216,13 +248,20 @@ function render(){
   if(id && $(id)){ $(id).focus(); if(at != null) try { $(id).setSelectionRange(at, at); } catch(_) {} }
 }
 
+// A key kept for the save is still a key in an open tab, and someone waiting on a friend
+// may leave one open for days. After this long it goes, and the file becomes the record.
+const IDLE_MS = 15 * 60 * 1000;
+const wipe = () => { S.me?.signer?.wipePrivateData(); if(S.me) S.me.signer = null; };
+let _idle;
+const touch = () => { clearTimeout(_idle); if(S.me?.signer) _idle = setTimeout(() => { wipe(); render(); }, IDLE_MS); };
 const onStep = (n, of) => { S.progress = `Approve ${n} of ${of} in your wallet`; render(); };
 
 const ACT = {
   theme(){ S.dark = !S.dark; lsSet('ms_light', S.dark ? '' : '1'); },
   skip(){ S.step = 1; },
+  confirm(){ S.checked = !S.checked; },
   next(){ S.step = 2; },
-  go(el){ S.step = +el.dataset.s; if(S.step === 0){ S.me?.signer?.wipePrivateData(); S.me = null; } },
+  go(el){ S.step = +el.dataset.s; if(S.step === 0){ wipe(); S.me = null; } },
   async connect(el){
     const w = el.dataset.w;
     if(window.top !== window || window.opener) throw new Error('Open this page in its own tab to use a key.');
@@ -230,7 +269,7 @@ const ACT = {
     if(w.startsWith('btc:')){
       const wallet = BW.detect().find(x => x.key === w.slice(4)), key = await BW.connectWallet(wallet, S.network, onStep);
       key.evmPriv.fill(0);
-      S.me = { signer: key.signer, owner: key.owner, handle: key.handle, evm: key.evm, wallet: key.address, published: key.published, label: `${wallet.name} ${short(key.address)}` };
+      S.me = { signer: key.signer, recheck: key.recheck, owner: key.owner, handle: key.handle, evm: key.evm, wallet: key.address, published: key.published, label: `${wallet.name} ${short(key.address)}` };
     } else {
       const eth = w === 'wc' ? await BW.walletConnect() : w === 'eth' ? window.ethereum : evmWallets.get(w).provider;
       S.me = await BW.connectEvmForHandle(eth, S.network, { onStep, keep: true });
@@ -238,10 +277,11 @@ const ACT = {
     S.step = 1;
     if(S.invite) takeSeat();
     // Others find an owner through this, so a failed save is worth saying.
+    if(S.invite && !S.rows.some(r => r.mine)){ wipe(); }
     if(!S.me.published) S.msg = 'Connected, but your key could not be published. Co-owners will see you as WAITING. Reconnect to try again.';
   },
   net(el){
-    S.me?.signer?.wipePrivateData();
+    wipe();
     S.network = el.dataset.n; S.me = null; S.step = 0;
     S.rows.forEach(r => { r.owner = null; r.state = r.text.trim() ? 'checking' : 'empty'; });
     return ACT.check();
@@ -269,6 +309,7 @@ document.addEventListener('click', async e => {
   catch(err) { S.msg = err?.message || String(err); }
   S.busy = false;
   S.progress = null;
+  touch();
   render();
 });
 let _typing;

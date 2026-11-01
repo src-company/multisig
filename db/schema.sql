@@ -1854,7 +1854,9 @@ BEGIN
   IF coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb->>'role', '') <> 'metadata_writer' THEN
     RAISE EXCEPTION 'A verified owner signature is required' USING ERRCODE = '42501';
   END IF;
-  PERFORM rate_gate('btc_handle:' || client_ip(), 30, interval '1 minute');
+  -- Keyed on the owner: only the service calls this, so client_ip() is one bucket for
+  -- everyone, and a busy minute would turn honest owners away.
+  PERFORM rate_gate('btc_handle:' || p_address, 30, interval '1 minute');
   INSERT INTO btc_owner_handles (address, network, handle) VALUES (p_address, p_network, p_handle)
   -- First key stays. A twin is derived from this table, so letting a row change would
   -- move a funded vault's address, and proofs carry no date, so an old handle could be
@@ -1968,8 +1970,13 @@ CREATE TABLE IF NOT EXISTS btc_vault_owners (
   PRIMARY KEY (address, network, vault)
 );
 ALTER TABLE btc_vault_owners ENABLE ROW LEVEL SECURITY;
+-- The owner's own signature, kept so a client can check `confirmed` for itself.
+ALTER TABLE btc_vault_owners ADD COLUMN IF NOT EXISTS at bigint;
+ALTER TABLE btc_vault_owners ADD COLUMN IF NOT EXISTS sig text;
 
-CREATE OR REPLACE FUNCTION put_btc_vault(p_address text, p_network text, p_vault text, p_descriptor text, p_confirmed boolean)
+DROP FUNCTION IF EXISTS put_btc_vault(text, text, text, text, boolean);
+DROP FUNCTION IF EXISTS btc_vaults_for(text, text);
+CREATE OR REPLACE FUNCTION put_btc_vault(p_address text, p_network text, p_vault text, p_descriptor text, p_confirmed boolean, p_at bigint, p_sig text)
 RETURNS void AS $$
 BEGIN
   IF coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb->>'role', '') <> 'metadata_writer' THEN
@@ -1979,17 +1986,25 @@ BEGIN
   IF NOT p_confirmed AND (SELECT count(*) FROM btc_vault_owners WHERE address = p_address AND network = p_network AND NOT confirmed) >= 50 THEN
     RETURN;
   END IF;
-  INSERT INTO btc_vault_owners (address, network, vault, descriptor, confirmed)
-  VALUES (p_address, p_network, p_vault, p_descriptor, p_confirmed)
-  ON CONFLICT (address, network, vault) DO UPDATE SET confirmed = btc_vault_owners.confirmed OR EXCLUDED.confirmed;
+  IF p_confirmed AND (SELECT count(*) FROM btc_vault_owners WHERE address = p_address AND network = p_network AND confirmed) >= 200 THEN
+    RAISE EXCEPTION 'Too many vaults on this address' USING ERRCODE = '54000';
+  END IF;
+  INSERT INTO btc_vault_owners (address, network, vault, descriptor, confirmed, at, sig)
+  VALUES (p_address, p_network, p_vault, p_descriptor, p_confirmed, p_at, p_sig)
+  -- The owner's own copy wins: an invitation may carry someone else's origin text.
+  ON CONFLICT (address, network, vault) DO UPDATE SET
+    confirmed  = btc_vault_owners.confirmed OR EXCLUDED.confirmed,
+    descriptor = CASE WHEN EXCLUDED.confirmed THEN EXCLUDED.descriptor ELSE btc_vault_owners.descriptor END,
+    at         = CASE WHEN EXCLUDED.confirmed THEN EXCLUDED.at ELSE btc_vault_owners.at END,
+    sig        = CASE WHEN EXCLUDED.confirmed THEN EXCLUDED.sig ELSE btc_vault_owners.sig END;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
 -- Not granted to anon: this is read through the service, which checks the owner's
 -- signature first. The list of who sits on what stays behind that.
 CREATE OR REPLACE FUNCTION btc_vaults_for(p_address text, p_network text)
-RETURNS TABLE (descriptor text, confirmed boolean) AS $$
-  SELECT v.descriptor, v.confirmed FROM btc_vault_owners v
+RETURNS TABLE (descriptor text, confirmed boolean, at bigint, sig text) AS $$
+  SELECT v.descriptor, v.confirmed, v.at, v.sig FROM btc_vault_owners v
   WHERE v.address = p_address AND v.network = p_network
   ORDER BY v.confirmed DESC, v.created_at DESC LIMIT 200;
 $$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp;

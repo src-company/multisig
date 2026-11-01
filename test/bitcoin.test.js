@@ -657,7 +657,7 @@ test('only a plain verdict releases a coin that tripped the envelope check', asy
   const asked = [];
   const c = {
     used: async a => a === addr, utxos: async () => coins.map(u => ({ ...u })),
-    tx: async id => id.startsWith('ee') ? { vin: [] } : envelope,
+    tx: async id => id.startsWith('ee') ? { vin: [{ witness: ['00'] }] } : envelope,
     classify: async list => { asked.push(...list); return { [op('aa')]: { status: 'plain' }, [op('bb')]: { status: 'asset', asset_ids: ['f0'.repeat(32)] }, [op('cc')]: { status: 'unverified', reason: 'x' } }; },
   };
   const { coins: found } = await BV.scan(policy, c);
@@ -670,6 +670,9 @@ test('only a plain verdict releases a coin that tripped the envelope check', asy
   await assert.rejects(BV.assertSpendable([{ txid: 'bb'.repeat(32), vout: 0, sats: 50000 }], c), /not signed/);
   await BV.assertSpendable([{ txid: 'aa'.repeat(32), vout: 0, sats: 50000 }], c);
   await BV.assertSpendable([{ txid: 'ee'.repeat(32), vout: 0, sats: 50000 }], c);
+  // An explorer that answers with nothing has not cleared the coin.
+  await assert.rejects(BV.assertSpendable([{ txid: 'aa'.repeat(32), vout: 0, sats: 50000 }], { tx: async () => ({}) }), /not signed/);
+  await assert.rejects(BV.assertSpendable([{ txid: 'aa'.repeat(32), vout: 0, sats: 50000 }], {}), /cannot check/);
 });
 
 test('an owner proves who they are without a wallet prompt, for one action, briefly', () => {
@@ -688,6 +691,14 @@ test('the vault list keeps only vaults holding this owner\'s key', async () => {
   const got = await BV.listVaults('signet', A.signer, handle, f);
   assert.equal(got.length, 1);
   assert.equal(BV.descriptor(got[0].policy), mine);
+  // The server saying confirmed is not enough. It needs this owner's own signature.
+  assert.equal(got[0].confirmed, false);
+  const policy = plain('signet'), auth = BV.signOwnerAuth(A.signer, 'signet', `save:${BV.vaultId(policy)}`);
+  const f2 = async () => ({ ok: true, json: async () => [{ descriptor: mine, confirmed: true, ...auth }] });
+  assert.equal((await BV.listVaults('signet', A.signer, handle, f2))[0].confirmed, true);
+  const forged = BV.signOwnerAuth(B.signer, 'signet', `save:${BV.vaultId(policy)}`);
+  const f3 = async () => ({ ok: true, json: async () => [{ descriptor: mine, confirmed: true, ...forged }] });
+  assert.equal((await BV.listVaults('signet', A.signer, handle, f3))[0].confirmed, false);
 });
 
 test('two different proposals do not merge', () => {

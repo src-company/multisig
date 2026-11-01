@@ -581,11 +581,15 @@ async function listVaults(network, signer, handle, doFetch = (...a) => root.fetc
   const auth = signOwnerAuth(signer, network, 'list');
   const r = await postJson(doFetch, `${API}/btc-vaults`, { network, handle, ...auth });
   if(!r.ok) throw new Error('Could not read your vaults');
-  const { xpub } = decodeOwner(handle, network), out = [];
+  const me = decodeOwner(handle, network), { xpub } = me, out = [];
   for(const row of await r.json()){
     try {
       const policy = parseDescriptor(row.descriptor, network);
-      if(policy.paths.some(p => p.keys.some(k => k.xpub === xpub))) out.push({ policy, confirmed: !!row.confirmed });
+      if(!policy.paths.some(p => p.keys.some(k => k.xpub === xpub))) continue;
+      // Confirmed by this owner's signature, checked here. The server's word is not
+      // enough: anyone who could write that row could plant a vault as trusted.
+      const signed = !!row.confirmed && verifyOwnerAuth(me, network, `save:${vaultId(policy)}`, row.at, row.sig, row.at);
+      out.push({ policy, confirmed: signed });
     } catch(_) {}
   }
   return out;
@@ -738,7 +742,19 @@ function vsize(policy, pathIdx, inputs, outputScripts){
 // are not detected.
 const isProtected = coin => coin.value <= DUST || !!coin.quarantine;
 const ENVELOPE_MARKER = '5441434954'; // "TACIT"
-const hasTacitEnvelope = tx => (tx.vin || []).some(i => (i.witness || []).some(w => w.includes(ENVELOPE_MARKER)));
+// Names for the assets anyone is likely to meet. The classifier gives ids; any other
+// shows as its id, which is still the truth.
+const TACIT_ASSETS = {
+  f0bbe868af10c6c67652a99709bf32048d1aa7194efe3e9a1ef1bde43f94762b: 'TAC',
+  '3cba71e1114af183cdeacc6b8457a474d17529fd28704480ca799d0d03126f34': 'tETH',
+  '62a20d98fc1cd20289621d1315294cb8772f934d822e404b71e1f471cf0679c8': 'cBTC',
+  '8f4490dd3728b0ee904d7a67c11b37ffd463a5c7f08b79810006995ee8a9679d': 'cUSD',
+};
+const hasTacitEnvelope = tx => {
+  // A reply with no inputs is no answer. Calling it clear would release the coin.
+  if(!Array.isArray(tx?.vin) || !tx.vin.length) throw new Error('not a transaction');
+  return tx.vin.some(i => (i.witness || []).some(w => w.includes(ENVELOPE_MARKER)));
+};
 function coinsFor(policy, pathIdx, utxos, tip){
   const older = policy.paths[pathIdx].older;
   return utxos.filter(u => u.height > 0 && !isProtected(u) && (!older || tip + 1 >= u.height + older));
@@ -1083,14 +1099,14 @@ async function scan(policy, c, gap = GAP){
       if(!sure) throw new Error('the explorers disagree about this vault, so its balance cannot be trusted right now');
     }
   }
-  await classifyCoins(coins, c);
+  if(c.tx) await classifyCoins(coins, c);
   return { coins, receive: next[0], change: next[1] };
 }
 
 // Sets `quarantine` on any coin that is not provably plain. Fails closed throughout: a
 // coin that could not be checked is treated as one that failed.
 async function classifyCoins(coins, c){
-  if(!c.tx) return;
+  if(!c.tx) throw new Error('cannot check coins for tokens');
   const hits = [];
   await Promise.all(coins.map(async u => {
     u.quarantine = undefined;
@@ -1126,7 +1142,7 @@ function concat(...parts){
   return out;
 }
 
-root.BitcoinVault = { signOwnerAuth, verifyOwnerAuth, saveVault, listVaults, assertSpendable, isProtected, hasTacitEnvelope, walletMessage, linkMessage, keyFromWalletSignature, evmSignHash, evmSignMessage, bitcoinMessageHash, bitcoinSigners, handleForWallet, proposalId, vaultId, publishProposal, fetchProposals, openProposals, publishHandle, fetchHandles, MAX_INDEX, txidOf, seatMisdescribed, EVM_CHAINS, selectors: { threshold: selector('threshold()') }, readEvmVault, mirror, bindingMessage, evmMessageHash, NETWORKS, DUST, GAP, MAX_OWNERS, MAX_OLDER, MAX_FEE_RATE, encodeOwner, decodeOwner, originText, ownerMessage, deriveOwnerKey, keyFromSignature, fingerprintOf,
-  policyOf, descriptor, descriptorChecksum, parseDescriptor, walletPolicy, vaultOf, vsize, coinsFor, propose, inspect, sign, combine, finalize, chain, scan };
+root.BitcoinVault = Object.freeze({ TACIT_ASSETS, signOwnerAuth, verifyOwnerAuth, saveVault, listVaults, assertSpendable, isProtected, hasTacitEnvelope, walletMessage, linkMessage, keyFromWalletSignature, evmSignHash, evmSignMessage, bitcoinMessageHash, bitcoinSigners, handleForWallet, proposalId, vaultId, publishProposal, fetchProposals, openProposals, publishHandle, fetchHandles, MAX_INDEX, txidOf, seatMisdescribed, EVM_CHAINS, selectors: { threshold: selector('threshold()') }, readEvmVault, mirror, bindingMessage, evmMessageHash, NETWORKS, DUST, GAP, MAX_OWNERS, MAX_OLDER, MAX_FEE_RATE, encodeOwner, decodeOwner, originText, ownerMessage, deriveOwnerKey, keyFromSignature, fingerprintOf,
+  policyOf, descriptor, descriptorChecksum, parseDescriptor, walletPolicy, vaultOf, vsize, coinsFor, propose, inspect, sign, combine, finalize, chain, scan, evmSigner });
 
 })(typeof window !== 'undefined' ? window : globalThis);
