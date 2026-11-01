@@ -398,21 +398,16 @@ function load(psbt){
 }
 
 function propose(){
-  const f = S.form, addr = f.to.trim(), amt = f.amt.trim();
-  const args = { policy: S.policy, utxos: S.coins || [], tip: S.tip, feeRate: +f.rate || feeOf('6'), path: +f.path, change: S.change };
+  const f = S.form, addr = f.to.trim();
   if(!addr) throw new Error('Enter an address to send to.');
   // There is no fee bump, so a guess at the floor could leave a spend stuck.
   if(!+f.rate && !Object.keys(S.fees || {}).length) throw new Error('Fee estimates are unavailable. Enter a rate.');
-  if(amt.toLowerCase() === 'all') args.sweep = addr;
-  else {
-    if(!/^\d+(\.\d{1,8})?$/.test(amt)) throw new Error('Amount is in BTC, up to 8 places, or use MAX.');
-    const [whole, frac = ''] = amt.split('.');
-    args.outputs = [{ address: addr, sats: Number(BigInt(whole) * 100000000n + BigInt(frac.padEnd(8, '0'))) }];
-  }
+  const args = sendArgs(addr);
+  if(!args) throw new Error('Amount is in BTC, up to 8 places, or use MAX.');
   load(BV.propose(args));
   const all = args.sweep ? BV.coinsFor(S.policy, args.path, args.utxos, args.tip).length : 0;
   if(all > S.review.inputs.length) S.msg = { text: `MAX TAKES ${S.review.inputs.length} OF ${all} COINS. SEND AGAIN FOR THE REST`, kind: 'ok' };
-  Object.assign(S.form, { to: '', amt: '', rate: '', path: '0' });
+  Object.assign(S.form, { to: '', amt: '', rate: '', tier: '', max: false, path: '0' });
 }
 
 // Into the shared queue, or, if that cannot be reached, by hand. A signature is never
@@ -631,27 +626,48 @@ function renderProposal(item, i){
   </div>`;
 }
 
+// The send as it stands, built the way PROPOSE builds it, so what the form says is what
+// the proposal will be. Before an address is in, the vault's own stands in for the size.
+function sendArgs(to){
+  const f = S.form, amt = f.amt.trim();
+  const args = { policy: S.policy, utxos: S.coins || [], tip: S.tip, feeRate: +f.rate || feeOf('6'), path: +f.path, change: S.change };
+  if(f.max) return { ...args, sweep: to };
+  if(!/^\d+(\.\d{1,8})?$/.test(amt)) return null;
+  const [whole, frac = ''] = amt.split('.');
+  return { ...args, outputs: [{ address: to, sats: Number(BigInt(whole) * 100000000n + BigInt(frac.padEnd(8, '0'))) }] };
+}
+function sendPreview(){
+  const f = S.form, args = sendArgs(f.to.trim() || BV.vaultOf(S.policy, 0, 0).address);
+  if(!args || !S.coins) return null;
+  try {
+    const v = BV.inspect(BV.propose(args), S.policy, known()), inSats = v.inputs.reduce((n, i) => n + i.sats, 0);
+    const send = f.max ? inSats - v.fee : args.outputs[0].sats;
+    const all = S.coins.filter(c => !BV.isProtected(c)).reduce((n, c) => n + c.value, 0);
+    return { send, fee: v.fee, left: Math.max(all - send - v.fee, 0) };
+  } catch(e) { return { error: e.message }; }
+}
+
 function renderCompose(){
   const f = S.form, p = S.policy;
-  const tiers = [['SLOW', '144'], ['NORMAL', '6'], ['FAST', '1']];
-  const cur = f.rate || String(feeOf('6'));
-  return `<div class="tx">
-    <label class="lbl" for="to">TO</label>
+  const tiers = [['SLOW', '144'], ['NORMAL', '6'], ['FAST', '1']], tier = f.rate ? f.tier : '6';
+  const view = sendPreview();
+  if(f.max) f.amt = view?.send > 0 ? btcOf(view.send) : '';
+  const sats = n => `${n.toLocaleString('en-US')} sats`;
+  return `<div class="tx send">
+    <label class="lbl" for="to">SEND TO</label>
     <input class="inp" id="to" data-field="to" spellcheck="false" autocomplete="off" placeholder="${S.network === 'signet' ? 'tb1…' : 'bc1…'}" value="${esc(f.to)}">
-    <div class="cols">
-      <div>
-        <label class="lbl" for="amt">AMOUNT <span class="dim">BTC</span></label>
-        <input class="inp" id="amt" data-field="amt" inputmode="decimal" autocomplete="off" placeholder="0.00000000" value="${esc(f.amt)}">
-        <div class="pills" style="margin-top:8px"><button class="pill${f.amt === 'all' ? ' on' : ''}" data-act="max">MAX</button></div>
-      </div>
-      <div>
-        <label class="lbl" for="rate">FEE <span class="dim">sat/vB</span></label>
-        <input class="inp" id="rate" data-field="rate" inputmode="decimal" autocomplete="off" value="${esc(cur)}">
-        <div class="pills" style="margin-top:8px">${tiers.map(([l, t]) => `<button class="pill${cur === String(feeOf(t)) ? ' on' : ''}" data-act="tier" data-t="${t}">${l} ${feeOf(t)}</button>`).join('')}</div>
-      </div>
-    </div>
-    ${p.paths.length > 1 ? `<label class="lbl">SPEND WITH</label><div class="pills">${p.paths.map((x, i) => `<button class="pill${f.path === String(i) ? ' on' : ''}" data-act="path" data-p="${i}">${pathLabel(x)}</button>`).join('')}</div>` : ''}
-    <div class="btns"><div class="right"><button class="btn btn-ghost" data-act="compose">CANCEL</button><button class="btn btn-fill" data-act="propose"${S.coins ? '' : ' disabled'}>PROPOSE</button></div></div>
+    <label class="lbl" for="amt">AMOUNT</label>
+    <div class="amt-row"><input class="inp" id="amt" data-field="amt" inputmode="decimal" autocomplete="off" placeholder="0.00000000" value="${esc(f.amt)}"><span class="unit">BTC</span><button class="pill${f.max ? ' on' : ''}" data-act="max" aria-pressed="${!!f.max}">MAX</button></div>
+    <span class="lbl">SPEED</span>
+    <div class="speed">${tiers.map(([l, t]) => `<button class="pill${tier === t ? ' on' : ''}" data-act="tier" data-t="${t}" aria-pressed="${tier === t}">${l}</button>`).join('')}
+      <label class="rate"><input class="inp" id="rate" data-field="rate" inputmode="decimal" autocomplete="off" aria-label="Fee rate in sats per vbyte" value="${esc(f.rate || String(feeOf('6')))}"><span>sat/vB</span></label></div>
+    ${p.paths.length > 1 ? `<span class="lbl">SPEND WITH</span><div class="pills">${p.paths.map((x, i) => `<button class="pill${f.path === String(i) ? ' on' : ''}" data-act="path" data-p="${i}">${pathLabel(x)}</button>`).join('')}</div>` : ''}
+    ${view?.error ? `<div class="send-err">${esc(view.error)}</div>` : view ? `<div class="send-sum">
+      <div><span>RECIPIENT GETS</span><b>${btcOf(view.send)} BTC</b></div>
+      <div><span>NETWORK FEE</span><b>${sats(view.fee)}</b></div>
+      <div><span>LEFT IN VAULT</span><b>${btcOf(view.left)} BTC</b></div>
+    </div>` : ''}
+    <div class="btns"><div class="right"><button class="btn btn-ghost" data-act="compose">CANCEL</button><button class="btn btn-fill" data-act="propose"${S.coins && view && !view.error ? '' : ' disabled'}>PROPOSE</button></div></div>
   </div>`;
 }
 
@@ -1004,11 +1020,11 @@ const ACT = {
   st(el){ const n = Math.max(ownerRows(S.form.second).filter(r => r.ok).length, 1); S.form.secondThreshold = String(Math.min(n, Math.max(1, (+S.form.secondThreshold || 1) + +el.dataset.d))); },
   'add-me'(){ if(S.pending) throw new Error('Confirm your wallet first.'); const f = S.form, me = myHandle(); if(!f.owners.includes(me)) f.owners = (f.owners.trim() + '\n' + me).trim(); },
   compose(){ S.compose = !S.compose; S.msg = null; },
-  max(){ S.form.amt = 'all'; },
-  tier(el){ S.form.rate = String(feeOf(el.dataset.t)); },
+  max(){ S.form.max = !S.form.max; if(!S.form.max) S.form.amt = ''; },
+  tier(el){ Object.assign(S.form, { rate: String(feeOf(el.dataset.t)), tier: el.dataset.t }); },
   path(el){ S.form.path = el.dataset.p; },
   // Sending coins to the vault's own next address is how their clock restarts.
-  reset(){ Object.assign(S.form, { to: BV.vaultOf(S.policy, 0, S.receive).address, amt: 'all', path: '0' }); S.compose = true; },
+  reset(){ Object.assign(S.form, { to: BV.vaultOf(S.policy, 0, S.receive).address, max: true, path: '0' }); S.compose = true; },
   paste(){ load(S.form.paste.trim()); S.form.paste = ''; },
   discard(){
     const id = BV.proposalId(S.psbt);
@@ -1050,7 +1066,7 @@ const ACT = {
     Object.assign(S, { moveFrom: null, moveTo: null });
     await open(BV.parseDescriptor(from, S.network));
     await scanned;
-    Object.assign(S.form, { to, amt: 'all', path: '0' });
+    Object.assign(S.form, { to, max: true, path: '0' });
     S.compose = true;
   },
   async 'tacit-setup'(){
@@ -1092,11 +1108,13 @@ document.addEventListener('input', e => {
   const k = e.target.dataset?.field;
   if(!k) return;
   S.form[k] = e.target.value;
+  if(k === 'amt') S.form.max = false;
+  if(k === 'rate') S.form.tier = '';
   if(k === 'evmChain' || k === 'evmVault') S.mirror = null;
   // Only the create form reads itself back as it is typed in. The fee pills light up
   // from the rate, so that one field redraws too.
   if(k === 'owners' || k === 'second') resolveWallets(k);
-  if(S.view === 'create' || k === 'rate' || k === 'amt') render();
+  if(S.view === 'create' || k === 'rate' || k === 'amt' || k === 'to') render();
 });
 document.addEventListener('keydown', e => { if(e.key === 'Escape' && S.ovl && S.ovl !== 'confirm'){ S.ovl = null; render(); } });
 window.addEventListener('hashchange', readHash);
