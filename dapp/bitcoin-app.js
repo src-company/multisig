@@ -1,8 +1,8 @@
 'use strict';
 // The Bitcoin page. Everything that decides anything is in bitcoin.js; this file
-// holds the screen. There is no server behind it: vaults are descriptors kept in
-// this browser and in links, and a proposal moves between owners as a PSBT in a
-// link fragment, which never reaches a web server's log.
+// holds the screen. Vaults are descriptors kept in this browser and in links. Proposals
+// go through a shared queue, whose rows are re-read here and never believed, and can
+// also move by link or PSBT, so the queue being down stops nothing.
 //
 // The layout is the Ethereum dashboard's on purpose: the same header, tabs, stat and
 // queue card, so that Bitcoin reads as another chain and not as another product.
@@ -49,7 +49,7 @@ const S = {
 };
 const myHandle = () => BV.encodeOwner({ network: S.network, ...S.owner });
 function forget(){ if(S.owner){ S.owner.signer.wipePrivateData(); S.owner = null; } }
-const known = () => S.coins ? { receive: S.receive, change: S.change } : undefined;
+const known = () => S.coins ? { receive: S.receive, change: S.change, quarantined: S.coins.filter(c => c.quarantine).map(c => `${c.txid}:${c.vout}`) } : undefined;
 let idle;
 // Timers stop while a device sleeps, so the wall clock is checked as well.
 let lastActive = Date.now();
@@ -81,13 +81,42 @@ const isMe = k => !!S.owner && S.owner.xpub === k.xpub;
 const allKeys = p => [...new Map(p.paths.flatMap(x => x.keys).map(k => [k.xpub, k])).values()];
 
 // ── OWNER KEY ──────────────────────────────────────────────
-async function connect(){
+// The extensions that announce themselves, a plain window.ethereum if none do.
+const evmWallets = new Map();
+window.addEventListener('eip6963:announceProvider', e => {
+  const { info, provider } = e.detail || {};
+  if(info?.uuid && provider && !info.rdns?.startsWith('software.multisig.')) evmWallets.set(info.uuid, { name: String(info.name), provider });
+});
+window.dispatchEvent(new Event('eip6963:requestProvider'));
+const walletConnect = () => window.BitcoinWallets.walletConnect();
+
+async function connect(el){
+  const choice = el?.dataset?.w || '';
+  if(choice.startsWith('btc:')){
+    checkPlace();
+    const wallet = window.BitcoinWallets.detect().find(w => w.key === choice.slice(4));
+    const key = await window.BitcoinWallets.connectWallet(wallet, S.network);
+    forget();
+    S.owner = { ...key.owner, signer: key.signer, evm: key.evm, via: `${wallet.name} ${short(key.address)}` };
+    key.evmPriv.fill(0);
+    S.msg = null;
+    S.ovl = 'me';
+    touch();
+    return;
+  }
+  return connectEvm(choice === 'wc' ? await walletConnect() : choice ? evmWallets.get(choice).provider : window.ethereum);
+}
+
+function checkPlace(){
   // A path gateway gives every site on it this same origin, and the key would be
   // within their reach.
   if(/^\/ip[fn]s\//.test(location.pathname)) throw new Error('Open this page from its own domain to use a key. This address shares its origin with other sites.');
   // The hosting headers do not travel to a mirror, so the page checks for itself.
   if(window.top !== window || window.opener) throw new Error('Open this page in its own tab to use a key.');
-  const eth = window.ethereum;
+}
+
+async function connectEvm(eth){
+  checkPlace();
   if(!eth) throw new Error('No Ethereum wallet in this browser. Owners on a hardware wallet need no connection here: copy the PSBT and sign it there.');
   const [evm] = await eth.request({ method: 'eth_requestAccounts' });
   const hexMsg = m => '0x' + window.btc.hex.encode(new TextEncoder().encode(m));
@@ -108,6 +137,18 @@ async function connect(){
 // ── VAULTS ─────────────────────────────────────────────────
 const words = text => text.split(/[\s,]+/).filter(Boolean);
 const parseOwners = text => words(text).map(t => BV.decodeOwner(t, S.network));
+// A Bitcoin address in an owner box is swapped for that owner's handle, if they have
+// connected. Otherwise the row says so, and the box keeps what was typed.
+const isWalletAddress = t => /^(bc1|tb1)[a-z0-9]{20,}$/i.test(t);
+const _askedWallets = new Set();
+async function resolveWallets(field){
+  for(const t of words(S.form[field]).filter(isWalletAddress)){
+    if(_askedWallets.has(t)) continue;
+    _askedWallets.add(t);
+    const found = await BV.handleForWallet(S.network, t).catch(() => null);
+    if(found){ S.form[field] = S.form[field].replace(t, found.handle); render(); }
+  }
+}
 
 // Each line checked as it is typed, so a bad paste is found at the paste.
 function ownerRows(text){
@@ -115,7 +156,7 @@ function ownerRows(text){
     try {
       const o = BV.decodeOwner(t, S.network);
       return { ok: true, text: o.evm ? short(o.evm) : o.fingerprint, proven: !!o.proven, me: isMe(o) };
-    } catch(e) { return { ok: false, text: short(t), err: e.message }; }
+    } catch(e) { return { ok: false, text: short(t), err: isWalletAddress(t) ? 'This wallet has not connected yet' : e.message }; }
   });
 }
 
@@ -182,7 +223,6 @@ async function refresh(){
     if(run !== scanning) return;
     Object.assign(S, { coins: found.coins, receive: found.receive, change: found.change, tip, fees });
     await syncQueue();
-    if(run !== scanning) return;
     render();
   } catch(e) { if(run === scanning) say(`Could not read the chain: ${e.message}`); }
 }
@@ -196,7 +236,8 @@ async function syncQueue(){
   const byId = new Map(S.queue.map(q => [q.id, q.psbt]));
   for(const psbt of remote){
     const id = BV.proposalId(psbt);
-    byId.set(id, byId.has(id) ? BV.combine([byId.get(id), psbt], S.policy) : psbt);
+    // One bad row stays one bad row: the copy already here is kept.
+    try { byId.set(id, byId.has(id) ? BV.combine([byId.get(id), psbt], S.policy) : psbt); } catch(_) {}
   }
   const live = psbt => BV.inspect(psbt, S.policy, known()).inputs.every(i => S.coins.some(c => c.txid === i.txid && c.vout === i.vout));
   S.queue = [...byId].filter(([id, psbt]) => !noteOf('hidden', id) && live(psbt)).map(([id, psbt]) => ({ id, psbt, review: BV.inspect(psbt, S.policy, known()) }));
@@ -245,7 +286,7 @@ function load(psbt){
 
 function propose(){
   const f = S.form, addr = f.to.trim(), amt = f.amt.trim();
-  const args = { policy: S.policy, utxos: S.coins || [], tip: S.tip, feeRate: +f.rate || feeOf('3'), path: +f.path, change: S.change };
+  const args = { policy: S.policy, utxos: S.coins || [], tip: S.tip, feeRate: +f.rate || feeOf('6'), path: +f.path, change: S.change };
   if(!addr) throw new Error('Enter an address to send to.');
   if(amt.toLowerCase() === 'all') args.sweep = addr;
   else {
@@ -266,6 +307,7 @@ async function persist(){
 
 async function sign(){
   if(!S.owner) throw new Error('Connect first: nothing here can sign without your owner key.');
+  if(!S.trusted) throw new Error('Check this vault\'s owners first.');
   load(BV.sign(S.psbt, S.owner.signer, S.policy, known()));
   touch();
   await persist();
@@ -331,7 +373,7 @@ function download(){
 const feeOf = t => Math.max(1, Math.ceil(S.fees[t] || 1));
 
 function renderHeader(){
-  const label = S.owner ? `0x${S.owner.evm.slice(2, 6)}…${S.owner.evm.slice(-4)}` : 'CONNECT';
+  const label = S.owner ? (S.owner.via || `0x${S.owner.evm.slice(2, 6)}…${S.owner.evm.slice(-4)}`) : 'CONNECT';
   const vaultAddr = S.policy && S.trusted ? `${short(BV.vaultOf(S.policy, 0, S.receive).address)}` : '';
   return `<div class="hbar" aria-hidden="true">${asc(200)}</div>
     <div class="hdr">
@@ -379,8 +421,8 @@ function renderTabs(){
 function renderEmpty(){
   return `<div class="empty">
     <div class="empty-title">NO VAULTS</div>
-    <div class="empty-sub">${S.network === 'signet' ? 'TRY ONE ON SIGNET. COINS ARE FREE AND WORTH NOTHING.' : 'K-OF-N BITCOIN. NO CONTRACT, NO SERVER.'}</div>
-    <button class="btn btn-fill" data-act="view" data-v="create">CREATE A VAULT</button>
+    <div class="empty-sub">${S.network === 'signet' ? 'TRY ONE ON SIGNET. COINS ARE FREE AND WORTH NOTHING.' : 'K-OF-N BITCOIN. NO CONTRACT, NOTHING TO DEPLOY.'}</div>
+    <a class="btn btn-fill" style="text-decoration:none" href="./bitcoin-vault.html">CREATE A VAULT</a>
     <details><summary>OPEN AN EXISTING VAULT</summary>
       <textarea class="inp" id="import" data-field="import" spellcheck="false" aria-label="Vault descriptor" placeholder="Paste a descriptor, tr(…">${esc(S.form.import)}</textarea>
       <div class="btns"><button class="btn btn-outline btn-sm" data-act="import">OPEN</button></div>
@@ -402,7 +444,8 @@ function renderProposal(item, i){
   const r = item.review, n = S.queue.length - i;
   const clash = S.queue.some(q => q.id !== item.id && q.review.inputs.some(a => r.inputs.some(b => a.txid === b.txid && a.vout === b.vout)));
   const mine = S.owner && r.keys.some(k => k.xpub === S.owner.xpub), signed = S.owner && r.signedAll.includes(S.owner.xpub);
-  const stranded = r.outputs.some(o => o.stranded);
+  const dust = r.inputs.some(x => x.sats <= BV.DUST || S.coins?.some(c => c.quarantine && c.txid === x.txid && c.vout === x.vout));
+  const stranded = r.outputs.some(o => o.stranded) || dust;
   const sends = r.outputs.filter(o => !o.change), back = r.outputs.filter(o => o.change);
   const value = sends.reduce((n, o) => n + o.sats, 0);
   // A delayed proposal can be fully signed long before it can confirm.
@@ -428,7 +471,7 @@ function renderProposal(item, i){
     ${early ? `<div class="note warn"><b>Not valid until block ${validAt}.</b> Once signed it can be sent any time after that, even if it is discarded here.</div>` : ''}
     ${r.signedBy.length ? '<p class="tx-sub">TO CANCEL THIS FOR EVERYONE, SPEND THESE COINS. DISMISS ONLY HIDES IT HERE.</p>' : ''}
     ${r.feeRate > 200 ? '<div class="note warn"><b>That fee is unusually high.</b> Check it before signing.</div>' : ''}
-    ${stranded ? '<div class="note bad">This sends coins to a vault address so far along that no scan would find them. Do not sign it.</div>' : ''}
+    ${dust ? '<div class="note bad">This spends a coin that may hold a token, which would destroy it. Do not sign it.</div>' : stranded ? '<div class="note bad">This sends coins to a vault address so far along that no scan would find them. Do not sign it.</div>' : ''}
     ${mine && !S.trusted ? '<div class="note warn">Confirm the owners above before signing.</div>' : ''}
     <div class="btns">
       <button class="btn btn-ghost btn-sm" data-act="ovl" data-o="share">SHARE</button>
@@ -497,7 +540,7 @@ function renderReceive(){
       <div>
         <div class="mono">${S.coins ? esc(a) : '<span class="pulse">SCANNING…</span>'}</div>
         <div class="btns"><button class="btn btn-outline btn-sm" data-act="copy-address"${S.coins ? '' : ' disabled'}>COPY ADDRESS</button></div>
-        <p class="small" style="margin-top:14px">A fresh address appears after each deposit. Every address here belongs to this vault.</p>
+        <p class="small" style="margin-top:14px">A fresh address appears after each deposit. Every address here belongs to this vault. Send sats only. Tacit assets that arrive are set aside and never spent as sats, but this vault cannot move them.</p>
         ${S.network === 'signet' ? `<p class="small">Need test coins? <a class="lk" href="https://faucet.coinbin.org" target="_blank" rel="noopener">Signet faucet ↗</a></p>` : ''}
       </div>
       ${S.coins ? `<div class="qr" role="img" aria-label="QR code of the address">${window.btc.encodeQR(a.toUpperCase(), 'svg')}</div>` : ''}
@@ -511,6 +554,7 @@ function renderCoins(){
   return `<div class="head"><span>COINS</span></div>
     ${coins.map(c => {
       const left = delayed && c.height ? c.height + delayed.older - S.tip - 1 : null;
+      if(BV.isProtected(c)) return `<div class="row"><span>${btcOf(c.value)} BTC</span><span class="r" title="This page will not spend it as sats">${c.quarantine === 'tacit' ? 'SET ASIDE · TACIT ASSET' : c.quarantine ? 'SET ASIDE · COULD NOT CHECK' : 'SET ASIDE · MAY HOLD A TOKEN'}</span></div>`;
       return `<div class="row"><span>${btcOf(c.value)} BTC</span><span class="r">${!c.height ? 'UNCONFIRMED' : delayed ? (left > 0 ? `DELAYED PATH OPENS IN ${days(left)}` : 'DELAYED PATH OPEN') : `${S.tip - c.height + 1} CONF`}</span></div>`;
     }).join('')}`;
 }
@@ -645,12 +689,21 @@ function renderMirror(){
       ${S.owner ? '<div class="btns" style="margin-top:8px"><button class="btn btn-ghost btn-sm" data-act="add-me">+ ADD ME</button></div>' : ''}` : ''}`;
 }
 
+function walletRows(){
+  const btc = window.BitcoinWallets.detect(), evm = [...evmWallets];
+  const row = (w, name) => `<button class="kind" data-act="connect" data-w="${esc(w)}"><b>${esc(name)}</b></button>`;
+  return `${btc.map(w => row(`btc:${w.key}`, `${w.name.toUpperCase()} · BITCOIN`)).join('')}
+    ${evm.map(([id, w]) => row(id, w.name.toUpperCase())).join('')}
+    ${!evm.length && window.ethereum ? row('', 'BROWSER WALLET') : ''}
+    ${row('wc', 'WALLETCONNECT')}`;
+}
+
 function renderOverlay(){
   if(S.ovl === 'connect') return `<div class="ovl" data-act="close-bg"><div class="ovl-card" role="dialog" aria-modal="true" aria-label="Connect">
     <div class="ovl-head"><span>CONNECT AN OWNER KEY</span><button class="x-btn" data-act="close" aria-label="Close">✕</button></div>
-    <p class="small">An Ethereum wallet cannot sign for Bitcoin directly, so it signs a message and your Bitcoin key is derived from that signature. Same wallet, same key, on any device. Expect three prompts. Your public key is then published, so vaults you sit on can find it.</p>
+    <p class="small">Your wallet signs a message and your vault key is derived from that signature. Same wallet, same key, on any device. Expect three prompts. Your public key is then published, so vaults you sit on can find it.</p>
     <div class="note warn"><b>The key sits in this page while you use it,</b> so a hardware wallet protects the derivation, not each spend. Any site that gets you to sign the same text gets this key. It clears after 15 idle minutes or a reload.</div>
-    <button class="btn btn-fill btn-w" data-act="connect">CONNECT WALLET</button>
+    ${walletRows()}
     <p class="small" style="margin-top:14px">On a hardware wallet? Skip this. Paste your <span class="lk">[fingerprint/path]xpub</span> as an owner, and sign each PSBT in your wallet.</p>
   </div></div>`;
   if(S.ovl === 'me' && S.owner) return `<div class="ovl" data-act="close-bg"><div class="ovl-card" role="dialog" aria-modal="true" aria-label="Your owner key">
@@ -664,7 +717,7 @@ function renderOverlay(){
     const left = Math.max(S.review.threshold - S.review.signedAll.length, 0);
     return `<div class="ovl" data-act="close-bg"><div class="ovl-card" role="dialog" aria-modal="true" aria-label="Share proposal">
     <div class="ovl-head"><span>${left ? `${left} MORE SIGNATURE${left > 1 ? 'S' : ''} NEEDED` : 'SHARE'}</span><button class="x-btn" data-act="close" aria-label="Close">✕</button></div>
-    <p class="small">The link carries the proposal and your signature. It reaches no server. Send it to a co-signer, who adds theirs and sends it on.</p>
+    <p class="small">Co-signers see this in the queue. This link is the other way: it carries the proposal and your signature. Send it to a co-signer, who adds theirs and sends it on.</p>
     <button class="btn btn-fill btn-w" style="margin-top:12px" data-act="copy-link">COPY LINK</button>
     <p class="small" style="margin-top:14px">Signing with a hardware wallet? Use the PSBT in Sparrow or similar, then add it back here.</p>
     <button class="btn btn-ghost btn-w" style="margin-top:8px" data-act="copy-psbt">COPY PSBT</button>
@@ -771,6 +824,9 @@ document.addEventListener('click', async e => {
   try {
     // A card's buttons act on that card.
     const card = el.closest('[data-pid]'), item = card && S.queue.find(q => q.id === card.dataset.pid);
+    // A card can outlive its proposal on screen. Acting on whatever was selected last
+    // would sign something other than what the button is on.
+    if(card && !item) throw new Error('This proposal changed. Check it again.');
     if(item) Object.assign(S, { psbt: item.psbt, review: item.review });
     await ACT[el.dataset.act](el, e);
     render();
@@ -785,6 +841,7 @@ document.addEventListener('input', e => {
   if(k === 'evmChain' || k === 'evmVault') S.mirror = null;
   // Only the create form reads itself back as it is typed in. The fee pills light up
   // from the rate, so that one field redraws too.
+  if(k === 'owners' || k === 'second') resolveWallets(k);
   if(S.view === 'create' || k === 'rate' || k === 'amt') render();
 });
 document.addEventListener('keydown', e => { if(e.key === 'Escape' && S.ovl){ S.ovl = null; render(); } });

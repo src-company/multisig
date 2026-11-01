@@ -26,7 +26,7 @@ Why extended keys: a hardware wallet finds its key by fingerprint and path, and 
 
 ## The queue
 
-Proposals are shared as on Ethereum, and the rule is the same: `POST /btc-proposal` admits a PSBT only with a valid owner signature for that descriptor, and merges it with the stored copy. Links and pasted PSBTs still work, so a hardware wallet owner needs no connection and the queue being down loses nothing.
+Proposals are shared as on Ethereum, and the rule is the same. They are readable by anyone who can compute the vault, which for a mirrored vault is anyone, since its owners and their handles are public. They are also signed-transaction drafts, so assume amounts and payees are public. The rule: `POST /btc-proposal` admits a PSBT only with a valid owner signature for that descriptor, and merges it with the stored copy. Links and pasted PSBTs still work, so a hardware wallet owner needs no connection and the queue being down loses nothing.
 
 Nothing in the table is believed. Each client re-reads every PSBT against its own policy. There is no status column, because spent coins are what end a proposal, and the chain says that. Dismiss only hides a proposal in one browser: on Bitcoin a signed proposal stays valid until its coins move, so cancelling for everyone means spending them.
 
@@ -42,11 +42,11 @@ The handle has to carry proof. It holds the Ethereum address's signature over th
 
 Limits:
 
-- It is a snapshot. Changing owners on Ethereum does not change the Bitcoin vault, and a new owner set means a new vault and a sweep.
+- It is a snapshot. The dashboard link is worked out from the current owners, so changing owners or the threshold on Ethereum moves it to a new Bitcoin vault, while coins stay in the old one and removed owners keep their seat there. The dashboard says so if it saw the earlier one. Sweep the coins across. Any Ethereum vaults with the same owners and threshold share one Bitcoin twin.
 - The EVM timelock does not carry over, for the reasons under Timelocks.
 - Contract owners, such as a Safe, cannot take part, because they cannot make a repeatable signature.
 - The owner list comes from one RPC. A lying RPC could name different owners, so the page shows them before creating anything.
-- Handles are published to `btc_owner_handles` by `POST /handle`, which checks the signature with the same code the dapp runs. Every client checks them again on reading, so the table can lose a handle but cannot forge one.
+- The first handle for an address stays: a later one is ignored, so a twin's address cannot be moved or rolled back by republishing. Handles do not prove the publisher holds the Bitcoin key, so an owner can burn their own seat. Handles are published to `btc_owner_handles` by `POST /handle`, which checks the signature with the same code the dapp runs. Every client checks them again on reading, so the table can lose a handle but cannot forge one.
 
 ## What came from Tacit
 

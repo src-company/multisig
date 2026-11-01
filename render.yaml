@@ -138,6 +138,12 @@ services:
       - path: /bitcoin.html
         name: Cross-Origin-Opener-Policy
         value: same-origin
+      - path: /bitcoin-vault.html
+        name: Cross-Origin-Opener-Policy
+        value: same-origin
+      - path: /bitcoin-vault
+        name: Cross-Origin-Opener-Policy
+        value: same-origin
       - path: /bitcoin
         name: Cross-Origin-Opener-Policy
         value: same-origin

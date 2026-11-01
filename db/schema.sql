@@ -1842,7 +1842,7 @@ ALTER VIEW tx_history SET (security_invoker = true);
 CREATE TABLE IF NOT EXISTS btc_owner_handles (
   address    text NOT NULL CHECK (address ~ '^0x[0-9a-f]{40}$'),
   network    text NOT NULL CHECK (network IN ('mainnet', 'signet')),
-  handle     text NOT NULL CHECK (length(handle) BETWEEN 1 AND 400),
+  handle     text NOT NULL CHECK (length(handle) BETWEEN 1 AND 700),
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (address, network)
 );
@@ -1856,7 +1856,10 @@ BEGIN
   END IF;
   PERFORM rate_gate('btc_handle:' || client_ip(), 30, interval '1 minute');
   INSERT INTO btc_owner_handles (address, network, handle) VALUES (p_address, p_network, p_handle)
-  ON CONFLICT (address, network) DO UPDATE SET handle = EXCLUDED.handle, updated_at = now();
+  -- First key stays. A twin is derived from this table, so letting a row change would
+  -- move a funded vault's address, and proofs carry no date, so an old handle could be
+  -- replayed. A lost key is a new owner on the vault, not a new row here.
+  ON CONFLICT (address, network) DO NOTHING;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
@@ -1895,7 +1898,13 @@ BEGIN
   IF coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb->>'role', '') <> 'metadata_writer' THEN
     RAISE EXCEPTION 'A verified owner signature is required' USING ERRCODE = '42501';
   END IF;
-  PERFORM rate_gate('btc_proposal:' || client_ip(), 60, interval '1 minute');
+  -- Rows are never needed for long: a proposal ends when its coins move.
+  DELETE FROM btc_proposals WHERE updated_at < now() - interval '90 days';
+  -- A full vault refuses new rows rather than pushing real ones out of the window.
+  IF NOT EXISTS (SELECT 1 FROM btc_proposals WHERE vault = p_vault AND id = p_id)
+     AND (SELECT count(*) FROM btc_proposals WHERE vault = p_vault) >= 50 THEN
+    RAISE EXCEPTION 'This vault has too many open proposals' USING ERRCODE = '54000';
+  END IF;
   INSERT INTO btc_proposals (vault, id, network, psbt) VALUES (p_vault, p_id, p_network, p_psbt)
   ON CONFLICT (vault, id) DO UPDATE SET psbt = EXCLUDED.psbt, updated_at = now();
 END;
@@ -1905,5 +1914,42 @@ CREATE OR REPLACE FUNCTION btc_vault_proposals(p_vault text)
 RETURNS TABLE (id text, psbt text) AS $$
   SELECT p.id, p.psbt FROM btc_proposals p WHERE p.vault = p_vault
   ORDER BY p.created_at DESC LIMIT 50;
+$$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
+
+CREATE OR REPLACE FUNCTION btc_proposal_row(p_vault text, p_id text)
+RETURNS text AS $$
+  SELECT p.psbt FROM btc_proposals p WHERE p.vault = p_vault AND p.id = p_id;
+$$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
+
+-- ── BITCOIN WALLET LINKS ────────────────────────────────────
+ALTER TABLE btc_owner_handles DROP CONSTRAINT IF EXISTS btc_owner_handles_handle_check;
+ALTER TABLE btc_owner_handles ADD CONSTRAINT btc_owner_handles_handle_check CHECK (length(handle) BETWEEN 1 AND 700);
+
+-- A bc1… address to the 0x owner it belongs to, so a Bitcoin address can be typed where
+-- an owner goes. Written only from a handle that carries that wallet's own signature.
+CREATE TABLE IF NOT EXISTS btc_wallet_links (
+  wallet  text NOT NULL CHECK (length(wallet) BETWEEN 14 AND 90),
+  network text NOT NULL CHECK (network IN ('mainnet', 'signet')),
+  address text NOT NULL CHECK (address ~ '^0x[0-9a-f]{40}$'),
+  PRIMARY KEY (wallet, network)
+);
+ALTER TABLE btc_wallet_links ENABLE ROW LEVEL SECURITY;
+
+CREATE OR REPLACE FUNCTION put_btc_wallet_link(p_wallet text, p_network text, p_address text)
+RETURNS void AS $$
+BEGIN
+  IF coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb->>'role', '') <> 'metadata_writer' THEN
+    RAISE EXCEPTION 'A verified owner signature is required' USING ERRCODE = '42501';
+  END IF;
+  INSERT INTO btc_wallet_links (wallet, network, address) VALUES (p_wallet, p_network, p_address)
+  ON CONFLICT (wallet, network) DO NOTHING;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+CREATE OR REPLACE FUNCTION btc_handle_for_wallet(p_network text, p_wallet text)
+RETURNS TABLE (address text, handle text) AS $$
+  SELECT h.address, h.handle FROM btc_wallet_links l
+  JOIN btc_owner_handles h ON h.address = l.address AND h.network = l.network
+  WHERE l.wallet = p_wallet AND l.network = p_network;
 $$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
 

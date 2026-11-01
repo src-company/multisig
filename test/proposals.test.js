@@ -872,3 +872,22 @@ test('a Bitcoin proposal needs an owner signature, and copies merge', async () =
   assert.throws(() => BV.sign(psbt, x.signer, policy), /not an owner/);
 });
 
+test('a Bitcoin proposal that cannot merge is refused, not stored over the queue', async () => {
+  const { admitBitcoinProposal } = require('../api/proposals.cjs');
+  const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
+  const c = vm.createContext({ TextEncoder, TextDecoder, Uint8Array, crypto: globalThis.crypto });
+  c.globalThis = c;
+  for (const f of ['btc.min.js', 'bitcoin.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, '../dapp', f), 'utf8'), c);
+  const BV = c.BitcoinVault, { Transaction, base64 } = c.btc;
+  const seat = n => BV.keyFromSignature('0x' + String(n).repeat(128) + '1b', 'signet');
+  const [a, b] = [1, 2].map(seat);
+  const policy = BV.policyOf({ network: 'signet', paths: [{ threshold: 2, keys: [a.owner, b.owner] }] });
+  const psbt = BV.propose({ policy, utxos: [{ txid: '11'.repeat(32), vout: 0, value: 100000, height: 100, branch: 0, index: 0 }], tip: 200, sweep: 'tb1pqqqqp399et2xygdj5xreqhjjvcmzhxw4aywxecjdzew6hylgvsesf3hn0c', feeRate: 2 });
+  const src = Transaction.fromPSBT(base64.decode(psbt), { allowUnknownInputs: true }), lie = new Transaction({ version: 2, allowUnknownInputs: true });
+  const inp = src.getInput(0);
+  lie.addInput({ ...inp, witnessUtxo: { script: inp.witnessUtxo.script, amount: inp.witnessUtxo.amount + 50000n } });
+  lie.addOutput(src.getOutput(0));
+  const bad = BV.sign(base64.encode(lie.toPSBT()), b.signer, policy);
+  await assert.rejects(admitBitcoinProposal({ psbt: bad, descriptor: BV.descriptor(policy), network: 'signet' }, { readBtcProposal: async () => BV.sign(psbt, a.signer, policy) }), e => e.status === 409);
+});
+

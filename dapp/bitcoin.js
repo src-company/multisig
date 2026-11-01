@@ -29,7 +29,7 @@
 
 (function(root){
 
-const { Transaction, Script, Address, OutScript, HDKey, NETWORK, TEST_NETWORK, TAPROOT_UNSPENDABLE_KEY, p2tr, schnorr, secp256k1, sha256, keccak_256, bech32m, hex, base64 } = root.btc;
+const { Transaction, Script, Address, OutScript, HDKey, NETWORK, TEST_NETWORK, TAPROOT_UNSPENDABLE_KEY, p2tr, p2pkh, p2wpkh, p2sh, schnorr, secp256k1, sha256, keccak_256, bech32m, hex, base64 } = root.btc;
 
 // signet shares testnet's address format, so TEST_NETWORK is right for it.
 // `owner` on the handle is deliberately different per network: a key pasted from
@@ -44,13 +44,14 @@ const NETWORKS = {
 const net = n => { if(!Object.hasOwn(NETWORKS, n)) throw new Error(`unknown network ${n}`); return NETWORKS[n]; };
 
 const MAX_OWNERS = 20;
+const CURVE_N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
 const MAX_OLDER = 0xffff;        // BIP-68 keeps 16 bits of blocks
 const DUST = 546;
 const MAX_FEE_RATE = 1000;       // sat/vB. A typo here spends the vault on fees.
 const FINAL_RBF = 0xfffffffd;
 const HARDENED = 0x80000000;
 const GAP = 20;                  // BIP-44's gap limit: unused addresses before a scan stops
-const MAX_INDEX = 5000;          // past this a scan stops, and nothing is called change
+const MAX_INDEX = 2000;          // past this a scan stops, and nothing is called change
 const COOLDOWN_MS = 60000, TIMEOUT_MS = 8000;
 const te = new TextEncoder();
 
@@ -68,14 +69,16 @@ const numsKey = network => new HDKey({ publicKey: hex.decode('02' + hex.encode(T
 // code and public key. 0x02 is the Ethereum address the key belongs to, so one
 // person reads as one owner on every chain. Alone it is a label and proves nothing.
 // 0x04 is that address's signature over this key, which is what makes it a fact, and
-// the only form mirror() accepts. Bits above those are reserved: later lanes follow
+// the only form mirror() accepts. 0x08 is a Bitcoin wallet's address and that wallet's
+// signature naming the Ethereum address, so an owner who came with UniSat can be found
+// by their bc1… address. Bits above those are reserved: later lanes follow
 // the known ones, so an old reader takes what it knows and ignores the rest. Unlike
 // tacit1 there is no scan key and no pool key, because a vault receives at its own
 // addresses.
 //
 // Owners from a hardware wallet paste the text every descriptor tool already
 // prints, [fingerprint/path]xpub, so they need no handle at all.
-const OWNER_VERSION = 0, LANE_BTC = 1, LANE_EVM = 2, LANE_PROOF = 4;
+const OWNER_VERSION = 0, LANE_BTC = 1, LANE_EVM = 2, LANE_PROOF = 4, LANE_WALLET = 8;
 
 const pathText = path => path.map(n => n >= HARDENED ? `${n - HARDENED}h` : `${n}`).join('/');
 const parsePath = text => text ? text.split('/').map(p => {
@@ -100,7 +103,7 @@ function ownerOf({ network, fingerprint, path, xpub, evm = null }){
   return { fingerprint, path, xpub, evm };
 }
 
-function encodeOwner({ network, fingerprint, path, xpub, evm, proof }){
+function encodeOwner({ network, fingerprint, path, xpub, evm, proof, wallet }){
   ownerOf({ network, fingerprint, path, xpub });
   const k = HDKey.fromExtendedKey(xpub, net(network).versions);
   let flags = LANE_BTC;
@@ -112,6 +115,12 @@ function encodeOwner({ network, fingerprint, path, xpub, evm, proof }){
     if(!/^0x[0-9a-fA-F]{40}$/.test(evm)) throw new Error('not an Ethereum address');
     parts.push(hex.decode(evm.slice(2).toLowerCase())); flags |= LANE_EVM;
     if(proof){ parts.push(hex.decode(proof.replace(/^0x/, '').toLowerCase())); flags |= LANE_PROOF; }
+    if(wallet){
+      if(!proof) throw new Error('a wallet link needs the Ethereum proof beside it');
+      const a = te.encode(wallet.address), sig = base64.decode(wallet.signature);
+      if(a.length > 90 || sig.length !== 65) throw new Error('cannot use that wallet signature');
+      parts.push(new Uint8Array([a.length]), a, sig); flags |= LANE_WALLET;
+    }
   }
   const body = concat(...parts);
   body[1] = flags;
@@ -132,8 +141,11 @@ function decodeOwner(text, network){
   if(!(b[1] & LANE_BTC)) throw new Error('owner handle has no Bitcoin key');
   const fingerprint = hex.encode(b.subarray(2, 6)), depth = b[6], at = 7 + 4 * depth;
   if((b[1] & LANE_PROOF) && !(b[1] & LANE_EVM)) throw new Error('owner handle has a proof of no address');
-  const want = at + 32 + 33 + 8 + (b[1] & LANE_EVM ? 20 : 0) + (b[1] & LANE_PROOF ? 65 : 0);
-  if(b[1] & ~(LANE_BTC | LANE_EVM | LANE_PROOF) ? b.length < want : b.length !== want) throw new Error('owner handle has the wrong length');
+  if((b[1] & LANE_WALLET) && !(b[1] & LANE_PROOF)) throw new Error('owner handle has a wallet link with no proof');
+  let want = at + 32 + 33 + 8 + (b[1] & LANE_EVM ? 20 : 0) + (b[1] & LANE_PROOF ? 65 : 0);
+  const walletAt = want;
+  if(b[1] & LANE_WALLET) want += 1 + (b[walletAt] ?? 0) + 65;
+  if(b[1] & ~(LANE_BTC | LANE_EVM | LANE_PROOF | LANE_WALLET) ? b.length < want : b.length !== want) throw new Error('owner handle has the wrong length');
   const dv = new DataView(b.buffer, b.byteOffset), path = [];
   for(let i = 0; i < depth; i++) path.push(dv.getUint32(7 + 4 * i));
   let k;
@@ -146,6 +158,12 @@ function decodeOwner(text, network){
   if(b[1] & LANE_PROOF){
     if(evmSigner(bindingMessage(network, owner), b.subarray(at + 93, at + 158)) !== evm) throw new Error('owner handle was not signed by the address it names');
     owner.proven = true;
+  }
+  if(b[1] & LANE_WALLET){
+    const len = b[walletAt], address = new TextDecoder().decode(b.subarray(walletAt + 1, walletAt + 1 + len));
+    const sig = b.subarray(walletAt + 1 + len, walletAt + 1 + len + 65);
+    if(!bitcoinSigners(linkMessage(network, evm), sig, network).includes(address)) throw new Error('owner handle was not signed by the Bitcoin wallet it names');
+    owner.wallet = address;
   }
   return owner;
 }
@@ -204,6 +222,75 @@ function evmSigner(text, sig){
   } catch(_) { return null; }
 }
 
+// A Bitcoin wallet's owner. UniSat cannot make the signature an Ethereum contract
+// verifies, so, as Tacit does, the wallet signs one fixed message and everything comes
+// from that: the Bitcoin owner key on BIP-87 as usual, and an Ethereum key on the
+// standard path, which sits on an Ethereum multisig as an ordinary owner. One seed
+// across networks, because the 0x address must be one address on every chain.
+function walletMessage(){
+  return [
+    'Multisig wallet key',
+    '',
+    'Signing this creates your multisig keys for Bitcoin and Ethereum. Anyone who has this signature can sign as you on every vault these keys own.',
+    '',
+    'Sign it only in a Multisig app you trust. Every Multisig app asks for exactly this message.',
+    '',
+    'version: 1',
+  ].join('\n');
+}
+function linkMessage(network, evm){
+  return [
+    'Multisig Bitcoin wallet link',
+    '',
+    'This links your Bitcoin wallet to a multisig owner. It cannot move funds.',
+    '',
+    `network: ${net(network).name}`,
+    `ethereum: ${evm}`,
+    'version: 1',
+  ].join('\n');
+}
+// r and s alone, low-s, so the header a wallet picks for its address type cannot
+// change the key. Anything else, such as a BIP-322 witness, is hashed as it came.
+function canonicalWalletSignature(b64){
+  const raw = base64.decode(b64);
+  if(raw.length !== 65) return raw;
+  const out = raw.slice(1), s = BigInt('0x' + hex.encode(out.subarray(32)));
+  if(s > CURVE_N / 2n) out.set(hex.decode((CURVE_N - s).toString(16).padStart(64, '0')), 32);
+  return out;
+}
+function keyFromWalletSignature(b64, network){
+  const n = net(network), seed = sha256(concat(te.encode('multisig-wallet-v1\0'), canonicalWalletSignature(b64)));
+  const evmKey = HDKey.fromMasterSeed(seed).derive("m/44'/60'/0'/0/0"), evmPriv = evmKey.privateKey.slice();
+  evmKey.wipePrivateData();
+  const signer = HDKey.fromMasterSeed(seed, n.versions), account = signer.derive(`m/87'/${n.coin}'/0'`);
+  const xpub = account.publicExtendedKey;
+  account.wipePrivateData();
+  const pub = secp256k1.Point.fromBytes(secp256k1.getPublicKey(evmPriv)).toBytes(false);
+  return { signer, evmPriv, evm: evmAddressOf(pub), owner: { fingerprint: fingerprintOf(signer), path: ownPath(network), xpub, evm: null } };
+}
+// Signs as an Ethereum wallet does, from a key held here.
+const evmSignHash = (hash, priv) => {
+  const r = secp256k1.sign(hash, priv, { prehash: false, format: 'recovered' });
+  return '0x' + hex.encode(r.subarray(1)) + (r[0] + 27).toString(16);
+};
+const evmSignMessage = (text, priv) => evmSignHash(evmMessageHash(text), priv);
+
+// BIP-137. A signature names a key, and a key several addresses, so this gives them all
+// and the caller asks whether the claimed one is among them.
+function bitcoinMessageHash(text){
+  const m = te.encode(text);
+  const len = m.length < 253 ? [m.length] : [253, m.length & 255, m.length >> 8];
+  return sha256(sha256(concat(te.encode('\x18Bitcoin Signed Message:\n'), new Uint8Array(len), m)));
+}
+function bitcoinSigners(text, sig, network){
+  if(sig.length !== 65 || sig[0] < 27 || sig[0] > 42) return [];
+  try {
+    const pub = secp256k1.recoverPublicKey(concat(new Uint8Array([(sig[0] - 27) % 4]), sig.subarray(1)), bitcoinMessageHash(text), { prehash: false });
+    const params = net(network).params, wpkh = p2wpkh(pub, params);
+    return [p2pkh(pub, params).address, wpkh.address, p2sh(wpkh, params).address, p2tr(pub.subarray(1), undefined, params).address];
+  } catch(_) { return []; }
+}
+
 // Asks twice. A signer that is not deterministic (a smart account, some hardware
 // paths) would hand back a key the owner could never derive again, and the first
 // they would hear of it is when they try to sign.
@@ -244,7 +331,6 @@ function keyFromSignature(sig, network){
   account.wipePrivateData();
   return { signer, owner: { fingerprint: fingerprintOf(signer), path, xpub, evm: null } };
 }
-const CURVE_N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
 const ownPath = network => [87 + HARDENED, net(network).coin + HARDENED, HARDENED];
 const fingerprintOf = k => k.fingerprint.toString(16).padStart(8, '0');
 
@@ -299,7 +385,7 @@ const chainBase = (policy, pathIdx, key) => pathIdx && policy.paths[0].keys.some
 const _child = new Map();
 function childKey(xpub, chain, index, network){
   const k = `${xpub}/${chain}`;
-  if(!_child.has(k)) _child.set(k, HDKey.fromExtendedKey(xpub, net(network).versions).deriveChild(chain));
+  if(!_child.has(k)) capped(_child, 2000).set(k, HDKey.fromExtendedKey(xpub, net(network).versions).deriveChild(chain));
   return _child.get(k).deriveChild(index).publicKey.slice(1);
 }
 
@@ -444,6 +530,16 @@ async function publishHandle(handle, network, doFetch = (...a) => root.fetch(...
   const r = await doFetch(`${API}/handle`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle, network }), signal: root.AbortSignal?.timeout(TIMEOUT_MS) });
   if(!r.ok) throw new Error('Could not publish this handle');
 }
+// A bc1… address to the owner behind it. Checked like any handle, and it must be the
+// same wallet that was asked about.
+async function handleForWallet(network, address, doFetch = (...a) => root.fetch(...a)){
+  const r = await doFetch(`${STORE}/rpc/btc_handle_for_wallet`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ p_network: network, p_wallet: address }), signal: root.AbortSignal?.timeout(TIMEOUT_MS) });
+  if(!r.ok) throw new Error('Could not read owner handles');
+  const [row] = await r.json();
+  if(!row) return null;
+  const h = decodeOwner(row.handle, network);
+  return h.proven && h.wallet === address ? { handle: row.handle, evm: h.evm } : null;
+}
 async function fetchHandles(network, addresses, doFetch = (...a) => root.fetch(...a)){
   net(network);
   const wanted = addresses.map(a => a.toLowerCase());
@@ -458,10 +554,12 @@ async function fetchHandles(network, addresses, doFetch = (...a) => root.fetch(.
 
 // The queue. A proposal is known by its unsigned transaction, so every signed copy of
 // one is the same proposal, and a vault by a hash of its descriptor, so the queue can
-// be read only by someone who holds the vault. What comes back is re-read against the
-// policy: a row that does not parse, or does not belong, is simply not there.
+// be found only by someone who can compute that. For a vault mirrored from Ethereum that
+// is anyone: its owners are public and so are their handles. What comes back is re-read
+// against the policy: a row that does not parse, or does not belong, is simply not there.
+// Fingerprints and paths are left out of the hash, as they do not change the addresses.
 const proposalId = psbt => hex.encode(sha256(load(psbt).unsignedTx));
-const vaultId = policy => hex.encode(sha256(te.encode(descriptor(policy))));
+const vaultId = policy => hex.encode(sha256(te.encode(JSON.stringify(policy.paths.map(p => [p.threshold, p.older, p.keys.map(k => keyId(k, policy.network))])))));
 async function publishProposal(psbt, policy, doFetch = (...a) => root.fetch(...a)){
   const r = await doFetch(`${API}/btc-proposal`, { method: 'POST', headers: { 'content-type': 'application/json' }, signal: root.AbortSignal?.timeout(TIMEOUT_MS),
     body: JSON.stringify({ psbt, descriptor: descriptor(policy), network: policy.network }) });
@@ -526,7 +624,7 @@ function vaultOf(policy, branch = 0, index = 0){
     p.hash = pay.leaves.find(l => hex.encode(l.script) === hex.encode(p.script)).hash;
   }
   const slot = { address: pay.address, script: pay.script, internal, merkleRoot: pay.tapMerkleRoot, paths, branch, index };
-  _slots.set(id, slot);
+  capped(_slots, 2000).set(id, slot);
   return slot;
 }
 
@@ -545,16 +643,30 @@ const derivations = (slot, which) => {
 // Which address of this vault a script is. The PSBT's derivation says where to look
 // and nothing more: the claim is re-derived from the policy, so a hostile proposal
 // cannot pass off its own address as change.
-function locate(policy, script, entries){
+//
+// Deriving a slot is the expensive step, and this runs on hostile input before any
+// signature is looked at, on the server too. So a claim is tried only once, an honest
+// item never needs more than two, and the whole proposal has a budget. Spending it just
+// makes an item read as not ours.
+const MAX_CLAIMS = 2;
+function locate(policy, script, entries, budget){
+  const tried = new Set();
   for(const [, { der }] of (entries || []).slice(0, 64)){
     if(der.path.length < 2) continue;
     const [chain, index] = der.path.slice(-2);
-    if(chain >= HARDENED || index >= HARDENED) continue;
+    if(chain >= HARDENED || index >= MAX_INDEX) continue;
+    const id = `${chain % 2}/${index}`;
+    if(tried.has(id)) continue;
+    if(tried.size >= MAX_CLAIMS || budget.left <= 0) return null;
+    tried.add(id);
+    budget.left--;
     const slot = vaultOf(policy, chain % 2, index);
     if(hex.encode(slot.script) === hex.encode(script)) return slot;
   }
   return null;
 }
+// Long-lived on the page and on the server, so they are capped rather than left to grow.
+const capped = (map, max) => { if(map.size >= max) map.clear(); return map; };
 
 // ── FEES ───────────────────────────────────────────────────
 // Weight is exact rather than guessed: everything in the witness is known once the
@@ -573,9 +685,21 @@ function vsize(policy, pathIdx, inputs, outputScripts){
 // A coin can go down a delayed path from the block `older` after the one it
 // confirmed in, and BIP-68 counts from the coin's block, so the spending block
 // must be at least height + older.
+//
+// Some coins are never spent as sats, because spending one could destroy a token on it.
+// Coins of 546 sats or less are left alone, the rule the Tacit dapp keeps, but a sender
+// picks an output's value, so that alone misses a token on a larger coin. Tacit's check
+// does not need a wallet's keys: a Tacit coin comes from a transaction carrying a Tacit
+// envelope, so scan() looks at each coin's creating transaction and quarantines it if
+// any input's witness holds the marker, or if that could not be read. That errs towards
+// leaving a plain coin alone, which costs little. Runes and inscriptions on large coins
+// are not detected.
+const isProtected = coin => coin.value <= DUST || !!coin.quarantine;
+const ENVELOPE_MARKER = '5441434954'; // "TACIT"
+const hasTacitEnvelope = tx => (tx.vin || []).some(i => (i.witness || []).some(w => w.includes(ENVELOPE_MARKER)));
 function coinsFor(policy, pathIdx, utxos, tip){
   const older = policy.paths[pathIdx].older;
-  return utxos.filter(u => u.height > 0 && (!older || tip + 1 >= u.height + older));
+  return utxos.filter(u => u.height > 0 && !isProtected(u) && (!older || tip + 1 >= u.height + older));
 }
 
 // ── PROPOSALS ──────────────────────────────────────────────
@@ -614,7 +738,8 @@ function propose({ policy, utxos, tip, outputs = [], sweep = null, feeRate, path
     for(const u of eligible){
       picked.push(u); have += u.value;
       fee = Math.ceil(vsize(policy, path, picked.length, [...lens, changeSlot.script.length]) * feeRate);
-      if(have >= want + fee + DUST){ change = have - want - fee; done = true; break; }
+      // Change must clear the dust line, or it would become a coin this page never spends.
+      if(have >= want + fee + DUST + 1){ change = have - want - fee; done = true; break; }
       // Exactly enough, or short of a change output worth making: the rest is fee.
       const noChange = Math.ceil(vsize(policy, path, picked.length, lens) * feeRate);
       if(have >= want + noChange){ change = 0; done = true; break; }
@@ -670,6 +795,7 @@ function inspect(psbtText, policy, known = { receive: 0, change: 0 }){
   const params = net(policy.network).params;
   if(!tx.inputsLength || !tx.outputsLength) throw new Error('proposal is empty');
   let pathIdx = -1, inTotal = 0n;
+  const budget = { left: 2 * (tx.inputsLength + tx.outputsLength) + 4 };
   const scripts = [], amounts = [], inputs = [], outpoints = new Set();
   // Both are things k owners could otherwise sign without seeing: a locktime makes a
   // payment that looks dead come alive later.
@@ -677,7 +803,7 @@ function inspect(psbtText, policy, known = { receive: 0, change: 0 }){
   if(tx.version !== 2) throw new Error('proposal has an unexpected transaction version');
   for(let i = 0; i < tx.inputsLength; i++){
     const inp = tx.getInput(i);
-    const slot = inp.witnessUtxo && locate(policy, inp.witnessUtxo.script, inp.tapBip32Derivation);
+    const slot = inp.witnessUtxo && locate(policy, inp.witnessUtxo.script, inp.tapBip32Derivation, budget);
     if(!slot) throw new Error(`input ${i} does not belong to this vault`);
     // A proposal names one leaf, but a signer that knows the whole policy may add the
     // rest on its way through, so more than one is not an error. Each must be this
@@ -713,7 +839,7 @@ function inspect(psbtText, policy, known = { receive: 0, change: 0 }){
     if(hex.encode(OutScript.encode(decoded)) !== hex.encode(o.script)) throw new Error(`output ${i} is not a standard address`);
     // Ours, and also somewhere a scan will find it. An address far past the gap is
     // this vault's on paper and lost in practice, so it does not count as change.
-    const slot = locate(policy, o.script, o.tapBip32Derivation);
+    const slot = locate(policy, o.script, o.tapBip32Derivation, budget);
     const reach = slot && slot.index < MAX_INDEX && slot.index < (slot.branch ? known.change : known.receive) + GAP;
     outputs.push({ address: Address(params).encode(decoded), sats: Number(o.amount), change: !!reach, stranded: !!slot && !reach, index: slot ? slot.index : null, branch: slot ? slot.branch : null });
   }
@@ -747,6 +873,8 @@ function sign(psbtText, signer, policy, known){
   const view = inspect(psbtText, policy, known);
   if(view.feeRate > MAX_FEE_RATE) throw new Error(`refusing to sign: the fee is ${view.feeRate.toFixed(0)} sat/vB`);
   if(view.outputs.some(o => o.stranded)) throw new Error('refusing to sign: this sends coins to a vault address no scan would ever find');
+  if(view.inputs.some(i => i.sats <= DUST)) throw new Error('refusing to sign: this spends a dust coin, which may hold a token');
+  if(view.inputs.some(i => known?.quarantined?.includes(`${i.txid}:${i.vout}`))) throw new Error('refusing to sign: this spends a quarantined coin, which may hold a token');
   const account = signer.derive(`m/${pathText(ownPath(policy.network)).replace(/h/g, "'")}`), xpub = account.publicExtendedKey;
   account.wipePrivateData();
   if(!view.keys.some(k => k.xpub === xpub)) throw new Error('this key is not an owner on that path');
@@ -791,6 +919,11 @@ function combine(psbts, policy){
   const [first, ...rest] = psbts.map(load);
   for(const other of rest){
     if(hex.encode(other.unsignedTx) !== hex.encode(first.unsignedTx)) throw new Error('those are two different proposals');
+    // Amounts are not in the unsigned transaction, so one proposal id can arrive
+    // claiming different ones. A copy that does is not a copy.
+    for(let i = 0; i < first.inputsLength; i++){
+      if(first.getInput(i).witnessUtxo?.amount !== other.getInput(i).witnessUtxo?.amount) throw new Error('those copies disagree about an amount');
+    }
     addSignatures(first, other);
   }
   const out = base64.encode(first.toPSBT());
@@ -872,6 +1005,7 @@ function chain(network, doFetch = (...a) => root.fetch(...a), bases = net(networ
       return (await get(`/address/${address}/utxo`)).map(u => ({ txid: u.txid, vout: u.vout, value: u.value, height: u.status?.confirmed ? u.status.block_height : 0 }));
     },
     fees: () => get('/fee-estimates'),
+    tx: txid => get(`/tx/${txid}`),
     spent: async (txid, vout) => (await get(`/tx/${txid}/outspend/${vout}`)).spent === true,
     broadcast: tx => get('/tx', { method: 'POST', body: tx }, 'text'),
   };
@@ -902,6 +1036,11 @@ async function scan(policy, c, gap = GAP){
       if(!sure) throw new Error('the explorers disagree about this vault, so its balance cannot be trusted right now');
     }
   }
+  // Fail closed: a coin that cannot be checked is treated as one that failed.
+  if(c.tx) await Promise.all(coins.map(async u => {
+    try { if(hasTacitEnvelope(await c.tx(u.txid))) u.quarantine = 'tacit'; }
+    catch(_) { u.quarantine = 'unknown'; }
+  }));
   return { coins, receive: next[0], change: next[1] };
 }
 
@@ -911,7 +1050,7 @@ function concat(...parts){
   return out;
 }
 
-root.BitcoinVault = { proposalId, vaultId, publishProposal, fetchProposals, openProposals, publishHandle, fetchHandles, MAX_INDEX, txidOf, seatMisdescribed, EVM_CHAINS, selectors: { threshold: selector('threshold()') }, readEvmVault, mirror, bindingMessage, evmMessageHash, NETWORKS, DUST, GAP, MAX_OWNERS, MAX_OLDER, MAX_FEE_RATE, encodeOwner, decodeOwner, originText, ownerMessage, deriveOwnerKey, keyFromSignature, fingerprintOf,
+root.BitcoinVault = { isProtected, hasTacitEnvelope, walletMessage, linkMessage, keyFromWalletSignature, evmSignHash, evmSignMessage, bitcoinMessageHash, bitcoinSigners, handleForWallet, proposalId, vaultId, publishProposal, fetchProposals, openProposals, publishHandle, fetchHandles, MAX_INDEX, txidOf, seatMisdescribed, EVM_CHAINS, selectors: { threshold: selector('threshold()') }, readEvmVault, mirror, bindingMessage, evmMessageHash, NETWORKS, DUST, GAP, MAX_OWNERS, MAX_OLDER, MAX_FEE_RATE, encodeOwner, decodeOwner, originText, ownerMessage, deriveOwnerKey, keyFromSignature, fingerprintOf,
   policyOf, descriptor, descriptorChecksum, parseDescriptor, walletPolicy, vaultOf, vsize, coinsFor, propose, inspect, sign, combine, finalize, chain, scan };
 
 })(typeof window !== 'undefined' ? window : globalThis);

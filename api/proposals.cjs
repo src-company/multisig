@@ -737,10 +737,9 @@ function dependencies({ postgrestUrl, jwtSecret, rpcUrls }, fetcher = fetch) {
     // sends. The role travels with it for the same reason: a token minted to
     // rename a vault must not reach the one that deletes a signature.
     async readBtcProposal(vault, id) {
-      const rows = await json(`${postgrestUrl}/rpc/btc_vault_proposals`, { method: 'POST', headers: {
+      return json(`${postgrestUrl}/rpc/btc_proposal_row`, { method: 'POST', headers: {
         'Content-Type': 'application/json',
-      }, body: JSON.stringify({ p_vault: vault }) }, 'readBtcProposal');
-      return rows.find(row => row.id === id)?.psbt ?? null;
+      }, body: JSON.stringify({ p_vault: vault, p_id: id }) }, 'readBtcProposal');
     },
     async saveMetadata({ fn, args }, role = 'metadata_writer') {
       return postRpc(fn, args, role);
@@ -748,16 +747,32 @@ function dependencies({ postgrestUrl, jwtSecret, rpcUrls }, fetcher = fetch) {
   };
 }
 
+// Checking a Bitcoin write is real work on the one event loop every route shares, and it
+// happens before anything proves who is asking, so callers are counted first. The
+// database's own rate gates cannot do this: they see only this service.
+const BTC_WINDOW_MS = 60000, BTC_PER_WINDOW = 20;
+const _btcCalls = new Map();
+function btcRateLimit(req) {
+  const ip = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').split(',')[0].trim();
+  const now = Date.now();
+  if (_btcCalls.size > 10000) _btcCalls.clear();
+  const seen = _btcCalls.get(ip);
+  if (!seen || now - seen.at > BTC_WINDOW_MS) { _btcCalls.set(ip, { at: now, n: 1 }); return; }
+  if (++seen.n > BTC_PER_WINDOW) throw new RequestError(429, 'Too many requests');
+}
+
 // A Bitcoin owner handle. It needs no vault and no session, only its own proof: the
 // address it names must have signed the key it carries.
 function verifyHandle(input) {
-  check(input && typeof input.handle === 'string' && input.handle.length <= 400, 'Invalid handle');
+  check(input && typeof input.handle === 'string' && input.handle.length <= 700, 'Invalid handle');
   check(input.network === 'mainnet' || input.network === 'signet', 'Invalid network');
   let owner;
   try { owner = BitcoinVault.decodeOwner(input.handle, input.network); }
   catch (error) { throw new RequestError(403, error.message); }
   if (!owner.proven) throw new RequestError(403, 'A handle must be signed by its Ethereum address');
-  return { fn: 'put_btc_handle', args: { p_address: owner.evm, p_network: input.network, p_handle: input.handle.trim() } };
+  const write = { fn: 'put_btc_handle', args: { p_address: owner.evm, p_network: input.network, p_handle: input.handle.trim() } };
+  if (owner.wallet) write.link = { fn: 'put_btc_wallet_link', args: { p_wallet: owner.wallet, p_network: input.network, p_address: owner.evm } };
+  return write;
 }
 
 // Same rule as an Ethereum proposal: nothing enters the queue without an owner's
@@ -775,7 +790,12 @@ async function admitBitcoinProposal(input, deps) {
   const vault = BitcoinVault.vaultId(policy), id = BitcoinVault.proposalId(input.psbt);
   let psbt = input.psbt;
   const prior = await deps.readBtcProposal(vault, id);
-  if (prior) { try { psbt = BitcoinVault.combine([prior, psbt], policy); } catch (_) {} }
+  // A copy that cannot merge is refused, never stored over what is there: replacing the
+  // row would throw away every signature on it.
+  if (prior) {
+    try { psbt = BitcoinVault.combine([prior, psbt], policy); }
+    catch (_) { throw new RequestError(409, 'That copy disagrees with the proposal in the queue'); }
+  }
   return { fn: 'put_btc_proposal', args: { p_vault: vault, p_id: id, p_network: input.network, p_psbt: psbt } };
 }
 
@@ -815,6 +835,7 @@ function createHandler(deps, allowedOrigins = []) {
         res.end();
         return;
       }
+      if (req.url === '/btc-proposal' || req.url === '/handle') btcRateLimit(req);
       if (req.url === '/btc-proposal') {
         await deps.saveMetadata(await admitBitcoinProposal(input, deps));
         res.writeHead(204);
@@ -822,7 +843,9 @@ function createHandler(deps, allowedOrigins = []) {
         return;
       }
       if (req.url === '/handle') {
-        await deps.saveMetadata(verifyHandle(input));
+        const { link, ...write } = verifyHandle(input);
+        await deps.saveMetadata(write);
+        if (link) await deps.saveMetadata(link);
         res.writeHead(204);
         res.end();
         return;

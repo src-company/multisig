@@ -22,7 +22,7 @@ vm.createContext(sandbox);
 for(const f of ['btc.min.js', 'bitcoin.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, '../dapp', f), 'utf8'), sandbox, { filename: f });
 // `var btc` in a classic script lands on the global object in a browser as well.
 const BV = sandbox.BitcoinVault;
-const { hex, base64, Transaction, HDKey } = sandbox.btc;
+const { hex, base64, Transaction, HDKey, schnorr } = sandbox.btc;
 
 const seats = network => [1, 2, 3, 4].map(n => {
   const { signer, owner } = BV.keyFromSignature('0x' + String(n).repeat(128) + '1b', network);
@@ -325,10 +325,10 @@ test('a vault address past the scan is not change, and is not signed', () => {
   const policy = plain('signet');
   const far = BV.propose({ policy, utxos: [fakeCoin(100000)], tip: 200, outputs: [{ address: payee, sats: 30000 }], feeRate: 2, change: 2000000000 });
   const v = BV.inspect(far, policy);
+  // Past the ceiling a claim is not even tried: it reads as a payment to a stranger,
+  // full address on screen, and no scan's word makes it change.
   assert.equal(v.outputs[1].change, false);
-  assert.equal(v.outputs[1].stranded, true);
-  assert.throws(() => BV.sign(far, A.signer, policy), /no scan would/);
-  // Past the ceiling, no scan's word makes it change.
+  assert.equal(v.outputs[1].stranded, false);
   assert.equal(BV.inspect(far, policy, { receive: 0, change: 2000000000 }).outputs[1].change, false);
   // Within it, an address is fine once a scan has reached that far.
   const later = BV.propose({ policy, utxos: [fakeCoin(100000)], tip: 200, outputs: [{ address: payee, sats: 30000 }], feeRate: 2, change: 300 });
@@ -485,7 +485,7 @@ test('an explorer cannot walk a scan forever, or past the gap alone', async () =
   await assert.rejects(BV.scan(policy, steered), /disagree/);
   assert.equal((await BV.scan(policy, { ...steered, usedByAll: async () => true })).change, 26);
   const huge = BV.propose({ policy, utxos: [fakeCoin(100000)], tip: 200, outputs: [{ address: payee, sats: 30000 }], feeRate: 2, change: BV.MAX_INDEX });
-  assert.equal(BV.inspect(huge, policy, { receive: 0, change: BV.MAX_INDEX }).outputs[1].stranded, true);
+  assert.equal(BV.inspect(huge, policy, { receive: 0, change: BV.MAX_INDEX }).outputs[1].change, false);
 });
 
 test('names on the object prototype are not networks', () => {
@@ -539,6 +539,113 @@ test('the queue is re-read against the vault, and spent coins close a proposal',
   assert.deepEqual([...await BV.fetchProposals(policy, f)], [good]);
   assert.equal((await BV.openProposals(policy, { spent: async () => false }, f)).length, 1);
   assert.equal((await BV.openProposals(policy, { spent: async () => true }, f)).length, 0);
+});
+
+test('dust is never spent, and change never becomes dust', () => {
+  const policy = plain('signet');
+  const dust = { ...fakeCoin(546, 100, 1), txid: '22'.repeat(32) };
+  assert.equal(BV.isProtected(dust), true);
+  assert.equal(BV.isProtected({ value: 547 }), false);
+  const swept = BV.inspect(BV.propose({ policy, utxos: [fakeCoin(100000), dust], tip: 200, sweep: payee, feeRate: 2 }), policy);
+  assert.equal(swept.inputs.length, 1);
+  assert.throws(() => BV.propose({ policy, utxos: [dust], tip: 200, sweep: payee, feeRate: 2 }), /no confirmed/);
+  // A co-owner can build one by hand. It reads, and it does not get signed.
+  const slot = BV.vaultOf(policy, 0, 0), tx = new Transaction({ version: 2, allowUnknownInputs: true });
+  tx.addInput({ ...reopen(sweepOf(policy)).getInput(0), witnessUtxo: { script: slot.script, amount: 546n } });
+  tx.addOutput({ script: reopen(sweepOf(policy)).getOutput(0).script, amount: 300n });
+  assert.throws(() => BV.sign(reseal(tx), A.signer, policy), /dust coin/);
+  const size = BV.vsize(policy, 0, 1, [34, 34]), exact = 30000 + Math.ceil(size * 2) + 546;
+  const v = BV.inspect(BV.propose({ policy, utxos: [fakeCoin(exact)], tip: 200, outputs: [{ address: payee, sats: 30000 }], feeRate: 2 }), policy);
+  assert.equal(v.outputs.length, 1);
+});
+
+// A Bitcoin wallet, signing BIP-137 the way UniSat's ecdsa mode does.
+const btcWallet = (seed, network = 'signet') => {
+  const { secp256k1, sha256, p2wpkh, TEST_NETWORK, NETWORK } = sandbox.btc;
+  const priv = sha256(new TextEncoder().encode(seed)), pub = secp256k1.getPublicKey(priv);
+  const address = p2wpkh(pub, network === 'signet' ? TEST_NETWORK : NETWORK).address;
+  const sign = text => {
+    const r = secp256k1.sign(BV.bitcoinMessageHash(text), priv, { prehash: false, format: 'recovered' });
+    const out = new Uint8Array(65); out[0] = 39 + r[0]; out.set(r.subarray(1), 1);
+    return base64.encode(out);
+  };
+  return { address, sign };
+};
+
+test('one Bitcoin wallet gives one owner on Bitcoin and Ethereum', () => {
+  const w = btcWallet('w'), sig = w.sign(BV.walletMessage());
+  const signet = BV.keyFromWalletSignature(sig, 'signet'), main = BV.keyFromWalletSignature(sig, 'mainnet');
+  assert.equal(signet.evm, main.evm);
+  assert.notEqual(signet.owner.xpub, main.owner.xpub);
+  assert.match(signet.evm, /^0x[0-9a-f]{40}$/);
+  const proof = BV.evmSignMessage(BV.bindingMessage('signet', signet.owner), signet.evmPriv);
+  const handle = BV.encodeOwner({ network: 'signet', ...signet.owner, evm: signet.evm, proof, wallet: { address: w.address, signature: w.sign(BV.linkMessage('signet', signet.evm)) } });
+  const h = BV.decodeOwner(handle, 'signet');
+  assert.equal(h.proven, true);
+  assert.equal(h.wallet, w.address);
+  assert.equal(h.evm, signet.evm);
+});
+
+test('a wallet link is refused unless that wallet signed it', () => {
+  const w = btcWallet('w'), other = btcWallet('other'), { owner, evm, evmPriv } = BV.keyFromWalletSignature(w.sign(BV.walletMessage()), 'signet');
+  const proof = BV.evmSignMessage(BV.bindingMessage('signet', owner), evmPriv);
+  const claim = (address, signature) => BV.encodeOwner({ network: 'signet', ...owner, evm, proof, wallet: { address, signature } });
+  assert.throws(() => BV.decodeOwner(claim(w.address, other.sign(BV.linkMessage('signet', evm))), 'signet'), /Bitcoin wallet it names/);
+  assert.throws(() => BV.decodeOwner(claim(w.address, w.sign(BV.linkMessage('signet', '0x' + 'ab'.repeat(20)))), 'signet'), /Bitcoin wallet it names/);
+  assert.ok(BV.decodeOwner(claim(w.address, w.sign(BV.linkMessage('signet', evm))), 'signet').wallet);
+});
+
+test('a bc1 lookup believes only a handle that proves that wallet', async () => {
+  const w = btcWallet('w'), { owner, evm, evmPriv } = BV.keyFromWalletSignature(w.sign(BV.walletMessage()), 'signet');
+  const handle = BV.encodeOwner({ network: 'signet', ...owner, evm, proof: BV.evmSignMessage(BV.bindingMessage('signet', owner), evmPriv), wallet: { address: w.address, signature: w.sign(BV.linkMessage('signet', evm)) } });
+  const reply = rows => async () => ({ ok: true, json: async () => rows });
+  assert.equal((await BV.handleForWallet('signet', w.address, reply([{ address: evm, handle }]))).evm, evm);
+  assert.equal(await BV.handleForWallet('signet', btcWallet('x').address, reply([{ address: evm, handle }])), null);
+  assert.equal(await BV.handleForWallet('signet', w.address, reply([])), null);
+});
+
+test('a coin from a Tacit transaction is set aside, and so is one that cannot be checked', async () => {
+  const policy = plain('signet'), addr = BV.vaultOf(policy, 0, 0).address;
+  const coins = [{ txid: 'aa'.repeat(32), vout: 0, value: 50000, height: 10 }, { txid: 'bb'.repeat(32), vout: 0, value: 60000, height: 10 }, { txid: 'cc'.repeat(32), vout: 0, value: 70000, height: 10 }];
+  const envelope = '20' + '11'.repeat(32) + 'ac006305' + '5441434954' + '0101' + '68';
+  const txs = { ['aa'.repeat(32)]: { vin: [{ witness: ['00'.repeat(64), envelope] }] }, ['bb'.repeat(32)]: { vin: [{ witness: ['00'.repeat(64)] }] } };
+  const c = { used: async a => a === addr, utxos: async () => coins, tx: async id => { if(!txs[id]) throw new Error('down'); return txs[id]; } };
+  const found = await BV.scan(policy, c);
+  assert.deepEqual([...found.coins].map(u => u.quarantine), ['tacit', undefined, 'unknown']);
+  const v = BV.inspect(BV.propose({ policy, utxos: found.coins.map(u => ({ ...u })), tip: 200, sweep: payee, feeRate: 2 }), policy);
+  assert.deepEqual([...v.inputs].map(i => i.txid), ['bb'.repeat(32)]);
+  // Built by hand, it reads, and it is not signed.
+  const hand = BV.propose({ policy, utxos: [{ ...coins[0], branch: 0, index: 0 }], tip: 200, sweep: payee, feeRate: 2 });
+  assert.throws(() => BV.sign(hand, A.signer, policy, { receive: 1, change: 0, quarantined: [`${'aa'.repeat(32)}:0`] }), /quarantined/);
+  assert.ok(BV.sign(hand, A.signer, policy, { receive: 1, change: 0, quarantined: [] }));
+});
+
+test('hostile derivations cannot make a proposal expensive to read', () => {
+  const keys = Array.from({ length: 12 }, (_, i) => BV.keyFromSignature('0x' + (i + 10).toString(16).padStart(2, '0').repeat(64) + '1b', 'signet').owner);
+  const policy = BV.policyOf({ network: 'signet', paths: [{ threshold: 2, keys }] }), src = reopen(BV.propose({ policy, utxos: [fakeCoin(100000)], tip: 200, sweep: payee, feeRate: 2 }));
+  const rows = Array.from({ length: 60 }, (_, i) => [schnorr.getPublicKey(sandbox.btc.sha256(new Uint8Array([i + 1]))), { hashes: [], der: { fingerprint: 1, path: [0, 1000 + i] } }]);
+  const tx = new Transaction({ version: 2, allowUnknownInputs: true, disableScriptCheck: true });
+  const { tapBip32Derivation, ...input } = src.getInput(0);
+  tx.addInput({ ...input, tapBip32Derivation: rows });
+  tx.addOutput(src.getOutput(0));
+  const at = Date.now();
+  assert.throws(() => BV.inspect(reseal(tx), policy), /does not belong/);
+  assert.ok(Date.now() - at < 1500, `took ${Date.now() - at}ms`);
+});
+
+test('a copy claiming another amount does not merge', () => {
+  const policy = plain('signet'), psbt = sweepOf(policy), signed = BV.sign(psbt, A.signer, policy);
+  const src = reopen(psbt), tx = new Transaction({ version: 2, allowUnknownInputs: true });
+  const inp = src.getInput(0);
+  tx.addInput({ ...inp, witnessUtxo: { script: inp.witnessUtxo.script, amount: inp.witnessUtxo.amount + 50000n } });
+  tx.addOutput(src.getOutput(0));
+  assert.equal(BV.proposalId(reseal(tx)), BV.proposalId(psbt));
+  assert.throws(() => BV.combine([signed, reseal(tx)], policy), /disagree/);
+});
+
+test('a vault id ignores fingerprints, which do not change the addresses', () => {
+  const a = plain('signet'), b = BV.policyOf({ network: 'signet', paths: [{ threshold: 2, keys: [A, B, C].map(s => s === A ? { ...s.owner, fingerprint: 'deadbeef' } : s.owner) }] });
+  assert.equal(BV.vaultId(a), BV.vaultId(b));
 });
 
 test('two different proposals do not merge', () => {

@@ -4,11 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <!-- The one page here that holds a private key, so the tightest policy of the
-     three: no inline script at all, and it can reach two block explorers, the
+     three: no inline script at all, and, past the WalletConnect relay that an owner opts
+     into by choosing it, it can reach two block explorers, the
      Ethereum RPCs that read a vault's owners, and nothing else. That narrows where
      a stolen key could go. It does not close it: script running here could still
      post one to those hosts, so the defence is that nothing unescaped ever runs. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src https://multisig-proposals.onrender.com https://multisig-postgrest.onrender.com https://mempool.space https://blockstream.info https://*.publicnode.com https://mainnet.megaeth.com https://rpc.mainnet.chain.robinhood.com; form-action 'none'; base-uri 'none'; upgrade-insecure-requests">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://explorer-api.walletconnect.com; frame-src https://verify.walletconnect.com https://verify.walletconnect.org; connect-src https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org https://multisig-proposals.onrender.com https://multisig-postgrest.onrender.com https://mempool.space https://blockstream.info https://*.publicnode.com https://mainnet.megaeth.com https://rpc.mainnet.chain.robinhood.com; form-action 'none'; base-uri 'none'; upgrade-insecure-requests">
 <title>multisig — bitcoin</title>
 <meta name="description" content="k-of-n Bitcoin vaults. Taproot, no contract and no server: a vault is a descriptor and a proposal is a PSBT.">
 <link rel="canonical" href="https://www.multisig.software/bitcoin.html">
@@ -69,7 +70,7 @@ button:disabled{opacity:.45;cursor:default}
 .nav>button::after,.vtab::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--a);transform:scaleX(0);transition:transform .2s}
 .nav>button.on::after,.vtab.on::after{transform:scaleX(1)}
 .nets{margin-left:auto;display:flex;align-items:center;gap:6px}
-.nets a{font-size:9px;font-weight:700;letter-spacing:2px;color:var(--d);text-decoration:none;padding:0 6px}
+.nets a{font-size:9px;font-weight:700;letter-spacing:2px;color:var(--d);text-decoration:none;padding:8px 6px}
 .pill{background:transparent;border:1px solid var(--ln);color:var(--d);font-size:9px;font-weight:700;letter-spacing:2px;padding:6px 10px;display:inline-flex;align-items:center;gap:6px}
 .pill.on{background:var(--a);color:var(--bg);border-color:var(--a)}
 
@@ -196,7 +197,7 @@ details[open] summary{margin-bottom:10px}
 .x-btn{background:none;border:none;color:var(--a);font-size:14px;padding:4px 8px}
 .toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:var(--a);color:var(--bg);font-size:10px;font-weight:700;letter-spacing:2px;padding:10px 16px;z-index:300}
 .footer{display:flex;justify-content:space-between;gap:16px;padding:16px 0 12px;border-top:1px solid var(--ln);font-size:9px;letter-spacing:2px;color:var(--d);flex-wrap:wrap}
-.footer a{color:var(--d);text-decoration:none;border-bottom:1px solid var(--ln)}
+.footer a{color:var(--d);text-decoration:none;border-bottom:1px solid var(--ln);display:inline-block;padding:6px 0}
 .pulse{animation:pulse 1.6s infinite}
 @keyframes pulse{50%{opacity:.45}}
 
@@ -237,6 +238,7 @@ details[open] summary{margin-bottom:10px}
      no legal comments. -->
 <script src="./btc.min.js"></script>
 <script src="./bitcoin.js"></script>
+<script src="./bitcoin-wallets.js"></script>
 <script src="./bitcoin-app.js"></script>
 </body>
 </html>
