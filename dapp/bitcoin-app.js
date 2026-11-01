@@ -426,7 +426,7 @@ function renderEmpty(){
   return `<div class="empty">
     <div class="empty-title">NO VAULTS</div>
     <div class="empty-sub">${S.network === 'signet' ? 'TRY ONE ON SIGNET. COINS ARE FREE AND WORTH NOTHING.' : 'K-OF-N BITCOIN. NO CONTRACT, NOTHING TO DEPLOY.'}</div>
-    <a class="btn btn-fill" style="text-decoration:none" href="./bitcoin-vault.html">CREATE A VAULT</a>
+    <a class="btn btn-fill" style="text-decoration:none" href="./btc.html">CREATE A VAULT</a>
     <details><summary>OPEN AN EXISTING VAULT</summary>
       <textarea class="inp" id="import" data-field="import" spellcheck="false" aria-label="Vault descriptor" placeholder="Paste a descriptor, tr(…">${esc(S.form.import)}</textarea>
       <div class="btns"><button class="btn btn-outline btn-sm" data-act="import">OPEN</button></div>

@@ -24,14 +24,16 @@ const S = {
   me: null, busy: false, msg: null,
   // text is what was typed. owner is set once a row is a key that can go in the vault.
   rows: [{ text: '', owner: null, state: 'empty' }, { text: '', owner: null, state: 'empty' }],
-  threshold: 2, name: '', policy: null, saved: false,
+  threshold: 2, name: '', policy: null, saved: false, step: 0,
 };
 let _t;
 const toast = t => { $('toast').innerHTML = `<div class="toast">${esc(t)}</div>`; clearTimeout(_t); _t = setTimeout(() => { $('toast').innerHTML = ''; }, 1600); };
 const evmWallets = new Map();
 window.addEventListener('eip6963:announceProvider', e => {
   const { info, provider } = e.detail || {};
-  if(info?.uuid && provider && !info.rdns?.startsWith('software.multisig.')) evmWallets.set(info.uuid, { name: String(info.name), provider });
+  // data: only, as in wallet.js: an announcement is whatever an extension chose to send.
+  const icon = /^data:image\//.test(info?.icon || '') ? info.icon : null;
+  if(info?.uuid && provider && !info.rdns?.startsWith('software.multisig.')) evmWallets.set(info.uuid, { name: String(info.name), provider, icon });
   if(document.getElementById('app').firstChild) render();
 });
 
@@ -86,60 +88,88 @@ function backup(){
   S.saved = true;
 }
 
+// Line icons, one to a step. Drawn inline: this page's CSP loads nothing else.
+const svg = d => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const ICONS = {
+  connect: svg('<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12.5h2M3 10h18"/>'),
+  owners: svg('<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.6 3.2-5.5 6.5-5.5s5.9 1.9 6.5 5.5"/><path d="M16 4.8a3.5 3.5 0 0 1 0 6.4M18.5 14.8c1.6.8 2.7 2.5 3 5.2"/>'),
+  backup: svg('<path d="M12 3l8 3v6c0 4.5-3.2 7.6-8 9-4.8-1.4-8-4.5-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/>'),
+  receive: svg('<path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M4 20h16"/>'),
+};
+const STEPS = [['connect', 'CONNECT'], ['owners', 'OWNERS'], ['backup', 'BACK UP'], ['receive', 'RECEIVE']];
+
+function renderFlow(){
+  return `<ol class="flow">${STEPS.map(([k, l], i) => {
+    const state = i < S.step ? 'done' : i === S.step ? 'now' : '';
+    const back = i < S.step && !S.policy;
+    return `<li class="${state}"><button data-act="go" data-s="${i}"${back ? '' : ' disabled'}${i === S.step ? ' aria-current="step"' : ''}><span class="ic">${ICONS[k]}</span><span class="t">${l}</span></button></li>`;
+  }).join('')}</ol>`;
+}
+
+function renderConnect(){
+  const btc = BW.detect(), evm = [...evmWallets];
+  const opt = (w, name, icon) => `<button class="wal" data-act="connect" data-w="${esc(w)}"${S.busy ? ' disabled' : ''}>${icon || ICONS.connect}<span>${esc(name)}</span></button>`;
+  return `<h2>Connect a wallet</h2><p class="lead">Free. It signs a message, not a transaction.</p>
+    <div class="wals">${btc.map(w => opt(`btc:${w.key}`, w.name, BTC)).join('')}
+    ${evm.map(([k, w]) => opt(k, w.name, w.icon ? `<img src="${esc(w.icon)}" alt="">` : '')).join('')}
+    ${!evm.length && window.ethereum ? opt('eth', 'Browser wallet') : ''}
+    ${opt('wc', 'WalletConnect')}</div>
+    <button class="link" data-act="skip">Using a hardware wallet? Skip</button>`;
+}
+
+function renderOwners(){
+  const n = total(), th = Math.min(S.threshold, Math.max(n, 1));
+  const risk = n > 1 && th === n ? 'One lost key freezes the coins.' : n > 1 && th === 1 ? 'Any one owner can spend alone.' : null;
+  const waiting = filled().some(r => r.state === 'waiting');
+  return `<h2>Add owners</h2><p class="lead">A 0x address, a Bitcoin address, or an xpub.</p>
+    ${S.me ? `<div class="row"><span class="n">${ICONS.owners}</span><span class="inp">${esc(S.me.label)}</span><span class="st ok">YOU</span></div>` : ''}
+    ${S.rows.map((r, i) => `<div class="row"><span class="n">${ICONS.owners}</span><input class="inp" id="o${i}" data-row="${i}" aria-label="Owner" spellcheck="false" autocomplete="off" placeholder="${S.network === 'mainnet' ? '0x… or bc1…' : '0x… or tb1…'}" value="${esc(r.text)}">${statusOf(r)}${S.rows.length > 1 ? `<button class="x" data-act="drop" data-i="${i}" aria-label="Remove">✕</button>` : ''}</div>${r.error ? `<div class="st bad" style="padding:4px 0">${esc(r.error)}</div>` : ''}`).join('')}
+    <div class="btns"><button class="link" data-act="add">+ Add owner</button></div>
+    ${waiting ? `<div class="wait">Waiting owners connect once at this link.<div class="btns"><button class="btn line" data-act="invite">COPY LINK</button><button class="btn line" data-act="check">CHECK AGAIN</button></div></div>` : ''}
+    ${n > 1 ? `<div class="th"><div class="stepper"><button data-act="th" data-d="-1" aria-label="Fewer">−</button><output>${th} OF ${n}</output><button data-act="th" data-d="1" aria-label="More">+</button></div><span>must sign</span></div>` : ''}
+    ${risk ? `<div class="note">${risk}</div>` : ''}
+    <button class="btn fill w" data-act="next"${allReady() ? '' : ' disabled'}>CONTINUE</button>`;
+}
+
+function renderBackup(){
+  return `<h2>Save your backup</h2><p class="lead">Without this file the coins can't be spent, even with every key. It holds no private key.</p>
+    <input class="inp boxed" id="name" data-name="1" aria-label="Vault name" maxlength="24" placeholder="Vault name (optional)" autocomplete="off" value="${esc(S.name)}">
+    <button class="btn fill w" data-act="backup">CREATE AND SAVE</button>`;
+}
+
+function renderReceive(){
+  const a = BV.vaultOf(S.policy).address;
+  return `<h2>Your vault is ready</h2><p class="lead">Share the backup with every owner, then send sats here.</p>
+    <div class="qr" role="img" aria-label="QR code of the address">${window.btc.encodeQR(a.toUpperCase(), 'svg')}</div>
+    <div class="addr">${esc(a)}</div>
+    <div class="btns center"><button class="btn line" data-act="copy">COPY ADDRESS</button>${S.network === 'signet' ? '<a class="btn line asbtn" href="https://faucet.coinbin.org" target="_blank" rel="noopener">GET TEST COINS ↗</a>' : ''}</div>
+    <div class="note">Sats only. Tacit assets sent here are set aside, and this vault cannot move them.</div>
+    <a class="btn go w" href="./bitcoin.html#${S.network}/${encodeURIComponent(BV.descriptor(S.policy))}">OPEN VAULT</a>`;
+}
+
 function render(){
   document.body.classList.toggle('light', !S.dark);
   const el = document.activeElement, id = el?.id, at = el?.selectionStart;
-  const n = total(), th = Math.min(S.threshold, Math.max(n, 1));
-  const btc = BW.detect(), evm = [...evmWallets];
-  const opt = (w, name, hint) => `<button class="opt" data-act="connect" data-w="${esc(w)}"${S.busy ? ' disabled' : ''}>${esc(name)}<span>${hint}</span></button>`;
-  const stepOne = S.me ? `<p>Connected as <strong>${esc(S.me.label)}</strong>. Your public key is published so vaults you sit on can find it.</p>`
-    : `<p>Your wallet signs a message, and your vault key comes from that signature. No transaction, no fee.</p>
-      ${btc.map(w => opt(`btc:${w.key}`, w.name.toUpperCase(), 'BITCOIN')).join('')}
-      ${evm.map(([k, w]) => opt(k, w.name.toUpperCase(), 'ETHEREUM')).join('')}
-      ${!evm.length && window.ethereum ? opt('eth', 'BROWSER WALLET', 'ETHEREUM') : ''}
-      ${opt('wc', 'WALLETCONNECT', 'ETHEREUM')}
-      <p>On a hardware wallet? Skip this and paste your [fingerprint/path]xpub as an owner.</p>`;
-  const risk = n > 1 && th === n ? 'If one owner loses their key, the coins are stuck for good.' : n > 1 && th === 1 ? 'Any one owner can spend alone.' : null;
-  const waiting = filled().filter(r => r.state === 'waiting').length;
-  const done = S.policy;
+  const pane = [renderConnect, renderOwners, renderBackup, renderReceive][S.step];
   $('app').innerHTML = `<div class="frame">
+    <div class="hbar" aria-hidden="true">${'/'.repeat(120)}</div>
     <div class="hdr"><div class="logo"><a href="./index.html">MULTISIG</a></div>
-      <div class="pills">${['mainnet', 'signet'].map(k => `<button class="pill${k === S.network ? ' on' : ''}" data-act="net" data-n="${k}"${done ? ' disabled' : ''}>${k === 'mainnet' ? 'BITCOIN' : 'SIGNET'}</button>`).join('')}</div></div>
-    <div class="hero">
-      <div class="marks"><span class="mark">${BTC}</span><span class="mark">${TAC}</span></div>
-      <h1>A Bitcoin multisig,<br>from any wallet</h1>
-      <div class="sub">Bring an Ethereum or a Bitcoin wallet. Several owners, one vault, and Bitcoin itself enforces the rule.</div>
-      <div class="free">FREE · NOTHING TO DEPLOY</div>
-    </div>
+      <div class="pills"><button class="theme" data-act="theme" aria-label="Switch to ${S.dark ? 'light' : 'dark'} theme">${S.dark ? '☀' : '☾'}</button>${['mainnet', 'signet'].map(k => `<button class="pill${k === S.network ? ' on' : ''}" data-act="net" data-n="${k}"${k === S.network ? ' aria-current="true"' : ''}${S.policy ? ' disabled' : ''}>${k.toUpperCase()}</button>`).join('')}</div></div>
+    <div class="hero"><div class="marks"><span class="mark">${BTC}</span><span class="mark">${TAC}</span></div>
+      <h1>Bitcoin multisig</h1><div class="free">FREE · NOTHING TO DEPLOY</div></div>
+    ${renderFlow()}
     ${S.msg ? `<div class="note bad" role="status">${esc(S.msg)}</div>` : ''}
-    <section class="step"><h2><span>1</span>CONNECT${S.me ? '<span class="ok">DONE</span>' : ''}</h2>${stepOne}</section>
-    <section class="step${done ? ' off' : ''}"><h2><span>2</span>OWNERS</h2>
-      <p>Paste a 0x address, a Bitcoin address, or an xpub. Each owner connects here once, and shows READY when they have.</p>
-      ${S.me ? `<div class="row"><span class="inp">${esc(S.me.label)} · YOU</span><span class="st ok">READY</span></div>` : ''}
-      ${S.rows.map((r, i) => `<div class="row"><input class="inp" id="o${i}" data-row="${i}" aria-label="Owner" spellcheck="false" autocomplete="off" placeholder="0x…, ${S.network === 'mainnet' ? 'bc1' : 'tb1'}… or xpub" value="${esc(r.text)}"${done ? ' disabled' : ''}>${statusOf(r)}<button class="x" data-act="drop" data-i="${i}" aria-label="Remove">✕</button></div>${r.error ? `<div class="st bad" style="padding:4px 0">${esc(r.error)}</div>` : ''}`).join('')}
-      <div class="btns"><button class="btn line" data-act="add"${done ? ' disabled' : ''}>+ ADD OWNER</button>${waiting ? '<button class="btn line" data-act="check">CHECK AGAIN</button><button class="btn line" data-act="invite">COPY INVITE LINK</button>' : ''}</div>
-      <div><div class="stepper"><button data-act="th" data-d="-1" aria-label="Fewer"${done ? ' disabled' : ''}>−</button><output>${th} OF ${Math.max(n, 1)}</output><button data-act="th" data-d="1" aria-label="More"${done ? ' disabled' : ''}>+</button></div></div>
-      ${risk ? `<div class="note">${risk}</div>` : ''}
-    </section>
-    <section class="step${allReady() || done ? '' : ' off'}"><h2><span>3</span>BACK UP${S.saved ? '<span class="ok">DONE</span>' : ''}</h2>
-      <p>Bitcoin keeps no record of who owns a vault, so this file is what makes the coins spendable. It holds no private key. Every owner should have a copy.</p>
-      <input class="inp" id="name" data-name="1" aria-label="Vault name" maxlength="24" placeholder="NAME THIS VAULT (OPTIONAL)" autocomplete="off" value="${esc(S.name)}" style="margin-top:10px;border-bottom:1px solid var(--ln)"${done ? ' disabled' : ''}>
-      ${S.saved ? '' : `<button class="btn fill w" data-act="backup"${allReady() ? '' : ' disabled'}>CREATE AND SAVE BACKUP</button>`}
-      ${allReady() || done ? '' : `<p style="font-size:10px;color:var(--d);margin-top:10px">${n ? 'Waiting on every owner.' : 'Connect, or add an owner.'}</p>`}
-    </section>
-    <section class="step${S.saved ? '' : ' off'}"><h2><span>4</span>RECEIVE</h2>
-      ${S.saved ? (() => { const a = BV.vaultOf(S.policy).address; return `<div class="addr">${esc(a)}</div>
-        <div class="qr" role="img" aria-label="QR code of the address">${window.btc.encodeQR(a.toUpperCase(), 'svg')}</div>
-        <div class="btns"><button class="btn line" data-act="copy">COPY ADDRESS</button></div>
-        <div class="note">Send sats only. Tacit assets that arrive are set aside and never spent as sats, but this vault cannot move them yet.</div>
-        <a class="btn go w" href="./bitcoin.html#${S.network}/${encodeURIComponent(BV.descriptor(S.policy))}">OPEN VAULT</a>`; })() : '<p>Your vault address appears here. Sending to it is the first thing that happens on chain.</p>'}
-    </section>
+    <section class="pane">${pane()}</section>
     <div class="foot"><a href="./index.html">ETHEREUM AND L2 ↗</a><a href="./bitcoin.html">MY VAULTS</a></div>
   </div>`;
   if(id && $(id)){ $(id).focus(); if(at != null) try { $(id).setSelectionRange(at, at); } catch(_) {} }
 }
 
 const ACT = {
+  theme(){ S.dark = !S.dark; lsSet('ms_light', S.dark ? '' : '1'); },
+  skip(){ S.step = 1; },
+  next(){ S.step = 2; },
+  go(el){ S.step = +el.dataset.s; if(S.step === 0) S.me = null; },
   async connect(el){
     const w = el.dataset.w;
     if(window.top !== window || window.opener) throw new Error('Open this page in its own tab to use a key.');
@@ -152,9 +182,10 @@ const ACT = {
       const eth = w === 'wc' ? await BW.walletConnect() : w === 'eth' ? window.ethereum : evmWallets.get(w).provider;
       S.me = await BW.connectEvmForHandle(eth, S.network);
     }
+    S.step = 1;
   },
   net(el){
-    S.network = el.dataset.n; S.me = null;
+    S.network = el.dataset.n; S.me = null; S.step = 0;
     S.rows.forEach(r => { r.owner = null; r.state = r.text.trim() ? 'checking' : 'empty'; });
     return ACT.check();
   },
@@ -163,7 +194,7 @@ const ACT = {
   th(el){ const max = Math.max(total(), 1); S.threshold = Math.max(1, Math.min(max, Math.min(S.threshold, max) + +el.dataset.d)); },
   async check(){ await Promise.all(S.rows.map(resolve)); },
   invite(){ return navigator.clipboard.writeText(`${location.origin}${location.pathname}`).then(() => toast('LINK COPIED'), () => toast('THE BROWSER REFUSED THE CLIPBOARD')); },
-  backup(){ create(); backup(); },
+  backup(){ create(); backup(); S.step = 3; },
   copy(){ return navigator.clipboard.writeText(BV.vaultOf(S.policy).address).then(() => toast('ADDRESS COPIED'), () => toast('THE BROWSER REFUSED THE CLIPBOARD')); },
 };
 
@@ -189,6 +220,11 @@ document.addEventListener('input', e => {
   _typing = setTimeout(async () => { await resolve(row); render(); }, 350);
 });
 
+// The address is /btc. Links stay btc.html, the only spelling an IPFS gateway resolves,
+// so the page tidies the bar itself, on our own host only.
+if(/(^|\.)multisig\.software$/.test(location.hostname) && location.pathname === '/btc.html'){
+  try { history.replaceState(null, '', `/btc${location.search}${location.hash}`); } catch(_) {}
+}
 window.dispatchEvent(new Event('eip6963:requestProvider'));
 render();
 

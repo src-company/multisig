@@ -14,4 +14,5 @@
 /brand/  /brand.html  200
 /bitcoin    /bitcoin.html   200
 /bitcoin/   /bitcoin.html   200
-/bitcoin-vault    /bitcoin-vault.html   200
+/btc    /btc.html   200
+/bitcoin-vault    /btc.html   200

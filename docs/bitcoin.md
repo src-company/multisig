@@ -101,6 +101,8 @@ Vaults hold sats. Anyone can send a Tacit note to a vault address, and a vault c
 
 Every coin's creating transaction is checked for a Tacit envelope, which works from any explorer and misses nothing. Coins that trip it go to `POST api.tacit.finance/outpoints/classify`, which clears false alarms and names the asset. Only `plain` releases a coin: `asset`, `unverified`, a missing entry or any failure leaves it set aside and retries. The check runs again on a proposal's inputs before signing. The full contract is `docs/VAULT-INTEGRATION.md` in the Tacit repo. Holding notes in a vault would be its own design.
 
+A set-aside coin shows its asset id and no amount. That needs no owner to sign, and no owner's signature would reveal more: a note's amount is blinded to a key the vault does not have, so only the sender can read it.
+
 ## Not done
 
 - **Mainnet opened before these were done.** It is open by the owner's decision, with a warning on the page. `MAINNET` in `bitcoin-app.js` is the switch.

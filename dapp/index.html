@@ -3400,7 +3400,7 @@ const BTC_LOGO = WBTC_ICON;
 // The row itself, shared by the two places a chain gets picked — the CREATE panel
 // and the SELECT CHAIN overlay. A link, not a chain: Bitcoin vaults have their own
 // page, with no factory behind it and a stricter CSP, because it holds a key.
-const BTC_ROW = `<a class="net-row btc-row" href="./bitcoin-vault.html">
+const BTC_ROW = `<a class="net-row btc-row" href="./btc.html">
   <span style="font-size:8px" aria-hidden="true">○</span><span class="tok-ico">${BTC_LOGO}</span><span>BITCOIN</span>
   <span class="net-id">↗</span>
 </a>`;
@@ -8901,7 +8901,7 @@ function doAccelerate(vi, nonce) {
 // nothing is deployed there. Its address is worked out from each owner's Bitcoin key,
 // and a key can only come from its owner, so each connects once and publishes a signed
 // handle. With all of them in, anyone reaches the same vault. That setup happens on
-// bitcoin-vault.html, which holds a key under a stricter policy than this page can.
+// btc.html, which holds a key under a stricter policy than this page can.
 const loadBitcoin = () => window.BitcoinWallets.loadBitcoinLibs();
 // What the registry knows about these owners, read once per set and drawn when it lands.
 const _btcSets = new Map();
@@ -8947,7 +8947,7 @@ function renderBtcPanel(c){
     <div style="font-size:10px;letter-spacing:2px;color:var(--m);font-weight:600">${network === 'mainnet' ? 'BITCOIN' : 'SIGNET'} &middot; ${threshold} OF ${owners.length} &middot; FREE, NOTHING TO DEPLOY</div>
     <div style="margin-top:4px;font-size:10px;line-height:1.6;color:var(--d)">Its own addresses, not this vault's. Setup costs no gas and no sats; a spend pays the usual miner fee from the vault.</div>
     ${owners.map(a => { const ok = set.ready.includes(a.toLowerCase()); return `<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;font-size:10px;letter-spacing:1px;color:${ok ? 'var(--g)' : 'var(--d)'}"><span>${esc(a.slice(0, 6) + '…' + a.slice(-4))}</span><span>${set.loading ? '…' : ok ? 'READY' : 'WAITING'}</span></div>`; }).join('')}
-    ${mine && !iAmReady && !set.loading ? `<a class="btn btn-outline btn-sm" style="margin-top:6px;text-decoration:none" href="./bitcoin-vault.html">SET UP MY BITCOIN KEY &#8599;</a>` : ''}
+    ${mine && !iAmReady && !set.loading ? `<a class="btn btn-outline btn-sm" style="margin-top:6px;text-decoration:none" href="./btc.html">SET UP MY BITCOIN KEY &#8599;</a>` : ''}
     ${set.link ? `<a class="alt-link" style="display:inline-block;margin-top:6px;text-decoration:none" href="${esc(set.link)}">OPEN ON BITCOIN &#8599;</a>` : `<div style="margin-top:6px;font-size:10px;line-height:1.6;color:var(--d)">Each owner sets up once, here or on the vault. The vault appears on its dashboard when all are ready. Contract owners, such as a Safe, cannot take part.</div>`}
   </div>`;
 }
@@ -8967,7 +8967,7 @@ function renderBtcMeta(v){
   const moved = seen && seen !== set.link;
   if(set.link) return `<span><a href="${esc(set.link)}" title="Worked out from this vault's current owners and threshold" style="color:inherit;border-bottom:1px solid var(--ln);text-decoration:none">BITCOIN &#8599;</a>${moved ? ` <span style="color:var(--y)" title="The owners or threshold changed, so this is a new Bitcoin vault. Coins sent to the old one are still there.">OWNERS CHANGED</span>` : ''}${set.pending ? ` <span style="color:var(--y)">${set.pending} PENDING</span>` : ''}</span>`;
   const mine = owners.some(a => a.toLowerCase() === me) && !set.ready.includes(me);
-  return `<span>BITCOIN ${set.ready.length}/${owners.length}${mine ? ` <a href="./bitcoin-vault.html" style="color:inherit;border-bottom:1px solid var(--ln);text-decoration:none">SET UP &#8599;</a>` : ''}</span>`;
+  return `<span>BITCOIN ${set.ready.length}/${owners.length}${mine ? ` <a href="./btc.html" style="color:inherit;border-bottom:1px solid var(--ln);text-decoration:none">SET UP &#8599;</a>` : ''}</span>`;
 }
 
 function toggleClone(i){
