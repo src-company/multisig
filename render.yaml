@@ -207,8 +207,12 @@ services:
       - path: /multisig-card-1200x630.png
         name: Cache-Control
         value: "public, max-age=604800"
-    # No redirect for /bitcoin/ here: the host treats it and /bitcoin as one path, so
-    # that rule sends /bitcoin to itself forever.
+    # The host treats /bitcoin/ and /bitcoin as one path, so a rule on either catches
+    # both. It must land on the file: pointed at /bitcoin it redirected to itself forever.
+    routes:
+      - type: redirect
+        source: /bitcoin/
+        destination: /bitcoin.html
     # The full CSP is served from the <meta> tag in each page instead of here,
     # so it stays next to the code whose origins it lists. If you move it, point
     # connect-src at the PostgREST service URL above.
