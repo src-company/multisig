@@ -1981,6 +1981,36 @@ RETURNS TABLE (address text, handle text) AS $$
   WHERE l.wallet = p_wallet AND l.network = p_network;
 $$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
 
+-- ── BITCOIN NOTE KEYS ───────────────────────────────────────
+-- A vault's sealed note key. The record is signed by an owner and checked against the
+-- vault's keys by everyone who reads it, so this table only carries it. The first stays.
+CREATE TABLE IF NOT EXISTS btc_note_keys (
+  vault      text PRIMARY KEY CHECK (vault ~ '^[0-9a-f]{64}$'),
+  network    text NOT NULL CHECK (network IN ('mainnet', 'signet')),
+  record     text NOT NULL CHECK (length(record) BETWEEN 1 AND 20000),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE btc_note_keys ENABLE ROW LEVEL SECURITY;
+
+CREATE OR REPLACE FUNCTION put_btc_note_key(p_vault text, p_network text, p_record text)
+RETURNS void AS $$
+BEGIN
+  IF coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb->>'role', '') <> 'metadata_writer' THEN
+    RAISE EXCEPTION 'A verified owner signature is required' USING ERRCODE = '42501';
+  END IF;
+  IF (SELECT count(*) FROM btc_note_keys) >= 20000 THEN
+    RAISE EXCEPTION 'The note key list is full' USING ERRCODE = '54000';
+  END IF;
+  INSERT INTO btc_note_keys (vault, network, record) VALUES (p_vault, p_network, p_record)
+  ON CONFLICT (vault) DO NOTHING;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+CREATE OR REPLACE FUNCTION btc_note_key(p_vault text)
+RETURNS text AS $$
+  SELECT record FROM btc_note_keys WHERE vault = p_vault;
+$$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
+
 -- ── BITCOIN VAULT LIST ──────────────────────────────────────
 -- Which vaults an owner sits on, so connecting a wallet on any device finds them. A
 -- descriptor spends nothing, and it is re-read against the owner's own key on arrival.

@@ -56,7 +56,7 @@ const S = {
   msg: null, busy: false,
 };
 const myHandle = () => BV.encodeOwner({ network: S.network, ...S.owner });
-function forget(){ S.pending = null; if(S.owner){ S.owner.signer.wipePrivateData(); S.owner = null; } }
+function forget(){ S.pending = null; S.noteKey?.fill(0); S.noteKey = null; S.inbox = null; if(S.owner){ S.owner.signer.wipePrivateData(); S.owner = null; } }
 const known = () => S.coins ? { receive: S.receive, change: S.change, quarantined: S.coins.filter(c => c.quarantine).map(c => `${c.txid}:${c.vout}`) } : undefined;
 let idle;
 // Timers stop while a device sleeps, so the wall clock is checked as well.
@@ -276,7 +276,8 @@ async function open(policy, fromLink = false){
   S.moving = null;
   if(S.moveTo !== BV.descriptor(policy)) Object.assign(S, { moveFrom: null, moveTo: null });
   if(trusted) remember(policy);
-  Object.assign(S, { who: null, policy, trusted, view: 'dash', compose: false, coins: null, tip: null, queue: [], psbt: null, review: null, msg: null });
+  S.noteKey?.fill(0);
+  Object.assign(S, { noteKey: null, noteRecord: undefined, noteBad: false, inbox: null, who: null, policy, trusted, view: 'dash', compose: false, coins: null, tip: null, queue: [], psbt: null, review: null, msg: null });
   syncHash();
   render();
   // In the background: a click's busy lock must not outlast the click, or every button
@@ -286,8 +287,36 @@ async function open(policy, fromLink = false){
 
 // Numbered, because a slow scan of the last vault must not land on this one.
 let scanning = 0, lastScan = 0, scanned = Promise.resolve(), retries = 0;
+// Signet only for now. Anything that fails simply shows no address: a record that does
+// not check out against this vault's keys is treated as no record at all.
+async function readTacit(){
+  const policy = S.policy, BT = window.BitcoinTacit;
+  if(!policy || !BT || S.network !== 'signet' || !S.trusted) return;
+  const record = await BV.fetchNoteRecord(policy).catch(() => undefined);
+  if(policy !== S.policy || record === undefined) return;
+  S.noteRecord = record && BT.verifyRecord(policy, record) ? record : null;
+  S.noteBad = !!record && !S.noteRecord;
+  if(S.noteRecord && S.owner?.signer && allKeys(policy).some(isMe) && !S.noteKey) S.noteKey = await BT.openRecord(S.noteRecord, S.owner.signer, S.owner, policy).catch(() => null);
+  if(S.noteKey) S.inbox = await BT.readInbox(S.noteKey, S.network, BV.chain(S.network)).catch(() => S.inbox);
+  if(policy === S.policy) render();
+}
+function renderTacit(){
+  if(S.network !== 'signet' || !S.trusted || !window.BitcoinTacit) return '';
+  const head = '<div class="head"><span>TACIT</span></div>';
+  if(S.noteBad) return `${head}<div class="note warn"><b>This vault's Tacit record does not check out.</b> No address is shown.</div>`;
+  if(!S.noteRecord) return S.noteRecord === undefined ? '' : `${head}<p class="small" style="padding:10px 8px">Give this vault a tacit1 address, so any Tacit wallet can pay it. Test coins only for now.</p>
+    <div class="btns">${S.owner && allKeys(S.policy).some(isMe) ? '<button class="btn btn-outline btn-sm" data-act="tacit-setup">SET UP TACIT</button>' : '<button class="btn btn-outline btn-sm" data-act="wallet">CONNECT TO SET UP</button>'}</div>`;
+  if(!S.noteKey) return `${head}<p class="small" style="padding:10px 8px">This vault has a tacit1 address. Connect as an owner to see it.</p>`;
+  const addr = window.BitcoinTacit.noteAddress(S.noteKey, S.network);
+  const row = n => `<div class="row"><span class="asset"><span class="btc" style="width:20px;height:20px">${TAC_ICON}</span>${esc(assetName(n.asset))}</span><span class="r">${n.status === 'asset' ? `${n.amount} UNITS` : n.status === 'plain' ? `${n.value} SATS` : 'CHECKING…'}</span></div>`;
+  return `${head}<div class="mono" style="font-size:11px;font-weight:400;padding:12px 8px">${esc(addr)}</div>
+    <div class="btns"><button class="btn btn-outline btn-sm" data-act="copy-tacit">COPY TACIT ADDRESS</button></div>
+    ${(S.inbox || []).map(row).join('')}
+    <p class="small" style="padding:10px 8px">Notes land in an inbox any owner can move, on the way to the vault. Moving them under the vault's rules comes next, so keep this to test coins.</p>`;
+}
 function readOwners(){
   const policy = S.policy;
+  readTacit();
   if(policy) BV.ownersOf(policy).then(who => { if(policy === S.policy){ S.who = who; render(); } }, () => {});
 }
 async function refresh(){
@@ -303,7 +332,12 @@ async function refresh(){
     // A slow first look at a coin answers "retry". Each try gets further, so it clears.
     if(S.coins.some(c => c.quarantine === 'unknown') && retries++ < 5) setTimeout(() => { if(run === scanning) scanned = refresh(); }, 30000);
     else if(!S.coins.some(c => c.quarantine === 'unknown')) retries = 0;
-  } catch(e) { if(run === scanning) say(`Could not read the chain: ${e.message}`); }
+  } catch(e) {
+    if(run !== scanning) return;
+    // A rate limit passes by itself, so it gets a calm word and another try.
+    if(e.message === BV.EXPLORERS_BUSY){ say('The Bitcoin explorers are busy. Trying again shortly.'); setTimeout(() => { if(run === scanning) scanned = refresh(); }, 30000); }
+    else say(`Could not read the chain: ${e.message}`);
+  }
 }
 
 // What the vault's queue holds, joined with anything only this browser has. A copy held
@@ -448,6 +482,7 @@ function backupText(){
     '',
     BV.recoveryText(S.network),
     '',
+    ...(S.noteRecord ? ['Tacit note key record. Each owner can open their own copy with their key:', JSON.stringify(S.noteRecord), ''] : []),
   ].join('\n');
 }
 function download(){
@@ -735,6 +770,7 @@ function renderDash(){
     ${open ? `<div class="note warn"><b>The delayed path is open on ${open} coin${open > 1 ? 's' : ''}.</b> Send them back to this vault to restart the clock. <button class="addrline" data-act="reset">SET THIS UP</button></div>` : ''}
     ${renderClock()}
     ${renderQueue()}
+    ${renderTacit()}
     ${renderAssets()}
     ${renderReceive()}
     ${renderCoins()}`;
@@ -1017,6 +1053,13 @@ const ACT = {
     Object.assign(S.form, { to, amt: 'all', path: '0' });
     S.compose = true;
   },
+  async 'tacit-setup'(){
+    if(S.pending) throw new Error('Confirm your wallet first.');
+    const record = await window.BitcoinTacit.makeRecord(S.owner.signer, S.owner, S.policy);
+    await BV.publishNoteRecord(S.policy, S.owner.signer, myHandle(), record);
+    await readTacit();
+  },
+  'copy-tacit'(){ return copy(window.BitcoinTacit.noteAddress(S.noteKey, S.network), 'ADDRESS COPIED'); },
   'copy-evm'(){ return copy(S.owner.evm, 'ADDRESS COPIED'); },
   'copy-address'(){ return copy(BV.vaultOf(S.policy, 0, S.receive).address, 'ADDRESS COPIED'); },
   async 'copy-descriptor'(){ await copy(BV.descriptor(S.policy), 'DESCRIPTOR COPIED'); setNote('backup', curDesc(), 1); },
@@ -1067,6 +1110,8 @@ document.addEventListener('visibilitychange', () => {
 render();
 readHash().then(handled => {
   if(handled) return;
+  // Sent here from the main app to find this wallet's vaults, which takes its signature.
+  if(location.hash === '#find' && !S.owner){ S.ovl = 'connect'; render(); }
   const first = saved()[0];
   if(first) return open(BV.parseDescriptor(first, S.network));
 });

@@ -56,3 +56,24 @@ test('a real signet deposit opens to its amount with the note key', () => {
   assert.equal(BT.openNote(tx, 0, sha256(Uint8Array.of(9))), null, 'wrong key opens nothing');
   assert.equal(BT.openNote(tx, 7, v), null, 'no such output');
 });
+
+test('the service keeps a note key record only from an owner, and only on signet', async () => {
+  const { saveNoteKey } = require('../api/proposals.cjs');
+  const record = await BT.makeRecord(a.signer, a.owner, policy), descriptor = BV.descriptor(policy);
+  await assert.rejects(saveNoteKey({ network: 'mainnet', descriptor, handle: 'x', record }), /Invalid network/);
+  await assert.rejects(saveNoteKey({ network: 'signet', descriptor, handle: 'x', record: null }), /Invalid record/);
+  await assert.rejects(saveNoteKey({ network: 'signet', descriptor, handle: 'nonsense', record, at: 1, sig: 'a' }));
+});
+
+test('an inbox shows an amount only for a coin Tacit calls an asset', async () => {
+  const tx = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/tacit-deposit.json'), 'utf8'));
+  const v = sha256(new TextEncoder().encode('tacit-vault-spike-signet-v1/note-key')), id = tx.txid;
+  const chain = verdict => ({ utxos: async () => [{ txid: id, vout: 0, value: 546 }], tx: async () => tx, classify: async () => verdict });
+  assert.equal(BT.inboxAddress(v, 'signet').slice(0, 4), 'tb1q');
+  const [ok] = await BT.readInbox(v, 'signet', chain({ [`${id}:0`]: { status: 'asset', asset_ids: ['ab'] } }));
+  assert.deepEqual([ok.status, ok.amount, ok.asset], ['asset', 700n, 'ab']);
+  const [unsure] = await BT.readInbox(v, 'signet', chain({ [`${id}:0`]: { status: 'unverified' } }));
+  assert.deepEqual([unsure.status, unsure.amount], ['unverified', undefined]);
+  const [gone] = await BT.readInbox(v, 'signet', { ...chain({}), classify: async () => { throw new Error('down'); } });
+  assert.deepEqual([gone.status, gone.amount], ['unverified', undefined]);
+});

@@ -16,7 +16,7 @@ const vm = require('node:vm');
 const http = require('node:http');
 const { spawn } = require('node:child_process');
 
-const sandbox = { TextEncoder, TextDecoder, Uint8Array, crypto: globalThis.crypto, console };
+const sandbox = { setTimeout, TextEncoder, TextDecoder, Uint8Array, crypto: globalThis.crypto, console };
 sandbox.globalThis = sandbox;
 vm.createContext(sandbox);
 for(const f of ['btc.min.js', 'bitcoin.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, '../dapp', f), 'utf8'), sandbox, { filename: f });
@@ -546,6 +546,20 @@ test('a scan never reads an address past the ceiling', async () => {
   await BV.scan(policy, { used: async a => { seen.push(a); return true; }, utxos: async () => [] });
   assert.ok(seen.some(a => last.has(a)));
   assert.equal(seen.length, BV.MAX_INDEX * 2);
+});
+
+test('a rate limit moves on to the next explorer, and is said calmly when all are busy', async () => {
+  const seen = [], limited = { ok: false, status: 429, headers: { get: () => '1' }, text: async () => '{"message":"limit"}' };
+  const c = BV.chain('signet', async url => { seen.push(url); return /first/.test(url) ? limited : { ok: true, json: async () => 77 }; }, ['https://first.rl/api', 'https://second.rl/api']);
+  assert.equal(await c.tip(), 77);
+  assert.deepEqual(seen.map(u => u.split('/')[2]), ['first.rl', 'second.rl']);
+  const all = BV.chain('signet', async () => limited, ['https://a.busy/api', 'https://b.busy/api']);
+  await assert.rejects(all.tip(), e => e.message === BV.EXPLORERS_BUSY);
+  const stat = n => ({ ok: true, json: async () => ({ chain_stats: { tx_count: n }, mempool_stats: { tx_count: 0 } }) });
+  const onlyOne = BV.chain('signet', async url => /lie/.test(url) ? stat(1) : limited, ['https://lie.one/api', 'https://quiet.two/api']);
+  await assert.rejects(onlyOne.usedByAll('x'), e => e.message === BV.EXPLORERS_BUSY);
+  const mirror = BV.chain('mainnet', async url => /fra/.test(url) || /blockstream/.test(url) ? stat(1) : limited, ['https://mempool.space/api', 'https://mempool.fra.mempool.space/api', 'https://blockstream.info/api']);
+  assert.equal(await mirror.usedByAll('x'), true);
 });
 
 test('names on the object prototype are not networks', () => {

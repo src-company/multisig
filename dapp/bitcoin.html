@@ -9,7 +9,7 @@
      Ethereum RPCs that read a vault's owners, and nothing else. That narrows where
      a stolen key could go. It does not close it: script running here could still
      post one to those hosts, so the defence is that nothing unescaped ever runs. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://explorer-api.walletconnect.com; frame-src https://verify.walletconnect.com https://verify.walletconnect.org; connect-src https://api.tacit.finance https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org https://multisig-proposals.onrender.com https://multisig-postgrest.onrender.com https://mempool.space https://blockstream.info https://*.publicnode.com https://mainnet.megaeth.com https://rpc.mainnet.chain.robinhood.com; form-action 'none'; base-uri 'none'; upgrade-insecure-requests">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://explorer-api.walletconnect.com; frame-src https://verify.walletconnect.com https://verify.walletconnect.org; connect-src https://api.tacit.finance https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org https://multisig-proposals.onrender.com https://multisig-postgrest.onrender.com https://mempool.space https://mempool.fra.mempool.space https://mempool.va1.mempool.space https://mempool.tk7.mempool.space https://mempool.emzy.de https://blockstream.info https://*.publicnode.com https://mainnet.megaeth.com https://rpc.mainnet.chain.robinhood.com; form-action 'none'; base-uri 'none'; upgrade-insecure-requests">
 <title>multisig</title>
 <meta name="description" content="k-of-n Bitcoin vaults. Taproot, no contract: a vault is a descriptor and a proposal is a PSBT.">
 <link rel="canonical" href="https://www.multisig.software/bitcoin.html">
@@ -260,6 +260,7 @@ details[open] summary{margin-bottom:10px}
 <script src="./btc.min.js"></script>
 <script src="./bitcoin.js"></script>
 <script src="./bitcoin-wallets.js"></script>
+<script src="./bitcoin-tacit.js"></script>
 <script src="./bitcoin-app.js"></script>
 </body>
 </html>

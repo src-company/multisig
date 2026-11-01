@@ -868,6 +868,17 @@ function inWorker(op, input, who) {
   });
 }
 
+// Signet only until the rest of the Tacit path has its own review.
+async function saveNoteKey(input, who) {
+  check(input && input.network === 'signet', 'Invalid network');
+  check(typeof input.descriptor === 'string' && input.descriptor.length <= 8000, 'Invalid vault');
+  check(typeof input.handle === 'string' && input.handle.length <= 700, 'Invalid handle');
+  const record = JSON.stringify(input.record ?? null);
+  check(input.record && record.length <= 20000, 'Invalid record');
+  const { vault } = await inWorker('notekey', { descriptor: input.descriptor, network: input.network, handle: input.handle, at: input.at, sig: input.sig, record: input.record }, who);
+  return { fn: 'put_btc_note_key', args: { p_vault: vault, p_network: input.network, p_record: record } };
+}
+
 async function admitBitcoinProposal(input, deps, who) {
   check(input && typeof input.psbt === 'string' && input.psbt.length <= 72000, 'Invalid proposal');
   check(typeof input.descriptor === 'string' && input.descriptor.length <= 8000, 'Invalid vault');
@@ -903,7 +914,7 @@ function createHandler(deps, allowedOrigins = []) {
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     }
     if (req.url === '/health' && req.method === 'GET') { res.writeHead(200); res.end('ok'); return; }
-    if (!['/proposals', '/metadata', '/action', '/signature', '/reconcile', '/register', '/confirm', '/session', '/handle', '/btc-proposal', '/btc-vault', '/btc-vaults'].includes(req.url)) { res.writeHead(404); res.end(); return; }
+    if (!['/proposals', '/metadata', '/action', '/signature', '/reconcile', '/register', '/confirm', '/session', '/handle', '/btc-proposal', '/btc-vault', '/btc-vaults', '/btc-note-key'].includes(req.url)) { res.writeHead(404); res.end(); return; }
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
     if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
     const caller = callerOf(req);
@@ -928,7 +939,13 @@ function createHandler(deps, allowedOrigins = []) {
         res.end();
         return;
       }
-      if (['/btc-proposal', '/handle', '/btc-vault', '/btc-vaults'].includes(req.url)) btcRateLimit(req);
+      if (['/btc-proposal', '/handle', '/btc-vault', '/btc-vaults', '/btc-note-key'].includes(req.url)) btcRateLimit(req);
+      if (req.url === '/btc-note-key') {
+        await deps.saveMetadata(await saveNoteKey(input, caller));
+        res.writeHead(204);
+        res.end();
+        return;
+      }
       if (req.url === '/btc-vault') {
         for (const write of await saveBitcoinVault(input, caller)) await deps.saveMetadata(write);
         res.writeHead(204);
@@ -1027,4 +1044,4 @@ if (require.main === module) {
   server.listen(Number(PORT), '0.0.0.0');
 }
 
-module.exports = { saveBitcoinVault, btcOwner, admitBitcoinProposal, verifyHandle, verifyProposal, verifyMetadata, verifyAction, verifySignature, verifyReconcile, verifyRegistration, verifyConfirm, verifySession, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, ACTION_TYPES, SESSION_TYPES, iface };
+module.exports = { saveNoteKey, saveBitcoinVault, btcOwner, admitBitcoinProposal, verifyHandle, verifyProposal, verifyMetadata, verifyAction, verifySignature, verifyReconcile, verifyRegistration, verifyConfirm, verifySession, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, ACTION_TYPES, SESSION_TYPES, iface };

@@ -130,6 +130,7 @@ const sandbox = {
   renderSlowOutbound: () => '',
   renderBtcMeta: () => '',
   renderBtcBanner: () => '',
+  renderBtcTabs: () => '',
   renderTxBuilder: () => '<div id="txb"></div>',
   renderSim: () => '',
   vaultRef: v => v.address,

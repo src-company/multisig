@@ -37,7 +37,7 @@ const { Transaction, Script, Address, OutScript, HDKey, NETWORK, TEST_NETWORK, T
 const XPUB = { private: 0x0488ade4, public: 0x0488b21e }, TPUB = { private: 0x04358394, public: 0x043587cf };
 const NETWORKS = {
   mainnet: { name: 'mainnet', params: NETWORK,      owner: 'msig',  versions: XPUB, coin: 0, explorer: 'https://mempool.space',
-             api: ['https://mempool.space/api', 'https://blockstream.info/api'] },
+             api: ['https://mempool.space/api', 'https://mempool.fra.mempool.space/api', 'https://mempool.va1.mempool.space/api', 'https://mempool.tk7.mempool.space/api', 'https://mempool.emzy.de/api', 'https://blockstream.info/api'] },
   signet:  { name: 'signet',  params: TEST_NETWORK, owner: 'tmsig', versions: TPUB, coin: 1, explorer: 'https://mempool.space/signet',
              api: ['https://mempool.space/signet/api', 'https://blockstream.info/signet/api'] },
 };
@@ -54,7 +54,8 @@ const FINAL_RBF = 0xfffffffd;
 const HARDENED = 0x80000000;
 const GAP = 20;                  // BIP-44's gap limit: unused addresses before a scan stops
 const MAX_INDEX = 2000;          // past this a scan stops, and nothing is called change
-const COOLDOWN_MS = 60000, TIMEOUT_MS = 8000;
+const COOLDOWN_MS = 60000, TIMEOUT_MS = 8000, RETRY_MS = 1200;
+const EXPLORERS_BUSY = 'the explorers are busy';
 const te = new TextEncoder();
 
 // The unspendable internal key, as an extended key. BIP-388 has no way to write the
@@ -711,6 +712,18 @@ async function saveVault(policy, signer, handle, handles = [], doFetch = (...a) 
   const r = await postJson(doFetch, `${API}/btc-vault`, { network: policy.network, descriptor: descriptor(policy), handle, handles, ...auth });
   if(!r.ok) throw new Error('Could not save this vault');
 }
+async function publishNoteRecord(policy, signer, handle, record, doFetch = (...a) => root.fetch(...a)){
+  const auth = signOwnerAuth(signer, policy.network, `notekey:${vaultId(policy)}`);
+  const r = await postJson(doFetch, `${API}/btc-note-key`, { network: policy.network, descriptor: descriptor(policy), handle, record, ...auth });
+  if(!r.ok) throw new Error('Could not save the note key');
+}
+// Whatever the store holds. The caller checks it against the vault before using it.
+async function fetchNoteRecord(policy, doFetch = (...a) => root.fetch(...a)){
+  const r = await doFetch(`${STORE}/rpc/btc_note_key`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ p_vault: vaultId(policy) }), signal: root.AbortSignal?.timeout(TIMEOUT_MS) });
+  if(!r.ok) throw new Error('Could not read the note key');
+  const text = await r.json();
+  return text ? JSON.parse(text) : null;
+}
 // What the service says this owner sits on, kept only where this owner's key really is.
 async function listVaults(network, signer, handle, doFetch = (...a) => root.fetch(...a)){
   const auth = signOwnerAuth(signer, network, 'list');
@@ -1172,20 +1185,34 @@ const seatMisdescribed = (policy, owner) => policy.paths.some(p => p.keys.some(k
 const _down = new Map();
 function chain(network, doFetch = (...a) => root.fetch(...a), bases = net(network).api){
   const isDown = b => (_down.get(b) || 0) > Date.now();
-  const get = async (path, opts = {}, read = 'json') => {
-    let last;
+  // Public explorers limit a browser without warning, so each one that does is left alone
+  // for as long as it asks, the rest are tried, and a round where all of them were busy
+  // gets one more go after a pause.
+  const round = async (path, opts, read) => {
+    let last, busy = 0;
     for(const b of [...bases].sort((x, y) => isDown(x) - isDown(y))){
       try {
         const r = await doFetch(b + path, { ...opts, signal: root.AbortSignal?.timeout(TIMEOUT_MS) });
-        if(r.ok) return await r[read]();
-        last = new Error(await r.text());
+        if(r.ok) return { value: await r[read]() };
         // A node refusing a transaction refuses it everywhere: asking the next one
         // only hides the reason behind a second, less useful error.
-        if(r.status === 400) break;
-      } catch(e) { last = e; }
+        if(r.status === 400) throw Object.assign(new Error(await r.text()), { final: true });
+        last = new Error(`the explorer answered ${r.status}`);
+        if(r.status === 429){ busy++; _down.set(b, Date.now() + (Number(r.headers?.get?.('retry-after')) * 1000 || COOLDOWN_MS)); continue; }
+      } catch(e) { if(e.final) throw e; last = e; }
       _down.set(b, Date.now() + COOLDOWN_MS);
     }
-    throw last;
+    return { last, busy };
+  };
+  const get = async (path, opts = {}, read = 'json') => {
+    let got = await round(path, opts, read);
+    if('value' in got) return got.value;
+    if(opts.method !== 'POST'){
+      await new Promise(ok => setTimeout(ok, RETRY_MS));
+      got = await round(path, opts, read);
+      if('value' in got) return got.value;
+    }
+    throw got.busy ? new Error(EXPLORERS_BUSY) : got.last;
   };
   return {
     async tip(){
@@ -1199,11 +1226,18 @@ function chain(network, doFetch = (...a) => root.fetch(...a), bases = net(networ
     },
     // Every operator, not the first that answers.
     async usedByAll(address){
+      const operators = new Map(), opOf = b => { const host = new URL(b).hostname; return /(^|\.)mempool\.space$/.test(host) ? 'mempool.space' : host; };
       for(const b of bases){
-        const r = await doFetch(`${b}/address/${address}`, { signal: root.AbortSignal?.timeout(TIMEOUT_MS) });
-        const a = await r.json();
-        if(a.chain_stats.tx_count + a.mempool_stats.tx_count <= 0) return false;
+        const op = opOf(b);
+        if(operators.has(op)) continue;
+        const answer = await doFetch(`${b}/address/${address}`, { signal: root.AbortSignal?.timeout(TIMEOUT_MS) }).then(r => r.ok ? r.json() : null).catch(() => null);
+        // One that is busy says nothing either way. Another of the same operator may answer.
+        if(!answer) continue;
+        if(answer.chain_stats.tx_count + answer.mempool_stats.tx_count <= 0) return false;
+        operators.set(op, true);
       }
+      // This check is what stops one explorer steering a scan, so one alone does not pass it.
+      if(operators.size < Math.min(2, new Set(bases.map(opOf)).size)) throw new Error(EXPLORERS_BUSY);
       return true;
     },
     async utxos(address){
@@ -1251,7 +1285,7 @@ async function scan(policy, c, gap = GAP){
     // How far along a vault is decides what counts as change, so one explorer alone
     // does not get to move it past the gap: another operator must agree.
     if(next[branch] > gap && c.usedByAll){
-      const sure = await c.usedByAll(vaultOf(policy, branch, next[branch] - 1).address).catch(() => false);
+      const sure = await c.usedByAll(vaultOf(policy, branch, next[branch] - 1).address);
       if(!sure) throw new Error('the explorers disagree about this vault, so its balance cannot be trusted right now');
     }
     // A vault pushed to the end reuses addresses inside the range, not ones past it: the
@@ -1305,7 +1339,7 @@ function concat(...parts){
 }
 
 const keyPoint = (owner, network) => HDKey.fromExtendedKey(owner.xpub, net(network).versions).publicKey;
-root.BitcoinVault = Object.freeze({ policySummary, aboutBlocks, signPossession, keyPoint, ownersOf, HOW_IT_WORKS, describePolicy, keyId, isName, resolveName, exportAccountKey, recoveryText, sameKey, TACIT_ASSETS, signOwnerAuth, verifyOwnerAuth, saveVault, listVaults, assertSpendable, isProtected, hasTacitEnvelope, walletMessage, linkMessage, keyFromWalletSignature, evmSignHash, evmSignMessage, bitcoinMessageHash, bitcoinSigners, handleForWallet, proposalId, vaultId, publishProposal, fetchProposals, openProposals, publishHandle, fetchHandles, MAX_INDEX, txidOf, seatMisdescribed, EVM_CHAINS, selectors: { threshold: selector('threshold()') }, readEvmVault, mirror, bindingMessage, evmMessageHash, NETWORKS, DUST, GAP, MAX_OWNERS, MAX_OLDER, MAX_FEE_RATE, encodeOwner, decodeOwner, originText, ownerMessage, deriveOwnerKey, keyFromSignature, fingerprintOf,
+root.BitcoinVault = Object.freeze({ EXPLORERS_BUSY, publishNoteRecord, fetchNoteRecord, policySummary, aboutBlocks, signPossession, keyPoint, ownersOf, HOW_IT_WORKS, describePolicy, keyId, isName, resolveName, exportAccountKey, recoveryText, sameKey, TACIT_ASSETS, signOwnerAuth, verifyOwnerAuth, saveVault, listVaults, assertSpendable, isProtected, hasTacitEnvelope, walletMessage, linkMessage, keyFromWalletSignature, evmSignHash, evmSignMessage, bitcoinMessageHash, bitcoinSigners, handleForWallet, proposalId, vaultId, publishProposal, fetchProposals, openProposals, publishHandle, fetchHandles, MAX_INDEX, txidOf, seatMisdescribed, EVM_CHAINS, selectors: { threshold: selector('threshold()') }, readEvmVault, mirror, bindingMessage, evmMessageHash, NETWORKS, DUST, GAP, MAX_OWNERS, MAX_OLDER, MAX_FEE_RATE, encodeOwner, decodeOwner, originText, ownerMessage, deriveOwnerKey, keyFromSignature, fingerprintOf,
   policyOf, descriptor, descriptorChecksum, parseDescriptor, walletPolicy, vaultOf, vsize, coinsFor, propose, inspect, sign, combine, finalize, chain, scan, evmSigner });
 
 })(typeof window !== 'undefined' ? window : globalThis);

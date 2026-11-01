@@ -14,7 +14,7 @@
 
 (function(root){
 
-const { secp256k1, schnorr, sha256, hex, bech32m } = root.btc;
+const { secp256k1, schnorr, sha256, hex, bech32m, p2wpkh } = root.btc;
 const BV = root.BitcoinVault;
 const te = new TextEncoder();
 const N = secp256k1.Point.Fn.ORDER;
@@ -57,6 +57,9 @@ function makeNoteKey(signer, policy){
 }
 const scanOf = priv => hmac(priv, te.encode('multisig-note-scan-v1'));
 const noteAddress = (priv, network) => tacitAddress(secp256k1.getPublicKey(priv, true), secp256k1.getPublicKey(scanOf(priv), true), network);
+
+// Where a tacit1 payment lands: a plain send pays the key's own P2WPKH address.
+const inboxAddress = (priv, network) => p2wpkh(secp256k1.getPublicKey(priv, true), BV.NETWORKS[network].params).address;
 
 // An owner's account key, the one in the descriptor, opens their seal.
 const pubOf = (owner, network) => BV.keyPoint(owner, network);
@@ -164,6 +167,20 @@ function outputsOf(payload){
   return { asset, outputs: Array.from({ length: n }, (_, i) => ({ commitment: payload.subarray(98 + i * 41, 131 + i * 41), ct: payload.subarray(131 + i * 41, 139 + i * 41) })) };
 }
 
+// What sits in the inbox. An amount is only shown for a coin Tacit's own check calls an
+// asset, because a note that opens is not yet a note that is valid: anyone can write one.
+async function readInbox(priv, network, chain){
+  const coins = (await chain.utxos(inboxAddress(priv, network))).slice(0, 50), out = [];
+  const verdicts = coins.length ? await chain.classify(coins.map(c => `${c.txid}:${c.vout}`)).catch(() => ({})) : {};
+  for(const c of coins){
+    const status = verdicts[`${c.txid}:${c.vout}`]?.status;
+    if(status === 'plain'){ out.push({ ...c, status }); continue; }
+    const n = status === 'asset' ? openNote(await chain.tx(c.txid), c.vout, priv) : null;
+    out.push({ ...c, status: status === 'asset' && !n ? 'unreadable' : status || 'unverified', asset: verdicts[`${c.txid}:${c.vout}`]?.asset_ids?.[0] || n?.asset, amount: n?.amount, blinding: n?.blinding });
+  }
+  return out;
+}
+
 // A note from an explorer's transaction, opened with V. Returns null unless the amount
 // reproduces the commitment on chain, which is what makes it the amount and not a guess.
 function openNote(tx, vout, priv){
@@ -185,6 +202,6 @@ function openNote(tx, vout, priv){
   return fits(amount, blinding) ? { asset: body.asset, amount, blinding, path: 'self' } : null;
 }
 
-root.BitcoinTacit = Object.freeze({ tacitAddress, noteAddress, makeNoteKey, makeRecord, verifyRecord, openRecord, openNote, envelopeOf, outputsOf });
+root.BitcoinTacit = Object.freeze({ inboxAddress, readInbox, tacitAddress, noteAddress, makeNoteKey, makeRecord, verifyRecord, openRecord, openNote, envelopeOf, outputsOf });
 
 })(typeof window !== 'undefined' ? window : globalThis);

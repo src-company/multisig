@@ -17,7 +17,7 @@
      provider is initialised with an rpcMap for the one chain it is given, so
      chain reads stay on the RPC hosts listed here; letting the fallback
      through would put a vault's traffic on a host that is not one of them. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://mempool.space https://blockstream.info https://multisig-proposals.onrender.com https://multisig-postgrest.onrender.com https://sourcify.dev https://*.publicnode.com https://1rpc.io https://*.drpc.org https://sepolia.gateway.tenderly.co https://api.coinbase.com https://mainnet.base.org https://sepolia.base.org https://arb1.arbitrum.io https://mainnet.optimism.io https://mainnet.megaeth.com https://rpc-megaeth-mainnet.globalstake.io https://rpc.mainnet.chain.robinhood.com https://api.dotmega.domains https://keys.coinbase.com https://rpc.wallet.coinbase.com https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org; img-src 'self' data: https://explorer-api.walletconnect.com; frame-src https://verify.walletconnect.com https://verify.walletconnect.org; upgrade-insecure-requests">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://mempool.space https://mempool.fra.mempool.space https://mempool.va1.mempool.space https://mempool.tk7.mempool.space https://mempool.emzy.de https://blockstream.info https://multisig-proposals.onrender.com https://multisig-postgrest.onrender.com https://sourcify.dev https://*.publicnode.com https://1rpc.io https://*.drpc.org https://sepolia.gateway.tenderly.co https://api.coinbase.com https://mainnet.base.org https://sepolia.base.org https://arb1.arbitrum.io https://mainnet.optimism.io https://mainnet.megaeth.com https://rpc-megaeth-mainnet.globalstake.io https://rpc.mainnet.chain.robinhood.com https://api.dotmega.domains https://keys.coinbase.com https://rpc.wallet.coinbase.com https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org; img-src 'self' data: https://explorer-api.walletconnect.com; frame-src https://verify.walletconnect.com https://verify.walletconnect.org; upgrade-insecure-requests">
 <title>multisig</title>
 <meta name="description" content="Multichain multisig with an embedded timelock. A mandatory delay between queuing and execution, so a compromised key or a social-engineered signature can be seen and cancelled before it lands.">
 <!-- Unfurl metadata. Vault links get passed between co-signers and pasted into
@@ -6172,6 +6172,7 @@ function renderDash(v,mob){
       <div class="vtab-name">${esc(vt.name)}${dot}</div>
       ${info?`<div class="vtab-info">${info}</div>`:""}
     </button>`}).join("")}
+    ${renderBtcTabs()}
   </div></div>
   <div class="stats">
     ${h0?`<div class="privg"${pgAttrs()} style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -8952,6 +8953,19 @@ const btcNetworkOf = sel => sel.some(n => n && n.test) ? 'signet' : 'mainnet';
 function renderBtcBanner(){
   if(S.demoMode || lsGet('ms_btc_banner')) return '';
   return `<div class="btc-banner"><a href="./btc.html"><span class="tok-ico">${BTC_LOGO}</span><span><strong>NEW</strong> YOUR ETHEREUM WALLET NOW SIGNS ON BITCOIN. MULTISIG WITH A DEADMAN SWITCH &#8599;</span></a><button class="x-btn" onclick="lsSet('ms_btc_banner','1');render()" aria-label="Close">&#10005;</button></div>`;
+}
+
+// Bitcoin vaults sit beside the others. Those this browser knows open directly. On a new
+// device the list is behind the owner's own signature, so the tab goes to where that is.
+function renderBtcTabs(){
+  if(S.demoMode) return '';
+  const read = k => { try { return JSON.parse(lsGet(k)) || null; } catch(_) { return null; } };
+  const tabs = ['mainnet', 'signet'].flatMap(net => {
+    const list = read(`ms_btc_vaults_${net}`), names = read(`ms_btc_names_${net}`) || {};
+    return (Array.isArray(list) ? list : []).filter(d => typeof d === 'string').map((d, i) => ({ href: `./bitcoin.html#${net}/${encodeURIComponent(d)}`, name: names[d] || `VAULT_${i + 1}`, net }));
+  }).slice(0, 8);
+  const tab = (href, name, info) => `<a class="vtab" href="${esc(href)}" style="text-decoration:none;color:inherit"><div class="vtab-name">${esc(name)}</div><div class="vtab-info"><span class="tok-ico">${BTC_LOGO}</span> ${esc(info)} &#8599;</div></a>`;
+  return tabs.map(t => tab(t.href, t.name, t.net === 'mainnet' ? 'BITCOIN' : 'SIGNET')).join('') + (window._connectedAddress ? tab('./bitcoin.html#find', 'BITCOIN VAULTS', 'FIND YOURS') : '');
 }
 
 function renderBtcPill(c){
