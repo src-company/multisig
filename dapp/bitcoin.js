@@ -1207,7 +1207,7 @@ function chain(network, doFetch = (...a) => root.fetch(...a), bases = net(networ
   const get = async (path, opts = {}, read = 'json') => {
     let got = await round(path, opts, read);
     if('value' in got) return got.value;
-    if(opts.method !== 'POST'){
+    if(opts.method !== 'POST' && got.busy){
       await new Promise(ok => setTimeout(ok, RETRY_MS));
       got = await round(path, opts, read);
       if('value' in got) return got.value;

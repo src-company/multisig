@@ -16,7 +16,7 @@ const vm = require('node:vm');
 const http = require('node:http');
 const { spawn } = require('node:child_process');
 
-const sandbox = { setTimeout, TextEncoder, TextDecoder, Uint8Array, crypto: globalThis.crypto, console };
+const sandbox = { setTimeout, URL, TextEncoder, TextDecoder, Uint8Array, crypto: globalThis.crypto, console };
 sandbox.globalThis = sandbox;
 vm.createContext(sandbox);
 for(const f of ['btc.min.js', 'bitcoin.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, '../dapp', f), 'utf8'), sandbox, { filename: f });
