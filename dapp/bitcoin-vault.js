@@ -26,7 +26,7 @@ const S = {
   rows: [{ text: '', owner: null, state: 'empty' }, { text: '', owner: null, state: 'empty' }],
   threshold: 2, name: '', policy: null, saved: false, step: 0,
   // True when this page was opened from someone's invite: the owners are theirs to set.
-  invite: false, checked: false, recorded: false,
+  invite: false, checked: false, recorded: false, confirming: false, unanswered: false,
 };
 let _t;
 const toast = t => { $('toast').innerHTML = `<div class="toast">${esc(t)}</div>`; clearTimeout(_t); _t = setTimeout(() => { $('toast').innerHTML = ''; }, 1600); };
@@ -103,18 +103,6 @@ function statusOf(r){
 async function create(){
   const keys = filled().map(r => r.owner);
   const policy = BV.policyOf({ network: S.network, paths: [{ threshold: Math.min(S.threshold, keys.length), keys }] });
-  // Once more before there is an address to fund, for a wallet that has no key on record.
-  // Spaced far from the first prompt, since Rainbow fails an identical one straight after.
-  // A different key stops everything. A closed popup does not: the question is unanswered,
-  // not answered badly, and the record catches it on the next connect.
-  if(S.me?.recheck){
-    S.progress = 'Approve once more in your wallet to confirm it repeats';
-    render();
-    let again = null;
-    try { again = await S.me.recheck(); } catch(_) {}
-    if(again && again !== S.me.owner.xpub) throw new Error('Your wallet gave a different key the second time, so it cannot hold a Bitcoin key here. Nothing was created.');
-    S.me.recheck = null;
-  }
   S.policy = policy;
   const d = BV.descriptor(S.policy), k = `ms_btc_vaults_${S.network}`, list = lsJson(k, []);
   if(Array.isArray(list) && !list.includes(d)){ list.unshift(d); lsSet(k, JSON.stringify(list)); }
@@ -142,7 +130,7 @@ function backup(){
     'Keep this. Bitcoin keeps no record of who owns this vault: without this text the',
     'coins cannot be spent, even with every key. It holds no private key.', '',
     `Rule: ${p.paths[0].threshold} of ${p.paths[0].keys.length}`, '', 'Descriptor:', d, '',
-    'BIP-388 wallet policy:', JSON.stringify(BV.walletPolicy(p), null, 2), ''].join('\n');
+    'BIP-388 wallet policy:', JSON.stringify(BV.walletPolicy(p), null, 2), '', BV.recoveryText(S.network), ''].join('\n');
   const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' })), a = document.createElement('a');
   a.href = url; a.download = `multisig-${S.network}-vault.txt`; a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -168,11 +156,18 @@ function renderFlow(){
   }).join('')}</ol>`;
 }
 
+function renderConfirm(){
+  return `<h2>One last signature</h2><p class="lead">This checks your wallet makes the same key every time, so your seat can't be lost. It only happens once.</p>
+    ${S.progress ? `<div class="connecting" role="status">${esc(S.progress)}<button class="btn line" data-act="cancelconnect">CANCEL</button></div>` : `<button class="btn fill w" data-act="finish">CONFIRM</button>`}
+    ${S.unanswered && !S.progress ? '<button class="link" data-act="skipcheck">My wallet will not show this. Continue without the check</button>' : ''}`;
+}
+
 function renderConnect(){
+  if(S.confirming) return renderConfirm();
   const btc = BW.detect(), evm = [...evmWallets];
   const opt = (w, name, icon) => `<button class="wal" data-act="connect" data-w="${esc(w)}"${S.busy ? ' disabled' : ''}>${icon || ICONS.connect}<span>${esc(name)}</span></button>`;
   if(S.progress) return `<h2>Connect a wallet</h2><div class="connecting" role="status">${esc(S.progress)}<button class="btn line" data-act="cancelconnect">CANCEL</button></div>`;
-  return `<h2>${S.invite ? 'You are invited to a Bitcoin vault' : 'Connect a wallet'}</h2><p class="lead">${S.invite ? 'Connect the wallet you were invited with to take your seat. ' : ''}Free. Two signed messages, no transaction.</p>
+  return `<h2>${S.invite ? 'You are invited to a Bitcoin vault' : 'Connect a wallet'}</h2><p class="lead">${S.invite ? 'Connect the wallet you were invited with to take your seat. ' : ''}Free. No transaction.</p>
     <div class="wals">${btc.map(w => opt(`btc:${w.key}`, w.name, BTC)).join('')}
     ${evm.map(([k, w]) => opt(k, w.name, w.icon ? `<img src="${esc(w.icon)}" alt="">` : '')).join('')}
     ${!evm.length && window.ethereum ? opt('eth', 'Browser wallet') : ''}
@@ -255,7 +250,30 @@ let _idle;
 const touch = () => { clearTimeout(_idle); if(S.me?.signer) _idle = setTimeout(() => { wipe(); render(); }, IDLE_MS); };
 const onStep = (n, of) => { S.progress = `Approve ${n} of ${of} in your wallet`; render(); };
 
+function afterConnect(){
+  S.confirming = false;
+  S.step = 1;
+  if(S.invite){ takeSeat(); if(!S.rows.some(r => r.mine)) wipe(); }
+}
+
+async function finish(skip){
+  S.progress = 'Approve in your wallet';
+  render();
+  try {
+    const published = await S.me.finish({ skip });
+    afterConnect();
+    // Others find an owner through this, so a failed save is worth saying.
+    if(!published) S.msg = 'Connected, but your key could not be published. Co-owners will see you as WAITING. Reconnect to try again.';
+  } catch(e) {
+    if(e.mismatch){ wipe(); S.me = null; S.confirming = false; throw e; }
+    S.unanswered = true;
+    throw e;
+  }
+}
+
 const ACT = {
+  finish(){ return finish(false); },
+  skipcheck(){ return finish(true); },
   theme(){ S.dark = !S.dark; lsSet('ms_light', S.dark ? '' : '1'); },
   skip(){ S.step = 1; },
   confirm(){ S.checked = !S.checked; },
@@ -268,16 +286,13 @@ const ACT = {
     if(w.startsWith('btc:')){
       const wallet = BW.detect().find(x => x.key === w.slice(4)), key = await BW.connectWallet(wallet, S.network, onStep);
       key.evmPriv.fill(0);
-      S.me = { signer: key.signer, recheck: key.recheck, owner: key.owner, handle: key.handle, evm: key.evm, wallet: key.address, published: key.published, label: `${wallet.name} ${short(key.address)}` };
+      S.me = { signer: key.signer, repeats: key.repeats, finish: key.finish, owner: key.owner, handle: key.handle, evm: key.evm, wallet: key.address, published: key.published, label: `${wallet.name} ${short(key.address)}` };
     } else {
       const eth = w === 'wc' ? await BW.walletConnect() : w === 'eth' ? window.ethereum : evmWallets.get(w).provider;
       S.me = await BW.connectEvmForHandle(eth, S.network, { onStep, keep: true });
     }
-    S.step = 1;
-    if(S.invite) takeSeat();
-    // Others find an owner through this, so a failed save is worth saying.
-    if(S.invite && !S.rows.some(r => r.mine)){ wipe(); }
-    if(!S.me.published) S.msg = 'Connected, but your key could not be published. Co-owners will see you as WAITING. Reconnect to try again.';
+    if(S.me.repeats) return afterConnect();
+    S.confirming = true;
   },
   net(el){
     wipe();

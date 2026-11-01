@@ -759,8 +759,9 @@ function dependencies({ postgrestUrl, jwtSecret, rpcUrls }, fetcher = fetch) {
 const BTC_WINDOW_MS = 60000, BTC_PER_WINDOW = 20;
 const _btcCalls = new Map();
 function btcRateLimit(req) {
-  // The rightmost entry, the hop the host wrote. The leftmost is whatever a caller sent.
-  const ip = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').split(',').pop().trim();
+  // The host's edge sets this one itself. Failing that the rightmost forwarded entry, the
+  // hop it wrote: the leftmost is whatever a caller sent.
+  const ip = String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').split(',').pop().trim();
   const now = Date.now();
   if (_btcCalls.size > 10000) _btcCalls.clear();
   const seen = _btcCalls.get(ip);
@@ -817,24 +818,57 @@ function saveBitcoinVault(input) {
 
 // Same rule as an Ethereum proposal: nothing enters the queue without an owner's
 // signature. The stored copy is merged here, so two owners signing at once both land.
+const { Worker } = require('node:worker_threads');
+const WORKER_MS = 3000, WORKER_QUEUE = 4;
+let _worker = null, _workerId = 0;
+const _waiting = new Map();
+function stopWorker() {
+  const w = _worker;
+  _worker = null;
+  w?.terminate();
+  for (const { no, timer } of _waiting.values()) { clearTimeout(timer); no(new RequestError(503, 'Please try again')); }
+  _waiting.clear();
+}
+// The work in its own thread, with a hard stop. Too much at once is refused, not queued.
+function inWorker(op, input) {
+  if (_waiting.size >= WORKER_QUEUE) return Promise.reject(new RequestError(503, 'Please try again'));
+  if (!_worker) {
+    _worker = new Worker(path.join(__dirname, 'btc-worker.cjs'));
+    _worker.on('message', ({ id, result, error }) => {
+      const job = _waiting.get(id);
+      if (!job) return;
+      _waiting.delete(id);
+      clearTimeout(job.timer);
+      // Idle, it must not hold the process open.
+      if (!_waiting.size) _worker?.unref();
+      if (error) job.no(new RequestError(403, error)); else job.ok(result);
+    });
+    _worker.on('error', stopWorker);
+  }
+  return new Promise((ok, no) => {
+    const id = ++_workerId, timer = setTimeout(stopWorker, WORKER_MS);
+    _worker.ref();
+    _waiting.set(id, { ok, no, timer });
+    _worker.postMessage({ id, op, input });
+  });
+}
+
 async function admitBitcoinProposal(input, deps) {
   check(input && typeof input.psbt === 'string' && input.psbt.length <= 72000, 'Invalid proposal');
   check(typeof input.descriptor === 'string' && input.descriptor.length <= 8000, 'Invalid vault');
   check(input.network === 'mainnet' || input.network === 'signet', 'Invalid network');
-  let policy, view;
-  try {
-    policy = BitcoinVault.parseDescriptor(input.descriptor, input.network);
-    view = BitcoinVault.inspect(input.psbt, policy);
-  } catch (error) { throw new RequestError(403, error.message); }
-  if (!view.signedBy.length) throw new RequestError(403, 'A proposal needs an owner signature');
-  const vault = BitcoinVault.vaultId(policy), id = BitcoinVault.proposalId(input.psbt);
+  const job = { descriptor: input.descriptor, network: input.network, psbt: input.psbt };
+  const { vault, id } = await inWorker('admit', job);
   let psbt = input.psbt;
   const prior = await deps.readBtcProposal(vault, id);
   // A copy that cannot merge is refused, never stored over what is there: replacing the
   // row would throw away every signature on it.
   if (prior) {
-    try { psbt = BitcoinVault.combine([prior, psbt], policy); }
-    catch (_) { throw new RequestError(409, 'That copy disagrees with the proposal in the queue'); }
+    try { psbt = (await inWorker('merge', { ...job, prior })).psbt; }
+    catch (error) {
+      if (error.status === 503) throw error;
+      throw new RequestError(409, 'That copy disagrees with the proposal in the queue');
+    }
   }
   return { fn: 'put_btc_proposal', args: { p_vault: vault, p_id: id, p_network: input.network, p_psbt: psbt } };
 }

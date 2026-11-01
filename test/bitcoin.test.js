@@ -481,11 +481,15 @@ test('a path that disagrees with its key, and a key too deep to use, are refused
 test('an explorer cannot walk a scan forever, or past the gap alone', async () => {
   const policy = plain('signet');
   const liar = { used: async () => true, utxos: async () => [] };
-  await assert.rejects(BV.scan(policy, liar), /every address/);
+  const walked = await BV.scan(policy, liar);
+  assert.equal(walked.truncated, true);
   const far = BV.vaultOf(policy, 1, 25).address, near = new Set([...Array(26)].map((_, i) => BV.vaultOf(policy, 1, i).address));
   const steered = { used: async a => near.has(a), utxos: async () => [], usedByAll: async a => { assert.equal(a, far); return false; } };
   await assert.rejects(BV.scan(policy, steered), /disagree/);
   assert.equal((await BV.scan(policy, { ...steered, usedByAll: async () => true })).change, 26);
+  // Bad numbers from an explorer never reach the page.
+  await assert.rejects(BV.chain('signet', async () => ({ ok: true, json: async () => '<meta http-equiv=refresh>' }), ['https://x']).tip(), /bad block/);
+  await assert.rejects(BV.chain('signet', async () => ({ ok: true, json: async () => [{ txid: '<b>', vout: 0, value: 1, status: {} }] }), ['https://y']).utxos('a'), /bad coin/);
   const huge = BV.propose({ policy, utxos: [fakeCoin(100000)], tip: 200, outputs: [{ address: payee, sats: 30000 }], feeRate: 2, change: BV.MAX_INDEX });
   assert.equal(BV.inspect(huge, policy, { receive: 0, change: BV.MAX_INDEX }).outputs[1].change, false);
 });
@@ -699,6 +703,35 @@ test('the vault list keeps only vaults holding this owner\'s key', async () => {
   const forged = BV.signOwnerAuth(B.signer, 'signet', `save:${BV.vaultId(policy)}`);
   const f3 = async () => ({ ok: true, json: async () => [{ descriptor: mine, confirmed: true, ...forged }] });
   assert.equal((await BV.listVaults('signet', A.signer, handle, f3))[0].confirmed, false);
+});
+
+test('one transaction stays relayable however many coins there are', () => {
+  const keys = Array.from({ length: 20 }, (_, i) => BV.keyFromSignature('0x' + (i + 16).toString(16).repeat(64) + '1b', 'signet').owner);
+  const policy = BV.policyOf({ network: 'signet', paths: [{ threshold: 20, keys }] });
+  const coins = Array.from({ length: 300 }, (_, i) => ({ txid: (i + 256).toString(16).padStart(64, '0'), vout: 0, value: 50000 + i, height: 100, branch: 0, index: 0 }));
+  const v = BV.inspect(BV.propose({ policy, utxos: coins, tip: 200, sweep: payee, feeRate: 1 }), policy);
+  assert.ok(v.vsize <= 95000, `${v.vsize}`);
+  assert.ok(v.inputs.length < 300);
+  assert.equal(v.inputs[0].sats, 50299);
+  assert.throws(() => BV.propose({ policy, utxos: coins, tip: 200, outputs: [{ address: payee, sats: 14000000 }], feeRate: 1 }), /too many small coins/);
+  assert.throws(() => BV.propose({ policy: plain('signet'), utxos: [fakeCoin(90000)], tip: 200, sweep: payee, feeRate: 0.5 }), /fee rate/);
+});
+
+test('one key in dressed-up xpub text is still its owner', () => {
+  const k = HDKey.fromExtendedKey(A.owner.xpub, BV.NETWORKS.signet.versions);
+  const other = new HDKey({ versions: BV.NETWORKS.signet.versions, depth: 2, index: 7, parentFingerprint: 1234, chainCode: k.chainCode, publicKey: k.publicKey });
+  const dressed = { fingerprint: 'aabbccdd', path: [1, 7], xpub: other.publicExtendedKey };
+  const policy = BV.policyOf({ network: 'signet', paths: [{ threshold: 2, keys: [dressed, B.owner, C.owner] }] });
+  assert.equal(BV.sameKey(dressed, A.owner, 'signet'), true);
+  const signed = BV.sign(sweepOf(policy), A.signer, policy);
+  assert.equal(BV.inspect(signed, policy).signedBy.length, 1);
+});
+
+test('a backup explains how to make the key again, and the exported key matches', () => {
+  const text = BV.recoveryText('signet');
+  assert.ok(text.includes(BV.ownerMessage('signet').split('\n')[2]) && text.includes("m/87'/1'/0'"));
+  const out = BV.exportAccountKey(A.signer, 'signet'), xprv = out.split(']')[1];
+  assert.equal(HDKey.fromExtendedKey(xprv, BV.NETWORKS.signet.versions).publicExtendedKey, A.owner.xpub);
 });
 
 test('two different proposals do not merge', () => {

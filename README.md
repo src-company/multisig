@@ -317,7 +317,7 @@ moved between hosts.
 | CID (v1) | `bafybeidmkvkbhznb23b5zf56bivsacoxykns43jlfls6xyzr7aznjwore4` |
 | Gateway | [multisig.wei.limo](https://multisig.wei.limo) |
 | Also resolves | [multisig.wei.is](https://multisig.wei.is) · [multisig.wei.domains](https://multisig.wei.domains) |
-| Any public gateway | `https://ipfs.io/ipfs/<cid>/` |
+| Any public gateway | `https://ipfs.io/ipfs/<cid>/` (browsing only: these share an origin, so the Bitcoin pages refuse to use a key or trust stored vaults there) |
 
 The CID is reproducible from this repository, so the pinned bundle can be checked
 against the source rather than trusted:

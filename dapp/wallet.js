@@ -632,7 +632,7 @@ async function connectWithWallet(walletKey) {
 
 window.disconnectWallet = function() {
   // A Bitcoin wallet holds its key here, so logging out has to end it.
-  try { _connectedWalletProvider?.disconnect?.(); } catch (e) {}
+  if (_connectedWalletProvider?.isMultisigBitcoin) _connectedWalletProvider.disconnect();
   if (_connectedWalletProvider && _walletEventHandlers) {
     try {
       _connectedWalletProvider.removeListener('accountsChanged', _walletEventHandlers.accountsChanged);

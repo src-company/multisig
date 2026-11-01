@@ -48,6 +48,8 @@ const CURVE_N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd03641
 const MAX_OLDER = 0xffff;        // BIP-68 keeps 16 bits of blocks
 const DUST = 546;
 const MAX_FEE_RATE = 1000;       // sat/vB. A typo here spends the vault on fees.
+const MAX_VSIZE = 95000;         // nodes will not relay a transaction past 100,000 vbytes
+const MAX_INPUTS = 400, MAX_OUTPUTS = 32;
 const FINAL_RBF = 0xfffffffd;
 const HARDENED = 0x80000000;
 const GAP = 20;                  // BIP-44's gap limit: unused addresses before a scan stops
@@ -198,11 +200,13 @@ function bindingMessage(network, owner){
   return [
     'Multisig Bitcoin owner link',
     '',
-    'This links your Ethereum account to a Bitcoin owner key. It cannot move funds.',
+    'This makes the key below your Bitcoin owner key. Whoever holds that key can sign as you on Bitcoin vaults built from your address.',
+    '',
+    'Sign this only in a Multisig app you trust, and only for a key that app just made for you.',
     '',
     `network: ${net(network).name}`,
     `key: ${originText(owner)}`,
-    'version: 1',
+    'version: 2',
   ].join('\n');
 }
 // EIP-191, the hash personal_sign signs.
@@ -358,6 +362,8 @@ const keyId = (owner, network) => {
   const k = HDKey.fromExtendedKey(owner.xpub, net(network).versions);
   return hex.encode(k.publicKey) + hex.encode(k.chainCode);
 };
+// True when two owner records are one key, however their xpub text is dressed.
+const sameKey = (a, b, network) => a.xpub === b.xpub || keyId(a, network) === keyId(b, network);
 function policyOf({ network, paths }){
   net(network);
   if(!Array.isArray(paths) || paths.length < 1 || paths.length > 2) throw new Error('a vault has one or two paths');
@@ -563,6 +569,37 @@ function signOwnerAuth(signer, network, action, at = Math.floor(Date.now() / 100
   account.wipePrivateData();
   return { at, sig };
 }
+// The account key in full, for spending without this site. The xprv stands in for its
+// xpub in a descriptor, and Bitcoin Core does the rest.
+function exportAccountKey(signer, network){
+  const account = signer.derive(`m/${pathText(ownPath(network)).replace(/h/g, "'")}`);
+  const text = `[${fingerprintOf(signer)}/${pathText(ownPath(network))}]${account.privateExtendedKey}`;
+  account.wipePrivateData();
+  return text;
+}
+// What a backup says about recovery. Written out in full so that it still works if
+// everything else about this project is gone.
+function recoveryText(network){
+  const n = net(network), lines = s => s.split('\n').map(l => `    ${l}`).join('\n');
+  return [
+    'Spending without this site:',
+    '',
+    `Owners on a hardware wallet: sign with your wallet, using account m/87'/${n.coin}'/0'-style paths in the descriptor.`,
+    '',
+    'Owners who connected a wallet: your key comes from one signature, and you can make it again.',
+    '  Ethereum wallet: personal_sign this exact text.',
+    lines(ownerMessage(network)),
+    '    Take r||s||v as 65 bytes, s low, v 27 or 28.',
+    '    seed = sha256("multisig-bitcoin-owner-v1" || 0x00 || signature)',
+    '  Bitcoin wallet: sign this exact text, BIP-137.',
+    lines(walletMessage()),
+    '    Take r||s from the 65 bytes, s low.',
+    '    seed = sha256("multisig-wallet-v1" || 0x00 || r || s)',
+    `  The BIP-32 master of that seed, at m/87'/${n.coin}'/0', is your key. Put its xprv where your`,
+    '  xpub is in the descriptor, import it to Bitcoin Core, and sign there. The app can also',
+    '  export this key for you, from your wallet menu, and runs from any IPFS mirror.',
+  ].join('\n');
+}
 function verifyOwnerAuth(owner, network, action, at, sig, now = Math.floor(Date.now() / 1000)){
   if(!Number.isInteger(at) || Math.abs(now - at) > AUTH_WINDOW || !/^[0-9a-f]{128}$/.test(String(sig))) return false;
   try { return schnorr.verify(hex.decode(sig), authHash(network, action, at), HDKey.fromExtendedKey(owner.xpub, net(network).versions).publicKey.subarray(1)); }
@@ -581,11 +618,11 @@ async function listVaults(network, signer, handle, doFetch = (...a) => root.fetc
   const auth = signOwnerAuth(signer, network, 'list');
   const r = await postJson(doFetch, `${API}/btc-vaults`, { network, handle, ...auth });
   if(!r.ok) throw new Error('Could not read your vaults');
-  const me = decodeOwner(handle, network), { xpub } = me, out = [];
+  const me = decodeOwner(handle, network), out = [];
   for(const row of await r.json()){
     try {
       const policy = parseDescriptor(row.descriptor, network);
-      if(!policy.paths.some(p => p.keys.some(k => k.xpub === xpub))) continue;
+      if(!policy.paths.some(p => p.keys.some(k => sameKey(k, me, network)))) continue;
       // Confirmed by this owner's signature, checked here. The server's word is not
       // enough: anyone who could write that row could plant a vault as trusted.
       const signed = !!row.confirmed && verifyOwnerAuth(me, network, `save:${vaultId(policy)}`, row.at, row.sig, row.at);
@@ -768,7 +805,8 @@ function coinsFor(policy, pathIdx, utxos, tip){
 function propose({ policy, utxos, tip, outputs = [], sweep = null, feeRate, path = 0, change: changeIndex = 0 }){
   const p = policy.paths[path];
   if(!p) throw new Error('no such path');
-  if(!(feeRate > 0 && feeRate <= MAX_FEE_RATE)) throw new Error(`fee rate must be above 0 and at most ${MAX_FEE_RATE} sat/vB`);
+  // Below 1 sat/vB most nodes will not relay it at all.
+  if(!(feeRate >= 1 && feeRate <= MAX_FEE_RATE)) throw new Error(`fee rate must be 1 to ${MAX_FEE_RATE} sat/vB`);
   const params = net(policy.network).params, changeSlot = vaultOf(policy, 1, changeIndex);
   const eligible = coinsFor(policy, path, utxos, tip).slice().sort((a, b) => b.value - a.value);
   if(!eligible.length) throw new Error(p.older ? `no coin here has aged ${p.older} blocks yet` : 'no confirmed coins');
@@ -778,7 +816,10 @@ function propose({ policy, utxos, tip, outputs = [], sweep = null, feeRate, path
   if(sweep){
     if(outputs.length) throw new Error('a sweep takes one address and no outputs');
     scriptOf(sweep);
-    picked = eligible;
+    // Largest first, and only what fits in one transaction. The rest takes another.
+    const out0 = outScriptLen(sweep, params);
+    picked = eligible.slice(0, Math.min(MAX_INPUTS, eligible.length));
+    while(picked.length > 1 && vsize(policy, path, picked.length, [out0]) > MAX_VSIZE) picked.pop();
     const total = picked.reduce((n, u) => n + u.value, 0);
     const out = outScriptLen(sweep, params);
     const value = total - Math.ceil(vsize(policy, path, picked.length, [out]) * feeRate);
@@ -795,6 +836,7 @@ function propose({ policy, utxos, tip, outputs = [], sweep = null, feeRate, path
     let have = 0, fee = 0, done = false;
     for(const u of eligible){
       picked.push(u); have += u.value;
+      if(picked.length > MAX_INPUTS || vsize(policy, path, picked.length, lens) > MAX_VSIZE) throw new Error('that needs too many small coins for one transaction. Send a smaller amount first');
       fee = Math.ceil(vsize(policy, path, picked.length, [...lens, changeSlot.script.length]) * feeRate);
       // Change must clear the dust line, or it would become a coin this page never spends.
       if(have >= want + fee + DUST + 1){ change = have - want - fee; done = true; break; }
@@ -853,7 +895,8 @@ function inspect(psbtText, policy, known = { receive: 0, change: 0 }){
   const params = net(policy.network).params;
   if(!tx.inputsLength || !tx.outputsLength) throw new Error('proposal is empty');
   let pathIdx = -1, inTotal = 0n;
-  const budget = { left: 2 * (tx.inputsLength + tx.outputsLength) + 4 };
+  if(tx.inputsLength > MAX_INPUTS || tx.outputsLength > MAX_OUTPUTS) throw new Error('proposal is too large');
+  const budget = { left: tx.inputsLength + tx.outputsLength + 4 };
   const scripts = [], amounts = [], inputs = [], outpoints = new Set();
   // Both are things k owners could otherwise sign without seeing: a locktime makes a
   // payment that looks dead come alive later.
@@ -935,7 +978,8 @@ function sign(psbtText, signer, policy, known){
   if(view.inputs.some(i => known?.quarantined?.includes(`${i.txid}:${i.vout}`))) throw new Error('refusing to sign: this spends a quarantined coin, which may hold a token');
   const account = signer.derive(`m/${pathText(ownPath(policy.network)).replace(/h/g, "'")}`), xpub = account.publicExtendedKey;
   account.wipePrivateData();
-  if(!view.keys.some(k => k.xpub === xpub)) throw new Error('this key is not an owner on that path');
+  const self = { xpub };
+  if(!view.keys.some(k => sameKey(k, self, policy.network))) throw new Error('this key is not an owner on that path');
   // Signed on a transaction built from what was reviewed and nothing else: one leaf,
   // and this key's own seat found by its xpub. A descriptor's fingerprint and path
   // are text that no one can check, so a creator who altered them, or a co-owner
@@ -943,7 +987,7 @@ function sign(psbtText, signer, policy, known){
   const src = load(psbtText);
   const clean = new Transaction({ version: 2, allowUnknownInputs: true, allowUnknownOutputs: true });
   view.inputs.forEach((inp, i) => {
-    const leaf = inp.slot.paths[view.path], mine = leaf.keys.find(k => k.owner.xpub === xpub);
+    const leaf = inp.slot.paths[view.path], mine = leaf.keys.find(k => sameKey(k.owner, self, policy.network));
     const from = src.getInput(i);
     clean.addInput({
       txid: from.txid, index: from.index, sequence: from.sequence, witnessUtxo: from.witnessUtxo,
@@ -1013,7 +1057,7 @@ const txidOf = raw => Transaction.fromRaw(hex.decode(raw), { allowUnknownInputs:
 
 // True when a seat holds this owner's key but describes it wrongly. The key still
 // signs here, but a hardware wallet finds keys by exactly that text.
-const seatMisdescribed = (policy, owner) => policy.paths.some(p => p.keys.some(k => k.xpub === owner.xpub
+const seatMisdescribed = (policy, owner) => policy.paths.some(p => p.keys.some(k => sameKey(k, owner, policy.network)
   && (k.fingerprint !== owner.fingerprint || pathText(k.path) !== pathText(owner.path))));
 
 // ── CHAIN ──────────────────────────────────────────────────
@@ -1045,7 +1089,11 @@ function chain(network, doFetch = (...a) => root.fetch(...a), bases = net(networ
     throw last;
   };
   return {
-    tip: () => get('/blocks/tip/height'),
+    async tip(){
+      const height = await get('/blocks/tip/height');
+      if(!Number.isSafeInteger(height) || height < 0) throw new Error('the explorer sent a bad block height');
+      return height;
+    },
     async used(address){
       const a = await get(`/address/${address}`);
       return a.chain_stats.tx_count + a.mempool_stats.tx_count > 0;
@@ -1060,7 +1108,13 @@ function chain(network, doFetch = (...a) => root.fetch(...a), bases = net(networ
       return true;
     },
     async utxos(address){
-      return (await get(`/address/${address}/utxo`)).map(u => ({ txid: u.txid, vout: u.vout, value: u.value, height: u.status?.confirmed ? u.status.block_height : 0 }));
+      // Checked here, once, because all of this ends up on a page. An explorer is a
+      // stranger and its strings are not trusted to be numbers or hashes.
+      return (await get(`/address/${address}/utxo`)).map(u => {
+        const coin = { txid: u.txid, vout: u.vout, value: u.value, height: u.status?.confirmed ? u.status.block_height : 0 };
+        if(!/^[0-9a-f]{64}$/.test(coin.txid) || !Number.isSafeInteger(coin.vout) || !Number.isSafeInteger(coin.value) || coin.value < 0 || !Number.isSafeInteger(coin.height)) throw new Error('the explorer sent a bad coin');
+        return coin;
+      });
     },
     fees: () => get('/fee-estimates'),
     tx: txid => get(`/tx/${txid}`),
@@ -1078,10 +1132,13 @@ function chain(network, doFetch = (...a) => root.fetch(...a), bases = net(networ
 // because a public explorer rate-limits a page that asks for forty addresses at once.
 async function scan(policy, c, gap = GAP){
   const coins = [], next = [0, 0];
+  let truncated = false;
   for(const branch of [0, 1]){
     let index = 0, idle = 0;
     while(idle < gap){
-      if(index >= MAX_INDEX) throw new Error('that explorer says every address has been used, which cannot be right');
+      // Deposits can be spread out on purpose to make a scan run on. It stops here and
+      // says so, and the coins it found stay usable.
+      if(index >= MAX_INDEX){ next[branch] = Math.max(next[branch], MAX_INDEX - gap); truncated = true; break; }
       const batch = Array.from({ length: Math.min(5, gap - idle) }, (_, i) => index + i);
       const seen = await Promise.all(batch.map(i => c.used(vaultOf(policy, branch, i).address)));
       for(let i = 0; i < batch.length; i++){
@@ -1100,7 +1157,7 @@ async function scan(policy, c, gap = GAP){
     }
   }
   if(c.tx) await classifyCoins(coins, c);
-  return { coins, receive: next[0], change: next[1] };
+  return { coins, receive: next[0], change: next[1], truncated };
 }
 
 // Sets `quarantine` on any coin that is not provably plain. Fails closed throughout: a
@@ -1108,7 +1165,8 @@ async function scan(policy, c, gap = GAP){
 async function classifyCoins(coins, c){
   if(!c.tx) throw new Error('cannot check coins for tokens');
   const hits = [];
-  await Promise.all(coins.map(async u => {
+  // Dust is never spent anyway, so a flood of it costs no lookups.
+  await Promise.all(coins.filter(u => u.value > DUST).map(async u => {
     u.quarantine = undefined;
     try { if(hasTacitEnvelope(await c.tx(u.txid))) hits.push(u); }
     catch(_) { u.quarantine = 'unknown'; }
@@ -1142,7 +1200,7 @@ function concat(...parts){
   return out;
 }
 
-root.BitcoinVault = Object.freeze({ TACIT_ASSETS, signOwnerAuth, verifyOwnerAuth, saveVault, listVaults, assertSpendable, isProtected, hasTacitEnvelope, walletMessage, linkMessage, keyFromWalletSignature, evmSignHash, evmSignMessage, bitcoinMessageHash, bitcoinSigners, handleForWallet, proposalId, vaultId, publishProposal, fetchProposals, openProposals, publishHandle, fetchHandles, MAX_INDEX, txidOf, seatMisdescribed, EVM_CHAINS, selectors: { threshold: selector('threshold()') }, readEvmVault, mirror, bindingMessage, evmMessageHash, NETWORKS, DUST, GAP, MAX_OWNERS, MAX_OLDER, MAX_FEE_RATE, encodeOwner, decodeOwner, originText, ownerMessage, deriveOwnerKey, keyFromSignature, fingerprintOf,
+root.BitcoinVault = Object.freeze({ exportAccountKey, recoveryText, sameKey, TACIT_ASSETS, signOwnerAuth, verifyOwnerAuth, saveVault, listVaults, assertSpendable, isProtected, hasTacitEnvelope, walletMessage, linkMessage, keyFromWalletSignature, evmSignHash, evmSignMessage, bitcoinMessageHash, bitcoinSigners, handleForWallet, proposalId, vaultId, publishProposal, fetchProposals, openProposals, publishHandle, fetchHandles, MAX_INDEX, txidOf, seatMisdescribed, EVM_CHAINS, selectors: { threshold: selector('threshold()') }, readEvmVault, mirror, bindingMessage, evmMessageHash, NETWORKS, DUST, GAP, MAX_OWNERS, MAX_OLDER, MAX_FEE_RATE, encodeOwner, decodeOwner, originText, ownerMessage, deriveOwnerKey, keyFromSignature, fingerprintOf,
   policyOf, descriptor, descriptorChecksum, parseDescriptor, walletPolicy, vaultOf, vsize, coinsFor, propose, inspect, sign, combine, finalize, chain, scan, evmSigner });
 
 })(typeof window !== 'undefined' ? window : globalThis);

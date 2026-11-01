@@ -126,10 +126,21 @@ async function connectWallet(wallet, network, onStep = () => {}){
     const provable = BV.bitcoinSigners(BV.linkMessage(network, key.evm), window.btc.base64.decode(signature), network).includes(address);
     const owner = { ...key.owner, evm: key.evm, proof, ...(provable ? { wallet: { address, signature } } : {}) };
     const handle = BV.encodeOwner({ network, ...owner });
-    const published = await BV.publishHandle(handle, network).then(() => true, () => false);
-    const recheck = repeats ? null : async () => { const k = BV.keyFromWalletSignature(await sign(), network); k.signer.wipePrivateData(); k.evmPriv.fill(0); return k.owner.xpub; };
-    return { ...key, owner, handle, address, published, recheck };
+    const finish = confirmer(BV, network, handle, key.owner.xpub, repeats, async () => { const k = BV.keyFromWalletSignature(await sign(), network); k.signer.wipePrivateData(); k.evmPriv.fill(0); return k.owner.xpub; });
+    return { ...key, owner, handle, address, repeats, finish };
   } catch(e) { key.signer.wipePrivateData(); key.evmPriv.fill(0); throw e; }
+}
+
+// A first-time wallet's key is not published until it has repeated itself, because a key
+// the wallet cannot make again must not reach co-owners, or get a vault funded. The owner
+// starts this check themselves, seconds after the first prompts, since Rainbow fails an
+// identical request made straight after. `skip` is for a wallet that will not answer it
+// at all: a closed popup says nothing, and the owner has been told what they are skipping.
+function confirmer(BV, network, handle, xpub, repeats, again){
+  return async ({ skip = false } = {}) => {
+    if(!repeats && !skip && await ask(again) !== xpub) throw Object.assign(new Error('Your wallet gave a different key the second time, so it cannot hold a Bitcoin key here. Nothing was published.'), { mismatch: true });
+    return repeats || BV.publishHandle(handle, network).then(() => true, () => false);
+  };
 }
 
 // An Ethereum wallet: one signature makes the key, a second says it belongs to this
@@ -148,7 +159,14 @@ async function connectEvmForHandle(eth, network, { keep = false, onStep = () => 
   // 7702 delegations start 0xef0100 and still sign as the key behind them.
   if(typeof code === 'string' && code !== '0x' && !code.startsWith('0xef0100')) throw new Error('Contract wallets cannot hold a Bitcoin key here, because they do not repeat a signature. Nothing was changed.');
   const hexMsg = m => '0x' + window.btc.hex.encode(new TextEncoder().encode(m));
-  const derive = () => BV.deriveOwnerKey(m => ask(() => eth.request({ method: 'personal_sign', params: [hexMsg(m), raw] })), network);
+  const derive = async () => {
+    let sig;
+    const k = await BV.deriveOwnerKey(async m => (sig = await ask(() => eth.request({ method: 'personal_sign', params: [hexMsg(m), raw] }))), network);
+    // A wallet that switched account mid-flow would otherwise bind the wrong key here.
+    const bytes = window.btc.hex.decode(String(sig).replace(/^0x/, ''));
+    if(bytes.length === 65 && BV.evmSigner(BV.ownerMessage(network), bytes) !== evm){ k.signer.wipePrivateData(); throw new Error('That signature did not come from the connected account. Nothing was changed.'); }
+    return k;
+  };
   onStep(1, 2);
   const key = await derive();
   try {
@@ -161,9 +179,8 @@ async function connectEvmForHandle(eth, network, { keep = false, onStep = () => 
     if(BV.evmSigner(BV.bindingMessage(network, key.owner), window.btc.hex.decode(proof.replace(/^0x/, ''))) !== evm) throw new Error('This wallet signs in a way that does not prove its address, so it cannot hold a Bitcoin key here. Nothing was changed.');
     if(!keep) key.signer.wipePrivateData();
     const owner = { ...key.owner, evm, proof }, handle = BV.encodeOwner({ network, ...owner });
-    const published = await BV.publishHandle(handle, network).then(() => true, () => false);
-    const recheck = repeats ? null : async () => { const k = await derive(); k.signer.wipePrivateData(); return k.owner.xpub; };
-    return { owner, handle, evm, published, recheck, signer: keep ? key.signer : null, label: `0x${evm.slice(2, 6)}…${evm.slice(-4)}` };
+    const finish = confirmer(BV, network, handle, key.owner.xpub, repeats, async () => { const k = await derive(); k.signer.wipePrivateData(); return k.owner.xpub; });
+    return { owner, handle, evm, repeats, finish, signer: keep ? key.signer : null, label: `0x${evm.slice(2, 6)}…${evm.slice(-4)}` };
   } catch(e) { key.signer.wipePrivateData(); throw e; }
 }
 
@@ -202,6 +219,7 @@ function providerFor(wallet){
   const refuse = (code, message) => Object.assign(new Error(message), { code });
   const signing = () => { if(!key) throw refuse(4100, 'Connect first'); touch(); return key; };
   return {
+    isMultisigBitcoin: true,
     disconnect: forget,
     on(e, f){ (listeners[e] ||= []).push(f); },
     removeListener(e, f){ listeners[e] = (listeners[e] || []).filter(x => x !== f); },

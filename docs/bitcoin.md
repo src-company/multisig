@@ -58,14 +58,14 @@ Limits:
 - The EVM timelock does not carry over, for the reasons under Timelocks.
 - Contract owners, such as a Safe, cannot take part, because they cannot make a repeatable signature.
 - The owner list comes from one RPC. A lying RPC could name different owners, so the page shows them before creating anything.
-- The first handle for an address stays: a later one is ignored, so a twin's address cannot be moved or rolled back by republishing. Handles do not prove the publisher holds the Bitcoin key, so an owner can burn their own seat. Handles are published to `btc_owner_handles` by `POST /handle`, which checks the signature with the same code the dapp runs. Every client checks them again on reading, so the table can lose a handle but cannot forge one.
+- A handle can be replaced only until its owner confirms a vault. After that it stays, so a twin's address cannot be moved or rolled back by republishing. Handles do not prove the publisher holds the Bitcoin key, so an owner can burn their own seat. Handles are published to `btc_owner_handles` by `POST /handle`, which checks the signature with the same code the dapp runs. Every client checks them again on reading, so the table can lose a handle but cannot forge one.
 
 ## What came from Tacit
 
 Tacit's `tacit1` address is bech32m over `[version][flags][lanes]`, and its embedded key is a hash of a wallet signature over a fixed message. `src-company/tacit` and `z0r0z/tacit` are identical in these modules.
 
 - **Taken: the lane encoding.** An owner handle is `msig1…` (`tmsig1…` on signet): a required Bitcoin lane (fingerprint, path, chain code, key) and an optional Ethereum address lane, a lane proving that address signed the key, and unknown lanes skipped by old readers. The HRP differs per network, so a key from the wrong network is refused at the paste. The Ethereum lane alone is a label; only the proof lane makes it a fact.
-- **Taken: signature-derived keys,** with a difference: Tacit asks twice in a row to prove a wallet repeats itself, and Rainbow answers an identical second request with an empty popup and a rejection. So setup is two different signatures, once per owner whatever the vault's size, plus one more at CREATE for a wallet with no key on record, spaced well after the first, because coins must not go to a key it cannot make again. After that a wallet is compared with its key on record each time it connects. Contract accounts are refused. This is how an Ethereum wallet becomes a Bitcoin owner, since no Ethereum wallet can sign a BIP-341 sighash.
+- **Taken: signature-derived keys,** with a difference: Tacit asks twice in a row to prove a wallet repeats itself, and Rainbow answers an identical second request with an empty popup and a rejection. So setup is two different signatures, once per owner whatever the vault's size, plus one confirm the owner starts themselves for a wallet with no key on record. Its key is not published until then, because coins must not go to a key it cannot make again. A wallet that will not answer can skip it, knowingly. After that a wallet is compared with its key on record each time it connects. Contract accounts are refused. This is how an Ethereum wallet becomes a Bitcoin owner, since no Ethereum wallet can sign a BIP-341 sighash.
 - **Not taken: the `tacit1` address itself.** It has scan and pool lanes a vault has no use for, and spending from it would mean asking for Tacit's identity message here. That signature controls all of a person's Tacit funds, so this app must never request it. The message here is its own, so the two keys are unrelated.
 - **Not taken: hand-written transaction code.** `dapp/btc.min.js` is `@scure/btc-signer`. Only the witness for a multi_a leaf is assembled here, because the library's finalizer does not cover a delayed one.
 
@@ -114,6 +114,13 @@ Vaults hold sats. Anyone can send a Tacit note to a vault address, and a vault c
 Every coin's creating transaction is checked for a Tacit envelope, which works from any explorer and misses nothing. Coins that trip it go to `POST api.tacit.finance/outpoints/classify`, which clears false alarms and names the asset. Only `plain` releases a coin: `asset`, `unverified`, a missing entry or any failure leaves it set aside and retries. The check runs again on a proposal's inputs before signing. The full contract is `docs/VAULT-INTEGRATION.md` in the Tacit repo. Holding notes in a vault would be its own design.
 
 A set-aside coin shows its asset id and no amount. That needs no owner to sign, and no owner's signature would reveal more: a note's amount is blinded to a key the vault does not have, so only the sender can read it.
+
+## Limits worth knowing
+
+- One transaction holds up to 400 coins or about 95,000 vbytes, whichever comes first. A sweep takes the largest coins that fit; repeat it for the rest.
+- A scan covers 2,000 addresses per chain. Past that the page says so, and a descriptor wallet finds the rest.
+- There is no fee bump yet. A stuck spend needs a new proposal at a higher rate, over the same coins.
+- Vault names stay in the browser, and a vault's record does not carry them.
 
 ## Not done
 

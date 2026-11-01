@@ -1858,10 +1858,11 @@ BEGIN
   -- everyone, and a busy minute would turn honest owners away.
   PERFORM rate_gate('btc_handle:' || p_address, 30, interval '1 minute');
   INSERT INTO btc_owner_handles (address, network, handle) VALUES (p_address, p_network, p_handle)
-  -- First key stays. A twin is derived from this table, so letting a row change would
-  -- move a funded vault's address, and proofs carry no date, so an old handle could be
-  -- replayed. A lost key is a new owner on the vault, not a new row here.
-  ON CONFLICT (address, network) DO NOTHING;
+  -- A key stays once it is on a vault its owner confirmed: a twin is derived from this
+  -- table, so changing it then would move a funded vault's address. Before that an owner
+  -- can still replace it, or a first bad key would hold the address for good.
+  ON CONFLICT (address, network) DO UPDATE SET handle = EXCLUDED.handle, updated_at = now()
+  WHERE NOT EXISTS (SELECT 1 FROM btc_vault_owners v WHERE v.address = EXCLUDED.address AND v.network = EXCLUDED.network AND v.confirmed);
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
@@ -1901,7 +1902,11 @@ BEGIN
     RAISE EXCEPTION 'A verified owner signature is required' USING ERRCODE = '42501';
   END IF;
   -- Rows are never needed for long: a proposal ends when its coins move.
-  DELETE FROM btc_proposals WHERE updated_at < now() - interval '90 days';
+  DELETE FROM btc_proposals WHERE updated_at < now() - interval '30 days';
+  -- This database also serves Ethereum vaults, so this table has a ceiling of its own.
+  IF (SELECT count(*) FROM btc_proposals) >= 20000 THEN
+    RAISE EXCEPTION 'The Bitcoin queue is full' USING ERRCODE = '54000';
+  END IF;
   -- A full vault refuses new rows rather than pushing real ones out of the window.
   IF NOT EXISTS (SELECT 1 FROM btc_proposals WHERE vault = p_vault AND id = p_id)
      AND (SELECT count(*) FROM btc_proposals WHERE vault = p_vault) >= 50 THEN

@@ -14,8 +14,11 @@ const BV = window.BitcoinVault;
 const $ = id => document.getElementById(id);
 const _escMap = { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' };
 const esc = s => String(s).replace(/[&<>"']/g, m => _escMap[m]);
-const lsGet = k => { try { return localStorage.getItem(k); } catch(_) { return null; } };
-const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch(_) {} };
+// A path gateway gives every site on it this origin, so what is stored here could have
+// been written by any of them. Nothing from it is believed.
+const SHARED = /^\/ip[fn]s\//.test(location.pathname);
+const lsGet = k => { if(SHARED) return null; try { return localStorage.getItem(k); } catch(_) { return null; } };
+const lsSet = (k, v) => { if(SHARED) return; try { localStorage.setItem(k, v); } catch(_) {} };
 const lsJson = (k, d) => { try { return JSON.parse(lsGet(k)) ?? d; } catch(_) { return d; } };
 const btcOf = sats => (sats / 1e8).toFixed(8);
 const short = s => s.length > 16 ? `${s.slice(0, 8)}…${s.slice(-6)}` : s;
@@ -80,7 +83,7 @@ const nameOf = (d, i) => noteOf('names', d) || `VAULT_${i + 1}`;
 const curDesc = () => S.policy ? BV.descriptor(S.policy) : null;
 const backedUp = () => !!noteOf('backup', curDesc());
 const labelOf = k => noteOf('labels', k.xpub) || k.fingerprint;
-const isMe = k => !!S.owner && S.owner.xpub === k.xpub;
+const isMe = k => !!S.owner && BV.sameKey(k, S.owner, S.network);
 const allKeys = p => [...new Map(p.paths.flatMap(x => x.keys).map(k => [k.xpub, k])).values()];
 
 // ── OWNER KEY ──────────────────────────────────────────────
@@ -103,7 +106,7 @@ async function connect(el){
     forget();
     S.owner = { ...key.owner, signer: key.signer, evm: key.evm, via: `${wallet.name} ${short(key.address)}` };
     key.evmPriv.fill(0);
-    S.msg = null;
+    S.msg = key.repeats ? null : { text: 'NEW KEY. FINISH SETTING IT UP AT /BTC', kind: 'ok' };
     S.ovl = null;
     touch();
     findVaults();
@@ -127,7 +130,7 @@ async function connectEvm(eth){
   forget();
   S.owner = { ...got.owner, signer: got.signer };
   S.progress = null;
-  S.msg = null;
+  S.msg = got.repeats ? null : { text: 'NEW KEY. FINISH SETTING IT UP AT /BTC', kind: 'ok' };
   S.ovl = null;
   touch();
   findVaults();
@@ -193,6 +196,7 @@ function policyFromForm(){
     if(!S.mirror) throw new Error('Read the Ethereum vault first.');
     const { missing, policy } = BV.mirror({ network: S.network, vault: S.mirror, handles: words(f.owners) });
     if(missing.length) throw new Error(`Still waiting on ${missing.length} of ${S.mirror.owners.length} owners.`);
+    S.mirrored = true;
     return policy;
   }
   const keys = parseOwners(f.owners), threshold = +f.threshold;
@@ -215,7 +219,10 @@ function createVault(){
   }
   Object.assign(S.form, { name: '', owners: '', second: '', evmVault: '' });
   S.mirror = null;
-  return open(policy);
+  // Owners read from one RPC get the same check as any vault someone hands you.
+  const fromRpc = S.mirrored;
+  S.mirrored = false;
+  return open(policy, fromRpc);
 }
 
 // A vault that arrives in a link is not yet this person's vault. It could be anyone's
@@ -240,7 +247,7 @@ async function refresh(){
   try {
     const [found, tip, fees] = await Promise.all([BV.scan(S.policy, c), c.tip(), c.fees().catch(() => ({}))]);
     if(run !== scanning) return;
-    Object.assign(S, { coins: found.coins, receive: found.receive, change: found.change, tip, fees });
+    Object.assign(S, { coins: found.coins, receive: found.receive, change: found.change, truncated: found.truncated, tip, fees });
     await syncQueue();
     render();
     // A slow first look at a coin answers "retry". Each try gets further, so it clears.
@@ -384,6 +391,8 @@ function backupText(){
     'BIP-388 wallet policy, for hardware wallets:',
     JSON.stringify(w, null, 2),
     '',
+    BV.recoveryText(S.network),
+    '',
   ].join('\n');
 }
 function download(){
@@ -427,6 +436,8 @@ function renderHeader(){
 function renderBars(){
   const out = [];
   const m = S.msg;
+  if(SHARED) out.push('<div class="attn bad"><b>THIS ADDRESS IS SHARED WITH OTHER SITES</b><a href="https://multisig.wei.limo/bitcoin.html">OPEN IT HERE</a></div>');
+  if(S.truncated) out.push('<div class="attn"><b>THIS VAULT HAS MORE ADDRESSES THAN THE SCAN COVERS</b><span>LATER COINS ARE NOT SHOWN. A DESCRIPTOR WALLET CAN FIND THEM</span></div>');
   if(m) out.push(`<div class="attn ${m.kind === 'ok' ? 'ok' : 'bad'}" role="status"><b>${esc(m.text)}</b>${m.href ? `<a href="${esc(m.href)}" target="_blank" rel="noopener">VIEW ↗</a>` : ''}<button class="end" data-act="dismiss" aria-label="Dismiss">✕</button></div>`);
   if(S.policy && S.owner && BV.seatMisdescribed(S.policy, S.owner)) out.push(`<div class="attn"><b>YOUR KEY IS MISDESCRIBED IN THIS VAULT</b><span>IT STILL SIGNS HERE, BUT ASK WHO CREATED IT WHY</span></div>`);
   if(S.view === 'dash' && S.policy && S.trusted && !backedUp()) out.push(`<div class="attn"><b>BACK UP THIS VAULT</b><span>WITHOUT IT THE COINS CANNOT BE SPENT, EVEN WITH EVERY KEY</span></div>`);
@@ -472,7 +483,7 @@ const chips = (r) => `<div class="approvals">${r.keys.map(k => {
 function renderProposal(item, i){
   const r = item.review, n = S.queue.length - i;
   const clash = S.queue.some(q => q.id !== item.id && q.review.inputs.some(a => r.inputs.some(b => a.txid === b.txid && a.vout === b.vout)));
-  const mine = S.owner && r.keys.some(k => k.xpub === S.owner.xpub), signed = S.owner && r.signedAll.includes(S.owner.xpub);
+  const mine = S.owner && r.keys.some(isMe), signed = S.owner && r.signedAll.includes(S.owner.xpub);
   const dust = r.inputs.some(x => x.sats <= BV.DUST || S.coins?.some(c => c.quarantine && c.txid === x.txid && c.vout === x.vout));
   const stranded = r.outputs.some(o => o.stranded) || dust;
   const sends = r.outputs.filter(o => !o.change), back = r.outputs.filter(o => o.change);
@@ -588,7 +599,7 @@ function renderAssets(){
   for(const c of held) groups.set(c.asset || '', (groups.get(c.asset || '') || 0) + 1);
   return `<div class="head"><span>TACIT ASSETS</span></div>
     ${[...groups].map(([id, n]) => `<div class="row"><span class="asset"><span class="btc" style="width:20px;height:20px">${TAC_ICON}</span>${esc(assetName(id))}</span><span class="r">${n} NOTE${n > 1 ? 'S' : ''} · AMOUNT HIDDEN</span></div>`).join('')}
-    <p class="small" style="padding:10px 8px 0">Held safely and never spent as sats. This vault can't read the amounts or move these yet, because a note is locked to one key and a vault has none.</p>`;
+    <p class="small" style="padding:10px 8px 0">Set aside and never spent as sats. This vault can't read the amounts or move these yet, because a note is locked to one key and a vault has none.</p>`;
 }
 
 function renderCoins(){
@@ -607,7 +618,7 @@ function renderCoins(){
 // a stranger's key on the delayed path is a different thing from one in the quorum.
 function renderPaths(){
   return S.policy.paths.map((x, i) => `<div class="tx-sub" style="padding:10px 8px 0">${i ? `SECOND PATH · ${x.threshold} OF ${x.keys.length} AFTER ${x.older} BLOCKS, ABOUT ${days(x.older)}` : `FIRST PATH · ${x.threshold} OF ${x.keys.length} AT ANY TIME`}</div>
-    ${x.keys.map(k => `<div class="row"><span class="mono" style="font-size:11px;font-weight:400">${esc(k.xpub)}${isMe(k) ? '<span class="you">YOU</span>' : ''}</span></div>`).join('')}`).join('');
+    ${x.keys.map(k => `<div class="row"><span class="mono" style="font-size:11px;font-weight:400">${esc(BV.originText(k))}${isMe(k) ? '<span class="you">YOU</span>' : ''}</span></div>`).join('')}`).join('');
 }
 
 function renderDash(){
@@ -728,7 +739,7 @@ function renderMirror(){
     <div class="btns"><button class="btn btn-outline btn-sm" data-act="read-mirror">READ VAULT</button></div>
     <div class="note warn"><b>A copy of the vault as it is now.</b> It cannot follow later changes to the owners or threshold, and it has no timelock. Contract owners, such as a Safe, cannot take part, and every owner signs with a key held in this page rather than on a hardware wallet.</div>
     ${v ? `<span class="lbl">${v.threshold} OF ${v.owners.length} OWNERS</span>
-      ${v.owners.map(o => `<div class="oln"><span class="tick" aria-hidden="true">${have.has(o) ? '✓' : '○'}</span><span>${esc(short(o))}</span><span style="margin-left:auto">${have.has(o) ? 'READY' : 'WAITING'}</span></div>`).join('')}
+      ${v.owners.map(o => `<div class="oln"><span class="tick" aria-hidden="true">${have.has(o) ? '✓' : '○'}</span><span>${esc(o)}</span><span style="margin-left:auto">${have.has(o) ? 'READY' : 'WAITING'}</span></div>`).join('')}
       <label class="lbl" for="owners">OWNER HANDLES <span class="dim">each owner connects once and shares theirs</span></label>
       <textarea class="inp" id="owners" data-field="owners" spellcheck="false">${esc(f.owners)}</textarea>
       ${S.owner ? '<div class="btns" style="margin-top:8px"><button class="btn btn-ghost btn-sm" data-act="add-me">+ ADD ME</button></div>' : ''}` : ''}`;
@@ -756,6 +767,7 @@ function renderOverlay(){
     <p class="small">Share this with whoever is creating a vault. It is public, and it cannot move funds.</p>
     <div class="mono" style="font-size:11px;font-weight:400;margin:12px 0">${esc(myHandle())}</div>
     <button class="btn btn-fill btn-w" data-act="copy-owner">COPY</button>
+    <button class="btn btn-ghost btn-w" style="margin-top:8px" data-act="exportkey">EXPORT KEY</button>
     <button class="btn btn-ghost btn-w" style="margin-top:8px" data-act="disconnect">FORGET KEY</button>
   </div></div>`;
   if(S.ovl === 'share' && S.review){
@@ -782,7 +794,7 @@ function render(){
       ${renderHeader()}${renderBars()}
       ${S.view === 'create' ? '' : renderTabs()}
       <div class="content">${S.view === 'create' ? renderCreate() : S.view === 'admin' ? renderAdmin() : renderDash()}</div>
-      <div class="footer"><span>BITCOIN · ${S.network === 'mainnet' ? 'MAINNET' : 'SIGNET'}${S.tip ? ` · BLOCK ${S.tip}` : ''}</span><span><a href="./docs.html">DOCS</a></span></div>
+      <div class="footer"><span>BITCOIN · ${S.network === 'mainnet' ? 'MAINNET' : 'SIGNET'}${S.tip ? ` · BLOCK ${esc(S.tip)}` : ''}</span><span><a href="./docs.html">DOCS</a></span></div>
     </div>`;
   $('ovl').innerHTML = renderOverlay();
   const ds = document.querySelectorAll('details');
@@ -811,6 +823,11 @@ const ACT = {
   theme(){ S.dark = !S.dark; lsSet('ms_light', S.dark ? '' : '1'); },
   wallet(){ S.ovl = S.owner ? 'me' : 'connect'; },
   disconnect(){ forget(); S.ovl = null; },
+  // For spending without this site. An xprv is the key itself, so it is asked for twice.
+  exportkey(){
+    if(!window.confirm('This copies your private key. Anyone who has it can sign as you. Continue?')) return;
+    return copy(BV.exportAccountKey(S.owner.signer, S.network), 'KEY COPIED');
+  },
   close(){ S.ovl = null; },
   'close-bg'(el, e){ if(e.target === el) S.ovl = null; },
   ovl(el){ S.ovl = el.dataset.o; },
