@@ -22,7 +22,7 @@ const lsSet = (k, v) => { if(SHARED) return; try { localStorage.setItem(k, v); }
 const lsJson = (k, d) => { try { return JSON.parse(lsGet(k)) ?? d; } catch(_) { return d; } };
 const btcOf = sats => (sats / 1e8).toFixed(8);
 const short = s => s.length > 16 ? `${s.slice(0, 8)}…${s.slice(-6)}` : s;
-const days = blocks => { const d = blocks / 144; return d < 2 ? `${Math.max(1, Math.round(blocks / 6))}H` : `${Math.round(d)}D`; };
+const days = blocks => { const d = blocks / 144; return d >= 2 ? `${Math.round(d)}D` : blocks >= 6 ? `${Math.round(blocks / 6)}H` : `${blocks * 10}M`; };
 const asc = n => '/'.repeat(n);
 
 // bitcoin.js is network-agnostic, so this is the one switch. Turning it off stops new

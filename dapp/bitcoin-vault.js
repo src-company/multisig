@@ -276,7 +276,7 @@ function renderSummary(){
   try {
     const s = BV.policySummary(BV.policyOf({ network: S.network, paths: pathsOf() }));
     const row = (label, r) => `<div class="idline"><span>${esc(label)}</span><span>key ${esc(r.owner.fingerprint)}</span></div>`;
-    return `<div class="note"><strong>${esc(s.name)}.</strong> ${esc(s.rules.join(' '))}</div>
+    return `<div class="note"><strong>${esc(s.name)}.</strong> ${esc(s.rules.join(' '))} ${esc(s.note)}</div>
       ${filled().map(r => row(r.addr || r.text || S.me?.evm || S.me?.label || '', r)).join('')}${recFilled().map(r => row(`Recovery: ${r.addr || r.text}`, r)).join('')}`;
   } catch(e) { return `<div class="note bad">${esc(e.message)}</div>`; }
 }
@@ -383,7 +383,7 @@ const ACT = {
   net(el){
     wipe();
     S.network = el.dataset.n; S.me = null; S.step = 0; S.confirming = false;
-    [...S.rows, ...S.recRows].forEach(r => { r.owner = null; r.state = r.text.trim() ? 'checking' : 'empty'; });
+    [...S.rows, ...S.recRows].forEach(r => { r.mine = false; r.owner = null; r.state = r.text.trim() ? 'checking' : 'empty'; });
     return ACT.check();
   },
   add(){ S.rows.push({ text: '', owner: null, state: 'empty' }); },
