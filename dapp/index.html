@@ -3371,7 +3371,7 @@ const SENTINEL = '0x0000000000000000000000000000000000000001';
 // repeating them — a key that does not match its owner's `addr` character for
 // character reads as "has not signed".
 const DEMO_YOU = "0x1a2Bc8E5c135b427a7B75E21483aE304399C3c4D";
-const NETS = [{name:"ETHEREUM",id:1},{name:"BASE",id:8453},{name:"MEGAETH",id:4326},{name:"ARBITRUM",id:42161},{name:"OP MAINNET",id:10},{name:"ROBINHOOD",id:4663},{name:"SEPOLIA",id:11155111,test:true},{name:"BASE SEPOLIA",id:84532,test:true}];
+const NETS = [{name:"ETHEREUM",id:1},{name:"BASE",id:8453},{name:"ROBINHOOD",id:4663},{name:"MEGAETH",id:4326},{name:"ARBITRUM",id:42161},{name:"OP MAINNET",id:10},{name:"SEPOLIA",id:11155111,test:true},{name:"BASE SEPOLIA",id:84532,test:true}];
 const EXPLORERS = {ETHEREUM:"https://etherscan.io",BASE:"https://basescan.org",MEGAETH:"https://mega.etherscan.io",ARBITRUM:"https://arbiscan.io","OP MAINNET":"https://optimistic.etherscan.io",ROBINHOOD:"https://robinhoodchain.blockscout.com",SEPOLIA:"https://sepolia.etherscan.io","BASE SEPOLIA":"https://sepolia.basescan.org"};
 
 // Chain logos (inline SVG) for network selectors, clone chips, switcher, deploy.
@@ -3404,14 +3404,9 @@ const BTC_ROW = `<a class="net-row btc-row" href="./btc.html">
   <span style="font-size:8px" aria-hidden="true">○</span><span class="tok-ico">${BTC_LOGO}</span><span>BITCOIN</span>
   <span class="net-id">↗</span>
 </a>`;
-// Where it goes: after the last mainnet, in both pickers. The overlay groups
-// under MAINNETS/TESTNETS headings and would put it under the wrong one at the
-// end; the CREATE panel has no headings but is ordered mainnets-then-testnets,
-// and appending there dropped BITCOIN below SEPOLIA — the same list reading two
-// different ways depending on which screen you were on. Derived from NETS, so a
-// new mainnet moves it rather than stranding it — which Robinhood, the sixth,
-// has already done without this line being touched.
-const BTC_ROW_AFTER = NETS.reduce((last, n, i) => n.test ? last : i, -1);
+// Where it goes: straight after Ethereum, in both pickers, so the two pickers read the
+// same. Taken from NETS rather than written as 0, so it follows Ethereum if that moves.
+const BTC_ROW_AFTER = NETS.findIndex(n => n.id === 1);
 const CHAIN_ICONS = { 1: ETH_ICON, 8453: BASE_LOGO, 10: OP_LOGO, 42161: ARB_LOGO, 4326: MEGA_LOGO, 4663: ROBINHOOD_LOGO, 11155111: ETH_ICON, 84532: BASE_LOGO };
 function chainIcon(id, cls){ const ic = CHAIN_ICONS[id]; return ic ? `<span class="tok-ico${cls?' '+cls:''}">${ic}</span>` : ''; }
 
@@ -6072,7 +6067,7 @@ function renderChainOverlay(mob){
         <button class="x-btn" onclick="S.showChains=false;render()" style="margin:0" aria-label="Close">&#10005;</button>
       </div>
       <div style="font-size:9px;letter-spacing:2px;color:var(--d);margin-bottom:8px">MAINNETS</div>
-      ${mainnets.map(row).join("")}${BTC_ROW}
+      ${mainnets.map((n, i) => row(n) + (NETS.indexOf(n) === BTC_ROW_AFTER ? BTC_ROW : "")).join("")}
       <div style="font-size:9px;letter-spacing:2px;color:var(--d);margin:12px 0 8px">TESTNETS</div>
       ${testnets.map(row).join("")}
     </div>
