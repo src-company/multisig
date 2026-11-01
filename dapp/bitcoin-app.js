@@ -214,7 +214,7 @@ async function open(policy, fromLink = false){
 }
 
 // Numbered, because a slow scan of the last vault must not land on this one.
-let scanning = 0, lastScan = 0, scanned = Promise.resolve();
+let scanning = 0, lastScan = 0, scanned = Promise.resolve(), retries = 0;
 async function refresh(){
   const c = BV.chain(S.network), run = ++scanning;
   lastScan = Date.now();
@@ -224,6 +224,9 @@ async function refresh(){
     Object.assign(S, { coins: found.coins, receive: found.receive, change: found.change, tip, fees });
     await syncQueue();
     render();
+    // A slow first look at a coin answers "retry". Each try gets further, so it clears.
+    if(S.coins.some(c => c.quarantine === 'unknown') && retries++ < 5) setTimeout(() => { if(run === scanning) scanned = refresh(); }, 30000);
+    else if(!S.coins.some(c => c.quarantine === 'unknown')) retries = 0;
   } catch(e) { if(run === scanning) say(`Could not read the chain: ${e.message}`); }
 }
 
@@ -308,6 +311,7 @@ async function persist(){
 async function sign(){
   if(!S.owner) throw new Error('Connect first: nothing here can sign without your owner key.');
   if(!S.trusted) throw new Error('Check this vault\'s owners first.');
+  await BV.assertSpendable(S.review.inputs, BV.chain(S.network));
   load(BV.sign(S.psbt, S.owner.signer, S.policy, known()));
   touch();
   await persist();
@@ -554,7 +558,7 @@ function renderCoins(){
   return `<div class="head"><span>COINS</span></div>
     ${coins.map(c => {
       const left = delayed && c.height ? c.height + delayed.older - S.tip - 1 : null;
-      if(BV.isProtected(c)) return `<div class="row"><span>${btcOf(c.value)} BTC</span><span class="r" title="This page will not spend it as sats">${c.quarantine === 'tacit' ? 'SET ASIDE · TACIT ASSET' : c.quarantine ? 'SET ASIDE · COULD NOT CHECK' : 'SET ASIDE · MAY HOLD A TOKEN'}</span></div>`;
+      if(BV.isProtected(c)) return `<div class="row"><span>${btcOf(c.value)} BTC</span><span class="r" title="This page will not spend it as sats">${c.quarantine === 'tacit' ? `TACIT ASSET${c.asset ? ` ${esc(short(c.asset))}` : ''} · NOT SPENT` : c.quarantine ? 'CHECKING…' : 'SET ASIDE · MAY HOLD A TOKEN'}</span></div>`;
       return `<div class="row"><span>${btcOf(c.value)} BTC</span><span class="r">${!c.height ? 'UNCONFIRMED' : delayed ? (left > 0 ? `DELAYED PATH OPENS IN ${days(left)}` : 'DELAYED PATH OPEN') : `${S.tip - c.height + 1} CONF`}</span></div>`;
     }).join('')}`;
 }

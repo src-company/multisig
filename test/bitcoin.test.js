@@ -648,6 +648,28 @@ test('a vault id ignores fingerprints, which do not change the addresses', () =>
   assert.equal(BV.vaultId(a), BV.vaultId(b));
 });
 
+test('only a plain verdict releases a coin that tripped the envelope check', async () => {
+  const op = n => `${n.repeat(32)}:0`, envelope = { vin: [{ witness: ['ac006305' + '5441434954' + '0101'] }] };
+  const coin = n => ({ txid: n.repeat(32), vout: 0, value: 50000, height: 10 });
+  const policy = plain('signet'), addr = BV.vaultOf(policy, 0, 0).address, coins = ['aa', 'bb', 'cc', 'dd', 'ee'].map(coin);
+  const asked = [];
+  const c = {
+    used: async a => a === addr, utxos: async () => coins.map(u => ({ ...u })),
+    tx: async id => id.startsWith('ee') ? { vin: [] } : envelope,
+    classify: async list => { asked.push(...list); return { [op('aa')]: { status: 'plain' }, [op('bb')]: { status: 'asset', asset_ids: ['f0'.repeat(32)] }, [op('cc')]: { status: 'unverified', reason: 'x' } }; },
+  };
+  const { coins: found } = await BV.scan(policy, c);
+  assert.deepEqual([...found].map(u => u.quarantine), [undefined, 'tacit', 'unknown', 'unknown', undefined]);
+  assert.equal(found[1].asset, 'f0'.repeat(32));
+  // A coin with no envelope is never sent to Tacit.
+  assert.ok(!asked.includes(op('ee')));
+  const down = await BV.scan(policy, { ...c, classify: async () => { throw new Error('down'); } });
+  assert.deepEqual([...down.coins].map(u => u.quarantine), ['unknown', 'unknown', 'unknown', 'unknown', undefined]);
+  await assert.rejects(BV.assertSpendable([{ txid: 'bb'.repeat(32), vout: 0, sats: 50000 }], c), /not signed/);
+  await BV.assertSpendable([{ txid: 'aa'.repeat(32), vout: 0, sats: 50000 }], c);
+  await BV.assertSpendable([{ txid: 'ee'.repeat(32), vout: 0, sats: 50000 }], c);
+});
+
 test('two different proposals do not merge', () => {
   const policy = plain('signet');
   const one = BV.propose({ policy, utxos: [fakeCoin(100000)], tip: 200, sweep: payee, feeRate: 2 });

@@ -92,14 +92,20 @@ Bitcoin has two relevant opcodes. `OP_CHECKSEQUENCEVERIFY` counts from when a co
 - Amounts in a PSBT are claims, but BIP-341 signs every input's amount, so understating one to hide a fee gives signatures the network rejects.
 - An Esplora server can lie about coins and fee estimates. It can make a proposal that cannot confirm, suggest a fee up to the 1000 sat/vB ceiling (review warns above 200), or steer an address to be reused. A scan that puts a vault past the 20-address gap must be confirmed by the second operator, so one explorer alone cannot steer change out of reach, but two colluding could; such coins are found by a wide rescan in a descriptor wallet. Broadcast compares the returned txid to one computed here. It cannot make anyone sign outputs the review does not show.
 - Two proposals over one coin cannot both land. The page checks before broadcast and calls the loser void.
-- `bitcoin.html` has its own CSP: scripts from `'self'` only, and connections only to `mempool.space`, `blockstream.info` and the Ethereum RPCs. Those hosts accept data, so the CSP narrows a theft and does not prevent one. Google Fonts' stylesheet is the one third-party file on this page.
+- `bitcoin.html` has its own CSP: scripts from `'self'` only, and connections only to `mempool.space`, `blockstream.info`, the Ethereum RPCs, our API, the WalletConnect relay and `api.tacit.finance`. Those hosts accept data, so the CSP narrows a theft and does not prevent one. Google Fonts' stylesheet is the one third-party file on this page.
 - `@scure/btc-signer` was audited by cure53 at 0.3.0 (2023) and self-audited at 2.2.0 (April 2026). This page runs 2.4.1, which neither audit covers, and its UTXO module is unaudited (it is not used here).
+
+## Tacit assets
+
+Vaults hold sats. Anyone can send a Tacit note to a vault address, and a vault can neither read it nor publish an opening, because a note's blinding comes from a private key a vault does not have. It is still spendable on Bitcoin, and spending it as sats burns the asset, so the danger is losing it, not being unable to move it. So: never send Tacit assets to a vault, and anything that arrives is set aside.
+
+Every coin's creating transaction is checked for a Tacit envelope, which works from any explorer and misses nothing. Coins that trip it go to `POST api.tacit.finance/outpoints/classify`, which clears false alarms and names the asset. Only `plain` releases a coin: `asset`, `unverified`, a missing entry or any failure leaves it set aside and retries. The check runs again on a proposal's inputs before signing. The full contract is `docs/VAULT-INTEGRATION.md` in the Tacit repo. Holding notes in a vault would be its own design.
 
 ## Not done
 
 - **Mainnet opened before these were done.** It is open by the owner's decision, with a warning on the page. `MAINNET` in `bitcoin-app.js` is the switch.
 - **A real device.** Interoperability is proven with Bitcoin Core as the outside signer, on regtest. No Ledger, Coldcard, Trezor or Sparrow has signed one of these PSBTs, and whether each accepts a `multi_a` Taproot policy with an xpub internal key has to be tried per device. Ledger registration from this page (WebHID) is not built; the policy export is untested on a device.
 - A real signet spend. The page has read live signet, but the funded flow has only run against a mocked explorer.
-- Native Bitcoin wallets (Xverse, Leather, UniSat), WalletConnect, and the passkey signer Tacit has. A passkey is bound to its domain, so the same passkey on `multisig.software` and the IPFS gateway gives different keys.
-- Proposal storage in Postgres. `chain_id` is an `int > 0`, and the verifier reads EVM state.
+- Bitcoin wallets signing vault spends directly. UniSat, Xverse and Leather derive a key held in the page; only UniSat's shape is tested, against a simulated wallet.
+- The passkey signer Tacit has. A passkey is bound to its domain, so the same passkey on `multisig.software` and the IPFS gateway gives different keys.
 - Independent review. Do this before mainnet use at any size.

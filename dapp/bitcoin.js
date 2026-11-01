@@ -690,9 +690,12 @@ function vsize(policy, pathIdx, inputs, outputScripts){
 // Coins of 546 sats or less are left alone, the rule the Tacit dapp keeps, but a sender
 // picks an output's value, so that alone misses a token on a larger coin. Tacit's check
 // does not need a wallet's keys: a Tacit coin comes from a transaction carrying a Tacit
-// envelope, so scan() looks at each coin's creating transaction and quarantines it if
-// any input's witness holds the marker, or if that could not be read. That errs towards
-// leaving a plain coin alone, which costs little. Runes and inscriptions on large coins
+// envelope. So each coin's creating transaction is read, which any explorer can answer,
+// and misses nothing. Only coins that trip that are put to Tacit's own classifier, which
+// clears the false alarms and names the asset, so an ordinary vault tells Tacit nothing.
+// A coin is released only on a plain "plain": asset stays set aside, and unverified,
+// missing or any failure does too, and is tried again. Spending one as sats burns the
+// note, and a vault has no key to read it with. Runes and inscriptions on large coins
 // are not detected.
 const isProtected = coin => coin.value <= DUST || !!coin.quarantine;
 const ENVELOPE_MARKER = '5441434954'; // "TACIT"
@@ -1006,6 +1009,11 @@ function chain(network, doFetch = (...a) => root.fetch(...a), bases = net(networ
     },
     fees: () => get('/fee-estimates'),
     tx: txid => get(`/tx/${txid}`),
+    async classify(outpoints){
+      const r = await doFetch(`https://api.tacit.finance/outpoints/classify?network=${network}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ outpoints }), signal: root.AbortSignal?.timeout(30000) });
+      if(!r.ok) throw new Error('Tacit check failed');
+      return (await r.json()).coins || {};
+    },
     spent: async (txid, vout) => (await get(`/tx/${txid}/outspend/${vout}`)).spent === true,
     broadcast: tx => get('/tx', { method: 'POST', body: tx }, 'text'),
   };
@@ -1036,12 +1044,41 @@ async function scan(policy, c, gap = GAP){
       if(!sure) throw new Error('the explorers disagree about this vault, so its balance cannot be trusted right now');
     }
   }
-  // Fail closed: a coin that cannot be checked is treated as one that failed.
-  if(c.tx) await Promise.all(coins.map(async u => {
-    try { if(hasTacitEnvelope(await c.tx(u.txid))) u.quarantine = 'tacit'; }
+  await classifyCoins(coins, c);
+  return { coins, receive: next[0], change: next[1] };
+}
+
+// Sets `quarantine` on any coin that is not provably plain. Fails closed throughout: a
+// coin that could not be checked is treated as one that failed.
+async function classifyCoins(coins, c){
+  if(!c.tx) return;
+  const hits = [];
+  await Promise.all(coins.map(async u => {
+    u.quarantine = undefined;
+    try { if(hasTacitEnvelope(await c.tx(u.txid))) hits.push(u); }
     catch(_) { u.quarantine = 'unknown'; }
   }));
-  return { coins, receive: next[0], change: next[1] };
+  for(let i = 0; i < hits.length; i += 100){
+    const chunk = hits.slice(i, i + 100);
+    if(!c.classify){ chunk.forEach(u => { u.quarantine = 'tacit'; }); continue; }
+    let verdicts;
+    try { verdicts = await c.classify(chunk.map(u => `${u.txid}:${u.vout}`)); }
+    catch(_) { chunk.forEach(u => { u.quarantine = 'unknown'; }); continue; }
+    for(const u of chunk){
+      const v = verdicts[`${u.txid}:${u.vout}`];
+      if(v?.status === 'plain') continue;
+      if(v?.status === 'asset'){ u.quarantine = 'tacit'; u.asset = v.asset_ids?.[0]; }
+      else u.quarantine = 'unknown';
+    }
+  }
+}
+
+// The same check on exactly what is about to be signed. A coin list can be minutes old,
+// and a proposal can come from someone else. Throws rather than letting a signature out.
+async function assertSpendable(inputs, c){
+  const coins = inputs.map(i => ({ txid: i.txid, vout: i.vout, value: i.sats }));
+  await classifyCoins(coins, c);
+  if(coins.some(isProtected)) throw new Error('A coin in this proposal may hold a Tacit asset, or could not be checked, so it was not signed. Try again shortly.');
 }
 
 function concat(...parts){
@@ -1050,7 +1087,7 @@ function concat(...parts){
   return out;
 }
 
-root.BitcoinVault = { isProtected, hasTacitEnvelope, walletMessage, linkMessage, keyFromWalletSignature, evmSignHash, evmSignMessage, bitcoinMessageHash, bitcoinSigners, handleForWallet, proposalId, vaultId, publishProposal, fetchProposals, openProposals, publishHandle, fetchHandles, MAX_INDEX, txidOf, seatMisdescribed, EVM_CHAINS, selectors: { threshold: selector('threshold()') }, readEvmVault, mirror, bindingMessage, evmMessageHash, NETWORKS, DUST, GAP, MAX_OWNERS, MAX_OLDER, MAX_FEE_RATE, encodeOwner, decodeOwner, originText, ownerMessage, deriveOwnerKey, keyFromSignature, fingerprintOf,
+root.BitcoinVault = { assertSpendable, isProtected, hasTacitEnvelope, walletMessage, linkMessage, keyFromWalletSignature, evmSignHash, evmSignMessage, bitcoinMessageHash, bitcoinSigners, handleForWallet, proposalId, vaultId, publishProposal, fetchProposals, openProposals, publishHandle, fetchHandles, MAX_INDEX, txidOf, seatMisdescribed, EVM_CHAINS, selectors: { threshold: selector('threshold()') }, readEvmVault, mirror, bindingMessage, evmMessageHash, NETWORKS, DUST, GAP, MAX_OWNERS, MAX_OLDER, MAX_FEE_RATE, encodeOwner, decodeOwner, originText, ownerMessage, deriveOwnerKey, keyFromSignature, fingerprintOf,
   policyOf, descriptor, descriptorChecksum, parseDescriptor, walletPolicy, vaultOf, vsize, coinsFor, propose, inspect, sign, combine, finalize, chain, scan };
 
 })(typeof window !== 'undefined' ? window : globalThis);
