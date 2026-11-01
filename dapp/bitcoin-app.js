@@ -87,7 +87,9 @@ const backedUp = () => !!noteOf('backup', curDesc());
 const labelOf = k => noteOf('labels', k.xpub) || k.fingerprint;
 // The wallet behind a key, once its record has been read and checked.
 function whoOf(k, full){
-  const w = S.who?.[k.xpub], show = t => full ? t : short(t);
+  // This page's own owner needs no record: the connected wallet is the proof.
+  const own = isMe(k) && S.owner.evm ? { evm: S.owner.evm, wallet: S.owner.wallet?.address || S.owner.wallet } : null;
+  const w = own || S.who?.[k.xpub], show = t => full ? t : short(t);
   if(w?.wallet) return { mark: BTC_ICON, text: show(w.wallet) };
   if(w) return { mark: ETH_ICON, text: show(w.evm) };
   return { mark: KEY_ICON, text: k.fingerprint };
@@ -149,7 +151,7 @@ async function connectEvm(eth){
 // A wallet with no key on record repeats itself before it can do anything here, the same
 // check /btc makes, because a seat on a key it cannot make again is a seat lost.
 function awaitConfirm(got){
-  if(got.repeats){ S.ovl = null; findVaults(); return; }
+  if(got.repeats){ S.ovl = null; findVaults(); setTimeout(readOwners, 2500); return; }
   S.pending = got.finish;
   S.unanswered = false;
   S.ovl = 'confirm';
@@ -163,6 +165,7 @@ async function finishConnect(skip){
     S.progress = null;
     S.ovl = null;
     findVaults();
+    readOwners();
   } catch(e) {
     S.progress = null;
     if(e.mismatch){ forget(); S.ovl = null; throw e; }
@@ -213,7 +216,7 @@ function ownerRows(text){
     try {
       const o = BV.decodeOwner(t, S.network);
       // A handle's 0x address is only a label until it is proven. Unproven, it is not shown.
-      return { ok: true, text: o.proven ? short(o.evm) : o.fingerprint, proven: !!o.proven, me: isMe(o) };
+      return { ok: true, text: o.possessed ? short(o.evm) : o.fingerprint, proven: !!o.possessed, me: isMe(o) };
     } catch(e) { return { ok: false, text: short(t), err: isWalletAddress(t) ? 'This wallet has not connected yet' : e.message }; }
   });
 }
@@ -249,19 +252,19 @@ function policyFromForm(){
 
 function createVault(){
   if(S.pending) throw new Error('Confirm your wallet first.');
-  const policy = policyFromForm(), d = BV.descriptor(policy), f = S.form;
+  const policy = policyFromForm(), d = BV.descriptor(policy), f = S.form, from = S.moving;
+  if(from === d) throw new Error('These are the same rules as the current vault.');
   if(f.name.trim()) setNote('names', d, f.name.trim().slice(0, 24).toUpperCase().replace(/\s+/g, '_'));
   for(const t of [...words(f.owners), ...words(f.second)]){
-    try { const o = BV.decodeOwner(t, S.network); if(o.proven) setNote('labels', o.xpub, short(o.evm)); } catch(_) {}
+    try { const o = BV.decodeOwner(t, S.network); if(o.possessed) setNote('labels', o.xpub, short(o.evm)); } catch(_) {}
   }
   Object.assign(S.form, { name: '', owners: '', second: '', evmVault: '' });
   S.mirror = null;
   // Owners read from one RPC get the same check as any vault someone hands you.
   const fromRpc = S.mirrored;
   S.mirrored = false;
-  if(S.moving && S.moving === d) throw new Error('These are the same rules as the current vault.');
-  S.moveFrom = S.moving;
-  S.moving = null;
+  // Both ends of a move are fixed here. The page can be pointed elsewhere after this.
+  Object.assign(S, { moveFrom: from || null, moveTo: from ? d : null });
   return open(policy, fromRpc);
 }
 
@@ -270,8 +273,10 @@ function createVault(){
 // to be paid until they have looked at the owners and said so.
 async function open(policy, fromLink = false){
   const trusted = !fromLink || saved().includes(BV.descriptor(policy));
+  S.moving = null;
+  if(S.moveTo !== BV.descriptor(policy)) Object.assign(S, { moveFrom: null, moveTo: null });
   if(trusted) remember(policy);
-  Object.assign(S, { policy, trusted, view: 'dash', compose: false, coins: null, tip: null, queue: [], psbt: null, review: null, msg: null });
+  Object.assign(S, { who: null, policy, trusted, view: 'dash', compose: false, coins: null, tip: null, queue: [], psbt: null, review: null, msg: null });
   syncHash();
   render();
   // In the background: a click's busy lock must not outlast the click, or every button
@@ -281,10 +286,14 @@ async function open(policy, fromLink = false){
 
 // Numbered, because a slow scan of the last vault must not land on this one.
 let scanning = 0, lastScan = 0, scanned = Promise.resolve(), retries = 0;
+function readOwners(){
+  const policy = S.policy;
+  if(policy) BV.ownersOf(policy).then(who => { if(policy === S.policy){ S.who = who; render(); } }, () => {});
+}
 async function refresh(){
   const c = BV.chain(S.network), run = ++scanning;
   lastScan = Date.now();
-  BV.ownersOf(S.policy).then(who => { if(run === scanning){ S.who = who; render(); } }, () => {});
+  readOwners();
   try {
     const [found, tip, fees] = await Promise.all([BV.scan(S.policy, c), c.tip(), c.fees().catch(() => ({}))]);
     if(run !== scanning) return;
@@ -492,7 +501,7 @@ function renderBars(){
   if(S.truncated) out.push('<div class="attn"><b>THIS VAULT HAS MORE ADDRESSES THAN THE SCAN COVERS</b><span>LATER COINS ARE NOT SHOWN. A DESCRIPTOR WALLET CAN FIND THEM</span></div>');
   if(m) out.push(`<div class="attn ${m.kind === 'ok' ? 'ok' : 'bad'}" role="status"><b>${esc(m.text)}</b>${m.href ? `<a href="${esc(m.href)}" target="_blank" rel="noopener">VIEW ↗</a>` : ''}<button class="end" data-act="dismiss" aria-label="Dismiss">✕</button></div>`);
   if(S.policy && S.owner && BV.seatMisdescribed(S.policy, S.owner)) out.push(`<div class="attn"><b>YOUR KEY IS MISDESCRIBED IN THIS VAULT</b><span>IT STILL SIGNS HERE, BUT ASK WHO CREATED IT WHY</span></div>`);
-  if(S.view === 'dash' && S.moveFrom && S.policy) out.push('<div class="attn ok"><b>NEW VAULT READY</b><span>SAVE ITS BACKUP, THEN MOVE THE COINS FROM THE OLD ONE</span><button class="end" data-act="movecoins">MOVE COINS</button></div>');
+  if(S.view === 'dash' && S.moveFrom && S.trusted && curDesc() === S.moveTo) out.push(`<div class="attn ok"><b>NEW VAULT READY</b><span>${backedUp() ? 'NOW MOVE THE COINS FROM THE OLD ONE' : 'SAVE ITS BACKUP, THEN MOVE THE COINS FROM THE OLD ONE'}</span>${backedUp() ? '<button class="end" data-act="movecoins">MOVE COINS</button>' : ''}</div>`);
   if(S.view === 'dash' && S.policy && S.trusted && !backedUp() && S.coins?.length) out.push(`<div class="attn"><b>BACK UP THIS VAULT</b><span>WITHOUT IT THE COINS CANNOT BE SPENT, EVEN WITH EVERY KEY</span></div>`);
   return out.join('');
 }
@@ -619,7 +628,7 @@ function renderQueue(){
         <textarea class="inp" id="paste" data-field="paste" spellcheck="false" aria-label="PSBT" placeholder="Paste a PSBT">${esc(S.form.paste)}</textarea>
         <div class="btns"><button class="btn btn-outline btn-sm" data-act="paste">OPEN</button></div>
       </details></div>`));
-  return `<div class="head"><span>QUEUE</span>${S.compose ? '' : `<button class="btn btn-outline btn-sm" data-act="compose"${S.coins && S.coins.length ? '' : ' disabled'}>+ NEW</button>`}</div>${body}`;
+  return `<div class="head"><span>QUEUE</span>${S.compose ? '' : `<button class="btn btn-outline btn-sm" data-act="compose"${S.coins && S.coins.length ? '' : ' disabled'}>SEND</button>`}</div>${body}`;
 }
 
 function renderReceive(){
@@ -685,7 +694,7 @@ function renderClock(){
   const later = S.policy.paths[1], coins = (S.coins || []).filter(c => c.height && movable(c));
   if(!later || !S.coins) return '';
   const { kind, name } = BV.policySummary(S.policy);
-  const who = kind === 'aged' ? `${later.threshold} of ${later.keys.length} owners` : `${later.threshold === later.keys.length ? 'The' : `${later.threshold} of ${later.keys.length}`} recovery key${later.keys.length > 1 ? 's' : ''}`;
+  const who = kind === 'aged' ? `${later.threshold} of ${later.keys.length} owners` : kind === 'custom' ? 'The keys on the second path' : `${later.threshold === later.keys.length ? 'The' : `${later.threshold} of ${later.keys.length}`} recovery key${later.keys.length > 1 ? 's' : ''}`;
   const left = coins.length ? Math.min(...coins.map(c => c.height + later.older - S.tip - 1)) : null;
   if(left !== null && left <= 0) return '';
   const pct = left === null ? 0 : Math.max(2, Math.round(100 * (1 - left / later.older))), late = left !== null && left < later.older * 0.1;
@@ -700,7 +709,7 @@ function renderClock(){
 function renderWho(){
   const [first, ...later] = S.policy.paths, s = BV.policySummary(S.policy), plain = k => chip(k);
   const rest = s.kind === 'aged' ? [] : later;
-  return `<div class="who">${first.keys.map(plain).join('')}${rest.map(p => `<span class="who-l">${p.older ? `AFTER ${days(p.older)}` : 'OR'}</span>${p.keys.map(plain).join('')}`).join('')}</div>
+  return `${S.trusted ? `<div class="who">${first.keys.map(plain).join('')}${rest.map(p => `<span class="who-l">${p.older ? `AFTER ${days(p.older)}` : 'OR'}</span>${p.keys.map(plain).join('')}`).join('')}</div>` : ''}
     <div class="rule"><b>${esc(s.name)}</b><span>${esc(s.rules.join(' '))} ${esc(s.note)}</span></div>`;
 }
 
@@ -711,13 +720,13 @@ function renderDash(){
   const open = delayed && coins ? coins.filter(c => c.height && movable(c) && c.height + delayed.older - S.tip - 1 <= 0).length : 0;
   const mine = S.owner && allKeys(p).some(isMe), seated = S.owner && p.paths[0].keys.some(isMe);
   return `<div class="stats">
-      <div class="stat-row"><span class="btc">${BTC_ICON}</span><span class="stat-big">${coins ? btcOf(total) : '<span class="pulse">…</span>'}</span><span class="stat-token">BTC</span>
+      <div class="stat-row"><span class="btc">${BTC_ICON}</span><span class="stat-big">${coins ? btcOf(total) : '<span class="pulse">…</span>'}</span><span class="stat-token">BTC</span>${coins && total ? `<span class="stat-sats">${total.toLocaleString('en-US')} SATS</span>` : ''}
       ${coins ? `<button class="addrline" data-act="refresh" aria-label="Scan again">↻</button>` : ''}
       ${S.trusted ? `<button class="addrline" data-act="download">BACKUP ↓</button>` : ''}</div>
       <div class="meta">
         <span><b>${p.paths[0].threshold}/${p.paths[0].keys.length}</b> SIG</span>
         ${delayed ? `<span><b>${pathLabel(delayed)}</b> ${open ? '<span class="y">OPEN</span>' : ''}</span>` : ''}
-        <span>${S.network === 'mainnet' ? 'BITCOIN' : 'SIGNET'}</span>
+        ${S.network === 'mainnet' ? '' : '<span>SIGNET</span>'}
         ${pending ? `<span class="y">${pending} UNCONFIRMED</span>` : ''}
         ${S.owner ? `<span class="${mine ? 'g' : ''}">${seated ? 'YOU ARE AN OWNER' : mine ? 'RECOVERY KEY ONLY' : 'NOT AN OWNER'}</span>` : ''}
       </div>
@@ -913,7 +922,7 @@ const copy = async (text, label = 'COPIED') => {
 function goNet(network){
   // A key is per network, so it does not carry across.
   forget();
-  Object.assign(S, { network, invited: [], view: 'dash', ovl: null, policy: null, queue: [], psbt: null, review: null, msg: null, coins: null, tip: null });
+  Object.assign(S, { moving: null, moveFrom: null, moveTo: null, network, invited: [], view: 'dash', ovl: null, policy: null, queue: [], psbt: null, review: null, msg: null, coins: null, tip: null });
   lsSet('ms_btc_net', network);
   syncHash();
   const first = saved()[0];
@@ -939,6 +948,7 @@ const ACT = {
   dismiss(){ S.msg = null; },
   view(el){ S.view = el.dataset.v; S.msg = null; S.form.rename = undefined; if(S.view !== 'create') S.moving = null; },
   trust(){
+    if(S.pending) throw new Error('Confirm your wallet first.');
     remember(S.policy);
     S.trusted = true;
     S.invited = S.invited.filter(d => d !== curDesc());
@@ -956,7 +966,7 @@ const ACT = {
   delay(el){ S.form.older = el.dataset.b; },
   th(el){ const n = Math.max(ownerRows(S.form.owners).filter(r => r.ok).length, 1); S.form.threshold = String(Math.min(n, Math.max(1, Math.min(+S.form.threshold || 1, n) + +el.dataset.d))); },
   st(el){ const n = Math.max(ownerRows(S.form.second).filter(r => r.ok).length, 1); S.form.secondThreshold = String(Math.min(n, Math.max(1, (+S.form.secondThreshold || 1) + +el.dataset.d))); },
-  'add-me'(){ const f = S.form, me = myHandle(); if(!f.owners.includes(me)) f.owners = (f.owners.trim() + '\n' + me).trim(); },
+  'add-me'(){ if(S.pending) throw new Error('Confirm your wallet first.'); const f = S.form, me = myHandle(); if(!f.owners.includes(me)) f.owners = (f.owners.trim() + '\n' + me).trim(); },
   compose(){ S.compose = !S.compose; S.msg = null; },
   max(){ S.form.amt = 'all'; },
   tier(el){ S.form.rate = String(feeOf(el.dataset.t)); },
@@ -985,15 +995,23 @@ const ACT = {
   // A vault's rules cannot change, so this is a new vault with the old one's owners,
   // and the coins follow once it exists. Nothing moves until the owners sign that.
   changerules(){
+    if(!S.trusted) throw new Error('Check this vault\'s keys first.');
     const p = S.policy, s = BV.policySummary(p), [first, later] = p.paths;
+    if(s.kind === 'custom') throw new Error('This vault has custom rules. Set up the new one in Create.');
     Object.assign(S.form, { kind: s.kind === 'deadman' ? 'recovery' : s.kind === 'aged' ? 'hold' : 'plain', owners: first.keys.map(BV.originText).join('\n'),
       threshold: String(s.kind === 'aged' ? later.threshold : first.threshold), second: s.kind === 'deadman' ? later.keys.map(BV.originText).join('\n') : '', secondThreshold: String(later?.threshold || 1), older: String(later?.older || 4320) });
     S.moving = BV.descriptor(p);
     S.view = 'create';
   },
+  // Every owner needs this vault before coins reach it, so its backup comes first, and
+  // both ends must be vaults this person has already accepted.
   async movecoins(){
-    const to = BV.vaultOf(S.policy, 0, 0).address, from = S.moveFrom;
-    S.moveFrom = null;
+    const { moveFrom: from, moveTo } = S;
+    if(!from || curDesc() !== moveTo || !S.trusted || !saved().includes(from)) throw new Error('That move no longer applies.');
+    if(!backedUp()) throw new Error('Save this vault\'s backup first.');
+    const target = BV.parseDescriptor(moveTo, S.network), to = BV.vaultOf(target, 0, 0).address;
+    if(S.owner?.signer && allKeys(target).some(isMe)) await BV.saveVault(target, S.owner.signer, myHandle(), [myHandle()]).catch(() => {});
+    Object.assign(S, { moveFrom: null, moveTo: null });
     await open(BV.parseDescriptor(from, S.network));
     await scanned;
     Object.assign(S.form, { to, amt: 'all', path: '0' });

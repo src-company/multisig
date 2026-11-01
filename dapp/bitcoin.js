@@ -560,13 +560,16 @@ const HOW_IT_WORKS = [
   ['Delays run per coin', 'A clock starts when a coin confirms, and moving the coin restarts it. So an active vault stays ahead of any delay.'],
   ['The backup is the way out', 'It holds no private key. With it and enough keys, the coins can be spent without this site.'],
 ];
-const aboutBlocks = b => { const d = Math.round(b / 144); return d >= 2 ? `about ${d} days` : `about ${Math.max(1, Math.round(b / 6))} hours`; };
+const aboutBlocks = b => { const d = Math.round(b / 144), h = Math.round(b / 6); return d >= 2 ? `about ${d} days` : h >= 2 ? `about ${h} hours` : b >= 6 ? 'about 1 hour' : `about ${b * 10} minutes`; };
 const sameKeys = (a, b, network) => a.length === b.length && a.every(k => b.some(o => sameKey(k, o, network)));
 function describePolicy(policy){
   return policy.paths.map(p => {
     const one = sameKeys(p.keys, policy.paths[0].keys, policy.network) ? 'owner' : 'recovery key';
-    const who = p.keys.length === 1 ? `The ${one}` : p.threshold === p.keys.length ? `All ${p.keys.length} ${one}s` : `Any ${p.threshold} of ${p.keys.length} ${one}s`;
-    return p.older ? `${who} can also spend any coin unmoved for ${p.older} blocks, ${aboutBlocks(p.older)}.` : `${who} can spend at any time.`;
+    const every = p.keys.length === 2 ? `Both ${one}s` : `All ${p.keys.length} ${one}s`;
+    if(!p.older && p.keys.length === 1) return `The ${one} can spend alone.`;
+    if(!p.older) return `${p.threshold === p.keys.length ? every : `Any ${p.threshold} of ${p.keys.length} ${one}s`} must sign.`;
+    const who = p.keys.length === 1 ? `The ${one}` : p.threshold === p.keys.length ? every : `Any ${p.threshold} of ${p.keys.length} ${one}s`;
+    return `${who} can also spend any coin unmoved for ${p.older} blocks, ${aboutBlocks(p.older)}.`;
   });
 }
 
@@ -574,15 +577,16 @@ function describePolicy(policy){
 // is named the same way as one made here.
 function policySummary(policy){
   const [first, later, ...rest] = policy.paths, n = first.keys.length;
-  const base = { rules: describePolicy(policy), delay: later?.older || 0 };
+  const base = { rules: describePolicy(policy), delay: later?.older || 0 }, short = later?.older < 144 ? ' This delay is very short.' : '';
   if(rest.length || (later && !later.older)) return { ...base, kind: 'custom', name: 'CUSTOM', note: 'This vault has its own rules. Read each one.' };
   if(!later) return { ...base, kind: 'standard', name: 'STANDARD',
-    note: n === 1 ? 'One key. A single-signature wallet.' : first.threshold === n ? 'Needs every owner, so one lost wallet locks the coins.' : first.threshold === 1 ? 'Any one owner can spend alone.' : `Still spends if ${n - first.threshold === 1 ? 'one wallet is' : `${n - first.threshold} wallets are`} lost.` };
+    note: n === 1 ? 'One key. A single-signature wallet.' : first.threshold === n ? 'One lost wallet locks the coins.' : first.threshold === 1 ? 'Any one owner can spend alone.' : `Still spends if ${n - first.threshold === 1 ? 'one wallet is' : `${n - first.threshold} wallets are`} lost.` };
   if(sameKeys(later.keys, first.keys, policy.network)){
-    if(first.threshold === n && later.threshold < n) return { ...base, kind: 'aged', name: 'AGED COINS', note: `A lost wallet delays the coins and does not lock them.` };
+    if(first.threshold === n && later.threshold < n) return { ...base, kind: 'aged', name: 'AGED COINS', note: `A lost wallet delays the coins and does not lock them.${later.threshold === 1 ? ' After the delay, one stolen wallet could spend them too.' : ''}${short}` };
     return { ...base, kind: 'custom', name: 'CUSTOM', note: 'This vault has its own rules. Read each one.' };
   }
-  return { ...base, kind: 'deadman', name: 'DEADMAN SWITCH', note: 'If the owners stop moving coins, the recovery keys can take over after the delay.' };
+  const inside = later.keys.every(k => first.keys.some(o => sameKey(k, o, policy.network)));
+  return { ...base, kind: 'deadman', name: 'DEADMAN SWITCH', note: `${inside ? 'After the delay, the owners listed there can spend without the others.' : 'If the owners stop moving coins, the recovery keys can take over after the delay.'}${short}` };
 }
 
 async function readEvmVault(chainId, address, doFetch = (...a) => root.fetch(...a)){

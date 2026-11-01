@@ -94,7 +94,7 @@ function readInvite(){
 // An owner's own row is theirs the moment they connect, whichever way they did.
 function takeSeat(){
   const me = S.me, row = [...S.rows, ...S.recRows].find(r => r.text.toLowerCase() === me.evm || r.text === me.wallet);
-  if(row) Object.assign(row, { owner: me.owner, handle: me.handle, state: 'ready', mine: true, error: null });
+  if(row) Object.assign(row, { seq: (row.seq || 0) + 1, owner: me.owner, handle: me.handle, state: 'ready', mine: true, error: null });
   return !!row;
 }
 const total = () => filled().length;
@@ -117,6 +117,7 @@ async function resolve(row){
   const seq = row.seq = (row.seq || 0) + 1, stale = () => seq !== row.seq;
   Object.assign(row, { owner: null, error: null, addr: null });
   if(!t) return void (row.state = 'empty');
+  row.state = 'checking';
   try {
     // A name is shown with the address it reached, since that is who gets the seat.
     if(BV.isName(t)){ const a = await BV.resolveName(t); if(stale()) return; t = row.addr = a; }
@@ -243,10 +244,11 @@ function renderOwners(){
     // Whoever sent this chose every line of it. A vault someone hands you can be one they
     // alone control, so the rule is said plainly and nothing is saved until it is checked.
     const rows = S.rows.map(r => `<div class="row"><span class="n">${markOf(r.text)}</span><span class="inp full">${esc(r.addr ? `${r.text} · ${r.addr}` : r.text)}</span>${r.mine ? '<span class="st ok">YOU</span>' : statusOf(r)}</div>`).join('');
+    const m = recFilled().length, rt = Math.min(S.recTh, Math.max(m, 1));
     const onRec = recFilled().some(r => r.mine), seated = S.rows.some(r => r.mine) || onRec, others = n - (S.rows.some(r => r.mine) ? 1 : 0);
     const warn = th === 1 && n > 1 ? 'Any one owner can spend everything alone.' : others >= th ? `The other ${others === 1 ? 'owner' : `${others} owners`} can spend without you.` : S.kind === 'recovery' && m - (onRec ? 1 : 0) >= rt ? 'After the delay, the recovery keys can spend without you.' : null;
     const recs = recFilled().map(r => `<div class="row"><span class="n">${markOf(r.text)}</span><span class="inp full">${esc(r.text)}</span>${r.mine ? '<span class="st ok">YOU</span>' : statusOf(r)}</div>`).join('');
-    const m = recFilled().length, rt = Math.min(S.recTh, Math.max(m, 1)), wait = esc(BV.aboutBlocks(S.older));
+    const wait = esc(BV.aboutBlocks(S.older));
     const rule = S.kind === 'hold' ? `All ${n} must sign now, or <strong>${th} of ${n}</strong> for coins unmoved for ${S.older} blocks, ${wait}.` : S.kind === 'recovery' ? `<strong>${th} of ${n}</strong> must sign. Or <strong>${rt} of ${m}</strong> recovery keys below, for coins unmoved for ${S.older} blocks, ${wait}.` : `<strong>${th} of ${n}</strong> must sign.`;
     return `<h2>${seated ? 'You are in' : 'You are invited'}</h2><p class="lead">${rule} ${waiting || !allReady() ? 'Waiting for the others. This updates by itself.' : 'Every owner is ready.'}</p>
       ${rows}${recs ? `<div class="plbl">RECOVERY KEYS</div>${recs}` : ''}
@@ -401,11 +403,14 @@ const ACT = {
   copy(){ return navigator.clipboard.writeText(BV.vaultOf(S.policy).address).then(() => toast('ADDRESS COPIED'), () => toast('THE BROWSER REFUSED THE CLIPBOARD')); },
 };
 
+const EDITS = new Set(['add', 'drop', 'th', 'kind', 'delay', 'addrec', 'droprec', 'rth', 'net', 'go']);
 document.addEventListener('click', async e => {
   const el = e.target.closest('[data-act]');
   // Past the busy lock on purpose: the lock is what a stuck wallet would be holding.
   if(el?.dataset.act === 'cancelconnect'){ BW.cancelPrompt(); return; }
   if(!el || el.disabled || S.busy) return;
+  // The tick is for what is on screen, so changing anything clears it.
+  if(EDITS.has(el.dataset.act)) S.checked = false;
   S.busy = true;
   S.msg = null;
   try { await ACT[el.dataset.act](el); }
@@ -421,6 +426,9 @@ document.addEventListener('input', e => {
   if(i === undefined && j === undefined) return;
   const row = j === undefined ? S.rows[+i] : S.recRows[+j];
   row.text = e.target.value;
+  row.seq = (row.seq || 0) + 1;
+  row.owner = null;
+  S.checked = false;
   row.state = row.text.trim() ? 'checking' : 'empty';
   render();
   // One timer per row: a shared one let typing in the next row cancel this row's lookup.

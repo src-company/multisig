@@ -1849,9 +1849,13 @@ CREATE TABLE IF NOT EXISTS btc_owner_handles (
 ALTER TABLE btc_owner_handles ENABLE ROW LEVEL SECURITY;
 -- The key a handle carries, as the service read it. Filled in for older rows by hand.
 ALTER TABLE btc_owner_handles ADD COLUMN IF NOT EXISTS key_id text;
+-- How much a handle proves. A replacement may not prove less, or anyone could post an
+-- owner's older handle back over their newer one.
+ALTER TABLE btc_owner_handles ADD COLUMN IF NOT EXISTS rank integer NOT NULL DEFAULT 0;
 
 DROP FUNCTION IF EXISTS put_btc_handle(text, text, text);
-CREATE OR REPLACE FUNCTION put_btc_handle(p_address text, p_network text, p_handle text, p_key text)
+DROP FUNCTION IF EXISTS put_btc_handle(text, text, text, text);
+CREATE OR REPLACE FUNCTION put_btc_handle(p_address text, p_network text, p_handle text, p_key text, p_rank integer)
 RETURNS void AS $$
 BEGIN
   IF coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb->>'role', '') <> 'metadata_writer' THEN
@@ -1863,9 +1867,9 @@ BEGIN
   -- An address keeps its first key: a twin is derived from this table, so a change would
   -- move a funded vault's address, and a proof carries no date to say which is newer. A
   -- new handle for the same key is fine, which is how an older handle gets its new proof.
-  INSERT INTO btc_owner_handles (address, network, handle, key_id) VALUES (p_address, p_network, p_handle, p_key)
-  ON CONFLICT (address, network) DO UPDATE SET handle = EXCLUDED.handle, updated_at = now()
-  WHERE btc_owner_handles.key_id = EXCLUDED.key_id;
+  INSERT INTO btc_owner_handles (address, network, handle, key_id, rank) VALUES (p_address, p_network, p_handle, p_key, p_rank)
+  ON CONFLICT (address, network) DO UPDATE SET handle = EXCLUDED.handle, rank = EXCLUDED.rank, updated_at = now()
+  WHERE btc_owner_handles.key_id = EXCLUDED.key_id AND EXCLUDED.rank >= btc_owner_handles.rank;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'This address already holds a different key' USING ERRCODE = '23505';
   END IF;

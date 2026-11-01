@@ -8963,7 +8963,7 @@ function renderBtcPanel(c){
   const owners = c.owners.map(o => (o.addr || '').trim()).filter(a => ethers.isAddress(a));
   const threshold = Math.min(Number(c.threshold) || 1, owners.length || 1);
   if(!owners.length) return `<div style="margin-top:12px;font-size:10px;letter-spacing:1px;color:var(--d)">ADD OWNERS TO SEE WHO IS READY FOR BITCOIN</div>`;
-  const kind = c.btcKind || 'plain', older = c.btcOlder || 4320;
+  const kind = c.btcKind === 'hold' && owners.length < 2 ? 'plain' : c.btcKind || 'plain', older = c.btcOlder || 4320;
   // Anything past a plain quorum is finished on /btc, which holds the recovery keys and
   // the owners' signatures. This hands over the draft, in a fragment no server sees.
   const draftTh = kind === 'hold' ? Math.min(threshold, Math.max(owners.length - 1, 1)) : threshold;

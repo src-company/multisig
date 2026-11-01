@@ -779,7 +779,7 @@ function verifyHandle(input) {
   try { owner = BitcoinVault.decodeOwner(input.handle, input.network); }
   catch (error) { throw new RequestError(403, error.message); }
   if (!owner.proven) throw new RequestError(403, 'A handle must be signed by its Ethereum address');
-  const write = { fn: 'put_btc_handle', args: { p_address: owner.evm, p_network: input.network, p_handle: input.handle.trim(), p_key: BitcoinVault.keyId(owner, input.network) } };
+  const write = { fn: 'put_btc_handle', args: { p_address: owner.evm, p_network: input.network, p_handle: input.handle.trim(), p_key: BitcoinVault.keyId(owner, input.network), p_rank: (owner.possessed ? 2 : 0) + (owner.wallet ? 1 : 0) } };
   if (owner.wallet) write.link = { fn: 'put_btc_wallet_link', args: { p_wallet: owner.wallet, p_network: input.network, p_address: owner.evm } };
   return write;
 }
@@ -881,7 +881,7 @@ async function admitBitcoinProposal(input, deps, who) {
   if (prior) {
     try { psbt = (await inWorker('merge', { ...job, prior }, who)).psbt; }
     catch (error) {
-      if (error.status === 503) throw error;
+      if (error.status === 503 || error.status === 429) throw error;
       throw new RequestError(409, 'That copy disagrees with the proposal in the queue');
     }
   }

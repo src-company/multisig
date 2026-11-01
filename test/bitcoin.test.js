@@ -517,7 +517,7 @@ test('a popup rejected too fast to be a person gets one more try', async () => {
 test('a vault describes its own rules in the same words everywhere', () => {
   const [a, b, c] = seats('signet'), [x, y] = owners(a, b), [z] = owners(c);
   const two = BV.policyOf({ network: 'signet', paths: [{ threshold: 2, keys: [x, y] }, { threshold: 1, keys: [x, y], older: 4320 }] });
-  assert.deepEqual(BV.describePolicy(two), ['All 2 owners can spend at any time.', 'Any 1 of 2 owners can also spend any coin unmoved for 4320 blocks, about 30 days.']);
+  assert.deepEqual(BV.describePolicy(two), ['Both owners must sign.', 'Any 1 of 2 owners can also spend any coin unmoved for 4320 blocks, about 30 days.']);
   const dead = BV.policyOf({ network: 'signet', paths: [{ threshold: 2, keys: [x, y] }, { threshold: 1, keys: [z], older: 144 }] });
   assert.equal(BV.describePolicy(dead)[1], 'The recovery key can also spend any coin unmoved for 144 blocks, about 24 hours.');
   assert.ok(BV.HOW_IT_WORKS.length >= 5);
@@ -526,11 +526,15 @@ test('a vault describes its own rules in the same words everywhere', () => {
 test('a vault names its own policy, and only a key can claim a wallet label', () => {
   const [a, b, c] = seats('signet'), [x, y] = owners(a, b), [z] = owners(c), P = paths => BV.policySummary(BV.policyOf({ network: 'signet', paths }));
   assert.equal(P([{ threshold: 2, keys: [x, y] }]).kind, 'standard');
-  assert.match(P([{ threshold: 2, keys: [x, y] }]).note, /lost wallet locks/);
+  assert.match(P([{ threshold: 2, keys: [x, y] }]).note, /One lost wallet locks/);
   assert.equal(P([{ threshold: 2, keys: [x, y] }, { threshold: 1, keys: [z], older: 144 }]).kind, 'deadman');
   assert.equal(P([{ threshold: 2, keys: [x, y] }, { threshold: 1, keys: [x], older: 144 }]).kind, 'deadman');
   assert.equal(P([{ threshold: 2, keys: [x, y] }, { threshold: 1, keys: [x, y], older: 144 }]).kind, 'aged');
   assert.equal(P([{ threshold: 1, keys: [x, y] }, { threshold: 1, keys: [x, y], older: 144 }]).kind, 'custom');
+  assert.match(P([{ threshold: 2, keys: [x, y] }, { threshold: 1, keys: [x, y], older: 144 }]).note, /one stolen wallet/);
+  assert.match(P([{ threshold: 2, keys: [x, y] }, { threshold: 1, keys: [x], older: 144 }]).note, /without the others/);
+  assert.match(P([{ threshold: 2, keys: [x, y] }, { threshold: 1, keys: [z], older: 3 }]).note, /very short/);
+  assert.equal(BV.aboutBlocks(3), 'about 30 minutes');
   const evm = '0x' + '12'.repeat(20), sign = BV.signPossession(a.signer, 'signet', evm);
   assert.equal(sign.length, 128);
   assert.notEqual(sign, BV.signPossession(b.signer, 'signet', evm));
