@@ -6204,6 +6204,7 @@ ${/* When this vault executes, as one bracketed clause. The delay and the one
         ${v.fastPath?'<span class="meta-fast" title="Unanimous owner signatures can bypass the timelock — instant execution via the executor">INSTANT &middot; ALL OWNERS</span>':""}</span>
       <span>${S.demoMode?v.chain:chainName()}</span>
       ${v.address&&ethers.isAddress(v.address)?`<span>${S.demoMode?addrLink(v.address,v.chain):addrLink(v.address)}${copyBtn(v.address)}</span>`:""}
+      ${renderBtcMeta(v)}
 ${/* The name used to sit here too. It moved up to the header, beside the
            address it stands in for, where it is visible from every tab rather
            than only this one — and repeating it a hundred pixels below said
@@ -8253,8 +8254,9 @@ METHOD      ${(c.fastPath&&ds>0)||c.wns?"createWithCalls()":"create()"}</div><di
         ${on?`<div class="net-tokens">${t.map(tk=>`<span>${tk}</span>`).join("")}${n.test?'<span style="opacity:.5">+ CUSTOM</span>':""}</div>`:""}
       </div>${i===BTC_ROW_AFTER?`<div>${BTC_ROW}</div>`:''}`}).join("")}</div>
       <span class="lbl" id="lbl-clone" style="display:block;margin-top:20px">CLONE TO OTHER CHAINS <span class="dim">&middot; SAME ADDRESS</span></span>
-      <div class="token-pills" role="group" aria-labelledby="lbl-clone">${NETS.map((n,i)=>i===c.net?'':`<button class="pill${(c.clone||[]).includes(i)?' on':''}" aria-pressed="${(c.clone||[]).includes(i)}" onclick="toggleClone(${i})">${chainIcon(n.id)}${esc(n.name)}${n.test?'<span class="pill-test">TEST</span>':''}</button>`).filter(Boolean).join('')}</div>
+      <div class="token-pills" role="group" aria-labelledby="lbl-clone">${NETS.map((n,i)=>i===c.net?'':`<button class="pill${(c.clone||[]).includes(i)?' on':''}" aria-pressed="${(c.clone||[]).includes(i)}" onclick="toggleClone(${i})">${chainIcon(n.id)}${esc(n.name)}${n.test?'<span class="pill-test">TEST</span>':''}</button>`).filter(Boolean).join('')}${renderBtcPill(c)}</div>
       ${(()=>{const sel=[c.net,...(c.clone||[])].map(i=>NETS[i]).filter(Boolean);const mixed=sel.some(n=>n.test)&&sel.some(n=>!n.test);return mixed?`<div style="margin-top:12px;font-size:9px;letter-spacing:1px;color:var(--y);line-height:1.5">MIXING MAINNET &amp; TESTNET &mdash; DEPLOYING TO BOTH IN ONE GO. UNCHECK IF UNINTENDED.</div>`:'';})()}
+      ${renderBtcPanel(c)}
       ${!val.ready?`<div style="margin-top:24px;font-size:10px;letter-spacing:1px;color:var(--y);text-align:center">${esc(val.reason)}</div>`:""}
       ${(()=>{const nc=1+(c.clone||[]).length;return `<button class="btn ${val.ready?"btn-fill":"btn-disabled"} btn-w btn-big" id="deploy-btn" style="margin-top:${val.ready?28:8}px" ${val.ready?"":'title="'+esc(val.reason)+'"'} onclick="${val.ready?"doDeploy()":""}">${nc>1?`DEPLOY TO ${nc} CHAINS`:"DEPLOY"}</button>${nc>1?`<div style="margin-top:8px;font-size:9px;color:var(--d);letter-spacing:1px;text-align:center">Same vault address on ${net.name}${(c.clone||[]).map(i=>", "+NETS[i].name).join("")}</div>`:""}`;})()}
       <div style="margin-top:12px;font-size:9px;color:var(--d);letter-spacing:1px;text-align:center">VIA <a href="${explorerBase}/address/${FACTORY}" target="_blank" rel="noopener" style="color:var(--d);border-bottom:1px solid var(--ln);text-decoration:none">MULTISIGFACTORY</a></div>
@@ -8875,6 +8877,96 @@ function doAccelerate(vi, nonce) {
   } else {
     guardSubmit(prodAccelerate)(vi, nonce);
   }
+}
+
+// ── BITCOIN ────────────────────────────────────────────────
+// Bitcoin is one more place a vault can exist, with the same owners and threshold, but
+// nothing is deployed there. Its address is worked out from each owner's Bitcoin key,
+// and a key can only come from its owner, so each connects once and publishes a signed
+// handle. With all of them in, anyone reaches the same vault. The libraries load only
+// here, so a page that never touches Bitcoin never fetches them.
+let _btcLib = null;
+function loadBitcoin(){
+  return _btcLib || (_btcLib = new Promise((ok, no) => {
+    const add = (src, next) => {
+      const el = document.createElement('script');
+      el.src = src;
+      el.onload = next;
+      el.onerror = () => { _btcLib = null; no(new Error('Could not load the Bitcoin libraries')); };
+      document.head.appendChild(el);
+    };
+    add('./btc.min.js', () => add('./bitcoin.js', () => ok(window.BitcoinVault)));
+  }));
+}
+// What the registry knows about these owners, read once per set and drawn when it lands.
+const _btcSets = new Map();
+function btcSet(network, owners, threshold){
+  const list = owners.map(a => a.toLowerCase()), key = `${network}|${threshold}|${list.join()}`;
+  if(!_btcSets.has(key)){
+    _btcSets.set(key, { loading: true, handles: [], ready: [], link: null });
+    loadBitcoin().then(BV => BV.fetchHandles(network, list).then(handles => {
+      const { missing, policy } = BV.mirror({ network, vault: { owners: list, threshold }, handles });
+      const link = policy ? `./bitcoin.html#${network}/${encodeURIComponent(BV.descriptor(policy))}` : null;
+      _btcSets.set(key, { loading: false, handles, ready: list.filter(a => !missing.includes(a)), link });
+      render();
+    })).catch(e => { console.error('Bitcoin owners:', e); _btcSets.set(key, { loading: false, failed: true, handles: [], ready: [], link: null }); render(); });
+  }
+  return _btcSets.get(key);
+}
+async function publishMyBitcoinKey(network){
+  const addr = window._connectedAddress, signer = window._signer;
+  if(!addr || !signer){ flash('CONNECT A WALLET FIRST'); return; }
+  try {
+    const BV = await loadBitcoin();
+    flash('SIGN IN YOUR WALLET: 3 PROMPTS');
+    const key = await BV.deriveOwnerKey(m => signer.signMessage(m), network);
+    const proof = await signer.signMessage(BV.bindingMessage(network, key.owner));
+    // This page only ever publishes the public half. The key itself is used on the
+    // Bitcoin page, which is built to hold one.
+    key.signer.wipePrivateData();
+    await BV.publishHandle(BV.encodeOwner({ network, ...key.owner, evm: addr.toLowerCase(), proof }), network);
+    _btcSets.clear();
+    flash('BITCOIN KEY READY');
+    render();
+  } catch(e) { console.error('Bitcoin key:', e); flash(e?.message ? e.message.toUpperCase().slice(0, 80) : 'COULD NOT SET UP A BITCOIN KEY'); }
+}
+window.publishMyBitcoinKey = publishMyBitcoinKey;
+function toggleBtc(){ S.cf.btc = !S.cf.btc; render(); }
+window.toggleBtc = toggleBtc;
+// Testnets go with signet. A deploy set that mixes them is warned about already, and
+// real bitcoin is only implied when every chain in it is real.
+const btcNetworkOf = sel => sel.some(n => n && n.test) ? 'signet' : 'mainnet';
+
+function renderBtcPill(c){
+  return `<button class="pill${c.btc?' on':''}" aria-pressed="${!!c.btc}" onclick="toggleBtc()"><span class="tok-ico">${BTC_LOGO}</span> BITCOIN</button>`;
+}
+function renderBtcPanel(c){
+  if(!c.btc) return '';
+  const network = btcNetworkOf([c.net, ...(c.clone || [])].map(i => NETS[i]));
+  const owners = c.owners.map(o => (o.addr || '').trim()).filter(a => ethers.isAddress(a));
+  const threshold = Math.min(Number(c.threshold) || 1, owners.length || 1);
+  if(!owners.length) return `<div style="margin-top:12px;font-size:10px;letter-spacing:1px;color:var(--d)">ADD OWNERS TO SEE WHO IS READY FOR BITCOIN</div>`;
+  const set = btcSet(network, owners, threshold), me = (window._connectedAddress || '').toLowerCase();
+  const mine = owners.some(a => a.toLowerCase() === me), iAmReady = set.ready.includes(me);
+  return `<div class="net-panel" style="margin-top:12px;padding:10px 14px">
+    <div style="font-size:10px;letter-spacing:2px;color:var(--m);font-weight:600">${network === 'mainnet' ? 'BITCOIN' : 'SIGNET'} &middot; ${threshold} OF ${owners.length} &middot; FREE, NOTHING TO DEPLOY</div>
+    ${owners.map(a => { const ok = set.ready.includes(a.toLowerCase()); return `<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;font-size:10px;letter-spacing:1px;color:${ok ? 'var(--g)' : 'var(--d)'}"><span>${esc(a.slice(0, 6) + '…' + a.slice(-4))}</span><span>${set.loading ? '…' : ok ? 'READY' : 'WAITING'}</span></div>`; }).join('')}
+    ${mine && !iAmReady && !set.loading ? `<button class="btn btn-outline btn-sm" style="margin-top:6px" onclick="publishMyBitcoinKey('${network}')">SET UP MY BITCOIN KEY</button>` : ''}
+    ${set.link ? `<a class="alt-link" style="display:inline-block;margin-top:6px;text-decoration:none" href="${esc(set.link)}">OPEN ON BITCOIN &#8599;</a>` : `<div style="margin-top:6px;font-size:10px;line-height:1.6;color:var(--d)">Each owner sets up once, here or on the vault. The vault appears on its dashboard when all are ready. Contract owners, such as a Safe, cannot take part.</div>`}
+  </div>`;
+}
+// Every vault gets this, however it was made: the Bitcoin twin is a function of its
+// owners, so there is nothing to have remembered at deploy time.
+function renderBtcMeta(v){
+  if(S.demoMode || !v.address || !ethers.isAddress(v.address) || !v.owners?.length) return '';
+  const owners = v.owners.map(o => o.addr).filter(a => ethers.isAddress(a));
+  if(owners.length !== v.owners.length || !v.threshold || owners.length > 20) return '';
+  const network = btcNetworkOf([NETS.find(n => n.id === S.chainId)]);
+  const set = btcSet(network, owners, Number(v.threshold)), me = (window._connectedAddress || '').toLowerCase();
+  if(set.failed || set.loading) return '';
+  if(set.link) return `<span><a href="${esc(set.link)}" style="color:inherit;border-bottom:1px solid var(--ln);text-decoration:none">BITCOIN &#8599;</a></span>`;
+  const mine = owners.some(a => a.toLowerCase() === me) && !set.ready.includes(me);
+  return `<span>BITCOIN ${set.ready.length}/${owners.length}${mine ? ` <button class="alt-link" onclick="publishMyBitcoinKey('${network}')">SET UP</button>` : ''}</span>`;
 }
 
 function toggleClone(i){

@@ -436,21 +436,41 @@ async function readEvmVault(chainId, address, doFetch = (...a) => root.fetch(...
   return { chainId, address, owners, threshold: parseInt(min, 16) };
 }
 
+// The handle registry. Everything read from it is checked here, so it is a place to
+// find handles and not something to trust: a row that does not prove itself, or that
+// names a different address from the one asked for, is dropped.
+const API = 'https://multisig-proposals.onrender.com', STORE = 'https://multisig-postgrest.onrender.com';
+async function publishHandle(handle, network, doFetch = (...a) => root.fetch(...a)){
+  const r = await doFetch(`${API}/handle`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle, network }), signal: root.AbortSignal?.timeout(TIMEOUT_MS) });
+  if(!r.ok) throw new Error('Could not publish this handle');
+}
+async function fetchHandles(network, addresses, doFetch = (...a) => root.fetch(...a)){
+  net(network);
+  const wanted = addresses.map(a => a.toLowerCase());
+  const r = await doFetch(`${STORE}/rpc/btc_handles`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ p_network: network, p_addresses: wanted }), signal: root.AbortSignal?.timeout(TIMEOUT_MS) });
+  if(!r.ok) throw new Error('Could not read owner handles');
+  const out = [];
+  for(const row of await r.json()){
+    try { const h = decodeOwner(row.handle, network); if(h.proven && h.evm === row.address && wanted.includes(h.evm)) out.push(row.handle); } catch(_) {}
+  }
+  return out;
+}
+
 // `missing` is who has not published yet. A proven handle from someone who is not an
 // owner is an error rather than ignored, since it is probably the wrong vault.
 function mirror({ network, vault, handles }){
-  const byOwner = new Map();
+  const byOwner = new Map(), owners = vault.owners.map(o => o.toLowerCase());
   for(const text of handles){
     const h = decodeOwner(text, network);
     if(!h.proven) throw new Error('every handle must be signed by its Ethereum address. Ask that owner to connect again and copy a fresh one.');
-    if(!vault.owners.includes(h.evm)) throw new Error(`${h.evm} is not an owner of that vault`);
+    if(!owners.includes(h.evm)) throw new Error(`${h.evm} is not an owner of that vault`);
     // One address, one key, or the same handles could give two different vaults.
     if(byOwner.has(h.evm) && byOwner.get(h.evm).xpub !== h.xpub) throw new Error(`${h.evm} has two different keys here`);
     byOwner.set(h.evm, h);
   }
-  const missing = vault.owners.filter(o => !byOwner.has(o));
+  const missing = owners.filter(o => !byOwner.has(o));
   if(missing.length) return { missing, policy: null };
-  return { missing, policy: policyOf({ network, paths: [{ threshold: vault.threshold, keys: vault.owners.map(o => byOwner.get(o)) }] }) };
+  return { missing, policy: policyOf({ network, paths: [{ threshold: vault.threshold, keys: owners.map(o => byOwner.get(o)) }] }) };
 }
 
 // One address of a vault. `branch` is 0 for receive and 1 for change.
@@ -859,7 +879,7 @@ function concat(...parts){
   return out;
 }
 
-root.BitcoinVault = { MAX_INDEX, txidOf, seatMisdescribed, EVM_CHAINS, selectors: { threshold: selector('threshold()') }, readEvmVault, mirror, bindingMessage, evmMessageHash, NETWORKS, DUST, GAP, MAX_OWNERS, MAX_OLDER, MAX_FEE_RATE, encodeOwner, decodeOwner, originText, ownerMessage, deriveOwnerKey, keyFromSignature, fingerprintOf,
+root.BitcoinVault = { publishHandle, fetchHandles, MAX_INDEX, txidOf, seatMisdescribed, EVM_CHAINS, selectors: { threshold: selector('threshold()') }, readEvmVault, mirror, bindingMessage, evmMessageHash, NETWORKS, DUST, GAP, MAX_OWNERS, MAX_OLDER, MAX_FEE_RATE, encodeOwner, decodeOwner, originText, ownerMessage, deriveOwnerKey, keyFromSignature, fingerprintOf,
   policyOf, descriptor, descriptorChecksum, parseDescriptor, walletPolicy, vaultOf, vsize, coinsFor, propose, inspect, sign, combine, finalize, chain, scan };
 
 })(typeof window !== 'undefined' ? window : globalThis);

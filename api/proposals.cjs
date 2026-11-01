@@ -10,6 +10,11 @@ const context = vm.createContext({ TextEncoder, TextDecoder, Uint8Array });
 context.window = context;
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../dapp/ethers.slim.min.js'), 'utf8'), context);
 const ethers = context.ethers;
+// The same code that makes a handle in the dapp is what checks one here.
+const btcContext = vm.createContext({ TextEncoder, TextDecoder, Uint8Array, crypto: globalThis.crypto });
+btcContext.globalThis = btcContext;
+for (const file of ['btc.min.js', 'bitcoin.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, '../dapp', file), 'utf8'), btcContext);
+const BitcoinVault = btcContext.BitcoinVault;
 const TYPES = { Execute: [
   { name: 'target', type: 'address' }, { name: 'value', type: 'uint256' },
   { name: 'data', type: 'bytes' }, { name: 'nonce', type: 'uint32' },
@@ -737,6 +742,18 @@ function dependencies({ postgrestUrl, jwtSecret, rpcUrls }, fetcher = fetch) {
   };
 }
 
+// A Bitcoin owner handle. It needs no vault and no session, only its own proof: the
+// address it names must have signed the key it carries.
+function verifyHandle(input) {
+  check(input && typeof input.handle === 'string' && input.handle.length <= 400, 'Invalid handle');
+  check(input.network === 'mainnet' || input.network === 'signet', 'Invalid network');
+  let owner;
+  try { owner = BitcoinVault.decodeOwner(input.handle, input.network); }
+  catch (error) { throw new RequestError(403, error.message); }
+  if (!owner.proven) throw new RequestError(403, 'A handle must be signed by its Ethereum address');
+  return { fn: 'put_btc_handle', args: { p_address: owner.evm, p_network: input.network, p_handle: input.handle.trim() } };
+}
+
 function createHandler(deps, allowedOrigins = []) {
   let active = 0;
   return async (req, res) => {
@@ -750,7 +767,7 @@ function createHandler(deps, allowedOrigins = []) {
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     }
     if (req.url === '/health' && req.method === 'GET') { res.writeHead(200); res.end('ok'); return; }
-    if (!['/proposals', '/metadata', '/action', '/signature', '/reconcile', '/register', '/confirm', '/session'].includes(req.url)) { res.writeHead(404); res.end(); return; }
+    if (!['/proposals', '/metadata', '/action', '/signature', '/reconcile', '/register', '/confirm', '/session', '/handle'].includes(req.url)) { res.writeHead(404); res.end(); return; }
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
     if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
     if (active >= 32) { res.writeHead(503); res.end(); return; }
@@ -769,6 +786,12 @@ function createHandler(deps, allowedOrigins = []) {
       catch (_) { throw new RequestError(400, 'Invalid JSON'); }
       if (req.url === '/metadata') {
         await deps.saveMetadata(await verifyMetadata(input, deps));
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+      if (req.url === '/handle') {
+        await deps.saveMetadata(verifyHandle(input));
         res.writeHead(204);
         res.end();
         return;
@@ -841,4 +864,4 @@ if (require.main === module) {
   server.listen(Number(PORT), '0.0.0.0');
 }
 
-module.exports = { verifyProposal, verifyMetadata, verifyAction, verifySignature, verifyReconcile, verifyRegistration, verifyConfirm, verifySession, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, ACTION_TYPES, SESSION_TYPES, iface };
+module.exports = { verifyHandle, verifyProposal, verifyMetadata, verifyAction, verifySignature, verifyReconcile, verifyRegistration, verifyConfirm, verifySession, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, ACTION_TYPES, SESSION_TYPES, iface };

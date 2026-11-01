@@ -128,6 +128,7 @@ const sandbox = {
   // suite is asking whether the card draws at all.
   txDecodeLink: () => '',
   renderSlowOutbound: () => '',
+  renderBtcMeta: () => '',
   renderTxBuilder: () => '<div id="txb"></div>',
   renderSim: () => '',
   vaultRef: v => v.address,

@@ -25,6 +25,8 @@ Why extended keys: a hardware wallet finds its key by fingerprint and path, and 
 
 ## The same owners as an Ethereum vault
 
+The deployment wizard offers Bitcoin beside the other chains, and every vault's dashboard links to its Bitcoin twin once all its owners are ready. Nothing is deployed there and nothing needs remembering at deploy time, because the twin is a function of the owners and threshold.
+
 A Bitcoin vault can be derived from an Ethereum vault. `getOwners()` and `threshold()` come from the contract, and each owner supplies a signed handle. Owners are sorted, so everyone holding the same handles reaches the same descriptor, and no one has to create it.
 
 Each owner must take part once. A Bitcoin owner key comes from that owner's signature, so it cannot be computed from an address. An Ethereum public key could be recovered from a past transaction, but no Ethereum wallet can produce the signature a Bitcoin script needs, so coins sent to it could never move.
@@ -37,7 +39,7 @@ Limits:
 - The EVM timelock does not carry over, for the reasons under Timelocks.
 - Contract owners, such as a Safe, cannot take part, because they cannot make a repeatable signature.
 - The owner list comes from one RPC. A lying RPC could name different owners, so the page shows them before creating anything.
-- Handles travel by paste. Publishing them, in Postgres or a `.wei` text record as Tacit does, is not built.
+- Handles are published to `btc_owner_handles` by `POST /handle`, which checks the signature with the same code the dapp runs. Every client checks them again on reading, so the table can lose a handle but cannot forge one.
 
 ## What came from Tacit
 

@@ -825,3 +825,26 @@ test('a session signature is not usable as any vault operation', async () => {
     assert.ok(res.status === 400 || res.status === 403, `${url} -> ${res.status}`);
   }
 });
+
+test('a Bitcoin handle is stored only when its address signed it', async () => {
+  const { verifyHandle } = require('../api/proposals.cjs');
+  const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
+  const c = vm.createContext({ TextEncoder, TextDecoder, Uint8Array, crypto: globalThis.crypto });
+  c.globalThis = c;
+  for (const f of ['btc.min.js', 'bitcoin.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, '../dapp', f), 'utf8'), c);
+  const BV = c.BitcoinVault, { secp256k1: s, keccak_256: k, sha256, hex } = c.btc;
+  const priv = sha256(new TextEncoder().encode('evm')), pub = s.Point.fromBytes(s.getPublicKey(priv)).toBytes(false);
+  const evm = '0x' + hex.encode(k(pub.subarray(1)).subarray(12));
+  const sign = t => { const r = s.sign(BV.evmMessageHash(t), priv, { prehash: false, format: 'recovered' }); return '0x' + hex.encode(r.subarray(1)) + (r[0] + 27).toString(16); };
+  const { owner } = BV.keyFromSignature('0x' + '1'.repeat(128) + '1b', 'signet');
+  const handle = BV.encodeOwner({ network: 'signet', ...owner, evm, proof: sign(BV.bindingMessage('signet', owner)) });
+  const write = verifyHandle({ handle, network: 'signet' });
+  assert.equal(write.args.p_address, evm);
+  assert.equal(write.fn, 'put_btc_handle');
+  assert.throws(() => verifyHandle({ handle, network: 'mainnet' }), /another network/);
+  assert.throws(() => verifyHandle({ handle: BV.encodeOwner({ network: 'signet', ...owner, evm }), network: 'signet' }), /must be signed/);
+  assert.throws(() => verifyHandle({ handle, network: 'testnet' }), /Invalid network/);
+  const stranger = '0x' + 'ab'.repeat(20);
+  assert.throws(() => verifyHandle({ handle: BV.encodeOwner({ network: 'signet', ...owner, evm: stranger, proof: sign(BV.bindingMessage('signet', owner)) }), network: 'signet' }), /not signed by/);
+});
+

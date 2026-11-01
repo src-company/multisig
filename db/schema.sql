@@ -1829,3 +1829,45 @@ END $$;
 ALTER VIEW my_wallets SET (security_invoker = true);
 ALTER VIEW tx_summary SET (security_invoker = true);
 ALTER VIEW tx_history SET (security_invoker = true);
+
+-- ── BITCOIN OWNER HANDLES ───────────────────────────────────
+-- A Bitcoin key comes from its owner's own wallet signature and cannot be worked out
+-- from an address, so each owner publishes a handle once, and any vault they sit on
+-- can then have a Bitcoin twin. The address column is what lets a vault find them.
+--
+-- Unlike most of this file, nothing here is re-derived from chain: it is re-derived
+-- from the handle. Each one carries the address's signature over the key, the service
+-- checks it before writing, and every client checks it again on reading, so this
+-- table can lose a row but cannot forge one.
+CREATE TABLE IF NOT EXISTS btc_owner_handles (
+  address    text NOT NULL CHECK (address ~ '^0x[0-9a-f]{40}$'),
+  network    text NOT NULL CHECK (network IN ('mainnet', 'signet')),
+  handle     text NOT NULL CHECK (length(handle) BETWEEN 1 AND 400),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (address, network)
+);
+ALTER TABLE btc_owner_handles ENABLE ROW LEVEL SECURITY;
+
+CREATE OR REPLACE FUNCTION put_btc_handle(p_address text, p_network text, p_handle text)
+RETURNS void AS $$
+BEGIN
+  IF coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb->>'role', '') <> 'metadata_writer' THEN
+    RAISE EXCEPTION 'A verified owner signature is required' USING ERRCODE = '42501';
+  END IF;
+  PERFORM rate_gate('btc_handle:' || client_ip(), 30, interval '1 minute');
+  INSERT INTO btc_owner_handles (address, network, handle) VALUES (p_address, p_network, p_handle)
+  ON CONFLICT (address, network) DO UPDATE SET handle = EXCLUDED.handle, updated_at = now();
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+CREATE OR REPLACE FUNCTION btc_handles(p_network text, p_addresses text[])
+RETURNS TABLE (address text, handle text) AS $$
+BEGIN
+  IF coalesce(cardinality(p_addresses), 0) > 64 THEN
+    RAISE EXCEPTION 'Too many addresses' USING ERRCODE = '22023';
+  END IF;
+  RETURN QUERY SELECT h.address, h.handle FROM btc_owner_handles h
+    WHERE h.network = p_network AND h.address = ANY (p_addresses);
+END;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
+

@@ -505,6 +505,21 @@ test('a txid is worked out from the transaction itself', () => {
   assert.match(BV.txidOf(raw), /^[0-9a-f]{64}$/);
 });
 
+test('the registry is a place to look, not something to believe', async () => {
+  const alice = account(1), good = handleFor(A, alice);
+  const answer = rows => async () => ({ ok: true, json: async () => rows });
+  const forged = BV.encodeOwner({ network: 'signet', ...B.owner, evm: alice.address });
+  const mismatch = { address: account(2).address, handle: good };
+  const got = await BV.fetchHandles('signet', [alice.address.toUpperCase().replace('0X', '0x')], answer([{ address: alice.address, handle: good }, { address: alice.address, handle: forged }, mismatch, { address: alice.address, handle: 'junk' }]));
+  assert.deepEqual([...got], [good]);
+});
+
+test('a mirror takes checksummed owner addresses from a contract', () => {
+  const alice = account(1);
+  const r = BV.mirror({ network: 'signet', vault: { owners: [alice.address.toUpperCase().replace('0X', '0x')], threshold: 1 }, handles: [handleFor(A, alice)] });
+  assert.ok(r.policy);
+});
+
 test('two different proposals do not merge', () => {
   const policy = plain('signet');
   const one = BV.propose({ policy, utxos: [fakeCoin(100000)], tip: 200, sweep: payee, feeRate: 2 });

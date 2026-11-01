@@ -9,13 +9,6 @@
 
 (function(){
 
-// The address is /bitcoin. In-app links stay bitcoin.html because that is the only
-// spelling an IPFS gateway resolves, so the page tidies the bar itself, on our own host
-// only, and keeps the fragment that holds a vault or a proposal.
-if(/(^|\.)multisig\.software$/.test(location.hostname) && location.pathname === '/bitcoin.html'){
-  try { history.replaceState(null, '', `/bitcoin${location.search}${location.hash}`); } catch(_) {}
-}
-
 const BV = window.BitcoinVault;
 const $ = id => document.getElementById(id);
 const _escMap = { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' };
@@ -105,6 +98,9 @@ async function connect(){
   S.msg = null;
   S.ovl = 'me';
   touch();
+  // So that every vault this address sits on can find this key. A handle is public
+  // and proves itself, and a failure here costs nothing: it can still be pasted.
+  BV.publishHandle(myHandle(), S.network).catch(() => {});
 }
 
 // ── VAULTS ─────────────────────────────────────────────────
@@ -124,6 +120,8 @@ function ownerRows(text){
 async function readMirror(){
   S.mirror = await BV.readEvmVault(+S.form.evmChain, S.form.evmVault.trim());
   S.form.threshold = String(S.mirror.threshold);
+  const found = await BV.fetchHandles(S.network, S.mirror.owners).catch(() => []);
+  S.form.owners = [...new Set([...words(S.form.owners), ...found])].join('\n');
   S.msg = null;
 }
 
@@ -618,7 +616,7 @@ function renderMirror(){
 function renderOverlay(){
   if(S.ovl === 'connect') return `<div class="ovl" data-act="close-bg"><div class="ovl-card" role="dialog" aria-modal="true" aria-label="Connect">
     <div class="ovl-head"><span>CONNECT AN OWNER KEY</span><button class="x-btn" data-act="close" aria-label="Close">✕</button></div>
-    <p class="small">An Ethereum wallet cannot sign for Bitcoin directly, so it signs a message and your Bitcoin key is derived from that signature. Same wallet, same key, on any device. Expect three prompts.</p>
+    <p class="small">An Ethereum wallet cannot sign for Bitcoin directly, so it signs a message and your Bitcoin key is derived from that signature. Same wallet, same key, on any device. Expect three prompts. Your public key is then published, so vaults you sit on can find it.</p>
     <div class="note warn"><b>The key sits in this page while you use it,</b> so a hardware wallet protects the derivation, not each spend. Any site that gets you to sign the same text gets this key. It clears after 15 idle minutes or a reload.</div>
     <button class="btn btn-fill btn-w" data-act="connect">CONNECT WALLET</button>
     <p class="small" style="margin-top:14px">On a hardware wallet? Skip this. Paste your <span class="lk">[fingerprint/path]xpub</span> as an owner, and sign each PSBT in your wallet.</p>
