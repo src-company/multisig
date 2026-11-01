@@ -664,7 +664,8 @@ function renderDash(){
   const mine = S.owner && allKeys(p).some(isMe);
   return `<div class="stats">
       <div class="stat-row"><span class="btc">${BTC_ICON}</span><span class="stat-big">${coins ? btcOf(total) : '<span class="pulse">…</span>'}</span><span class="stat-token">BTC</span>
-      ${coins ? `<button class="addrline" data-act="refresh" aria-label="Scan again">↻</button>` : ''}</div>
+      ${coins ? `<button class="addrline" data-act="refresh" aria-label="Scan again">↻</button>` : ''}
+      ${S.trusted ? `<button class="addrline" data-act="download">BACKUP ↓</button>` : ''}</div>
       <div class="meta">
         <span><b>${p.paths[0].threshold}/${p.paths[0].keys.length}</b> SIG</span>
         ${delayed ? `<span><b>${pathLabel(delayed)}</b> ${open ? '<span class="y">OPEN</span>' : ''}</span>` : ''}
