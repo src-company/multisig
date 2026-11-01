@@ -176,6 +176,14 @@ button:disabled{opacity:.45;cursor:default}
 .send-sum div+div{border-top:1px solid var(--ln)}
 .send-sum b{font-size:12px;letter-spacing:0;color:var(--a);font-weight:600}
 .send-err{margin-top:16px;font-size:11px;line-height:1.6;color:var(--y)}
+.wal-h{font-size:9px;font-weight:700;letter-spacing:2px;color:var(--d);margin:18px 0 8px}
+.wals{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.wal{display:flex;align-items:center;gap:10px;min-width:0;background:transparent;border:1px solid var(--ln);padding:12px;font-size:12px;font-weight:600;color:var(--a);text-align:left;cursor:pointer}
+.wal:hover{border-color:var(--a)}
+.wal span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wal img,.wal svg{width:22px;height:22px;flex-shrink:0;display:block}
+.wal-more{margin-top:16px}
+@media(max-width:560px){.wals{grid-template-columns:1fr}}
 .clock{margin-top:20px;border:1px solid var(--ln);padding:14px}
 .clock-top{display:flex;justify-content:space-between;gap:10px;font-size:10px;letter-spacing:2px;color:var(--d)}
 .clock-top b{color:var(--a);font-weight:700}

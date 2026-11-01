@@ -106,7 +106,7 @@ const allKeys = p => [...new Map(p.paths.flatMap(x => x.keys).map(k => [k.xpub, 
 const evmWallets = new Map();
 window.addEventListener('eip6963:announceProvider', e => {
   const { info, provider } = e.detail || {};
-  if(info?.uuid && provider && !info.rdns?.startsWith('software.multisig.')) evmWallets.set(info.uuid, { name: String(info.name), provider });
+  if(info?.uuid && provider && !info.rdns?.startsWith('software.multisig.')) evmWallets.set(info.uuid, { name: String(info.name), provider, icon: info.icon });
 });
 window.dispatchEvent(new Event('eip6963:requestProvider'));
 const walletConnect = () => window.BitcoinWallets.walletConnect();
@@ -423,6 +423,9 @@ async function sign(){
   if(!S.trusted) throw new Error('Check this vault\'s owners first.');
   // Held here, so a link opened during the check cannot change what gets signed.
   const psbt = S.psbt, policy = S.policy, inputs = S.review.inputs;
+  // The key is already in this page, so no wallet prompt follows. This is the prompt.
+  const sends = S.review.outputs.filter(o => !o.change).map(o => `${btcOf(o.sats)} BTC to ${o.address}`).join('\n');
+  if(!window.confirm(`Sign with your vault key?\n\n${sends}\nFee ${S.review.fee.toLocaleString('en-US')} sats\n\nYour wallet will not ask again. This is your approval.`)) return;
   await BV.assertSpendable(inputs, BV.chain(S.network));
   if(S.psbt !== psbt) throw new Error('This proposal changed. Check it again.');
   load(BV.sign(psbt, S.owner.signer, policy, known()));
@@ -904,11 +907,13 @@ function renderMirror(){
 
 function walletRows(){
   const btc = window.BitcoinWallets.detect(), evm = [...evmWallets];
-  const row = (w, name) => `<button class="kind" data-act="connect" data-w="${esc(w)}"><b>${esc(name)}</b></button>`;
-  return `${btc.map(w => row(`btc:${w.key}`, `${w.name.toUpperCase()} · BITCOIN`)).join('')}
-    ${evm.map(([id, w]) => row(id, w.name.toUpperCase())).join('')}
-    ${!evm.length && window.ethereum ? row('', 'BROWSER WALLET') : ''}
-    ${row('wc', 'WALLETCONNECT')}`;
+  const row = (w, name, icon) => `<button class="wal" data-act="connect" data-w="${esc(w)}">${icon}<span>${esc(name)}</span></button>`;
+  const img = w => /^data:image\//.test(w.icon || '') ? `<img src="${esc(w.icon)}" alt="">` : ETH_ICON;
+  return `${btc.length ? `<div class="wal-h">BITCOIN WALLETS</div><div class="wals">${btc.map(w => row(`btc:${w.key}`, w.name, BTC_ICON)).join('')}</div>` : ''}
+    <div class="wal-h">ETHEREUM WALLETS</div>
+    <div class="wals">${evm.map(([id, w]) => row(id, w.name, img(w))).join('')}
+    ${!evm.length && window.ethereum ? row('', 'Browser wallet', ETH_ICON) : ''}
+    ${row('wc', 'WalletConnect', ETH_ICON)}</div>`;
 }
 
 function renderOverlay(){
@@ -919,11 +924,13 @@ function renderOverlay(){
     ${S.unanswered && !S.progress ? '<div class="btns"><button class="addrline" data-act="skipcheck">My wallet will not show this. Continue anyway. If it cannot repeat this key, this address cannot be fixed later</button></div>' : ''}
   </div></div>`;
   if(S.ovl === 'connect') return `<div class="ovl" data-act="close-bg"><div class="ovl-card" role="dialog" aria-modal="true" aria-label="Connect">
-    <div class="ovl-head"><span>CONNECT AN OWNER KEY</span><button class="x-btn" data-act="close" aria-label="Close">✕</button></div>
-    <p class="small">Your wallet signs a message and your vault key is derived from that signature. Same wallet, same key, on any device. Expect two prompts, the same however many owners a vault has. Your public key is published, and vaults you are on are saved to your wallet's record, so any device can find them.</p>
-    <p class="small">Your key stays in this page while you use it and clears after 15 idle minutes. Only sign this message here.</p>
+    <div class="ovl-head"><span>CONNECT A WALLET</span><button class="x-btn" data-act="close" aria-label="Close">✕</button></div>
+    <p class="small">Your wallet signs once to make your Bitcoin key. Same wallet, same key, on any device. No transaction, no new seed phrase.</p>
     ${S.progress ? `<div class="connecting" role="status">${esc(S.progress)}<button class="btn btn-ghost btn-sm" data-act="cancelconnect">CANCEL</button></div>` : walletRows()}
-    <p class="small" style="margin-top:14px">On a hardware wallet? Skip this. Paste your <span class="lk">[fingerprint/path]xpub</span> as an owner, and sign each PSBT in your wallet.</p>
+    <details class="wal-more"><summary>WHAT HAPPENS</summary>
+      <p class="small">Expect two prompts, however many owners a vault has. Your public key is saved to your wallet's record, so any device finds your vaults. Your private key stays in this page while you use it and clears after 15 idle minutes. Only sign this message here.</p>
+      <p class="small">On a hardware wallet? Skip this. Paste your <span class="lk">[fingerprint/path]xpub</span> as an owner, and sign each PSBT in your wallet.</p>
+    </details>
   </div></div>`;
   if(S.ovl === 'me' && S.owner) return `<div class="ovl" data-act="close-bg"><div class="ovl-card" role="dialog" aria-modal="true" aria-label="Your owner key">
     <div class="ovl-head"><span>YOUR OWNER KEY</span><button class="x-btn" data-act="close" aria-label="Close">✕</button></div>
