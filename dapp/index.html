@@ -8940,6 +8940,10 @@ function btcSet(network, owners, threshold){
 }
 function toggleBtc(){ S.cf.btc = !S.cf.btc; render(); }
 window.toggleBtc = toggleBtc;
+function setBtcPolicy(kind, older){ S.cf.btcKind = kind; if(older) S.cf.btcOlder = older; render(); }
+window.setBtcPolicy = setBtcPolicy;
+const BTC_KINDS = [['plain', 'STANDARD', 'These owners can spend at any time.'], ['recovery', 'DEADMAN SWITCH', 'Recovery keys can spend any coin left unmoved past a delay. You add them on the next page.'], ['hold', 'AGED COINS', 'Everyone signs for now. The threshold above can spend coins older than a delay.']];
+const BTC_DELAYS = [['7D', 1008], ['30D', 4320], ['90D', 12960], ['1Y', 52560]];
 // Testnets go with signet. A deploy set that mixes them is warned about already, and
 // real bitcoin is only implied when every chain in it is real.
 const btcNetworkOf = sel => sel.some(n => n && n.test) ? 'signet' : 'mainnet';
@@ -8959,14 +8963,24 @@ function renderBtcPanel(c){
   const owners = c.owners.map(o => (o.addr || '').trim()).filter(a => ethers.isAddress(a));
   const threshold = Math.min(Number(c.threshold) || 1, owners.length || 1);
   if(!owners.length) return `<div style="margin-top:12px;font-size:10px;letter-spacing:1px;color:var(--d)">ADD OWNERS TO SEE WHO IS READY FOR BITCOIN</div>`;
+  const kind = c.btcKind || 'plain', older = c.btcOlder || 4320;
+  // Anything past a plain quorum is finished on /btc, which holds the recovery keys and
+  // the owners' signatures. This hands over the draft, in a fragment no server sees.
+  const draftTh = kind === 'hold' ? Math.min(threshold, Math.max(owners.length - 1, 1)) : threshold;
+  const draft = `./btc.html#draft/${network}/${draftTh}/${owners.map(encodeURIComponent).join(',')}${kind === 'hold' ? `/hold/${older}` : ''}`;
+  const policy = `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">${BTC_KINDS.map(([k, t]) => `<button class="pill${kind === k ? ' on' : ''}" aria-pressed="${kind === k}"${k === 'hold' && owners.length < 2 ? ' disabled' : ''} onclick="setBtcPolicy('${k}')">${t}</button>`).join('')}</div>
+    <div style="margin-top:6px;font-size:10px;line-height:1.6;color:var(--d)">${BTC_KINDS.find(([k]) => k === kind)[2]}</div>
+    ${kind === 'plain' ? '' : `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">${BTC_DELAYS.map(([l, b]) => `<button class="pill${older === b ? ' on' : ''}" aria-pressed="${older === b}" onclick="setBtcPolicy('${kind}',${b})">${l}</button>`).join('')}</div>
+    <a class="btn btn-outline btn-sm" style="margin-top:8px;text-decoration:none" href="${esc(kind === 'recovery' ? `./btc.html#draft/${network}/${threshold}/${owners.map(encodeURIComponent).join(',')}` : draft)}">FINISH ON BITCOIN &#8599;</a>`}`;
   const set = btcSet(network, owners, threshold), me = (window._connectedAddress || '').toLowerCase();
   const mine = owners.some(a => a.toLowerCase() === me), iAmReady = set.ready.includes(me);
   return `<div class="net-panel" style="margin-top:12px;padding:10px 14px">
     <div style="font-size:10px;letter-spacing:2px;color:var(--m);font-weight:600">${network === 'mainnet' ? 'BITCOIN' : 'SIGNET'} &middot; ${threshold} OF ${owners.length} &middot; FREE, NOTHING TO DEPLOY</div>
-    <div style="margin-top:4px;font-size:10px;line-height:1.6;color:var(--d)">Its own addresses, not this vault's. Setup costs no gas and no sats; a spend pays the usual miner fee from the vault.</div>
+    <div style="margin-top:4px;font-size:10px;line-height:1.6;color:var(--d)">Its own addresses, not this vault's. Setup costs no gas and no sats; a spend pays the usual miner fee from the vault. Its rules are built into the address, so they stay fixed.</div>
+    ${policy}
     ${owners.map(a => { const ok = set.ready.includes(a.toLowerCase()); return `<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;font-size:10px;letter-spacing:1px;color:${ok ? 'var(--g)' : 'var(--d)'}"><span>${esc(a.slice(0, 6) + '…' + a.slice(-4))}</span><span>${set.loading ? '…' : ok ? 'READY' : 'WAITING'}</span></div>`; }).join('')}
     ${mine && !iAmReady && !set.loading ? `<a class="btn btn-outline btn-sm" style="margin-top:6px;text-decoration:none" href="./btc.html">SET UP MY BITCOIN KEY &#8599;</a>` : ''}
-    ${set.link ? `<a class="alt-link" style="display:inline-block;margin-top:6px;text-decoration:none" href="${esc(set.link)}">OPEN ON BITCOIN &#8599;</a>` : `<div style="margin-top:6px;font-size:10px;line-height:1.6;color:var(--d)">Each owner sets up once, here or on the vault. The vault appears on its dashboard when all are ready. Contract owners, such as a Safe, cannot take part.</div>`}
+    ${kind !== 'plain' ? '' : set.link ? `<a class="alt-link" style="display:inline-block;margin-top:6px;text-decoration:none" href="${esc(set.link)}">OPEN ON BITCOIN &#8599;</a>` : `<div style="margin-top:6px;font-size:10px;line-height:1.6;color:var(--d)">Each owner sets up once, here or on the vault. The vault appears on its dashboard when all are ready. Contract owners, such as a Safe, cannot take part.</div>`}
   </div>`;
 }
 // Every vault gets this, however it was made: the Bitcoin twin is a function of its

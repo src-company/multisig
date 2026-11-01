@@ -111,6 +111,14 @@ Bitcoin has two relevant opcodes. `OP_CHECKSEQUENCEVERIFY` counts from when a co
 - `bitcoin.html` has its own CSP: scripts from `'self'` only, and connections only to `mempool.space`, `blockstream.info`, the Ethereum RPCs, our API, the WalletConnect relay and `api.tacit.finance`. Those hosts accept data, so the CSP narrows a theft and does not prevent one. Google Fonts' stylesheet is the one third-party file on this page.
 - `@scure/btc-signer` was audited by cure53 at 0.3.0 (2023) and self-audited at 2.2.0 (April 2026). This page runs 2.4.1, which neither audit covers, and its UTXO module is unaudited (it is not used here).
 
+## Policies
+
+`/btc`, the dashboard's Create tab and the deploy wizard offer the same choices. The wizard hands a draft to `/btc` in a `#draft/...` fragment, because recovery keys and each owner's signature are collected there. An invite link carries the policy too, so everyone reaches the same vault.
+
+- **Standard:** k of n at any time.
+- **Deadman switch:** k of n at any time, and recovery keys on a second leaf after a delay.
+- **Aged coins:** everyone at any time, and k of n on a second leaf after a delay.
+
 ## Tacit assets
 
 Vaults hold sats. Anyone can send a Tacit note to a vault address, and a vault can neither read it nor publish an opening, because a note's blinding comes from a private key a vault does not have. It is still spendable on Bitcoin, and spending it as sats burns the asset, so the danger is losing it, not being unable to move it. So: never send Tacit assets to a vault, and anything that arrives is set aside.

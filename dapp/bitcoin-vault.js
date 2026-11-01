@@ -25,6 +25,8 @@ const S = {
   // text is what was typed. owner is set once a row is a key that can go in the vault.
   rows: [{ text: '', owner: null, state: 'empty' }, { text: '', owner: null, state: 'empty' }],
   threshold: 2, name: '', policy: null, saved: false, step: 0,
+  // The same choices as the dashboard. Recovery keys are rows like the owners'.
+  kind: 'plain', older: 4320, recRows: [{ text: '', owner: null, state: 'empty', rec: true }], recTh: 1,
   // True when this page was opened from someone's invite: the owners are theirs to set.
   invite: false, checked: false, recorded: false, confirming: false, unanswered: false,
 };
@@ -39,6 +41,8 @@ window.addEventListener('eip6963:announceProvider', e => {
   if(document.getElementById('app').firstChild) render();
 });
 
+const DELAYS = [['7 DAYS', 1008], ['30 DAYS', 4320], ['90 DAYS', 12960], ['1 YEAR', 52560]];
+const recFilled = () => S.kind === 'recovery' ? S.recRows.filter(r => r.text.trim()) : [];
 const filled = () => [...(S.me && !S.invite ? [{ owner: S.me.owner, state: 'ready' }] : []), ...S.rows.filter(r => r.text.trim())];
 
 // An invite carries the draft itself: network, threshold and the owners' public
@@ -46,21 +50,36 @@ const filled = () => [...(S.me && !S.invite ? [{ owner: S.me.owner, state: 'read
 // vault the moment every owner has connected, in a fragment no server ever sees.
 function inviteLink(){
   const list = [...(S.me ? [S.me.evm] : []), ...S.rows.map(r => r.addr || r.text.trim()).filter(Boolean)];
-  const th = Math.min(S.threshold, Math.max(list.length, 1));
-  return `${location.origin}${location.pathname}#join/${S.network}/${th}/${list.map(encodeURIComponent).join(',')}`;
+  const addrs = l => l.map(encodeURIComponent).join(',');
+  const rec = recFilled().map(r => r.addr || r.text.trim());
+  const rule = S.kind === 'plain' ? '' : `/${S.kind}/${S.older}${S.kind === 'recovery' ? `/${Math.min(S.recTh, Math.max(rec.length, 1))}/${addrs(rec)}` : ''}`;
+  return `${location.origin}${location.pathname}#join/${S.network}/${thOf()}/${addrs(list)}${rule}`;
 }
 // A link is a stranger's text. It is taken exactly or refused: a bad threshold defaulting
 // to 1 would quietly be a vault any single owner can empty.
 function readInvite(){
-  const [kind, network, th, list] = location.hash.slice(1).split('/');
-  if(kind !== 'join') return false;
+  // `draft` is the same text from the deploy wizard: a start to edit, not an invitation.
+  const [kind, network, th, list, rule, older, recTh, recList] = location.hash.slice(1).split('/');
+  if(kind !== 'join' && kind !== 'draft') return false;
   try {
     const owners = list.split(',').map(decodeURIComponent).filter(Boolean);
     if(!Object.hasOwn(BV.NETWORKS, network) || !/^[1-9]\d*$/.test(th) || +th > owners.length || owners.length > BV.MAX_OWNERS || new Set(owners.map(o => o.toLowerCase())).size !== owners.length) throw new Error();
+    if(rule){
+      if(!['recovery', 'hold'].includes(rule) || !/^[1-9]\d*$/.test(older) || +older > BV.MAX_OLDER) throw new Error('bad rule');
+      if(rule === 'hold' && +th >= owners.length) throw new Error('bad rule');
+      if(rule === 'recovery'){
+        const rec = recList.split(',').map(decodeURIComponent).filter(Boolean);
+        if(!/^[1-9]\d*$/.test(recTh) || +recTh > rec.length || rec.length > BV.MAX_OWNERS) throw new Error('bad rule');
+        S.recRows = rec.map(text => ({ text, owner: null, state: 'checking', rec: true }));
+        S.recTh = +recTh;
+      }
+      S.kind = rule;
+      S.older = +older;
+    }
     S.network = network;
     S.threshold = +th;
     S.rows = owners.map(text => ({ text, owner: null, state: 'checking' }));
-    S.invite = true;
+    S.invite = kind === 'join';
     return true;
   } catch(_) {
     S.msg = 'That invite link is not valid. Ask for a new one.';
@@ -69,12 +88,21 @@ function readInvite(){
 }
 // An owner's own row is theirs the moment they connect, whichever way they did.
 function takeSeat(){
-  const me = S.me, row = S.rows.find(r => r.text.toLowerCase() === me.evm || r.text === me.wallet);
+  const me = S.me, row = [...S.rows, ...S.recRows].find(r => r.text.toLowerCase() === me.evm || r.text === me.wallet);
   if(row) Object.assign(row, { owner: me.owner, handle: me.handle, state: 'ready', mine: true, error: null });
   return !!row;
 }
 const total = () => filled().length;
-const allReady = () => total() > 0 && filled().every(r => r.state === 'ready');
+const allReady = () => total() > 0 && filled().every(r => r.state === 'ready') && (S.kind !== 'recovery' || (recFilled().length > 0 && recFilled().every(r => r.state === 'ready')));
+// On aged coins the threshold is the smaller quorum, so it stays below everyone.
+const thOf = () => { const n = Math.max(total(), 1); return Math.min(S.threshold, S.kind === 'hold' ? Math.max(n - 1, 1) : n); };
+function pathsOf(){
+  const keys = filled().map(r => r.owner), older = S.older;
+  if(S.kind === 'hold') return [{ threshold: keys.length, keys }, { threshold: thOf(), keys, older }];
+  const paths = [{ threshold: thOf(), keys }];
+  if(S.kind === 'recovery'){ const rec = recFilled().map(r => r.owner); paths.push({ threshold: Math.min(S.recTh, rec.length), keys: rec, older }); }
+  return paths;
+}
 
 // Whatever was typed, turned into a key if that can be done now. 0x and bc1 addresses
 // cannot be worked out, so they are looked up, and wait if that owner has not connected.
@@ -94,7 +122,7 @@ async function resolve(row){
     } else Object.assign(row, { owner: BV.decodeOwner(t, S.network), handle: t, state: 'ready' });
   } catch(e) { Object.assign(row, { state: 'bad', error: e.message }); }
   // One key cannot take two seats. Said here, not as an error on the last step.
-  const taken = [...(S.me ? [S.me.owner.xpub] : []), ...S.rows.filter(r => r !== row).map(r => r.owner?.xpub)];
+  const taken = row.rec ? S.recRows.filter(r => r !== row).map(r => r.owner?.xpub) : [...(S.me ? [S.me.owner.xpub] : []), ...S.rows.filter(r => r !== row).map(r => r.owner?.xpub)];
   if(row.owner && taken.includes(row.owner.xpub) && !row.mine) Object.assign(row, { owner: null, state: 'bad', error: 'That owner is already on this vault.' });
 }
 
@@ -103,9 +131,7 @@ function statusOf(r){
 }
 
 async function create(){
-  const keys = filled().map(r => r.owner);
-  const policy = BV.policyOf({ network: S.network, paths: [{ threshold: Math.min(S.threshold, keys.length), keys }] });
-  S.policy = policy;
+  S.policy = BV.policyOf({ network: S.network, paths: pathsOf() });
   const d = BV.descriptor(S.policy), k = `ms_btc_vaults_${S.network}`, list = lsJson(k, []);
   if(Array.isArray(list) && !list.includes(d)){ list.unshift(d); lsSet(k, JSON.stringify(list)); }
   if(S.name.trim()){
@@ -116,7 +142,7 @@ async function create(){
   // On the owner's own record, so any device finds it. The key was only kept this long
   // for that. Without a connected wallet there is no record, and the file is the backup.
   if(S.me?.signer){
-    const handles = [S.me.handle, ...S.rows.map(r => r.handle).filter(Boolean)];
+    const handles = [S.me.handle, ...[...S.rows, ...recFilled()].map(r => r.handle).filter(Boolean)];
     try {
       await BV.saveVault(S.policy, S.me.signer, S.me.handle, handles);
       S.recorded = true;
@@ -131,7 +157,7 @@ function backup(){
   const text = [`MULTISIG BITCOIN VAULT BACKUP (${S.network})`, '',
     'Keep this. Bitcoin keeps no record of who owns this vault: without this text the',
     'coins cannot be spent, even with every key. It holds no private key.', '',
-    `Rule: ${p.paths[0].threshold} of ${p.paths[0].keys.length}`, '', 'Descriptor:', d, '',
+    'Rules:', ...BV.describePolicy(p), '', 'Descriptor:', d, '',
     'BIP-388 wallet policy:', JSON.stringify(BV.walletPolicy(p), null, 2), '', BV.recoveryText(S.network), ''].join('\n');
   const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' })), a = document.createElement('a');
   a.href = url; a.download = `multisig-${S.network}-vault.txt`; a.click();
@@ -181,18 +207,39 @@ function renderConnect(){
     ${S.invite ? '' : '<button class="link" data-act="skip">Using a hardware wallet? Skip</button>'}`;
 }
 
+const renderHow = () => `<details class="how"><summary>How Bitcoin vaults work</summary>${BV.HOW_IT_WORKS.map(([t, d]) => `<p><strong>${esc(t)}.</strong> ${esc(d)}</p>`).join('')}</details>`;
+const recRow = (r, i) => `<div class="row"><span class="n">${markOf(r.text)}</span><input class="inp" id="r${i}" data-rec="${i}" aria-label="Recovery key" spellcheck="false" autocomplete="off" placeholder="0x…, name.wei or ${S.network === 'mainnet' ? 'bc1…' : 'tb1…'}" value="${esc(r.text)}">${statusOf(r)}${S.recRows.length > 1 ? `<button class="x" data-act="droprec" data-i="${i}" aria-label="Remove">✕</button>` : ''}</div>${r.addr ? `<div class="idline"><span>${esc(r.text.trim())} is</span><span>${esc(r.addr)}</span></div>` : ''}${r.error ? `<div class="err">${esc(r.error)}</div>` : ''}`;
+function renderPolicy(n){
+  const kinds = [
+    ['plain', 'Standard', 'These owners can spend at any time.'],
+    ['recovery', 'Deadman switch', 'Recovery keys can spend any coin left unmoved past a delay.'],
+    ['hold', 'Aged coins', 'Everyone signs for now. Fewer owners can spend coins older than a delay.'],
+  ];
+  const rec = recFilled().length;
+  return `<div class="policy"><div class="plbl">HOW IT SPENDS</div>
+    <div role="radiogroup" aria-label="Policy">${kinds.map(([k, t, d]) => `<button class="opt${S.kind === k ? ' on' : ''}" role="radio" aria-checked="${S.kind === k}" data-act="kind" data-k="${k}"${k === 'hold' && n < 2 ? ' disabled' : ''}><b>${t}</b><span>${d}</span></button>`).join('')}</div>
+    ${S.kind === 'plain' ? '' : `<div class="plbl">DELAY</div><div class="pills wrap">${DELAYS.map(([l, b]) => `<button class="pill${S.older === b ? ' on' : ''}" data-act="delay" data-b="${b}">${l}</button>`).join('')}</div>`}
+    ${S.kind === 'recovery' ? `<div class="plbl">RECOVERY KEYS</div>${S.recRows.map(recRow).join('')}
+      <div class="btns"><button class="link" data-act="addrec">+ Add recovery key</button></div>
+      ${rec > 1 ? `<div class="th"><div class="stepper"><button data-act="rth" data-d="-1" aria-label="Fewer">−</button><output>${Math.min(S.recTh, rec)} OF ${rec}</output><button data-act="rth" data-d="1" aria-label="More">+</button></div><span>to recover</span></div>` : ''}` : ''}
+    ${S.kind === 'plain' ? '' : '<div class="note">Moving a coin restarts its clock, so a vault in use stays ahead of the delay. Fixed once created.</div>'}
+  </div>`;
+}
+
 function renderOwners(){
-  const n = total(), th = Math.min(S.threshold, Math.max(n, 1));
-  const risk = n > 1 && th === n ? 'One lost key freezes the coins.' : n > 1 && th === 1 ? 'Any one owner can spend alone.' : null;
+  const n = total(), th = thOf();
+  const risk = S.kind !== 'plain' ? null : n > 1 && th === n ? 'One lost key freezes the coins.' : n > 1 && th === 1 ? 'Any one owner can spend alone.' : null;
   const waiting = filled().some(r => r.state === 'waiting');
   if(S.invite){
     // Whoever sent this chose every line of it. A vault someone hands you can be one they
     // alone control, so the rule is said plainly and nothing is saved until it is checked.
     const rows = S.rows.map(r => `<div class="row"><span class="n">${markOf(r.text)}</span><span class="inp full">${esc(r.text)}</span>${r.mine ? '<span class="st ok">YOU</span>' : statusOf(r)}</div>`).join('');
-    const seated = S.rows.some(r => r.mine), others = n - (seated ? 1 : 0);
+    const onRec = recFilled().some(r => r.mine), seated = S.rows.some(r => r.mine) || onRec, others = n - (S.rows.some(r => r.mine) ? 1 : 0);
     const warn = th === 1 && n > 1 ? 'Any one owner can spend everything alone.' : others >= th ? `The other ${others === 1 ? 'owner' : `${others} owners`} can spend without you.` : null;
-    return `<h2>${seated ? 'You are in' : 'You are invited'}</h2><p class="lead"><strong>${th} of ${n}</strong> must sign. ${waiting ? 'Waiting for the others. This updates by itself.' : 'Every owner is ready.'}</p>
-      ${rows}
+    const recs = recFilled().map(r => `<div class="row"><span class="n">${markOf(r.text)}</span><span class="inp full">${esc(r.text)}</span>${r.mine ? '<span class="st ok">YOU</span>' : statusOf(r)}</div>`).join('');
+    const days = Math.round(S.older / 144), rule = S.kind === 'hold' ? `All ${n} must sign now, or <strong>${th} of ${n}</strong> for coins unmoved for about ${days} days.` : S.kind === 'recovery' ? `<strong>${th} of ${n}</strong> must sign. After about ${days} days unmoved, the recovery keys below can also spend.` : `<strong>${th} of ${n}</strong> must sign.`;
+    return `<h2>${seated ? 'You are in' : 'You are invited'}</h2><p class="lead">${rule} ${waiting || !allReady() ? 'Waiting for the others. This updates by itself.' : 'Every owner is ready.'}</p>
+      ${rows}${recs ? `<div class="plbl">RECOVERY KEYS</div>${recs}` : ''}
       ${S.me && !seated ? '<div class="note bad">This wallet is not one of the owners on this invite. Connect the one that is.</div>' : ''}
       ${warn ? `<div class="note">${warn}</div>` : ''}
       <button class="tick" data-act="confirm" aria-pressed="${S.checked}"><span>${S.checked ? '✓' : ''}</span>I know every owner above, and this is the rule I agreed to</button>
@@ -204,9 +251,11 @@ function renderOwners(){
     ${S.rows.map((r, i) => `<div class="row"><span class="n">${markOf(r.text)}</span><input class="inp" id="o${i}" data-row="${i}" aria-label="Owner" spellcheck="false" autocomplete="off" placeholder="${S.network === 'mainnet' ? '0x…, name.wei, bc1… or xpub' : '0x…, name.wei, tb1… or xpub'}" value="${esc(r.text)}">${statusOf(r)}${S.rows.length > 1 ? `<button class="x" data-act="drop" data-i="${i}" aria-label="Remove">✕</button>` : ''}</div>${r.addr ? `<div class="idline"><span>${esc(r.text.trim())} is</span><span>${esc(r.addr)}</span></div>` : ''}${r.error ? `<div class="st bad" style="padding:4px 0">${esc(r.error)}</div>` : ''}`).join('')}
     <div class="btns"><button class="link" data-act="add">+ Add owner</button></div>
     ${waiting ? `<div class="wait">Send your co-owners this link. They connect once, and this updates by itself.<div class="btns"><button class="btn fill" data-act="invite">COPY INVITE LINK</button></div></div>` : ''}
-    ${n > 1 ? `<div class="th"><div class="stepper"><button data-act="th" data-d="-1" aria-label="Fewer">−</button><output>${th} OF ${n}</output><button data-act="th" data-d="1" aria-label="More">+</button></div><span>must sign</span></div>` : ''}
+    ${n > 1 ? `<div class="th"><div class="stepper"><button data-act="th" data-d="-1" aria-label="Fewer">−</button><output>${th} OF ${n}</output><button data-act="th" data-d="1" aria-label="More">+</button></div><span>${S.kind === 'hold' ? 'on aged coins' : 'must sign'}</span></div>` : ''}
     ${risk ? `<div class="note">${risk}</div>` : ''}
-    <button class="btn fill w" data-act="next"${allReady() ? '' : ' disabled'}>CONTINUE</button>`;
+    ${renderPolicy(n)}
+    <button class="btn fill w" data-act="next"${allReady() ? '' : ' disabled'}>CONTINUE</button>
+    ${renderHow()}`;
 }
 
 function renderBackup(){
@@ -261,7 +310,12 @@ const onStep = (n, of) => { S.progress = `Approve ${n} of ${of} in your wallet`;
 function afterConnect(){
   S.confirming = false;
   S.step = 1;
-  if(S.invite){ takeSeat(); if(!S.rows.some(r => r.mine)) wipe(); }
+  if(S.invite){ takeSeat(); if(![...S.rows, ...S.recRows].some(r => r.mine)) wipe(); }
+  // A draft from the wizard names everyone, the person now connected included.
+  else if(S.me){
+    S.rows = S.rows.filter(r => r.text.trim().toLowerCase() !== S.me.evm && r.text.trim() !== S.me.wallet);
+    if(!S.rows.length) S.rows.push({ text: '', owner: null, state: 'empty' });
+  }
 }
 
 async function finish(skip){
@@ -306,13 +360,18 @@ const ACT = {
   net(el){
     wipe();
     S.network = el.dataset.n; S.me = null; S.step = 0; S.confirming = false;
-    S.rows.forEach(r => { r.owner = null; r.state = r.text.trim() ? 'checking' : 'empty'; });
+    [...S.rows, ...S.recRows].forEach(r => { r.owner = null; r.state = r.text.trim() ? 'checking' : 'empty'; });
     return ACT.check();
   },
   add(){ S.rows.push({ text: '', owner: null, state: 'empty' }); },
+  kind(el){ S.kind = el.dataset.k; },
+  delay(el){ S.older = +el.dataset.b; },
+  addrec(){ S.recRows.push({ text: '', owner: null, state: 'empty', rec: true }); },
+  droprec(el){ S.recRows.splice(+el.dataset.i, 1); },
+  rth(el){ const max = Math.max(recFilled().length, 1); S.recTh = Math.max(1, Math.min(max, Math.min(S.recTh, max) + +el.dataset.d)); },
   drop(el){ S.rows.splice(+el.dataset.i, 1); },
-  th(el){ const max = Math.max(total(), 1); S.threshold = Math.max(1, Math.min(max, Math.min(S.threshold, max) + +el.dataset.d)); },
-  async check(){ await Promise.all(S.rows.filter(r => !r.mine).map(resolve)); },
+  th(el){ S.threshold = Math.max(1, thOf() + +el.dataset.d); S.threshold = thOf(); },
+  async check(){ await Promise.all([...S.rows, ...S.recRows].filter(r => !r.mine).map(resolve)); },
   vaultlink(){ return navigator.clipboard.writeText(`${location.origin}${location.pathname.replace(/\/[^/]*$/, '/')}bitcoin.html#${S.network}/${encodeURIComponent(BV.descriptor(S.policy))}`).then(() => toast('LINK COPIED'), () => toast('THE BROWSER REFUSED THE CLIPBOARD')); },
   invite(){ return navigator.clipboard.writeText(inviteLink()).then(() => toast('LINK COPIED'), () => toast('THE BROWSER REFUSED THE CLIPBOARD')); },
   async backup(){ await create(); backup(); S.step = 3; },
@@ -337,9 +396,9 @@ document.addEventListener('click', async e => {
 });
 document.addEventListener('input', e => {
   if(e.target.dataset.name){ S.name = e.target.value; return; }
-  const i = e.target.dataset.row;
-  if(i === undefined) return;
-  const row = S.rows[+i];
+  const i = e.target.dataset.row, j = e.target.dataset.rec;
+  if(i === undefined && j === undefined) return;
+  const row = j === undefined ? S.rows[+i] : S.recRows[+j];
   row.text = e.target.value;
   row.state = row.text.trim() ? 'checking' : 'empty';
   render();
@@ -359,8 +418,9 @@ render();
 if(invited) ACT.check().then(render);
 // Nobody should have to keep pressing a button to see a friend arrive.
 setInterval(async () => {
-  if(S.step !== 1 || S.busy || !filled().some(r => r.state === 'waiting')) return;
-  await Promise.all(S.rows.filter(r => r.state === 'waiting').map(resolve));
+  const rows = [...S.rows, ...S.recRows].filter(r => r.state === 'waiting');
+  if(S.step !== 1 || S.busy || !rows.length) return;
+  await Promise.all(rows.map(resolve));
   render();
 }, 12000);
 

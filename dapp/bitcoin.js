@@ -531,6 +531,23 @@ async function resolveName(name, doFetch = (...a) => root.fetch(...a)){
   return address;
 }
 
+// The same words on every page, so a vault reads the same wherever it is opened.
+const HOW_IT_WORKS = [
+  ['A vault is an address with its rules built in', 'No contract and nothing to deploy, so it is free to make, and Bitcoin itself enforces the rules.'],
+  ['The rules are fixed', 'Changing an owner or a delay means a new vault and moving the coins over. An Ethereum vault can change these in place.'],
+  ['Spending is a proposal', 'One owner proposes, the others sign in any order, and anyone can send it once enough have signed. The vault pays the miner fee.'],
+  ['Each owner brings a wallet', 'An Ethereum or Bitcoin wallet signs once and that makes the owner key, the same on any device.'],
+  ['Delays run per coin', 'A clock starts when a coin confirms, and moving the coin restarts it. So an active vault stays ahead of any delay.'],
+  ['The backup is the way out', 'It holds no private key. With it and enough keys, the coins can be spent without this site.'],
+];
+const aboutBlocks = b => { const d = Math.round(b / 144); return d >= 2 ? `about ${d} days` : `about ${Math.max(1, Math.round(b / 6))} hours`; };
+function describePolicy(policy){
+  return policy.paths.map(p => {
+    const who = p.threshold === p.keys.length ? (p.keys.length === 1 ? 'The one key on this path' : `All ${p.keys.length} keys`) : `Any ${p.threshold} of ${p.keys.length} keys`;
+    return p.older ? `${who} can also spend any coin unmoved for ${p.older} blocks, ${aboutBlocks(p.older)}.` : `${who} can spend at any time.`;
+  });
+}
+
 async function readEvmVault(chainId, address, doFetch = (...a) => root.fetch(...a)){
   const c = EVM_CHAINS[chainId];
   if(!c) throw new Error('unknown chain');
@@ -1229,7 +1246,7 @@ function concat(...parts){
   return out;
 }
 
-root.BitcoinVault = Object.freeze({ keyId, isName, resolveName, exportAccountKey, recoveryText, sameKey, TACIT_ASSETS, signOwnerAuth, verifyOwnerAuth, saveVault, listVaults, assertSpendable, isProtected, hasTacitEnvelope, walletMessage, linkMessage, keyFromWalletSignature, evmSignHash, evmSignMessage, bitcoinMessageHash, bitcoinSigners, handleForWallet, proposalId, vaultId, publishProposal, fetchProposals, openProposals, publishHandle, fetchHandles, MAX_INDEX, txidOf, seatMisdescribed, EVM_CHAINS, selectors: { threshold: selector('threshold()') }, readEvmVault, mirror, bindingMessage, evmMessageHash, NETWORKS, DUST, GAP, MAX_OWNERS, MAX_OLDER, MAX_FEE_RATE, encodeOwner, decodeOwner, originText, ownerMessage, deriveOwnerKey, keyFromSignature, fingerprintOf,
+root.BitcoinVault = Object.freeze({ HOW_IT_WORKS, describePolicy, keyId, isName, resolveName, exportAccountKey, recoveryText, sameKey, TACIT_ASSETS, signOwnerAuth, verifyOwnerAuth, saveVault, listVaults, assertSpendable, isProtected, hasTacitEnvelope, walletMessage, linkMessage, keyFromWalletSignature, evmSignHash, evmSignMessage, bitcoinMessageHash, bitcoinSigners, handleForWallet, proposalId, vaultId, publishProposal, fetchProposals, openProposals, publishHandle, fetchHandles, MAX_INDEX, txidOf, seatMisdescribed, EVM_CHAINS, selectors: { threshold: selector('threshold()') }, readEvmVault, mirror, bindingMessage, evmMessageHash, NETWORKS, DUST, GAP, MAX_OWNERS, MAX_OLDER, MAX_FEE_RATE, encodeOwner, decodeOwner, originText, ownerMessage, deriveOwnerKey, keyFromSignature, fingerprintOf,
   policyOf, descriptor, descriptorChecksum, parseDescriptor, walletPolicy, vaultOf, vsize, coinsFor, propose, inspect, sign, combine, finalize, chain, scan, evmSigner });
 
 })(typeof window !== 'undefined' ? window : globalThis);

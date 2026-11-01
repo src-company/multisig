@@ -492,18 +492,21 @@ function renderTabs(){
   return `<div class="vtabs"><div class="vtabs-inner">${tabs.join('')}</div></div>`;
 }
 
+const renderHow = () => `<details><summary>HOW BITCOIN VAULTS WORK</summary>${BV.HOW_IT_WORKS.map(([t, d]) => `<div class="step"><b>${esc(t.toUpperCase())}</b><span>${esc(d)}</span></div>`).join('')}</details>`;
+
 function renderEmpty(){
   return `<div class="empty">
     <div class="empty-title">NO VAULTS</div>
     <div class="empty-sub">${S.network === 'signet' ? 'TRY ONE ON SIGNET. COINS ARE FREE AND WORTH NOTHING.' : 'K-OF-N BITCOIN. NO CONTRACT, NOTHING TO DEPLOY.'}</div>
     <a class="btn btn-fill" style="text-decoration:none" href="./btc.html">CREATE A VAULT</a>
     ${S.owner ? '' : '<div class="btns" style="justify-content:center"><button class="btn btn-outline" data-act="wallet">CONNECT TO FIND YOUR VAULTS</button></div>'}
+    ${renderHow()}
     <details><summary>OPEN AN EXISTING VAULT</summary>
       <textarea class="inp" id="import" data-field="import" spellcheck="false" aria-label="Vault descriptor" placeholder="Paste a descriptor, tr(…">${esc(S.form.import)}</textarea>
       <div class="btns"><button class="btn btn-outline btn-sm" data-act="import">OPEN</button></div>
     </details>
     <div class="steps">
-      <div class="step"><b>1 / OWNERS</b><span>Each owner brings a key, from an Ethereum wallet or a hardware wallet. Nothing is deployed and it costs nothing.</span></div>
+      <div class="step"><b>1 / OWNERS</b><span>Each owner brings a key, from an Ethereum wallet, a Bitcoin wallet or a hardware wallet. Nothing is deployed and it costs nothing.</span></div>
       <div class="step"><b>2 / RECEIVE</b><span>Save the backup, then send bitcoin to the vault. Each deposit can use a fresh address.</span></div>
       <div class="step"><b>3 / SPEND</b><span>One owner proposes, the others sign in any order, and Bitcoin itself enforces the threshold.</span></div>
     </div>
@@ -684,9 +687,12 @@ function renderDash(){
 function renderAdmin(){
   if(!S.policy) return renderEmpty();
   const p = S.policy, d = BV.descriptor(p), list = saved(), i = list.indexOf(d);
-  return `<div class="head"><span>OWNERS</span></div>
+  return `<div class="head"><span>THIS VAULT'S RULES</span></div>
+    ${BV.describePolicy(p).map(l => `<p class="small" style="padding:8px 8px 0">${esc(l)}</p>`).join('')}
+    <div class="head"><span>OWNERS</span></div>
     ${renderPaths()}
     <p class="small" style="padding:12px 8px">Rules are part of the address, so they cannot change. Different owners or a different threshold means a new vault, and sending the coins to it.</p>
+    ${renderHow()}
     <div class="head"><span>BACKUP</span></div>
     <div class="mono" style="font-size:11px;font-weight:400;padding:12px 8px">${esc(d)}</div>
     <div class="btns"><button class="btn btn-fill btn-sm" data-act="download">DOWNLOAD BACKUP</button><button class="btn btn-ghost btn-sm" data-act="copy-descriptor">COPY DESCRIPTOR</button><button class="btn btn-ghost btn-sm" data-act="copy-policy">COPY WALLET POLICY</button><button class="btn btn-ghost btn-sm" data-act="copy-link">COPY LINK</button></div>

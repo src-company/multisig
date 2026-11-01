@@ -514,6 +514,15 @@ test('a popup rejected too fast to be a person gets one more try', async () => {
   assert.equal(calls, 1);
 });
 
+test('a vault describes its own rules in the same words everywhere', () => {
+  const [a, b, c] = seats('signet'), [x, y] = owners(a, b), [z] = owners(c);
+  const two = BV.policyOf({ network: 'signet', paths: [{ threshold: 2, keys: [x, y] }, { threshold: 1, keys: [x, y], older: 4320 }] });
+  assert.deepEqual(BV.describePolicy(two), ['All 2 keys can spend at any time.', 'Any 1 of 2 keys can also spend any coin unmoved for 4320 blocks, about 30 days.']);
+  const dead = BV.policyOf({ network: 'signet', paths: [{ threshold: 2, keys: [x, y] }, { threshold: 1, keys: [z], older: 144 }] });
+  assert.equal(BV.describePolicy(dead)[1], 'The one key on this path can also spend any coin unmoved for 144 blocks, about 24 hours.');
+  assert.ok(BV.HOW_IT_WORKS.length >= 5);
+});
+
 test('names on the object prototype are not networks', () => {
   for(const n of ['constructor', '__proto__', 'toString'])
     assert.throws(() => BV.policyOf({ network: n, paths: [{ threshold: 1, keys: owners(A) }] }), /unknown network/);
