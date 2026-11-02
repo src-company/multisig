@@ -57,10 +57,10 @@ test('a real signet deposit opens to its amount with the note key', () => {
   assert.equal(BT.openNote(tx, 7, v), null, 'no such output');
 });
 
-test('the service keeps a note key record only from an owner, and only on signet', async () => {
+test('the service keeps a note key record only from an owner', async () => {
   const { saveNoteKey } = require('../api/proposals.cjs');
   const record = await BT.makeRecord(a.signer, a.owner, policy), descriptor = BV.descriptor(policy);
-  await assert.rejects(saveNoteKey({ network: 'mainnet', descriptor, handle: 'x', record }), /Invalid network/);
+  await assert.rejects(saveNoteKey({ network: 'testnet', descriptor, handle: 'x', record }), /Invalid network/);
   await assert.rejects(saveNoteKey({ network: 'signet', descriptor, handle: 'x', record: null }), /Invalid record/);
   await assert.rejects(saveNoteKey({ network: 'signet', descriptor, handle: 'nonsense', record, at: 1, sig: 'a' }));
 });

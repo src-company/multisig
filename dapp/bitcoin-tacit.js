@@ -350,7 +350,6 @@ const firstHeld = p => p.kind === 'reseed' ? 1 : 2;
 // it, and a proof or kernel that would burn the notes stops here.
 async function reviewSend(p, policy, priv, chain, prover, known){
   const refuse = why => { throw new Error(`refusing this send: ${why}`); };
-  if(policy.network !== 'signet') refuse('this network is not open yet');
   if(!Number.isInteger(known?.receive)) refuse('the vault has not been read yet');
   const pub = secp256k1.getPublicKey(priv, true), mine = hex.encode(wpkh(pub)), { reveal } = p;
   const coin = c => c && /^[0-9a-f]{64}$/.test(String(c.txid)) && Number.isSafeInteger(c.vout) && c.vout >= 0 && Number.isSafeInteger(c.value) && c.value >= 0 && /^[0-9a-f]+$/.test(String(c.spk));

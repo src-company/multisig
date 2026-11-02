@@ -291,7 +291,7 @@ let scanning = 0, lastScan = 0, scanned = Promise.resolve(), retries = 0;
 // not check out against this vault's keys is treated as no record at all.
 async function readTacit(){
   const policy = S.policy, BT = window.BitcoinTacit;
-  if(!policy || !BT || S.network !== 'signet' || !S.trusted) return;
+  if(!policy || !BT || !S.trusted) return;
   const record = await BV.fetchNoteRecord(policy).catch(() => undefined);
   if(policy !== S.policy || record === undefined) return;
   S.noteRecord = record && BT.verifyRecord(policy, record) ? record : null;
@@ -342,20 +342,20 @@ const tacAll = () => {
   return { waiting: notes.filter(n => n.amount > 0n), leadFor, fee: inbox.filter(n => n.status === 'plain').sort((a, b) => b.value - a.value)[0], held, assets, asset, sendable: leadFor(asset) ? asset : undefined };
 };
 function renderTacit(){
-  if(S.network !== 'signet' || !S.trusted || !window.BitcoinTacit) return '';
+  if(!S.trusted || !window.BitcoinTacit) return '';
   const BT = window.BitcoinTacit, head = '<div class="head"><span>TACIT</span></div>';
   if(S.noteBad) return `${head}<div class="note warn"><b>This vault's Tacit record does not check out.</b> No address is shown.</div>`;
-  if(!S.noteRecord) return S.noteRecord === undefined ? '' : `${head}<p class="small" style="padding:10px 8px">Give this vault a tacit1 address, so any Tacit wallet can pay it. Test coins only for now.</p>
+  if(!S.noteRecord) return S.noteRecord === undefined ? '' : `${head}<p class="small" style="padding:10px 8px">Give this vault a tacit1 address, so any Tacit wallet can pay it.</p>
     <div class="btns">${S.owner && allKeys(S.policy).some(isMe) ? '<button class="btn btn-outline btn-sm" data-act="tacit-setup">SET UP TACIT</button>' : '<button class="btn btn-outline btn-sm" data-act="wallet">CONNECT TO SET UP</button>'}</div>`;
   if(S.noteLocked) return `${head}<div class="note warn"><b>Your copy of the note key does not open.</b> Ask the owner who set up Tacit for this vault.</div>`;
   if(!S.noteKey) return `${head}<p class="small" style="padding:10px 8px">This vault has a tacit1 address. Connect as an owner to see it.</p>`;
   const f = S.form, { waiting, fee, held, sendable, assets, asset } = tacAll(), name = a => esc(assetName(a));
-  const row = (n, side) => `<div class="row"><span class="asset"><span class="btc" style="width:20px;height:20px">${TAC_ICON}</span>${name(n.asset)}</span><span class="r">${n.amount} ${side}</span></div>`;
+  const row = (n, side) => `<div class="row"><span class="asset"><span class="btc" style="width:20px;height:20px">${TAC_ICON}</span>${name(n.asset)}</span><span class="r">${noteUnits(n.asset, n.amount)} ${side}</span></div>`;
   const checking = (S.inbox || []).filter(n => n.status !== 'asset' && n.status !== 'plain').length + (S.pendingNotes || 0);
   const card = q => q.error ? `<div class="tx"><span class="tag">REFUSED</span><p class="small">${esc(q.error)}</p></div>` : `<div class="tx" data-tac="${esc(q.id)}">
-      <div class="tx-top"><div><span class="tag">${q.review.reseed ? 'PREPARE SENDING' : 'TACIT SEND'}</span><div class="tx-val">${q.review.reseed ? q.review.total : q.review.amount} ${name(q.review.asset)}</div></div><span class="tx-status ${q.votes.ready ? 'ok' : 'wait'}">${q.votes.ready ? 'READY' : `${q.votes.signed.length} OF ${q.votes.threshold} SIGNED`}</span></div>
+      <div class="tx-top"><div><span class="tag">${q.review.reseed ? 'PREPARE SENDING' : 'TACIT SEND'}</span><div class="tx-val">${noteUnits(q.review.asset, q.review.reseed ? q.review.total : q.review.amount)} ${name(q.review.asset)}</div></div><span class="tx-status ${q.votes.ready ? 'ok' : 'wait'}">${q.votes.ready ? 'READY' : `${q.votes.signed.length} OF ${q.votes.threshold} SIGNED`}</span></div>
       <div class="tx-to">→ ${q.review.reseed ? 'STAYS IN THIS VAULT' : esc(q.review.recipient)}</div>
-      <div class="tx-sub">${q.review.reseed ? 'NOTHING LEAVES' : `${q.review.change} BACK TO THE VAULT`} · FEE ${q.review.sats.toLocaleString('en-US')} SATS · CHECKED AGAINST THE NOTE KEY</div>
+      <div class="tx-sub">${q.review.reseed ? 'NOTHING LEAVES' : `${noteUnits(q.review.asset, q.review.change)} BACK TO THE VAULT`} · FEE ${q.review.sats.toLocaleString('en-US')} SATS · CHECKED AGAINST THE NOTE KEY</div>
       <div class="btns"><div class="right">${q.votes.ready ? '<button class="btn btn-fill" data-act="tacit-broadcast">SEND</button>' : q.votes.signed.includes(BV.keyId(S.owner, S.network)) ? '' : '<button class="btn btn-fill" data-act="tacit-sign">SIGN</button>'}</div></div>
     </div>`;
   return `${head}<div class="mono" style="font-size:11px;font-weight:400;padding:12px 8px">${esc(BT.noteAddress(S.noteKey, S.network))}</div>
@@ -371,10 +371,10 @@ function renderTacit(){
     ${held.length && !sendable && fee && !(S.tacQueue || []).some(q => !q.error) ? '<div class="btns"><button class="btn btn-outline btn-sm" data-act="tacit-reseed">PREPARE TO SEND</button></div>' : ''}
     ${sendable && fee && !S.tacOpen ? '<div class="btns"><button class="btn btn-outline btn-sm" data-act="tacit-open">SEND TACIT</button></div>' : ''}
     ${sendable && fee && S.tacOpen ? `<div class="send">
-      <label class="lbl" for="tacTo">SEND TO</label><input class="inp" id="tacTo" data-field="tacTo" spellcheck="false" autocomplete="off" placeholder="tactt1…" value="${esc(f.tacTo || '')}">
-      <label class="lbl" for="tacAmt">AMOUNT</label><input class="inp" id="tacAmt" data-field="tacAmt" inputmode="numeric" autocomplete="off" value="${esc(f.tacAmt || '')}">
+      <label class="lbl" for="tacTo">SEND TO</label><input class="inp" id="tacTo" data-field="tacTo" spellcheck="false" autocomplete="off" placeholder="${S.network === 'mainnet' ? 'tacit1…' : 'tactt1…'}" value="${esc(f.tacTo || '')}">
+      <label class="lbl" for="tacAmt">AMOUNT <span class="dim">${name(asset)}</span></label><input class="inp" id="tacAmt" data-field="tacAmt" inputmode="numeric" autocomplete="off" value="${esc(f.tacAmt || '')}">
       <div class="btns"><div class="right"><button class="btn btn-ghost" data-act="tacit-open">CANCEL</button><button class="btn btn-fill" data-act="tacit-propose">PROPOSE</button></div></div></div>` : ''}
-    <p class="small" style="padding:10px 8px">Test coins only for now.</p>`;
+    <p class="small" style="padding:10px 8px">Pilot. Use small amounts.</p>`;
 }
 // An explorer's estimate is a stranger's number, and these ops pay from a small float.
 const tacRate = () => Math.min(Math.max(feeOf('6'), 1), 50);
@@ -794,6 +794,24 @@ function renderReceive(){
     </div>`;
 }
 
+// Known assets are shown and entered in whole units. Anything else stays in base units,
+// because its decimals are not known here.
+const noteUnits = (asset, amount) => {
+  if(!BV.TACIT_ASSETS[asset]) return String(amount);
+  const s = amount.toString().padStart(9, '0'), whole = s.slice(0, -8), frac = s.slice(-8).replace(/0+$/, '');
+  return frac ? `${whole}.${frac}` : whole;
+};
+function readUnits(asset, text){
+  const t = String(text).trim();
+  if(!BV.TACIT_ASSETS[asset]){
+    if(!/^[1-9]\d*$/.test(t)) throw new Error('Enter a whole amount.');
+    return BigInt(t);
+  }
+  if(!/^\d+(\.\d{1,8})?$/.test(t)) throw new Error('Enter an amount, up to 8 places.');
+  const [whole, frac = ''] = t.split('.'), units = BigInt(whole) * 100000000n + BigInt(frac.padEnd(8, '0'));
+  if(units <= 0n) throw new Error('Enter an amount above zero.');
+  return units;
+}
 const assetName = id => BV.TACIT_ASSETS[id] || (id ? short(id) : 'TACIT ASSET');
 // Tacit assets in this vault. That one is here, and which, can be read from the chain
 // by anyone with no signature. How much cannot: a note's amount is blinded to a key this
@@ -1198,8 +1216,7 @@ const ACT = {
   async 'tacit-propose'(){
     if(!S.coins) throw new Error('Still reading this vault.');
     const BT = window.BitcoinTacit, f = S.form, { leadFor, fee, held, sendable } = tacAll();
-    if(!/^[1-9]\d*$/.test((f.tacAmt || '').trim())) throw new Error('Enter a whole amount.');
-    const recipient = BT.parseRecipient(f.tacTo, S.network), amount = BigInt(f.tacAmt.trim()), lead = leadFor(sendable);
+    const recipient = BT.parseRecipient(f.tacTo, S.network), amount = readUnits(sendable, f.tacAmt || ''), lead = leadFor(sendable);
     const notes = held.filter(n => n.asset === sendable);
     S.msg = { text: 'BUILDING THE TRANSFER. THIS CAN TAKE A MOMENT', kind: 'ok' };
     render();
@@ -1216,7 +1233,7 @@ const ACT = {
   async 'tacit-sign'(el){
     const BT = window.BitcoinTacit, q = tacCard(el), prover = await BT.loadProver();
     const r = await BT.reviewSend(q.p, S.policy, S.noteKey, BV.chain(S.network), prover, known());
-    if(!window.confirm(`Sign this Tacit ${r.reseed ? 'refresh' : 'send'}?\n\n${r.reseed ? `${r.total} ${assetName(r.asset)} stays in this vault` : `${r.amount} ${assetName(r.asset)} to ${r.recipient}\n${r.change} back to the vault`}\nFee ${r.sats.toLocaleString('en-US')} sats\n\nYour wallet will not ask again. This is your approval.`)) return;
+    if(!window.confirm(`Sign this Tacit ${r.reseed ? 'refresh' : 'send'}?\n\n${r.reseed ? `${noteUnits(r.asset, r.total)} ${assetName(r.asset)} stays in this vault` : `${noteUnits(r.asset, r.amount)} ${assetName(r.asset)} to ${r.recipient}\n${noteUnits(r.asset, r.change)} back to the vault`}\nFee ${r.sats.toLocaleString('en-US')} sats\n\nYour wallet will not ask again. This is your approval.`)) return;
     const id = BT.sendId(q.p);
     // Whatever another owner saved meanwhile is kept, not written over.
     const latest = (await BV.fetchTacSends(S.policy).catch(() => [])).find(x => { try { return BT.sendId(x) === id; } catch(_) { return false; } });

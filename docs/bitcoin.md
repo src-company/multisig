@@ -121,6 +121,9 @@ Bitcoin has two relevant opcodes. `OP_CHECKSEQUENCEVERIFY` counts from when a co
 
 ## Tacit assets
 
+Tacit support for vaults is in pilot on mainnet. A vault can set up a `tacit1` address built from a shared note key. Notes paid to it land in an inbox any single owner can move, so they should be moved into the vault promptly. Once there, moving them takes the vault's quorum. Sending needs a zero note at the note key, which the quorum can recreate. Fees come from plain sats at the note key's address. Notes paid straight to a vault's `bc1p` address still cannot be read or moved.
+
+
 Vaults hold sats. Anyone can send a Tacit note to a vault address, and a vault can neither read it nor publish an opening, because a note's blinding comes from a private key a vault does not have. It is still spendable on Bitcoin, and spending it as sats burns the asset, so the danger is losing it, not being unable to move it. So: never send Tacit assets to a vault, and anything that arrives is set aside.
 
 Every coin's creating transaction is checked for a Tacit envelope, which works from any explorer and misses nothing. Coins that trip it go to `POST api.tacit.finance/outpoints/classify`, which clears false alarms and names the asset. Only `plain` releases a coin: `asset`, `unverified`, a missing entry or any failure leaves it set aside and retries. The check runs again on a proposal's inputs before signing. The full contract is `docs/VAULT-INTEGRATION.md` in the Tacit repo. Holding notes in a vault would be its own design.

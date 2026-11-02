@@ -868,9 +868,8 @@ function inWorker(op, input, who) {
   });
 }
 
-// Signet only until the rest of the Tacit path has its own review.
 async function saveNoteKey(input, who) {
-  check(input && input.network === 'signet', 'Invalid network');
+  check(input && (input.network === 'mainnet' || input.network === 'signet'), 'Invalid network');
   check(typeof input.descriptor === 'string' && input.descriptor.length <= 8000, 'Invalid vault');
   check(typeof input.handle === 'string' && input.handle.length <= 700, 'Invalid handle');
   const record = JSON.stringify(input.record ?? null);
@@ -880,7 +879,7 @@ async function saveNoteKey(input, who) {
 }
 
 async function saveTacSend(input, who) {
-  check(input && input.network === 'signet', 'Invalid network');
+  check(input && (input.network === 'mainnet' || input.network === 'signet'), 'Invalid network');
   check(typeof input.descriptor === 'string' && input.descriptor.length <= 8000, 'Invalid vault');
   check(typeof input.handle === 'string' && input.handle.length <= 700, 'Invalid handle');
   check(/^[0-9a-f]{64}$/.test(String(input.id)), 'Invalid proposal');
