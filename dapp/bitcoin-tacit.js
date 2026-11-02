@@ -76,7 +76,7 @@ const ownersOn = policy => {
   for(const p of policy.paths) for(const k of p.keys) seen.set(BV.keyId(k, policy.network), k);
   return [...seen.entries()];
 };
-const recordHash = (policy, pub, seals) => sha256(concat(te.encode('multisig-note-record-v1\0'), hex.decode(BV.vaultId(policy)), te.encode(pub), te.encode(JSON.stringify(Object.keys(seals).sort().map(k => [k, seals[k].eph, seals[k].iv, seals[k].ct])))));
+const recordHash = (policy, pub, seals) => sha256(concat(te.encode(`multisig-note-record-v1\0${policy.network}\0`), hex.decode(BV.vaultId(policy)), te.encode(pub), te.encode(JSON.stringify(Object.keys(seals).sort().map(k => [k, seals[k].eph, seals[k].iv, seals[k].ct])))));
 
 // Sealed to every owner at once, so no one has to be around for anyone else's copy.
 async function makeRecord(signer, self, policy){
@@ -146,18 +146,22 @@ const unmask = (ct, ks) => {
 function envelopeOf(script){
   if(script?.length < 36 || script[0] !== 32 || script[33] !== 0xac || script[34] !== 0x00 || script[35] !== 0x63) return null;
   const pushes = [];
+  let closed = false;
   for(let p = 36; p < script.length;){
     const op = script[p++];
-    if(op === 0x68) break;
+    // Tacit reads nothing past the end. A script with more is no envelope to it, and the
+    // op would be void with its notes gone, so it is none here either.
+    if(op === 0x68){ if(p !== script.length) return null; closed = true; break; }
     let n;
     if(op >= 1 && op <= 75) n = op;
     else if(op === 0x4c) n = script[p++];
     else if(op === 0x4d){ n = script[p] | (script[p + 1] << 8); p += 2; }
     else return null;
+    if(p + n > script.length) return null;
     pushes.push(script.subarray(p, p + n));
     p += n;
   }
-  if(pushes.length < 3 || new TextDecoder().decode(pushes[0]) !== 'TACIT' || pushes[1].length !== 1 || pushes[1][0] !== 1) return null;
+  if(!closed || pushes.length < 3 || new TextDecoder().decode(pushes[0]) !== 'TACIT' || pushes[1].length !== 1 || pushes[1][0] !== 1) return null;
   return concat(...pushes.slice(2));
 }
 function outputsOf(payload){
@@ -176,7 +180,9 @@ async function readInbox(priv, network, chain){
     const status = verdicts[`${c.txid}:${c.vout}`]?.status;
     if(status === 'plain'){ out.push({ ...c, status }); continue; }
     const n = status === 'asset' ? openNote(await chain.tx(c.txid), c.vout, priv) : null;
-    out.push({ ...c, status: status === 'asset' && !n ? 'unreadable' : status || 'unverified', asset: verdicts[`${c.txid}:${c.vout}`]?.asset_ids?.[0] || n?.asset, amount: n?.amount, blinding: n?.blinding });
+    // The asset is read from the note. The classifier only gets to agree with it.
+    const agrees = n && verdicts[`${c.txid}:${c.vout}`]?.asset_ids?.[0] === n.asset;
+    out.push({ ...c, status: status === 'asset' && !agrees ? 'unreadable' : status || 'unverified', asset: n?.asset, amount: n?.amount, blinding: n?.blinding });
   }
   return out;
 }
@@ -211,7 +217,7 @@ function openNote(tx, vout, priv){
 // foreign input on purpose and stays that way. The price is that everything the PSBT
 // signer would have checked is checked again here, and more: a bad op on Tacit destroys
 // its inputs, so a broken proof from a co-owner is a burn, not a failed transaction.
-const DUST_OUT = 546, SEQ = 0xfffffffd, MAX_NOTES = 16;
+const DUST_OUT = 546, SEQ = 0xfffffffd, MAX_NOTES = 16, MAX_FEE_SATS = 200000;
 const tag = (t, m) => { const h = sha256(te.encode(t)); return sha256(concat(h, h, m)); };
 const dsha = b => sha256(sha256(b));
 const le64 = n => { const b = new Uint8Array(8); new DataView(b.buffer).setBigUint64(0, BigInt(n), true); return b; };
@@ -228,12 +234,11 @@ function rawTx(tx, wit){
     wit ? concat(...wit.map(w => concat(varint(w.length), ...w.map(vbytes)))) : new Uint8Array(0), u32(0));
 }
 const txidOf = tx => hex.encode(reversed(dsha(rawTx(tx))));
-function sigV0(tx, i, priv){
-  const pub = secp256k1.getPublicKey(priv, true), n = tx.ins[i];
-  const code = concat(Uint8Array.of(0x19, 0x76, 0xa9, 0x14), hash160(pub), Uint8Array.of(0x88, 0xac));
-  const h = dsha(concat(u32(2), dsha(concat(...tx.ins.map(prevout))), dsha(concat(...tx.ins.map(() => u32(SEQ)))), prevout(n), code, le64(n.value), u32(SEQ), dsha(outsBytes(tx)), u32(0), u32(1)));
-  return concat(secp256k1.sign(h, priv, { prehash: false, format: 'der' }), Uint8Array.of(1));
+function hashV0(tx, i, pub){
+  const n = tx.ins[i], code = concat(Uint8Array.of(0x19, 0x76, 0xa9, 0x14), hash160(pub), Uint8Array.of(0x88, 0xac));
+  return dsha(concat(u32(2), dsha(concat(...tx.ins.map(prevout))), dsha(concat(...tx.ins.map(() => u32(SEQ)))), prevout(n), code, le64(n.value), u32(SEQ), dsha(outsBytes(tx)), u32(0), u32(1)));
 }
+const sigV0 = (tx, i, priv) => concat(secp256k1.sign(hashV0(tx, i, secp256k1.getPublicKey(priv, true)), priv, { prehash: false, format: 'der' }), Uint8Array.of(1));
 function leafHash(tx, i, script){
   const leaf = tag('TapLeaf', concat(Uint8Array.of(0xc0), vbytes(script)));
   return tag('TapSighash', concat(Uint8Array.of(0, 0), u32(2), u32(0), sha256(concat(...tx.ins.map(prevout))), sha256(concat(...tx.ins.map(n => le64(n.value)))),
@@ -263,6 +268,8 @@ function buildPayload(prover, asset, ins, outs){
   if(excess === 0n) throw new Error('that transfer has no kernel');
   const sig = schnorr.sign(kernelMessage(asset, ins, Cs), bytes32(excess));
   const proof = prover.prove(outs.map(o => o.amount), outs.map(o => o.r));
+  // Nothing leaves here unchecked: a bad op destroys what it spends.
+  if(!prover.verify(Cs, proof) || !schnorr.verify(sig, kernelMessage(asset, ins, Cs), secp256k1.Point.BASE.multiply(excess).toBytes(true).subarray(1))) throw new Error('that transfer did not verify');
   return concat(Uint8Array.of(0x23), asset, sig, Uint8Array.of(outs.length), ...outs.flatMap((o, i) => [Cs[i], o.ct]), Uint8Array.of(proof.length & 255, proof.length >> 8), proof);
 }
 const mask = (v, ks) => { const b = new Uint8Array(8); for(let i = 0; i < 8; i++) b[i] = Number((v >> BigInt(8 * i)) & 255n) ^ ks[i]; return b; };
@@ -304,7 +311,7 @@ function buildSweep({ priv, notes, fee, rate, vaultSpk, prover }){
 // Vault to anyone. Output 0 pays the recipient, 1 is the vault's change, and 2 and 3 are
 // zero notes at V, the next send's lead. A plain send's receiver reads the sender from
 // the first asset input, and a vault has no key to show there, so V's zero note goes first.
-function buildSend({ priv, keyNote, notes, recipient, amount, fee, rate, slot, prover }){
+function buildSend({ priv, keyNote, notes, recipient, to, amount, fee, rate, slot, prover }){
   if(amount <= 0n || !notes.length || notes.length > MAX_NOTES) throw new Error('nothing to send');
   if(new Set([keyNote, ...notes].map(n => n.asset)).size !== 1) throw new Error('one asset at a time');
   const total = notes.reduce((s, n) => s + n.amount, 0n);
@@ -318,7 +325,7 @@ function buildSend({ priv, keyNote, notes, recipient, amount, fee, rate, slot, p
   const script = envelopeScript(pub.subarray(1), payload);
   const change = BV.vaultOf(slot.policy, 0, slot.index), spks = [hex.encode(wpkh(recipient)), hex.encode(change.script), mine, mine];
   const { commit: commitHex, reveal, env } = frame({ priv, fee, rate, script, assets: ins.map(({ r, ...a }) => a), spks });
-  const proposal = { v: 1, commit: commitHex, script: hex.encode(script), reveal, recipient: hex.encode(recipient), amount: amount.toString(), changeIndex: slot.index,
+  const proposal = { v: 1, to, commit: commitHex, script: hex.encode(script), reveal, recipient: hex.encode(recipient), amount: amount.toString(), changeIndex: slot.index,
     envSig: hex.encode(schnorr.sign(leafHash(reveal, 0, script), priv)), keySig: hex.encode(sigV0(reveal, 1, priv)), sigs: {} };
   return { ...proposal, control: hex.encode(env.control), keyPub: hex.encode(pub) };
 }
@@ -326,13 +333,23 @@ function buildSend({ priv, keyNote, notes, recipient, amount, fee, rate, slot, p
 // Everything a signer must know before putting a signature on a send. The proposal is a
 // stranger's text. Each output is rebuilt from V, so no amount or address is taken from
 // it, and a proof or kernel that would burn the notes stops here.
-async function reviewSend(p, policy, priv, chain, prover){
+async function reviewSend(p, policy, priv, chain, prover, known){
   const refuse = why => { throw new Error(`refusing this send: ${why}`); };
+  if(policy.network !== 'signet') refuse('this network is not open yet');
+  if(!Number.isInteger(known?.receive)) refuse('the vault has not been read yet');
   const pub = secp256k1.getPublicKey(priv, true), mine = hex.encode(wpkh(pub)), { reveal } = p;
+  const coin = c => c && /^[0-9a-f]{64}$/.test(String(c.txid)) && Number.isSafeInteger(c.vout) && c.vout >= 0 && Number.isSafeInteger(c.value) && c.value >= 0 && /^[0-9a-f]+$/.test(String(c.spk));
   if(p.v !== 1 || !/^[0-9a-f]+$/.test(String(p.script)) || !/^0[23][0-9a-f]{64}$/.test(String(p.recipient))) refuse('it is not a send');
-  if(!Array.isArray(reveal?.ins) || !Array.isArray(reveal?.outs) || reveal.ins.length < 3 || reveal.ins.length > MAX_NOTES + 2) refuse('it has the wrong inputs');
+  if(!Array.isArray(reveal?.ins) || !Array.isArray(reveal?.outs) || reveal.ins.length < 3 || reveal.ins.length > MAX_NOTES + 2 || !reveal.ins.every(coin)) refuse('it has the wrong inputs');
+  if(!reveal.outs.every(o => o && Number.isSafeInteger(o.value) && o.value >= 0 && /^[0-9a-f]+$/.test(String(o.spk)))) refuse('it has the wrong outputs');
+  if(p.recipient === hex.encode(pub)) refuse('it pays the vault\'s own inbox');
   const script = hex.decode(p.script), payload = envelopeOf(script), body = outputsOf(payload), recipient = hex.decode(p.recipient);
   if(!body || payload[0] !== 0x23 || body.outputs.length !== 4) refuse('it is not a transfer');
+  // Byte for byte what this page would write, so nothing rides along with it.
+  if(hex.encode(envelopeScript(pub.subarray(1), payload)) !== p.script) refuse('its script is not the plain envelope');
+  let shown;
+  try { shown = hex.encode(parseRecipient(p.to, policy.network)); } catch(_) { refuse('its address does not read'); }
+  if(shown !== p.recipient) refuse('its address does not match the recipient');
   if(hex.encode(script.subarray(1, 33)) !== hex.encode(pub.subarray(1))) refuse('it is not signed by this vault\'s note key');
   // Inputs: the envelope, V's zero note, then notes held by this vault, and nothing else.
   const env = envelopeOutput(script), [e, key, ...held] = reveal.ins;
@@ -355,11 +372,11 @@ async function reviewSend(p, policy, priv, chain, prover){
   }
   if(opened[0].amount !== 0n) refuse('the lead note is not empty');
   const verdicts = await chain.classify([...seen].slice(1));
-  for(const id of [...seen].slice(1)) if(verdicts[id]?.status !== 'asset') refuse('Tacit does not vouch for an input');
+  for(const id of [...seen].slice(1)) if(verdicts[id]?.status !== 'asset' || verdicts[id].asset_ids?.[0] !== body.asset) refuse('Tacit does not vouch for an input');
   // Outputs: rebuilt from V. Anything that does not come out the same is not this send.
   const anchor = prevout(key), amount = BigInt(p.amount), total = opened.reduce((s, n) => s + n.amount, 0n);
   if(amount <= 0n || amount > total) refuse('the amount does not fit');
-  if(!Number.isInteger(p.changeIndex) || p.changeIndex < 0 || p.changeIndex >= BV.MAX_INDEX) refuse('the change address is out of range');
+  if(!Number.isInteger(p.changeIndex) || p.changeIndex < 0 || p.changeIndex >= BV.MAX_INDEX || p.changeIndex >= known.receive + BV.GAP) refuse('the change address is out of range');
   const change = BV.vaultOf(policy, 0, p.changeIndex);
   const want = [sentOut(priv, recipient, anchor, 0, amount), selfOut(priv, anchor, 1, total - amount), selfOut(priv, anchor, 2, 0n), selfOut(priv, anchor, 3, 0n)];
   const spks = [hex.encode(wpkh(recipient)), hex.encode(change.script), mine, mine];
@@ -377,23 +394,44 @@ async function reviewSend(p, policy, priv, chain, prover){
   if(!schnorr.verify(kernel, kernelMessage(hex.decode(body.asset), ins, cs), excess.toBytes(true).subarray(1))) refuse('its kernel does not verify');
   if(payload.length !== rpAt + 2 + proof.length || !prover.verify(cs, proof)) refuse('its range proof does not verify');
   // The commit must pay this envelope, and the reveal must spend exactly that.
-  if(commitIdOf(hex.decode(String(p.commit))) !== e.txid) refuse('the commit does not match');
-  return { asset: body.asset, amount, total, change: total - amount, recipient: p.recipient, sats: reveal.ins.reduce((n, i) => n + i.value, 0) - reveal.outs.reduce((n, o) => n + o.value, 0) };
+  let made;
+  try { made = readCommit(hex.decode(String(p.commit))); } catch(_) { refuse('the commit does not read'); }
+  if(made?.id !== e.txid || made.spk !== e.spk || made.value !== e.value) refuse('the commit does not match');
+  const fee = reveal.ins.reduce((n, i) => n + i.value, 0) - reveal.outs.reduce((n, o) => n + o.value, 0);
+  if(fee < 0 || fee > MAX_FEE_SATS) refuse('its fee is out of range');
+  let sigsOk = false;
+  try {
+    sigsOk = p.keyPub === hex.encode(pub) && schnorr.verify(hex.decode(p.envSig), leafHash(reveal, 0, script), pub.subarray(1)) && p.control === hex.encode(env.control)
+      && secp256k1.verify(hex.decode(p.keySig).slice(0, -1), hashV0(reveal, 1, pub), pub, { prehash: false, format: 'der' }) && p.keySig.endsWith('01');
+  } catch(_) {}
+  if(!sigsOk) refuse('the note key did not sign it');
+  return { asset: body.asset, amount, total, change: total - amount, recipient: p.to, sats: fee };
 }
 
-// A segwit transaction's id, read from its raw form.
-function commitIdOf(raw){
+// A segwit transaction's id and first output, read from its raw form.
+function readCommit(raw){
   let p = 4;
   if(raw[p] !== 0 || raw[p + 1] !== 1) return null;
   p += 2;
   const start = p, nIn = raw[p++];
   for(let i = 0; i < nIn; i++){ p += 36; p += 1 + raw[p] + 4; }
-  const nOut = raw[p++];
-  for(let i = 0; i < nOut; i++){ p += 8; p += 1 + raw[p]; }
-  return hex.encode(reversed(dsha(concat(raw.subarray(0, 4), raw.subarray(start, p), raw.subarray(raw.length - 4)))));
+  const nOut = raw[p++], view = new DataView(raw.buffer, raw.byteOffset);
+  let first = null;
+  for(let i = 0; i < nOut; i++){
+    const value = Number(view.getBigUint64(p, true)), len = raw[p + 8];
+    if(!i) first = { value, spk: hex.encode(raw.subarray(p + 9, p + 9 + len)) };
+    p += 9 + len;
+  }
+  return { ...first, id: hex.encode(reversed(dsha(concat(raw.subarray(0, 4), raw.subarray(start, p), raw.subarray(raw.length - 4))))) };
 }
 
-const sendId = p => hex.encode(sha256(te.encode(`${p.commit}|${p.script}`)));
+const sendId = p => hex.encode(sha256(te.encode(JSON.stringify([p.commit, p.script, p.reveal, p.changeIndex, p.recipient, p.amount]))));
+// Two owners saving at once must not cost either a signature. Only ones that verify count.
+function mergeSigs(a, b, policy){
+  const out = { ...a, sigs: { ...a.sigs } };
+  for(const id of signersOf(b, policy).signed) out.sigs[id] = b.sigs[id];
+  return out;
+}
 function vaultLeaf(policy, input){
   const slot = BV.vaultOf(policy, input.branch, input.index), path = slot.paths[0], control = path.leaf[0];
   return { path, script: path.script, control: concat(Uint8Array.of(control.version), control.internalKey, ...control.merklePath) };
@@ -455,6 +493,6 @@ const loadProver = async () => {
   return { prove: (v, r) => bp.bpRangeAggProve(v, r).proof, verify: (cs, proof) => bp.bpRangeAggVerify(cs.map(c => deps.secp.ProjectivePoint.fromHex(hex.encode(c))), proof) };
 };
 
-root.BitcoinTacit = Object.freeze({ parts: Object.freeze({ selfOut, sentOut, buildPayload, envelopeScript, frame, sigV0, leafHash, rawTx, wpkh, prevout, txidOf }), buildSweep, buildSend, reviewSend, signSend, signersOf, finishSend, sendId, parseRecipient, loadProver, inboxAddress, readInbox, tacitAddress, noteAddress, makeNoteKey, makeRecord, verifyRecord, openRecord, openNote, envelopeOf, outputsOf });
+root.BitcoinTacit = Object.freeze({ parts: Object.freeze({ selfOut, sentOut, buildPayload, envelopeScript, frame, sigV0, leafHash, rawTx, wpkh, prevout, txidOf }), buildSweep, buildSend, reviewSend, signSend, signersOf, mergeSigs, finishSend, sendId, parseRecipient, loadProver, inboxAddress, readInbox, tacitAddress, noteAddress, makeNoteKey, makeRecord, verifyRecord, openRecord, openNote, envelopeOf, outputsOf });
 
 })(typeof window !== 'undefined' ? window : globalThis);
