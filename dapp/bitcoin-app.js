@@ -39,7 +39,7 @@ const KEY_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" str
 const TAC_ICON = `<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#0a0a0a"/><circle cx="16" cy="16" r="13" fill="none" stroke="#f4efe6" stroke-width="2.5"/><path d="M17.5 7L13 22.5Q13 25 18 24" fill="none" stroke="#f7931a" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 11L21 11" stroke="#f7931a" stroke-width="2.4" stroke-linecap="round"/></svg>`;
 
 const S = {
-  network: MAINNET && lsGet('ms_btc_net') === 'mainnet' ? 'mainnet' : 'signet',
+  network: MAINNET && lsGet('ms_btc_net') !== 'signet' ? 'mainnet' : 'signet',
   dark: !lsGet('ms_light'),
   // The key lives here and nowhere else, for this tab's lifetime. It is never
   // written down, so a reload asks the wallet again.
