@@ -359,6 +359,10 @@ REVOKE ALL ON FUNCTION btc_proposal_row(text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION btc_proposal_row(text, text) TO anon;
 
 REVOKE ALL ON btc_vault_owners FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION put_btc_tac_proposal(text, text, text, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION put_btc_tac_proposal(text, text, text, text) TO metadata_writer;
+REVOKE ALL ON FUNCTION btc_tac_proposals_for(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION btc_tac_proposals_for(text) TO anon;
 REVOKE ALL ON FUNCTION put_btc_note_key(text, text, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION put_btc_note_key(text, text, text) TO metadata_writer;
 REVOKE ALL ON FUNCTION btc_note_key(text) FROM PUBLIC;

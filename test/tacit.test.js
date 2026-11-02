@@ -77,3 +77,62 @@ test('an inbox shows an amount only for a coin Tacit calls an asset', async () =
   const [gone] = await BT.readInbox(v, 'signet', { ...chain({}), classify: async () => { throw new Error('down'); } });
   assert.deepEqual([gone.status, gone.amount], ['unverified', undefined]);
 });
+
+// A real sweep from signet, then a send built on it. Every edit a co-owner could make to
+// the proposal must be refused before anyone signs, because a bad op burns the notes.
+const sendFixture = async () => {
+  const bp = await import('../dapp/tacit/bulletproofs.js'), deps = await import('../dapp/tacit/vendor/tacit-deps.min.js');
+  const prover = { prove: (v, r) => bp.bpRangeAggProve(v, r).proof, verify: (cs, proof) => bp.bpRangeAggVerify(cs.map(c => deps.secp.ProjectivePoint.fromHex(hex.encode(c))), proof) };
+  const te = new TextEncoder(), owner = n => BV.deriveOwnerKey(async m => BV.evmSignMessage(m, sha256(te.encode(n))), 'signet');
+  const [oa, ob] = await Promise.all(['tac-owner-a', 'tac-owner-b'].map(owner));
+  const vault = BV.policyOf({ network: 'signet', paths: [{ threshold: 2, keys: [oa.owner, ob.owner] }] }), V = BT.makeNoteKey(oa.signer, vault);
+  const tx = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/tacit-sweep.json'), 'utf8')), id = tx.txid;
+  const vn = BT.openNote(tx, 0, V), kn = BT.openNote(tx, 1, V), recipient = secp256k1.getPublicKey(sha256(te.encode('stranger')), true);
+  const proposal = BT.buildSend({ priv: V, keyNote: { txid: id, vout: 1, value: 546, asset: kn.asset, blinding: kn.blinding },
+    notes: [{ txid: id, vout: 0, value: 546, amount: vn.amount, blinding: vn.blinding, asset: vn.asset, branch: 0, index: 0 }],
+    recipient, amount: 75n, fee: { txid: 'aa'.repeat(32), vout: 0, value: 40000 }, rate: 2, slot: { policy: vault, index: 1 }, prover });
+  const chain = { tx: async () => tx, classify: async ops => Object.fromEntries(ops.map(o => [o, { status: 'asset' }])) };
+  return { vault, V, proposal, chain, prover, oa, ob, recipient };
+};
+
+test('a clean send passes review, and needs the quorum to finish', async () => {
+  const { vault, V, proposal, chain, prover, oa, ob } = await sendFixture();
+  const r = await BT.reviewSend(proposal, vault, V, chain, prover);
+  assert.deepEqual([r.amount, r.change], [75n, 125n]);
+  const one = BT.signSend(proposal, oa.signer, oa.owner, vault);
+  assert.deepEqual([BT.signersOf(one, vault).signed.length, BT.signersOf(one, vault).ready], [1, false]);
+  assert.throws(() => BT.finishSend(one, vault), /needs 2/);
+  const two = BT.signSend(one, ob.signer, ob.owner, vault);
+  assert.equal(BT.signersOf(two, vault).ready, true);
+  assert.match(BT.finishSend(two, vault).reveal, /^[0-9a-f]+$/);
+  // A forged or moved signature is simply not counted.
+  const key = BV.keyId(ob.owner, 'signet'), bad = { ...two, sigs: { ...two.sigs, [key]: { 0: '00'.repeat(64) } } };
+  assert.equal(BT.signersOf(bad, vault).ready, false);
+});
+
+test('every edit to a send is refused before anyone signs', async () => {
+  const { vault, V, proposal, chain, prover, recipient } = await sendFixture();
+  const flip = (h, at) => h.slice(0, at) + (h[at] === '0' ? '1' : '0') + h.slice(at + 1);
+  const edit = f => { const p = JSON.parse(JSON.stringify(proposal)); f(p); return p; };
+  const other = hex.encode(secp256k1.getPublicKey(sha256(Uint8Array.of(7)), true));
+  const scriptLen = proposal.script.length;
+  const cases = {
+    'a bigger amount': p => { p.amount = '76'; },
+    'another recipient': p => { p.recipient = other; },
+    'a redirected payment': p => { p.reveal.outs[0].spk = p.reveal.outs[1].spk; },
+    'redirected change': p => { p.reveal.outs[1].spk = p.reveal.outs[0].spk; },
+    'a moved change slot': p => { p.changeIndex = 2; },
+    'an extra payment': p => { p.reveal.outs.push({ value: 546, spk: p.reveal.outs[0].spk }); },
+    'a foreign input': p => { p.reveal.ins.push({ ...p.reveal.ins[2], vout: 5 }); },
+    'a repeated coin': p => { p.reveal.ins.push({ ...p.reveal.ins[2] }); },
+    'a swapped lead': p => { p.reveal.ins[1].kind = 'vault'; },
+    'a broken proof': p => { p.script = flip(p.script, scriptLen - 40); },
+    'a broken kernel': p => { p.script = flip(p.script, 240); },
+    'a commit for something else': p => { p.commit = flip(p.commit, 120); },
+    'no script': p => { p.script = 'zz'; },
+  };
+  for(const [name, f] of Object.entries(cases)) await assert.rejects(BT.reviewSend(edit(f), vault, V, chain, prover), /refusing this send|Cannot|invalid|Invalid|bad|out of|length|expected/, name);
+  await assert.rejects(BT.reviewSend(proposal, vault, V, { ...chain, classify: async () => ({}) }, prover), /does not vouch/);
+  assert.equal(hex.encode(BT.parseRecipient(BT.tacitAddress(recipient, recipient, 'signet'), 'signet')), hex.encode(recipient));
+  assert.throws(() => BT.parseRecipient(BT.tacitAddress(recipient, recipient, 'mainnet'), 'signet'), /another network/);
+});

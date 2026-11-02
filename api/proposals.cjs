@@ -879,6 +879,17 @@ async function saveNoteKey(input, who) {
   return { fn: 'put_btc_note_key', args: { p_vault: vault, p_network: input.network, p_record: record } };
 }
 
+async function saveTacSend(input, who) {
+  check(input && input.network === 'signet', 'Invalid network');
+  check(typeof input.descriptor === 'string' && input.descriptor.length <= 8000, 'Invalid vault');
+  check(typeof input.handle === 'string' && input.handle.length <= 700, 'Invalid handle');
+  check(/^[0-9a-f]{64}$/.test(String(input.id)), 'Invalid proposal');
+  const body = JSON.stringify(input.body ?? null);
+  check(input.body && body.length <= 40000, 'Invalid proposal');
+  const { vault } = await inWorker('tacsend', { descriptor: input.descriptor, network: input.network, handle: input.handle, at: input.at, sig: input.sig, id: input.id }, who);
+  return { fn: 'put_btc_tac_proposal', args: { p_vault: vault, p_id: input.id, p_network: input.network, p_body: body } };
+}
+
 async function admitBitcoinProposal(input, deps, who) {
   check(input && typeof input.psbt === 'string' && input.psbt.length <= 72000, 'Invalid proposal');
   check(typeof input.descriptor === 'string' && input.descriptor.length <= 8000, 'Invalid vault');
@@ -914,7 +925,7 @@ function createHandler(deps, allowedOrigins = []) {
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     }
     if (req.url === '/health' && req.method === 'GET') { res.writeHead(200); res.end('ok'); return; }
-    if (!['/proposals', '/metadata', '/action', '/signature', '/reconcile', '/register', '/confirm', '/session', '/handle', '/btc-proposal', '/btc-vault', '/btc-vaults', '/btc-note-key'].includes(req.url)) { res.writeHead(404); res.end(); return; }
+    if (!['/proposals', '/metadata', '/action', '/signature', '/reconcile', '/register', '/confirm', '/session', '/handle', '/btc-proposal', '/btc-vault', '/btc-vaults', '/btc-note-key', '/btc-tac-send'].includes(req.url)) { res.writeHead(404); res.end(); return; }
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
     if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
     const caller = callerOf(req);
@@ -939,7 +950,13 @@ function createHandler(deps, allowedOrigins = []) {
         res.end();
         return;
       }
-      if (['/btc-proposal', '/handle', '/btc-vault', '/btc-vaults', '/btc-note-key'].includes(req.url)) btcRateLimit(req);
+      if (['/btc-proposal', '/handle', '/btc-vault', '/btc-vaults', '/btc-note-key', '/btc-tac-send'].includes(req.url)) btcRateLimit(req);
+      if (req.url === '/btc-tac-send') {
+        await deps.saveMetadata(await saveTacSend(input, caller));
+        res.writeHead(204);
+        res.end();
+        return;
+      }
       if (req.url === '/btc-note-key') {
         await deps.saveMetadata(await saveNoteKey(input, caller));
         res.writeHead(204);
@@ -1044,4 +1061,4 @@ if (require.main === module) {
   server.listen(Number(PORT), '0.0.0.0');
 }
 
-module.exports = { saveNoteKey, saveBitcoinVault, btcOwner, admitBitcoinProposal, verifyHandle, verifyProposal, verifyMetadata, verifyAction, verifySignature, verifyReconcile, verifyRegistration, verifyConfirm, verifySession, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, ACTION_TYPES, SESSION_TYPES, iface };
+module.exports = { saveTacSend, saveNoteKey, saveBitcoinVault, btcOwner, admitBitcoinProposal, verifyHandle, verifyProposal, verifyMetadata, verifyAction, verifySignature, verifyReconcile, verifyRegistration, verifyConfirm, verifySession, createHandler, dependencies, serviceToken, senderSlot, ethers, TYPES, META_TYPES, ACTION_TYPES, SESSION_TYPES, iface };

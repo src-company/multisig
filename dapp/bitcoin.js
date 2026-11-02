@@ -717,6 +717,16 @@ async function publishNoteRecord(policy, signer, handle, record, doFetch = (...a
   const r = await postJson(doFetch, `${API}/btc-note-key`, { network: policy.network, descriptor: descriptor(policy), handle, record, ...auth });
   if(!r.ok) throw new Error('Could not save the note key');
 }
+async function publishTacSend(policy, signer, handle, id, body, doFetch = (...a) => root.fetch(...a)){
+  const auth = signOwnerAuth(signer, policy.network, `tacsend:${vaultId(policy)}:${id}`);
+  const r = await postJson(doFetch, `${API}/btc-tac-send`, { network: policy.network, descriptor: descriptor(policy), handle, id, body, ...auth });
+  if(!r.ok) throw new Error('Could not save this send');
+}
+async function fetchTacSends(policy, doFetch = (...a) => root.fetch(...a)){
+  const r = await doFetch(`${STORE}/rpc/btc_tac_proposals_for`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ p_vault: vaultId(policy) }), signal: root.AbortSignal?.timeout(TIMEOUT_MS) });
+  if(!r.ok) throw new Error('Could not read sends');
+  return (await r.json()).map(row => { try { return JSON.parse(row.body); } catch(_) { return null; } }).filter(Boolean);
+}
 // Whatever the store holds. The caller checks it against the vault before using it.
 async function fetchNoteRecord(policy, doFetch = (...a) => root.fetch(...a)){
   const r = await doFetch(`${STORE}/rpc/btc_note_key`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ p_vault: vaultId(policy) }), signal: root.AbortSignal?.timeout(TIMEOUT_MS) });
@@ -1347,7 +1357,7 @@ function concat(...parts){
 }
 
 const keyPoint = (owner, network) => HDKey.fromExtendedKey(owner.xpub, net(network).versions).publicKey;
-root.BitcoinVault = Object.freeze({ EXPLORERS_BUSY, publishNoteRecord, fetchNoteRecord, policySummary, aboutBlocks, signPossession, keyPoint, ownersOf, HOW_IT_WORKS, describePolicy, keyId, isName, resolveName, exportAccountKey, recoveryText, sameKey, TACIT_ASSETS, signOwnerAuth, verifyOwnerAuth, saveVault, listVaults, assertSpendable, isProtected, hasTacitEnvelope, walletMessage, linkMessage, keyFromWalletSignature, evmSignHash, evmSignMessage, bitcoinMessageHash, bitcoinSigners, handleForWallet, proposalId, vaultId, publishProposal, fetchProposals, openProposals, publishHandle, fetchHandles, MAX_INDEX, txidOf, seatMisdescribed, EVM_CHAINS, selectors: { threshold: selector('threshold()') }, readEvmVault, mirror, bindingMessage, evmMessageHash, NETWORKS, DUST, GAP, MAX_OWNERS, MAX_OLDER, MAX_FEE_RATE, encodeOwner, decodeOwner, originText, ownerMessage, deriveOwnerKey, keyFromSignature, fingerprintOf,
+root.BitcoinVault = Object.freeze({ publishTacSend, fetchTacSends, EXPLORERS_BUSY, publishNoteRecord, fetchNoteRecord, policySummary, aboutBlocks, signPossession, keyPoint, ownersOf, HOW_IT_WORKS, describePolicy, keyId, isName, resolveName, exportAccountKey, recoveryText, sameKey, TACIT_ASSETS, signOwnerAuth, verifyOwnerAuth, saveVault, listVaults, assertSpendable, isProtected, hasTacitEnvelope, walletMessage, linkMessage, keyFromWalletSignature, evmSignHash, evmSignMessage, bitcoinMessageHash, bitcoinSigners, handleForWallet, proposalId, vaultId, publishProposal, fetchProposals, openProposals, publishHandle, fetchHandles, MAX_INDEX, txidOf, seatMisdescribed, EVM_CHAINS, selectors: { threshold: selector('threshold()') }, readEvmVault, mirror, bindingMessage, evmMessageHash, NETWORKS, DUST, GAP, MAX_OWNERS, MAX_OLDER, MAX_FEE_RATE, encodeOwner, decodeOwner, originText, ownerMessage, deriveOwnerKey, keyFromSignature, fingerprintOf,
   policyOf, descriptor, descriptorChecksum, parseDescriptor, walletPolicy, vaultOf, vsize, coinsFor, propose, inspect, sign, combine, finalize, chain, scan, evmSigner });
 
 })(typeof window !== 'undefined' ? window : globalThis);

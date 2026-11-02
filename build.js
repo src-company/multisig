@@ -397,8 +397,8 @@ function main() {
     const raw = fs.readFileSync(path.join(SRC, file));
     let out;
     if(/\.html$/i.test(file)) out = Buffer.from(buildHtml(raw.toString('utf8'), file), 'utf8');
-    // Already minified upstream, and not ours to rewrite.
-    else if(/\.min\.js$/i.test(file)) out = raw;
+    // Already minified upstream, and not ours to rewrite. Tacit's ES modules ship as they came.
+    else if(/\.min\.js$/i.test(file) || /^tacit[\\/]/.test(file)) out = raw;
     else if(/\.js$/i.test(file)) out = Buffer.from(stripJs(raw.toString('utf8')), 'utf8');
     else if(/\.css$/i.test(file)) out = Buffer.from(stripCss(raw.toString('utf8')), 'utf8');
     else out = raw;

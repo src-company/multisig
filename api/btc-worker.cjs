@@ -48,6 +48,15 @@ const ops = {
     if (!BT.verifyRecord(policy, record) || record.by !== BV.keyId(signer, network)) throw fail('That note key record does not check out');
     return { vault };
   },
+  // A Tacit send, from an owner of the vault. What is inside is for the owners' pages to
+  // check, with a note key this service never sees.
+  tacsend({ network, descriptor, handle, at, sig, id }) {
+    const policy = BV.parseDescriptor(descriptor, network), vault = BV.vaultId(policy);
+    const signer = BV.decodeOwner(handle, network);
+    if (!signer.proven || !BV.verifyOwnerAuth(signer, network, `tacsend:${vault}:${id}`, at, sig)) throw Object.assign(new Error('Signature has expired or does not verify'), { refused: true });
+    if (!policy.paths.some(p => p.keys.some(k => BV.sameKey(k, signer, network)))) throw Object.assign(new Error('That owner is not on this vault'), { refused: true });
+    return { vault };
+  },
   merge({ descriptor, network, prior, psbt }) {
     return { psbt: BV.combine([prior, psbt], BV.parseDescriptor(descriptor, network)) };
   },

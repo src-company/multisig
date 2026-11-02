@@ -277,7 +277,7 @@ async function open(policy, fromLink = false){
   if(S.moveTo !== BV.descriptor(policy)) Object.assign(S, { moveFrom: null, moveTo: null });
   if(trusted) remember(policy);
   S.noteKey?.fill(0);
-  Object.assign(S, { noteKey: null, noteRecord: undefined, noteBad: false, inbox: null, who: null, policy, trusted, view: 'dash', compose: false, coins: null, tip: null, queue: [], psbt: null, review: null, msg: null });
+  Object.assign(S, { notes: null, tacQueue: null, noteKey: null, noteRecord: undefined, noteBad: false, inbox: null, who: null, policy, trusted, view: 'dash', compose: false, coins: null, tip: null, queue: [], psbt: null, review: null, msg: null });
   syncHash();
   render();
   // In the background: a click's busy lock must not outlast the click, or every button
@@ -297,22 +297,80 @@ async function readTacit(){
   S.noteRecord = record && BT.verifyRecord(policy, record) ? record : null;
   S.noteBad = !!record && !S.noteRecord;
   if(S.noteRecord && S.owner?.signer && allKeys(policy).some(isMe) && !S.noteKey) S.noteKey = await BT.openRecord(S.noteRecord, S.owner.signer, S.owner, policy).catch(() => null);
-  if(S.noteKey) S.inbox = await BT.readInbox(S.noteKey, S.network, BV.chain(S.network)).catch(() => S.inbox);
+  if(S.noteKey){
+    const c = BV.chain(S.network);
+    S.inbox = await BT.readInbox(S.noteKey, S.network, c).catch(() => S.inbox);
+    // Notes this vault holds. A coin here that V cannot open was sent straight to the
+    // vault's address, which is the case the vault cannot use: it stays set aside.
+    // Notes sit in dust, which the coin scan skips, so they are looked at here.
+    const candidates = (S.coins || []).filter(x => x.quarantine === 'tacit' || x.value <= BV.DUST).slice(0, 32), held = [];
+    const verdicts = candidates.length ? await c.classify(candidates.map(x => `${x.txid}:${x.vout}`)).catch(() => ({})) : {};
+    for(const coin of candidates){
+      if(verdicts[`${coin.txid}:${coin.vout}`]?.status !== 'asset') continue;
+      const n = BT.openNote(await c.tx(coin.txid).catch(() => null), coin.vout, S.noteKey);
+      if(n) held.push({ ...coin, ...n, value: coin.value });
+    }
+    S.notes = held;
+    const prover = await BT.loadProver();
+    const open = await BV.fetchTacSends(policy).catch(() => []), queue = [];
+    for(const p of open.slice(0, 20)){
+      // Gone once its coins are spent, the same way a Bitcoin proposal closes.
+      if(!p.reveal?.ins?.slice(2).every(i => S.coins?.some(x => x.txid === i.txid && x.vout === i.vout))) continue;
+      try { queue.push({ p, review: await BT.reviewSend(p, policy, S.noteKey, c, prover), votes: BT.signersOf(p, policy) }); }
+      catch(e) { queue.push({ p, error: e.message }); }
+    }
+    S.tacQueue = queue;
+  }
   if(policy === S.policy) render();
 }
+const tacAll = () => {
+  const inbox = S.inbox || [], notes = inbox.filter(n => n.status === 'asset');
+  return { waiting: notes.filter(n => n.amount > 0n), lead: notes.find(n => n.amount === 0n), fee: inbox.filter(n => n.status === 'plain').sort((a, b) => b.value - a.value)[0], held: (S.notes || []).filter(n => n.amount > 0n) };
+};
 function renderTacit(){
   if(S.network !== 'signet' || !S.trusted || !window.BitcoinTacit) return '';
-  const head = '<div class="head"><span>TACIT</span></div>';
+  const BT = window.BitcoinTacit, head = '<div class="head"><span>TACIT</span></div>';
   if(S.noteBad) return `${head}<div class="note warn"><b>This vault's Tacit record does not check out.</b> No address is shown.</div>`;
   if(!S.noteRecord) return S.noteRecord === undefined ? '' : `${head}<p class="small" style="padding:10px 8px">Give this vault a tacit1 address, so any Tacit wallet can pay it. Test coins only for now.</p>
     <div class="btns">${S.owner && allKeys(S.policy).some(isMe) ? '<button class="btn btn-outline btn-sm" data-act="tacit-setup">SET UP TACIT</button>' : '<button class="btn btn-outline btn-sm" data-act="wallet">CONNECT TO SET UP</button>'}</div>`;
   if(!S.noteKey) return `${head}<p class="small" style="padding:10px 8px">This vault has a tacit1 address. Connect as an owner to see it.</p>`;
-  const addr = window.BitcoinTacit.noteAddress(S.noteKey, S.network);
-  const row = n => `<div class="row"><span class="asset"><span class="btc" style="width:20px;height:20px">${TAC_ICON}</span>${esc(assetName(n.asset))}</span><span class="r">${n.status === 'asset' ? `${n.amount} UNITS` : n.status === 'plain' ? `${n.value} SATS` : 'CHECKING…'}</span></div>`;
-  return `${head}<div class="mono" style="font-size:11px;font-weight:400;padding:12px 8px">${esc(addr)}</div>
+  const f = S.form, { waiting, lead, fee, held } = tacAll(), name = a => esc(assetName(a));
+  const row = (n, side) => `<div class="row"><span class="asset"><span class="btc" style="width:20px;height:20px">${TAC_ICON}</span>${name(n.asset)}</span><span class="r">${n.amount} ${side}</span></div>`;
+  const checking = (S.inbox || []).filter(n => n.status !== 'asset' && n.status !== 'plain').length;
+  const card = q => q.error ? `<div class="tx"><span class="tag">REFUSED</span><p class="small">${esc(q.error)}</p></div>` : `<div class="tx" data-tac="${esc(BT.sendId(q.p))}">
+      <div class="tx-top"><div><span class="tag">TACIT SEND</span><div class="tx-val">${q.review.amount} ${name(q.review.asset)}</div></div><span class="tx-status ${q.votes.ready ? 'ok' : 'wait'}">${q.votes.ready ? 'READY' : `${q.votes.signed.length} OF ${q.votes.threshold} SIGNED`}</span></div>
+      <div class="tx-to">→ ${esc(q.review.recipient)}</div>
+      <div class="tx-sub">${q.review.change} BACK TO THE VAULT · FEE ${q.review.sats.toLocaleString('en-US')} SATS · CHECKED AGAINST THE NOTE KEY</div>
+      <div class="btns"><div class="right">${q.votes.ready ? '<button class="btn btn-fill" data-act="tacit-broadcast">SEND</button>' : q.votes.signed.includes(BV.keyId(S.owner, S.network)) ? '' : '<button class="btn btn-fill" data-act="tacit-sign">SIGN</button>'}</div></div>
+    </div>`;
+  return `${head}<div class="mono" style="font-size:11px;font-weight:400;padding:12px 8px">${esc(BT.noteAddress(S.noteKey, S.network))}</div>
     <div class="btns"><button class="btn btn-outline btn-sm" data-act="copy-tacit">COPY TACIT ADDRESS</button></div>
-    ${(S.inbox || []).map(row).join('')}
-    <p class="small" style="padding:10px 8px">Notes land in an inbox any owner can move, on the way to the vault. Moving them under the vault's rules comes next, so keep this to test coins.</p>`;
+    ${held.map(n => row(n, 'IN THE VAULT')).join('')}
+    ${waiting.map(n => row(n, 'IN THE INBOX')).join('')}
+    ${checking ? `<div class="row"><span class="small">${checking} INCOMING, WAITING FOR TACIT TO VERIFY</span></div>` : ''}
+    ${waiting.length ? `<div class="note warn"><b>Move this into the vault.</b> Until it does, any owner could take it alone.</div>
+      <div class="btns"><button class="btn btn-fill btn-sm" data-act="tacit-sweep"${fee ? '' : ' disabled'}>MOVE INTO VAULT</button></div>` : ''}
+    ${fee ? '' : `<p class="small" style="padding:10px 8px">Moving notes costs a miner fee, paid from the note key's address. Send about 10,000 sats to <button class="addrline" data-act="copy-tacit-fee">${esc(BT.inboxAddress(S.noteKey, S.network))} ⧉</button></p>`}
+    ${(S.tacQueue || []).map(card).join('')}
+    ${held.length && lead && fee ? `<details class="send"><summary>SEND TACIT</summary>
+      <label class="lbl" for="tacTo">SEND TO</label><input class="inp" id="tacTo" data-field="tacTo" spellcheck="false" autocomplete="off" placeholder="tactt1…" value="${esc(f.tacTo || '')}">
+      <label class="lbl" for="tacAmt">AMOUNT</label><input class="inp" id="tacAmt" data-field="tacAmt" inputmode="numeric" autocomplete="off" value="${esc(f.tacAmt || '')}">
+      <div class="btns"><div class="right"><button class="btn btn-fill" data-act="tacit-propose">PROPOSE</button></div></div></details>` : ''}
+    <p class="small" style="padding:10px 8px">Test coins only for now.</p>`;
+}
+const tacCard = el => {
+  const id = el.closest('[data-tac]')?.dataset.tac, q = (S.tacQueue || []).find(x => !x.error && window.BitcoinTacit.sendId(x.p) === id);
+  if(!q) throw new Error('This send changed. Check it again.');
+  return q;
+};
+// The reveal spends the commit, so it waits until an explorer has heard of it.
+async function tacBroadcast({ commit, reveal }){
+  const c = BV.chain(S.network);
+  await c.broadcast(commit);
+  for(let tries = 0; ; tries++){
+    try { return await c.broadcast(reveal); }
+    catch(e) { if(tries >= 5 || !/missing|spent/i.test(e.message)) throw e; await new Promise(ok => setTimeout(ok, 3000)); }
+  }
 }
 function readOwners(){
   const policy = S.policy;
@@ -329,6 +387,7 @@ async function refresh(){
     Object.assign(S, { coins: found.coins, receive: found.receive, change: found.change, truncated: found.truncated, tip, fees });
     await syncQueue();
     render();
+    readTacit();
     // A slow first look at a coin answers "retry". Each try gets further, so it clears.
     if(S.coins.some(c => c.quarantine === 'unknown') && retries++ < 5) setTimeout(() => { if(run === scanning) scanned = refresh(); }, 30000);
     else if(!S.coins.some(c => c.quarantine === 'unknown')) retries = 0;
@@ -345,9 +404,10 @@ async function refresh(){
 // whose coin is gone can no longer happen, so it leaves the queue: that is what closes
 // one on Bitcoin, whether it confirmed or lost to another.
 async function syncQueue(){
-  const remote = await BV.fetchProposals(S.policy).catch(() => []);
+  const remote = await BV.fetchProposals(S.policy).catch(() => null);
+  if(remote) S.shared = new Set(remote.map(BV.proposalId));
   const byId = new Map(S.queue.map(q => [q.id, q.psbt]));
-  for(const psbt of remote){
+  for(const psbt of remote || []){
     const id = BV.proposalId(psbt);
     // One bad row stays one bad row: the copy already here is kept.
     try { byId.set(id, byId.has(id) ? BV.combine([byId.get(id), psbt], S.policy) : psbt); } catch(_) {}
@@ -413,7 +473,7 @@ function propose(){
 // Into the shared queue, or, if that cannot be reached, by hand. A signature is never
 // lost to a failed save, only less convenient.
 async function persist(){
-  try { await BV.publishProposal(S.psbt, S.policy); toast('SAVED TO THE QUEUE'); }
+  try { await BV.publishProposal(S.psbt, S.policy); (S.shared ||= new Set()).add(BV.proposalId(S.psbt)); toast('SAVED TO THE QUEUE'); }
   catch(_) { if(!S.review.ready) S.ovl = 'share'; }
 }
 
@@ -513,6 +573,7 @@ function renderHeader(){
       <div class="hdr-r">
         <button class="theme-btn" data-act="theme" aria-label="Switch to ${S.dark ? 'light' : 'dark'} theme">${S.dark ? '☀' : '☾'}</button>
         <button class="wallet-btn" data-act="wallet" aria-haspopup="dialog">${S.owner ? '<span class="dot-sm" aria-hidden="true"></span>' : ''}${esc(label)}</button>
+        ${S.owner ? '<button class="wallet-btn" data-act="disconnect" aria-label="Disconnect and forget this key">DISCONNECT</button>' : ''}
       </div>
     </div>
     <nav class="nav">
@@ -602,7 +663,7 @@ function renderProposal(item, i){
         <span class="tx-nonce">#${n}</span>
         <span class="tag">${sends.length ? 'BTC TRANSFER' : 'CLOCK RESET'}${r.older ? ' · DELAYED PATH' : ''}</span>
         ${clash ? '<span class="tag" title="These spend the same coins, so only one can happen">CONFLICT</span>' : ''}
-        ${r.signedBy.length ? '' : '<span class="tag">DRAFT · ONLY ON THIS DEVICE</span>'}
+        ${r.signedBy.length ? (S.shared?.has(item.id) ? '' : '<span class="tag" title="Other owners cannot see this copy until someone signs it here">NOT IN THE QUEUE · ONLY ON THIS DEVICE</span>') : '<span class="tag">DRAFT · ONLY ON THIS DEVICE</span>'}
         <div class="tx-val"><span class="btc" style="width:18px;height:18px">${BTC_ICON}</span>${btcOf(sends.length ? value : back.reduce((n, o) => n + o.sats, 0))} BTC</div>
       </div>
       <span class="tx-status ${status[0]}">${status[1]}</span>
@@ -1086,6 +1147,49 @@ const ACT = {
     await readTacit();
   },
   'copy-tacit'(){ return copy(window.BitcoinTacit.noteAddress(S.noteKey, S.network), 'ADDRESS COPIED'); },
+  'copy-tacit-fee'(){ return copy(window.BitcoinTacit.inboxAddress(S.noteKey, S.network), 'ADDRESS COPIED'); },
+  async 'tacit-sweep'(){
+    const BT = window.BitcoinTacit, { waiting, fee } = tacAll(), asset = waiting[0].asset;
+    S.msg = { text: 'BUILDING THE TRANSFER. THIS CAN TAKE A MOMENT', kind: 'ok' };
+    render();
+    const prover = await BT.loadProver();
+    const built = BT.buildSweep({ priv: S.noteKey, notes: waiting.filter(n => n.asset === asset).slice(0, 8), fee, rate: Math.max(feeOf('6'), 1), vaultSpk: BV.vaultOf(S.policy, 0, S.receive).script, prover });
+    await tacBroadcast(built);
+    toast('SENT TO THE VAULT');
+    S.msg = null;
+    await readTacit();
+  },
+  async 'tacit-propose'(){
+    const BT = window.BitcoinTacit, f = S.form, { lead, fee, held } = tacAll();
+    if(!/^[1-9]\d*$/.test((f.tacAmt || '').trim())) throw new Error('Enter a whole amount.');
+    const recipient = BT.parseRecipient(f.tacTo, S.network), amount = BigInt(f.tacAmt.trim()), asset = lead.asset;
+    const notes = held.filter(n => n.asset === asset);
+    S.msg = { text: 'BUILDING THE TRANSFER. THIS CAN TAKE A MOMENT', kind: 'ok' };
+    render();
+    const prover = await BT.loadProver();
+    const p = BT.buildSend({ priv: S.noteKey, keyNote: lead, notes, recipient, amount, fee, rate: Math.max(feeOf('6'), 1), slot: { policy: S.policy, index: S.receive }, prover });
+    await BT.reviewSend(p, S.policy, S.noteKey, BV.chain(S.network), prover);
+    await BV.publishTacSend(S.policy, S.owner.signer, myHandle(), BT.sendId(p), p);
+    Object.assign(f, { tacTo: '', tacAmt: '' });
+    S.msg = null;
+    await readTacit();
+  },
+  // Reviewed again here against the chain and V, whatever the queue said a moment ago.
+  async 'tacit-sign'(el){
+    const BT = window.BitcoinTacit, q = tacCard(el), prover = await BT.loadProver();
+    const r = await BT.reviewSend(q.p, S.policy, S.noteKey, BV.chain(S.network), prover);
+    if(!window.confirm(`Sign this Tacit send?\n\n${r.amount} ${assetName(r.asset)} to ${r.recipient}\n${r.change} back to the vault\n\nYour wallet will not ask again. This is your approval.`)) return;
+    const signed = BT.signSend(q.p, S.owner.signer, S.owner, S.policy);
+    await BV.publishTacSend(S.policy, S.owner.signer, myHandle(), BT.sendId(signed), signed);
+    await readTacit();
+  },
+  async 'tacit-broadcast'(el){
+    const BT = window.BitcoinTacit, q = tacCard(el), prover = await BT.loadProver();
+    await BT.reviewSend(q.p, S.policy, S.noteKey, BV.chain(S.network), prover);
+    await tacBroadcast(BT.finishSend(q.p, S.policy));
+    toast('SENT');
+    scanned = refresh();
+  },
   'copy-evm'(){ return copy(S.owner.evm, 'ADDRESS COPIED'); },
   'copy-address'(){ return copy(BV.vaultOf(S.policy, 0, S.receive).address, 'ADDRESS COPIED'); },
   async 'copy-descriptor'(){ await copy(BV.descriptor(S.policy), 'DESCRIPTOR COPIED'); setNote('backup', curDesc(), 1); },

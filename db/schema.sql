@@ -2011,6 +2011,43 @@ RETURNS text AS $$
   SELECT record FROM btc_note_keys WHERE vault = p_vault;
 $$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
 
+-- A Tacit send waiting for signatures. Every reader rebuilds and checks it from the note
+-- key before showing it, so this table only carries it between owners.
+CREATE TABLE IF NOT EXISTS btc_tac_proposals (
+  vault      text NOT NULL CHECK (vault ~ '^[0-9a-f]{64}$'),
+  id         text NOT NULL CHECK (id ~ '^[0-9a-f]{64}$'),
+  network    text NOT NULL CHECK (network IN ('mainnet', 'signet')),
+  body       text NOT NULL CHECK (length(body) BETWEEN 1 AND 40000),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (vault, id)
+);
+ALTER TABLE btc_tac_proposals ENABLE ROW LEVEL SECURITY;
+
+CREATE OR REPLACE FUNCTION put_btc_tac_proposal(p_vault text, p_id text, p_network text, p_body text)
+RETURNS void AS $$
+BEGIN
+  IF coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb->>'role', '') <> 'metadata_writer' THEN
+    RAISE EXCEPTION 'A verified owner signature is required' USING ERRCODE = '42501';
+  END IF;
+  DELETE FROM btc_tac_proposals WHERE updated_at < now() - interval '30 days';
+  IF NOT EXISTS (SELECT 1 FROM btc_tac_proposals WHERE vault = p_vault AND id = p_id) THEN
+    IF (SELECT count(*) FROM btc_tac_proposals) >= 5000 THEN
+      RAISE EXCEPTION 'The queue is full' USING ERRCODE = '54000';
+    END IF;
+    IF (SELECT count(*) FROM btc_tac_proposals WHERE vault = p_vault) >= 20 THEN
+      RAISE EXCEPTION 'This vault has too many open sends' USING ERRCODE = '54000';
+    END IF;
+  END IF;
+  INSERT INTO btc_tac_proposals (vault, id, network, body) VALUES (p_vault, p_id, p_network, p_body)
+  ON CONFLICT (vault, id) DO UPDATE SET body = EXCLUDED.body, updated_at = now();
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+CREATE OR REPLACE FUNCTION btc_tac_proposals_for(p_vault text)
+RETURNS TABLE (id text, body text) AS $$
+  SELECT p.id, p.body FROM btc_tac_proposals p WHERE p.vault = p_vault ORDER BY p.updated_at DESC LIMIT 20;
+$$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
+
 -- ── BITCOIN VAULT LIST ──────────────────────────────────────
 -- Which vaults an owner sits on, so connecting a wallet on any device finds them. A
 -- descriptor spends nothing, and it is re-read against the owner's own key on arrival.
