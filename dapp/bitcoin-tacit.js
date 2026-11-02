@@ -330,6 +330,21 @@ function buildSend({ priv, keyNote, notes, recipient, to, amount, fee, rate, slo
   return { ...proposal, control: hex.encode(env.control), keyPub: hex.encode(pub) };
 }
 
+// Any one owner can spend a zero note at V, which would leave a send with nothing to lead
+// with. So the quorum can make new ones: vault notes back into the vault, and a zero note
+// at V beside them. No receiver has to read this one, so it leads with the vault itself.
+function buildReseed({ priv, notes, fee, rate, slot, prover }){
+  if(!notes.length || notes.length > MAX_NOTES) throw new Error('nothing to refresh');
+  if(new Set(notes.map(n => n.asset)).size !== 1) throw new Error('one asset at a time');
+  const pub = secp256k1.getPublicKey(priv, true), mine = hex.encode(wpkh(pub)), total = notes.reduce((s, n) => s + n.amount, 0n);
+  const ins = notes.map(n => ({ txid: n.txid, vout: n.vout, value: n.value, spk: hex.encode(BV.vaultOf(slot.policy, n.branch, n.index).script), r: n.blinding, kind: 'vault', branch: n.branch, index: n.index }));
+  const anchor = prevout(ins[0]), outs = [selfOut(priv, anchor, 0, total), selfOut(priv, anchor, 1, 0n)];
+  const script = envelopeScript(pub.subarray(1), buildPayload(prover, hex.decode(notes[0].asset), ins, outs));
+  const { commit: commitHex, reveal, env } = frame({ priv, fee, rate, script, assets: ins.map(({ r, ...a }) => a), spks: [hex.encode(BV.vaultOf(slot.policy, 0, slot.index).script), mine] });
+  return { v: 1, kind: 'reseed', commit: commitHex, script: hex.encode(script), reveal, changeIndex: slot.index, amount: '0', envSig: hex.encode(schnorr.sign(leafHash(reveal, 0, script), priv)), control: hex.encode(env.control), keyPub: hex.encode(pub), sigs: {} };
+}
+const firstHeld = p => p.kind === 'reseed' ? 1 : 2;
+
 // Everything a signer must know before putting a signature on a send. The proposal is a
 // stranger's text. Each output is rebuilt from V, so no amount or address is taken from
 // it, and a proof or kernel that would burn the notes stops here.
@@ -339,27 +354,32 @@ async function reviewSend(p, policy, priv, chain, prover, known){
   if(!Number.isInteger(known?.receive)) refuse('the vault has not been read yet');
   const pub = secp256k1.getPublicKey(priv, true), mine = hex.encode(wpkh(pub)), { reveal } = p;
   const coin = c => c && /^[0-9a-f]{64}$/.test(String(c.txid)) && Number.isSafeInteger(c.vout) && c.vout >= 0 && Number.isSafeInteger(c.value) && c.value >= 0 && /^[0-9a-f]+$/.test(String(c.spk));
-  if(p.v !== 1 || !/^[0-9a-f]+$/.test(String(p.script)) || !/^0[23][0-9a-f]{64}$/.test(String(p.recipient))) refuse('it is not a send');
-  if(!Array.isArray(reveal?.ins) || !Array.isArray(reveal?.outs) || reveal.ins.length < 3 || reveal.ins.length > MAX_NOTES + 2 || !reveal.ins.every(coin)) refuse('it has the wrong inputs');
+  const reseed = p.kind === 'reseed', first = firstHeld(p), width = reseed ? 2 : 4;
+  if(p.kind !== undefined && !reseed) refuse('it is not a send');
+  if(p.v !== 1 || !/^[0-9a-f]+$/.test(String(p.script)) || (!reseed && !/^0[23][0-9a-f]{64}$/.test(String(p.recipient)))) refuse('it is not a send');
+  if(!Array.isArray(reveal?.ins) || !Array.isArray(reveal?.outs) || reveal.ins.length < first + 1 || reveal.ins.length > MAX_NOTES + 2 || !reveal.ins.every(coin)) refuse('it has the wrong inputs');
   if(!reveal.outs.every(o => o && Number.isSafeInteger(o.value) && o.value >= 0 && /^[0-9a-f]+$/.test(String(o.spk)))) refuse('it has the wrong outputs');
   if(p.recipient === hex.encode(pub)) refuse('it pays the vault\'s own inbox');
-  const script = hex.decode(p.script), payload = envelopeOf(script), body = outputsOf(payload), recipient = hex.decode(p.recipient);
-  if(!body || payload[0] !== 0x23 || body.outputs.length !== 4) refuse('it is not a transfer');
+  const script = hex.decode(p.script), payload = envelopeOf(script), body = outputsOf(payload), recipient = reseed ? null : hex.decode(p.recipient);
+  if(!body || payload[0] !== 0x23 || body.outputs.length !== width) refuse('it is not a transfer');
   // Byte for byte what this page would write, so nothing rides along with it.
   if(hex.encode(envelopeScript(pub.subarray(1), payload)) !== p.script) refuse('its script is not the plain envelope');
-  let shown;
-  try { shown = hex.encode(parseRecipient(p.to, policy.network)); } catch(_) { refuse('its address does not read'); }
-  if(shown !== p.recipient) refuse('its address does not match the recipient');
+  if(!reseed){
+    let shown;
+    if(typeof p.to !== 'string' || p.to !== p.to.trim().toLowerCase()) refuse('its address does not read');
+    try { shown = hex.encode(parseRecipient(p.to, policy.network)); } catch(_) { refuse('its address does not read'); }
+    if(shown !== p.recipient) refuse('its address does not match the recipient');
+  }
   if(hex.encode(script.subarray(1, 33)) !== hex.encode(pub.subarray(1))) refuse('it is not signed by this vault\'s note key');
   // Inputs: the envelope, V's zero note, then notes held by this vault, and nothing else.
-  const env = envelopeOutput(script), [e, key, ...held] = reveal.ins;
+  const env = envelopeOutput(script), e = reveal.ins[0], key = reseed ? null : reveal.ins[1], held = reveal.ins.slice(first);
   if(e.spk !== hex.encode(env.spk) || e.vout !== 0) refuse('the envelope input does not match');
-  if(key.kind !== 'key' || key.spk !== mine) refuse('it does not lead with the note key');
+  if(key && (key.kind !== 'key' || key.spk !== mine)) refuse('it does not lead with the note key');
   if(p.control !== hex.encode(env.control)) refuse('the envelope path does not match');
   const seen = new Set(reveal.ins.map(i => `${i.txid}:${i.vout}`));
   if(seen.size !== reveal.ins.length) refuse('it repeats a coin');
   const opened = [];
-  for(const i of [key, ...held]){
+  for(const i of reveal.ins.slice(1)){
     const tx = await chain.tx(i.txid);
     if(tx.txid !== i.txid || tx.vout?.[i.vout]?.value !== i.value || tx.vout[i.vout].scriptpubkey !== i.spk) refuse('an input is not what it says');
     const n = openNote(tx, i.vout, priv);
@@ -370,27 +390,29 @@ async function reviewSend(p, policy, priv, chain, prover, known){
     if(i.kind !== 'vault' || !Number.isInteger(i.branch) || !Number.isInteger(i.index) || i.index >= BV.MAX_INDEX) refuse('an input is not the vault\'s');
     if(hex.encode(BV.vaultOf(policy, i.branch, i.index).script) !== i.spk) refuse('an input is not the vault\'s');
   }
-  if(opened[0].amount !== 0n) refuse('the lead note is not empty');
+  if(key && opened[0].amount !== 0n) refuse('the lead note is not empty');
   const verdicts = await chain.classify([...seen].slice(1));
   for(const id of [...seen].slice(1)) if(verdicts[id]?.status !== 'asset' || verdicts[id].asset_ids?.[0] !== body.asset) refuse('Tacit does not vouch for an input');
   // Outputs: rebuilt from V. Anything that does not come out the same is not this send.
-  const anchor = prevout(key), amount = BigInt(p.amount), total = opened.reduce((s, n) => s + n.amount, 0n);
-  if(amount <= 0n || amount > total) refuse('the amount does not fit');
+  const anchor = prevout(reveal.ins[1]), amount = BigInt(p.amount), total = opened.reduce((s, n) => s + n.amount, 0n);
+  if(reseed ? amount !== 0n : amount <= 0n || amount > total) refuse('the amount does not fit');
   if(!Number.isInteger(p.changeIndex) || p.changeIndex < 0 || p.changeIndex >= BV.MAX_INDEX || p.changeIndex >= known.receive + BV.GAP) refuse('the change address is out of range');
   const change = BV.vaultOf(policy, 0, p.changeIndex);
-  const want = [sentOut(priv, recipient, anchor, 0, amount), selfOut(priv, anchor, 1, total - amount), selfOut(priv, anchor, 2, 0n), selfOut(priv, anchor, 3, 0n)];
-  const spks = [hex.encode(wpkh(recipient)), hex.encode(change.script), mine, mine];
+  const want = reseed ? [selfOut(priv, anchor, 0, total), selfOut(priv, anchor, 1, 0n)] : [sentOut(priv, recipient, anchor, 0, amount), selfOut(priv, anchor, 1, total - amount), selfOut(priv, anchor, 2, 0n), selfOut(priv, anchor, 3, 0n)];
+  const spks = reseed ? [hex.encode(change.script), mine] : [hex.encode(wpkh(recipient)), hex.encode(change.script), mine, mine];
   want.forEach((o, i) => {
     if(hex.encode(commit(o.amount, o.r).toBytes(true)) !== hex.encode(body.outputs[i].commitment) || hex.encode(o.ct) !== hex.encode(body.outputs[i].ct)) refuse('a note does not match what is shown');
     if(reveal.outs[i]?.spk !== spks[i] || reveal.outs[i].value !== DUST_OUT) refuse('an address does not match what is shown');
   });
-  const extra = reveal.outs.slice(4);
+  const extra = reveal.outs.slice(width);
   if(extra.length > 1 || extra.some(o => o.spk !== mine)) refuse('it pays somewhere else');
+  // Back to V is back to any one owner, so it stays the size of a fee float.
+  if(extra.some(o => o.value > MAX_FEE_SATS)) refuse('it moves too many sats to the note key');
   // What would make Tacit void the op, and so destroy the notes.
   const cs = body.outputs.map(o => o.commitment), ins = reveal.ins.slice(1);
   const E = cs.reduce((s, c) => s.add(secp256k1.Point.fromHex(hex.encode(c))), secp256k1.Point.ZERO ?? null);
   const excess = opened.reduce((s, n) => s.subtract(commit(n.amount, n.blinding) ?? secp256k1.Point.ZERO), E);
-  const kernel = payload.subarray(33, 97), rpAt = 98 + 41 * 4, proof = payload.subarray(rpAt + 2, rpAt + 2 + (payload[rpAt] | (payload[rpAt + 1] << 8)));
+  const kernel = payload.subarray(33, 97), rpAt = 98 + 41 * width, proof = payload.subarray(rpAt + 2, rpAt + 2 + (payload[rpAt] | (payload[rpAt + 1] << 8)));
   if(!schnorr.verify(kernel, kernelMessage(hex.decode(body.asset), ins, cs), excess.toBytes(true).subarray(1))) refuse('its kernel does not verify');
   if(payload.length !== rpAt + 2 + proof.length || !prover.verify(cs, proof)) refuse('its range proof does not verify');
   // The commit must pay this envelope, and the reveal must spend exactly that.
@@ -402,10 +424,10 @@ async function reviewSend(p, policy, priv, chain, prover, known){
   let sigsOk = false;
   try {
     sigsOk = p.keyPub === hex.encode(pub) && schnorr.verify(hex.decode(p.envSig), leafHash(reveal, 0, script), pub.subarray(1)) && p.control === hex.encode(env.control)
-      && secp256k1.verify(hex.decode(p.keySig).slice(0, -1), hashV0(reveal, 1, pub), pub, { prehash: false, format: 'der' }) && p.keySig.endsWith('01');
+      && (reseed || (secp256k1.verify(hex.decode(p.keySig).slice(0, -1), hashV0(reveal, 1, pub), pub, { prehash: false, format: 'der' }) && p.keySig.endsWith('01')));
   } catch(_) {}
   if(!sigsOk) refuse('the note key did not sign it');
-  return { asset: body.asset, amount, total, change: total - amount, recipient: p.to, sats: fee };
+  return { reseed, asset: body.asset, amount, total, change: total - amount, recipient: reseed ? null : p.to, sats: fee };
 }
 
 // A segwit transaction's id and first output, read from its raw form.
@@ -422,10 +444,14 @@ function readCommit(raw){
     if(!i) first = { value, spk: hex.encode(raw.subarray(p + 9, p + 9 + len)) };
     p += 9 + len;
   }
+  // Nothing may sit past the end, or the bytes checked are not the bytes sent.
+  let w = p;
+  for(let i = 0; i < nIn; i++){ const items = raw[w++]; for(let k = 0; k < items; k++) w += 1 + raw[w]; }
+  if(w + 4 !== raw.length) return null;
   return { ...first, id: hex.encode(reversed(dsha(concat(raw.subarray(0, 4), raw.subarray(start, p), raw.subarray(raw.length - 4))))) };
 }
 
-const sendId = p => hex.encode(sha256(te.encode(JSON.stringify([p.commit, p.script, p.reveal, p.changeIndex, p.recipient, p.amount]))));
+const sendId = p => hex.encode(sha256(te.encode(JSON.stringify([p.kind || 'send', p.to, p.commit, p.script, p.reveal, p.changeIndex, p.recipient, p.amount]))));
 // Two owners saving at once must not cost either a signature. Only ones that verify count.
 function mergeSigs(a, b, policy){
   const out = { ...a, sigs: { ...a.sigs } };
@@ -439,13 +465,13 @@ function vaultLeaf(policy, input){
 // Reviewed first, always. This owner's signature on every vault input, under the first
 // path, the one that takes the quorum.
 function signSend(p, signer, self, policy){
-  const account = accountOf(signer, policy.network), held = p.reveal.ins.slice(2), sigs = {};
+  const account = accountOf(signer, policy.network), first = firstHeld(p), held = p.reveal.ins.slice(first), sigs = {};
   held.forEach((input, n) => {
     const { path } = vaultLeaf(policy, input), me = path.keys.find(k => BV.sameKey(k.owner, self, policy.network));
     if(!me) throw new Error('this key is not an owner on that path');
     const child = account.deriveChild(me.chain).deriveChild(input.index);
     if(hex.encode(child.publicKey.subarray(1)) !== hex.encode(me.pubkey)) throw new Error('this key does not match its seat');
-    sigs[n] = hex.encode(schnorr.sign(leafHash(p.reveal, n + 2, path.script), child.privateKey));
+    sigs[n] = hex.encode(schnorr.sign(leafHash(p.reveal, n + first, path.script), child.privateKey));
     child.wipePrivateData();
   });
   account.wipePrivateData();
@@ -453,13 +479,13 @@ function signSend(p, signer, self, policy){
 }
 // Signatures that check out, per owner. One that does not is simply not counted.
 function signersOf(p, policy){
-  const threshold = policy.paths[0].threshold, held = p.reveal.ins.slice(2), done = [];
+  const threshold = policy.paths[0].threshold, first = firstHeld(p), held = p.reveal.ins.slice(first), done = [];
   for(const k of policy.paths[0].keys){
     const id = BV.keyId(k, policy.network), got = p.sigs?.[id];
     if(!got) continue;
     const ok = held.every((input, n) => {
       const { path } = vaultLeaf(policy, input), seat = path.keys.find(x => BV.sameKey(x.owner, k, policy.network));
-      try { return /^[0-9a-f]{128}$/.test(String(got[n])) && schnorr.verify(hex.decode(got[n]), leafHash(p.reveal, n + 2, path.script), seat.pubkey); } catch(_) { return false; }
+      try { return /^[0-9a-f]{128}$/.test(String(got[n])) && schnorr.verify(hex.decode(got[n]), leafHash(p.reveal, n + first, path.script), seat.pubkey); } catch(_) { return false; }
     });
     if(ok) done.push(id);
   }
@@ -468,15 +494,15 @@ function signersOf(p, policy){
 function finishSend(p, policy){
   const { signed, threshold, ready } = signersOf(p, policy);
   if(!ready) throw new Error(`needs ${threshold} signatures`);
-  const chosen = new Set(signed.slice(0, threshold)), held = p.reveal.ins.slice(2);
+  const chosen = new Set(signed.slice(0, threshold)), held = p.reveal.ins.slice(firstHeld(p));
   const wit = held.map((input, n) => {
     const { path, script, control } = vaultLeaf(policy, input);
     // multi_a reads its first key off the top of the stack, so the last key goes first.
     const stack = [...path.keys].reverse().map(k => { const id = BV.keyId(k.owner, policy.network); return chosen.has(id) ? hex.decode(p.sigs[id][n]) : new Uint8Array(0); });
     return [...stack, script, control];
   });
-  const key = hex.decode(p.keyPub);
-  return { commit: p.commit, reveal: hex.encode(rawTx(p.reveal, [[hex.decode(p.envSig), hex.decode(p.script), hex.decode(p.control)], [hex.decode(p.keySig), key], ...wit])) };
+  const lead = p.kind === 'reseed' ? [] : [[hex.decode(p.keySig), hex.decode(p.keyPub)]];
+  return { commit: p.commit, reveal: hex.encode(rawTx(p.reveal, [[hex.decode(p.envSig), hex.decode(p.script), hex.decode(p.control)], ...lead, ...wit])) };
 }
 const parseRecipient = (text, network) => {
   const t = String(text).trim();
@@ -493,6 +519,6 @@ const loadProver = async () => {
   return { prove: (v, r) => bp.bpRangeAggProve(v, r).proof, verify: (cs, proof) => bp.bpRangeAggVerify(cs.map(c => deps.secp.ProjectivePoint.fromHex(hex.encode(c))), proof) };
 };
 
-root.BitcoinTacit = Object.freeze({ parts: Object.freeze({ selfOut, sentOut, buildPayload, envelopeScript, frame, sigV0, leafHash, rawTx, wpkh, prevout, txidOf }), buildSweep, buildSend, reviewSend, signSend, signersOf, mergeSigs, finishSend, sendId, parseRecipient, loadProver, inboxAddress, readInbox, tacitAddress, noteAddress, makeNoteKey, makeRecord, verifyRecord, openRecord, openNote, envelopeOf, outputsOf });
+root.BitcoinTacit = Object.freeze({ parts: Object.freeze({ selfOut, sentOut, buildPayload, envelopeScript, frame, sigV0, leafHash, rawTx, wpkh, prevout, txidOf }), buildSweep, buildSend, buildReseed, reviewSend, signSend, signersOf, mergeSigs, finishSend, sendId, parseRecipient, loadProver, inboxAddress, readInbox, tacitAddress, noteAddress, makeNoteKey, makeRecord, verifyRecord, openRecord, openNote, envelopeOf, outputsOf });
 
 })(typeof window !== 'undefined' ? window : globalThis);

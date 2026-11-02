@@ -144,6 +144,9 @@ test('every edit to a send is refused before anyone signs', async () => {
     'a forged envelope signature': p => { p.envSig = '00'.repeat(64); },
     'a forged key signature': p => { p.keySig = '00'; },
     'a poison input': p => { p.reveal.ins[1] = null; },
+    'an address with padding': p => { p.to = p.to + '\n'; },
+    'junk after the commit': p => { p.commit += '00'; },
+    'sats leaking to the note key': p => { p.reveal.outs.push({ value: 300000, spk: p.reveal.outs[2].spk }); },
     'a poison output': p => { p.reveal.outs[3] = { value: '0', spk: 'ab' }; },
   };
   for(const [name, f] of Object.entries(cases)) await assert.rejects(BT.reviewSend(edit(f), vault, V, chain, prover, { receive: 1 }), /refusing this send|Cannot|invalid|Invalid|bad|out of|length|expected/, name);
@@ -154,4 +157,24 @@ test('every edit to a send is refused before anyone signs', async () => {
   await assert.rejects(BT.reviewSend(proposal, vault, V, { ...chain, classify: async () => ({}) }, prover, { receive: 1 }), /does not vouch/);
   assert.equal(hex.encode(BT.parseRecipient(BT.tacitAddress(recipient, recipient, 'signet'), 'signet')), hex.encode(recipient));
   assert.throws(() => BT.parseRecipient(BT.tacitAddress(recipient, recipient, 'mainnet'), 'signet'), /another network/);
+});
+
+test('the quorum can recreate the lead note, and that is checked like a send', async () => {
+  const { vault, V, proposal, chain, prover, oa, ob } = await sendFixture();
+  const tx = await chain.tx(), vn = BT.openNote(tx, 0, V);
+  const p = BT.buildReseed({ priv: V, notes: [{ txid: tx.txid, vout: 0, value: 546, amount: vn.amount, blinding: vn.blinding, asset: vn.asset, branch: 0, index: 0 }], fee: { txid: 'aa'.repeat(32), vout: 0, value: 40000 }, rate: 2, slot: { policy: vault, index: 1 }, prover });
+  const r = await BT.reviewSend(p, vault, V, chain, prover, { receive: 1 });
+  assert.deepEqual([r.reseed, r.total, r.recipient], [true, 200n, null]);
+  const signed = BT.signSend(BT.signSend(p, oa.signer, oa.owner, vault), ob.signer, ob.owner, vault);
+  assert.equal(BT.signersOf(signed, vault).ready, true);
+  assert.match(BT.finishSend(signed, vault).reveal, /^[0-9a-f]+$/);
+  const edit = f => { const c = JSON.parse(JSON.stringify(p)); f(c); return c; };
+  for(const [name, f] of Object.entries({
+    'a payment hidden in change': c => { c.reveal.outs[0].spk = proposal.reveal.outs[0].spk; },
+    'an amount claim': c => { c.amount = '1'; },
+    'an unknown kind': c => { c.kind = 'other'; },
+    'bytes after the envelope': c => { c.script += '61'; },
+  })) await assert.rejects(BT.reviewSend(edit(f), vault, V, chain, prover, { receive: 1 }), /refusing this send/, name);
+  // A send dressed as a refresh is refused for having the wrong shape.
+  await assert.rejects(BT.reviewSend({ ...proposal, kind: 'reseed' }, vault, V, chain, prover, { receive: 1 }), /refusing this send/);
 });
