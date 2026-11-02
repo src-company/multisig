@@ -278,9 +278,15 @@ const sentOut = (priv, pub, anchor, i, amount) => ({ amount, r: derive.blind(pri
 
 // The commit, signed with V, and the reveal's skeleton on top of it. `fee` is a plain coin
 // at V's address. What is left after both fees goes back there.
-function frame({ priv, fee, rate, script, assets, spks }){
+// A vault input carries its whole leaf, which is most of a large quorum's weight.
+function vaultVb(policy, input){
+  const p = policy.paths[0], leaf = BV.vaultOf(policy, input.branch, input.index).paths[0], control = 1 + 32 + 32 * leaf.leaf[0].merklePath.length;
+  return 41 + Math.ceil((p.threshold * 65 + (p.keys.length - p.threshold) + leaf.script.length + 3 + control + 3) / 4);
+}
+function frame({ priv, fee, rate, script, assets, spks, policy }){
   const pub = secp256k1.getPublicKey(priv, true), mine = hex.encode(wpkh(pub)), env = envelopeOutput(script);
-  const revealFee = Math.ceil((170 + 80 * assets.length + 45 * spks.length + script.length / 4) * rate), commitFee = Math.ceil(170 * rate);
+  const inputsVb = assets.reduce((n, a) => n + (a.kind === 'vault' ? vaultVb(policy, a) : 80), 0);
+  const revealFee = Math.ceil((170 + inputsVb + 45 * spks.length + script.length / 4) * rate), commitFee = Math.ceil(170 * rate);
   const carried = assets.reduce((n, a) => n + a.value, 0), need = Math.max(DUST_OUT * spks.length + revealFee - carried, DUST_OUT);
   const change = fee.value - need - commitFee;
   if(change < 0) throw new Error(`the note key's address needs ${-change} more sats for fees`);
@@ -324,7 +330,7 @@ function buildSend({ priv, keyNote, notes, recipient, to, amount, fee, rate, slo
   const payload = buildPayload(prover, hex.decode(keyNote.asset), ins, outs);
   const script = envelopeScript(pub.subarray(1), payload);
   const change = BV.vaultOf(slot.policy, 0, slot.index), spks = [hex.encode(wpkh(recipient)), hex.encode(change.script), mine, mine];
-  const { commit: commitHex, reveal, env } = frame({ priv, fee, rate, script, assets: ins.map(({ r, ...a }) => a), spks });
+  const { commit: commitHex, reveal, env } = frame({ priv, fee, rate, script, assets: ins.map(({ r, ...a }) => a), spks, policy: slot.policy });
   const proposal = { v: 1, to, commit: commitHex, script: hex.encode(script), reveal, recipient: hex.encode(recipient), amount: amount.toString(), changeIndex: slot.index,
     envSig: hex.encode(schnorr.sign(leafHash(reveal, 0, script), priv)), keySig: hex.encode(sigV0(reveal, 1, priv)), sigs: {} };
   return { ...proposal, control: hex.encode(env.control), keyPub: hex.encode(pub) };
@@ -340,7 +346,7 @@ function buildReseed({ priv, notes, fee, rate, slot, prover }){
   const ins = notes.map(n => ({ txid: n.txid, vout: n.vout, value: n.value, spk: hex.encode(BV.vaultOf(slot.policy, n.branch, n.index).script), r: n.blinding, kind: 'vault', branch: n.branch, index: n.index }));
   const anchor = prevout(ins[0]), outs = [selfOut(priv, anchor, 0, total), selfOut(priv, anchor, 1, 0n)];
   const script = envelopeScript(pub.subarray(1), buildPayload(prover, hex.decode(notes[0].asset), ins, outs));
-  const { commit: commitHex, reveal, env } = frame({ priv, fee, rate, script, assets: ins.map(({ r, ...a }) => a), spks: [hex.encode(BV.vaultOf(slot.policy, 0, slot.index).script), mine] });
+  const { commit: commitHex, reveal, env } = frame({ priv, fee, rate, script, assets: ins.map(({ r, ...a }) => a), spks: [hex.encode(BV.vaultOf(slot.policy, 0, slot.index).script), mine], policy: slot.policy });
   return { v: 1, kind: 'reseed', commit: commitHex, script: hex.encode(script), reveal, changeIndex: slot.index, amount: '0', envSig: hex.encode(schnorr.sign(leafHash(reveal, 0, script), priv)), control: hex.encode(env.control), keyPub: hex.encode(pub), sigs: {} };
 }
 const firstHeld = p => p.kind === 'reseed' ? 1 : 2;
@@ -426,7 +432,7 @@ async function reviewSend(p, policy, priv, chain, prover, known){
       && (reseed || (secp256k1.verify(hex.decode(p.keySig).slice(0, -1), hashV0(reveal, 1, pub), pub, { prehash: false, format: 'der' }) && p.keySig.endsWith('01')));
   } catch(_) {}
   if(!sigsOk) refuse('the note key did not sign it');
-  return { reseed, asset: body.asset, amount, total, change: total - amount, recipient: reseed ? null : p.to, sats: fee };
+  return { reseed, asset: body.asset, amount, total, change: total - amount, recipient: reseed ? null : p.to, sats: fee, back: extra.reduce((n, o) => n + o.value, 0) };
 }
 
 // A segwit transaction's id and first output, read from its raw form.

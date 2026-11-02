@@ -165,6 +165,8 @@ test('the quorum can recreate the lead note, and that is checked like a send', a
   const p = BT.buildReseed({ priv: V, notes: [{ txid: tx.txid, vout: 0, value: 546, amount: vn.amount, blinding: vn.blinding, asset: vn.asset, branch: 0, index: 0 }], fee: { txid: 'aa'.repeat(32), vout: 0, value: 40000 }, rate: 2, slot: { policy: vault, index: 1 }, prover });
   const r = await BT.reviewSend(p, vault, V, chain, prover, { receive: 1 });
   assert.deepEqual([r.reseed, r.total, r.recipient], [true, 200n, null]);
+  const raw = hex.decode(p.reveal.ins[0].spk).length;
+  assert.ok(raw === 34);
   const signed = BT.signSend(BT.signSend(p, oa.signer, oa.owner, vault), ob.signer, ob.owner, vault);
   assert.equal(BT.signersOf(signed, vault).ready, true);
   assert.match(BT.finishSend(signed, vault).reveal, /^[0-9a-f]+$/);
