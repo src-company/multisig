@@ -314,7 +314,7 @@ moved between hosts.
 
 | | |
 |---|---|
-| CID (v1) | `bafybeihlo6xwznzj43hukikiezfll2lb7fsgvpeiq5pdeuz3sfbmn3og34` |
+| CID (v1) | `bafybeibffuystbmzeqpxhdaphpfenxmis36txjtp3ntcfbfwjuuhofvuty` |
 | Gateway | [multisig.wei.limo](https://multisig.wei.limo) |
 | Also resolves | [multisig.wei.is](https://multisig.wei.is) · [multisig.wei.domains](https://multisig.wei.domains) |
 | Any public gateway | `https://ipfs.io/ipfs/<cid>/` (browsing only: these share an origin, so the Bitcoin pages refuse to use a key or trust stored vaults there) |
@@ -325,7 +325,7 @@ against the source rather than trusted:
 ```bash
 node build.js
 ipfs add -r --cid-version 1 -Q --ignore ipfs.json dist
-# bafybeihlo6xwznzj43hukikiezfll2lb7fsgvpeiq5pdeuz3sfbmn3og34
+# bafybeibffuystbmzeqpxhdaphpfenxmis36txjtp3ntcfbfwjuuhofvuty
 ```
 
 `--ignore ipfs.json` is load-bearing. The footer shows the CID of the bundle it
