@@ -59,6 +59,7 @@ const NEEDED = [
   'WNS_CHAIN_ID', 'WNS_NAME_RE',
   'nameNearMiss', 'linkableName', 'parseDeepLink',
   '_addrState', 'addrHint', 'ownerRowNote', '_onKey',
+  'altChainAddress',
 ];
 
 // Stubs, kept as thin as each function will tolerate. Anything with real
@@ -78,6 +79,10 @@ const sandbox = {
   // is supplied rather than fetched.
   cannotSign: () => false,
   CONTRACT_NOTE: 'CONTRACT &middot; APPROVES ON-CHAIN, CANNOT SIGN',
+  // altChainAddress reads a resolver off mainnet. Which record it asks that
+  // resolver for is the logic under test, so the resolver is a recorder.
+  _nameRace: p => p,
+  mainnetRpc: () => null,
 };
 vm.createContext(sandbox);
 // Function declarations land on the context by themselves; `const` ones do not,
@@ -93,6 +98,7 @@ const {
   NAME_RE, NAME_KINDS, nameKindsHint, MEGA_CHAIN_ID, BASE_CHAIN_ID, WNS_CHAIN_ID,
   MEGA_NAME_RE, BASE_LINK_RE, isMegaName, isBaseName, megaNamesOn, baseNamesOn,
   nameNearMiss, linkableName, parseDeepLink, _addrState, addrHint, ownerRowNote, _onKey,
+  altChainAddress,
 } = sandbox;
 
 const ADDR = '0x2211d1D0020DAEA8039E46Cf1367962070d77DA9';
@@ -250,4 +256,20 @@ test('following a link adopts its chain rather than open-coding the swap', () =>
     'handleDeepLink assigns S.chainId directly again — the tick and the wallet poll interval go stale with it');
   assert.doesNotMatch(body, /provider\s*=\s*makeProvider\(/,
     'handleDeepLink rebuilds the provider by hand again, which is the half of the swap that looks complete');
+});
+
+test('a per-chain address is asked for by chain id, which ethers turns into the coin type', async () => {
+  // ethers adds 0x80000000 to an EVM chain id itself. Handed the coin type
+  // already offset, it skipped the record and answered null, so a name that
+  // publishes a different address for this chain was never flagged.
+  const OTHER = '0x1111111111111111111111111111111111111111';
+  const asked = [];
+  sandbox.mainnetRpc = () => ({ getResolver: async () => ({ getAddress: async t => { asked.push(t); return t === 8453 ? OTHER : null; } }) });
+  assert.equal(await altChainAddress('alice.eth', 8453, ADDR), OTHER);
+  assert.deepEqual(asked, [8453]);
+  // A record that agrees with mainnet, mainnet itself, and a basename are all silent.
+  assert.equal(await altChainAddress('alice.eth', 8453, OTHER), null);
+  assert.equal(await altChainAddress('alice.eth', 1, ADDR), null);
+  assert.equal(await altChainAddress('alice.base.eth', 8453, ADDR), null);
+  sandbox.mainnetRpc = () => null;
 });

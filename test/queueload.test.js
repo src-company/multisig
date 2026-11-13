@@ -92,6 +92,9 @@ const NEEDED = [
   'MULTISIG_ABI', 'msIface', 'ERC20_ABI', 'erc20Iface', 'SLOW_ABI', 'slowIface',
   'TIMELOCK_EXECUTOR_ABI', 'tlIface', 'WEINS_ABI', 'weinsIface', 'wnsRegIface',
   'SEL', 'SEL_RE', 'selOf', 'SELECTOR_LABELS', 'selectorToLabel',
+  // which contract a selector names: the loader labels each row against its vault
+  'SLOW_ADDRESS', 'WNS_ID_REGISTRAR', 'WEINS', 'TIMELOCK_EXECUTOR', 'WNS_CHAIN_ID',
+  'SLOW_CHAINS', 'slowOnChain', 'VAULT_SELECTORS', 'vaultChainId', 'labelFits',
   'EIP712_DOMAIN', 'EIP712_TYPES',
   '_ESC', '_escOne', 'esc', 'weiStr', 'bigOr0', 'groupInt', '_amtTrim', '_amtDisp',
   'fmtAmount', 'DECIMALS', 'stripCommas',
@@ -121,6 +124,7 @@ const NEEDED = [
   'isSelfCallTarget', 'multisigWriteFns', 'fetchContractAbi',
   '_abiPrefetched', 'ABI_PREFETCH_MAX', 'prefetchQueueAbis',
   // the subjects
+  'isOwnerOf', 'requireOwner',
   'queueRef', 'findQueueTx', 'prodSign', 'prodApprove', 'txSt', 'proposalDigest', 'approvalPairsFor', 'chainCheckQueue', 'sigsFor', 'loadVaultQueue',
 ];
 

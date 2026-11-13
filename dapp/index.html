@@ -579,7 +579,7 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
 .colophon svg{width:14px;height:14px;display:block;flex:none;user-select:none}
 
 /* toast */
-.toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:var(--a);color:var(--bg);padding:12px 24px;padding-bottom:max(12px,env(safe-area-inset-bottom));font-size:11px;font-weight:700;letter-spacing:2px;z-index:999;animation:toastIn .2s ease;text-align:center}
+.toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:var(--a);color:var(--bg);padding:12px 24px;padding-bottom:max(12px,env(safe-area-inset-bottom));font-size:11px;font-weight:700;letter-spacing:2px;z-index:999;animation:toastIn .2s ease;text-align:center;width:max-content;max-width:min(640px,calc(100vw - 32px))}
 
 /* empty */
 .empty{text-align:center;padding:40px 0;margin:auto 0}
@@ -675,12 +675,12 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
 .owner-note{font-size:9px;letter-spacing:1px;margin:2px 0 10px 30px}
 /* clone-from-Safe affordance: logo + a quiet CLONE hint beside OWNERS */
 .safe-pill{height:26px;padding:0 10px;gap:6px;font-size:9px;color:var(--m)}
-.safe-pill:hover{border-color:#12FF80;color:#12FF80}
+@media(hover:hover){.safe-pill:hover{border-color:#12FF80;color:#12FF80}.light .safe-pill:hover{border-color:var(--g);color:var(--g)}}
 .safe-pill .tok-ico svg{width:12px;height:12px}
 .safe-src{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:9px;letter-spacing:1px;color:var(--d);border:1px solid var(--ln);border-left:2px solid #12FF80;padding:8px 10px;margin:0 0 12px}
 .safe-src .x-btn{min-width:24px;min-height:24px;padding:0;font-size:11px}
 .safe-row{display:flex;align-items:center;gap:8px;font-size:10px;font-weight:700;letter-spacing:1px;color:var(--m);border:1px solid var(--ln);padding:10px;margin-top:8px;cursor:pointer;text-align:left;width:100%;background:transparent;transition:border-color .15s,color .15s}
-.safe-row:hover{border-color:#12FF80;color:#12FF80}
+@media(hover:hover){.safe-row:hover{border-color:#12FF80;color:#12FF80}.light .safe-row:hover{border-color:var(--g);color:var(--g)}}
 /* ── FREE id.wei IDENTITY ──────────────────────────────────────────
    One line under the vault name. It sits between a text field and the
    owner list, both of which are load-bearing, so it stays quiet until
@@ -693,6 +693,8 @@ body.priv-on .privg:focus-visible,body.priv-on .priv:focus-visible{outline:2px s
 .wns-opt.on b{color:var(--a)}
 .wns-box{width:14px;height:14px;flex-shrink:0;padding:0;background:transparent;border:1px solid var(--fr);color:var(--a);font-size:9px;line-height:1;display:inline-flex;align-items:center;justify-content:center;transition:border-color .15s}
 .wns-box:hover:not(:disabled){border-color:var(--a)}
+/* The only control for the free claim, and 14px across. The touch box is not. */
+.wns-box{position:relative}.wns-box::after{content:"";position:absolute;inset:-15px}
 .wns-box:disabled{opacity:.4;cursor:not-allowed}
 .wns-opt.on .wns-box{border-color:var(--a)}
 .wns-st{letter-spacing:2px;font-size:8px}
@@ -1648,7 +1650,9 @@ function decodeMultisigError(e) {
     return left > 0 ? `TIMELOCK NOT ELAPSED — ${fmtDelay(left)} LEFT` : 'TIMELOCK NOT ELAPSED';
   }
   if(parsed.name === 'InvalidSig') return 'INVALID SIGNATURES — WRONG SIGNERS, WRONG ORDER, OR A STALE NONCE';
-  if(parsed.name === 'Unauthorized') return 'UNAUTHORIZED — THIS CALL HAS TO COME FROM THE VAULT ITSELF';
+  // The vault's onlySelf guard, approve() from a non-owner, and forward() with
+  // instant execution off all revert with this one error.
+  if(parsed.name === 'Unauthorized') return 'UNAUTHORIZED — NOT AN OWNER, NOT CALLED BY THE VAULT ITSELF, OR INSTANT EXECUTION IS NOT ENABLED';
   if(parsed.name === 'InvalidConfig') return 'INVALID CONFIG — THE VAULT REJECTED THESE PARAMETERS';
   return null;
 }
@@ -2481,6 +2485,10 @@ async function prodReverseSlow(vi, transferId){
   const { signer, addr: connectedAddress } = w;
   const v = S.vaults[vi]; if(!v) return;
   if(!slowOnChain(S.chainId)){ flash('SLOW IS NOT ON THIS CHAIN'); return; }
+  // Before the prompt, as on every other propose path. Without a record the
+  // signature had nowhere to go, and this flashed CREATED over a reverse no
+  // co-signer would ever see — with the transfer's timer still running.
+  if(!requireVaultRecord(v)) return;
   const entry = (v.slowOut || []).find(t => t.transferId === transferId);
   if(!entry){ flash('TRANSFER NOT FOUND — REFRESH'); return; }
   if(entry.unlockAt <= NOW()){ flash('TIMELOCK EXPIRED — CAN NO LONGER REVERSE'); return; }
@@ -2513,7 +2521,7 @@ async function prodReverseSlow(vi, transferId){
     const target = v.address, value = '0';
 
     const domain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address };
-    const nonce = nextNonce(v);
+    const nonce = await freshNonce(v);
     const msg = { target, value: 0n, data: batchData, nonce };
     const sig = normalizeSigV(await signer.signTypedData(domain, EIP712_TYPES, msg));
     const txHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg);
@@ -2524,9 +2532,7 @@ async function prodReverseSlow(vi, transferId){
       ? `REVERSE SLOW · ${fmtAmount(entry.amount, entry.decimals)} ${entry.symbol} ↩ VAULT`
       : `REVERSE SLOW · ${fmtAmount(entry.amount, entry.decimals)} ${entry.symbol} ↩ HELD IN SLOW${needsApproval ? ' · WITHDRAWAL NEEDS GUARDIAN' : ''}`;
 
-    if(v.dbId){
-      await dbProposeTx(v.dbId, nonce, target, value, batchData, txHash, v.threshold, connectedAddress, desc, sig);
-    }
+    await dbProposeTx(v.dbId, nonce, target, value, batchData, txHash, v.threshold, connectedAddress, desc, sig);
     flash(`REVERSE TX #${nonce} CREATED`);
     await reloadQueue(vi);
   } catch(e){ console.error(e); flash(e.shortMessage || e.message || 'FAILED'); }
@@ -2716,8 +2722,19 @@ function customTokensFor(chainId, addr){
   const key = _ctokKey(chainId, addr);
   const hit = _ctokMemo[key];
   if(hit) return hit;
+  // Shaped on the way in, to the same bounds fetchTokenMeta applies on the way
+  // out. This app writes these entries, but it is not the only writer: the
+  // sibling pages share the origin, and on a path gateway so does every other
+  // site there. Read back raw, the fields went into markup and an inline
+  // handler unescaped, and the address and decimals into the amount a transfer
+  // encodes.
   let list = [];
-  try { const v = JSON.parse(lsGet(key) || '[]'); if(Array.isArray(v)) list = v; } catch(_) {}
+  try {
+    const v = JSON.parse(lsGet(key) || '[]');
+    if(Array.isArray(v)) list = v
+      .filter(t => t && /^0x[0-9a-fA-F]{40}$/.test(t.address) && Number.isInteger(t.decimals) && t.decimals >= 0 && t.decimals <= 36)
+      .map(t => ({ address: ethers.getAddress(t.address.toLowerCase()), symbol: cleanTokenSymbol(t.symbol) || shortAddr(t.address), decimals: t.decimals }));
+  } catch(_) {}
   _ctokMemo[key] = list;
   return list;
 }
@@ -3026,8 +3043,13 @@ async function pgFetch(path, init, baseUrl = PGRST_URL) {
       const opts = tok
         ? { ...init, headers: { ...(init && init.headers), Authorization: `Bearer ${tok}` }, signal: ctrl.signal }
         : { ...init, signal: ctrl.signal };
-      const res = await fetch(`${baseUrl}/${path}`, opts);
+      const raw = await fetch(`${baseUrl}/${path}`, opts);
+      // The body is read under the same deadline as the headers. Cleared on the
+      // headers alone, a response that stalled mid-body left the queue or history
+      // load waiting with no timeout and no retry; an abort here retries instead.
+      const body = await raw.text();
       clearTimeout(timer);
+      const res = { ok: raw.ok, status: raw.status, headers: raw.headers, text: async () => body, json: async () => JSON.parse(body) };
       if(!res.ok && PG_RETRY_STATUS.has(res.status) && attempt < PG_MAX_ATTEMPTS - 1) {
         lastErr = { status: res.status, message: `HTTP ${res.status}` };
         continue; // transient — retry
@@ -3820,12 +3842,15 @@ function fmtEta(eta) {
   return `${s}S`;
 }
 
+// Days only when the delay is whole days: 36 hours printed as 1D, and that is a
+// sentence a co-signer reads ("TIMELOCK BECOMES 1D, FROM 1D NOW"). Seconds when
+// it is under a minute, rather than 0M.
 function fmtD(s) {
   if (!s) return "0";
+  if (s % 86400 === 0) return `${s / 86400}D`;
   const h = s / 3600;
-  if (h >= 24) return `${Math.floor(h / 24)}D`;
-  if (h < 1) return `${Math.round(s / 60)}M`;
-  return Number.isInteger(h) ? `${h}H` : `${h.toFixed(1)}H`;
+  if (h >= 1) return Number.isInteger(h) ? `${h}H` : `${h.toFixed(1)}H`;
+  return s < 60 ? `${s}S` : `${Math.round(s / 60)}M`;
 }
 
 // Timelock delay is set in a user-chosen unit (minutes/hours/days) but stored
@@ -3835,7 +3860,10 @@ const UNIT_LABEL = { m: 'MIN', h: 'HR', d: 'DAY' };
 // Below this a non-zero timelock offers little practical protection — warn, don't block.
 const SHORT_DELAY_SEC = 600;
 // value (in `unit`) -> whole seconds
-function toSec(val, unit) { return Math.floor((parseFloat(val) || 0) * (UNIT_SEC[unit] || 3600)); }
+// Rounded, not floored: 2.05 minutes is 122.99999999999999 seconds in floating
+// point, so a delay read back into the form came out a second short, and ADMIN
+// offered to propose that "change" to a vault nobody had edited.
+function toSec(val, unit) { return Math.round((parseFloat(val) || 0) * (UNIT_SEC[unit] || 3600)); }
 // seconds -> the tidiest {val, unit} that represents it exactly
 function fromSec(sec) {
   if (!sec || sec <= 0) return { val: 0, unit: 'h' };
@@ -3859,14 +3887,38 @@ const SELECTOR_LABELS = {
   [SEL.depositTo]: 'SLOW TRANSFER',
   [SEL.wnsRegister]: 'CLAIM NAME',    [SEL.wnsSetPrimary]:'SET PRIMARY NAME',
 };
-// The target is optional, and only ever narrows the answer: given one whose
-// verified ABI has been read, the four bytes get the name the contract gives
-// them instead of being spelled back as themselves.
-function selectorToLabel(callData, target) {
+// The functions only the vault itself can run on itself: every one is onlySelf
+// but executeQueued, which skips the delay only when the vault is the caller.
+// Addressed to anything else, none of them touches this vault.
+const VAULT_SELECTORS = new Set([SEL.addOwner, SEL.removeOwner, SEL.setThreshold, SEL.setDelay,
+  SEL.setExecutor, SEL.cancelQueued, SEL.executeQueued, SEL.batch, SEL.delegateCall]);
+// The chain a vault lives on, which is not always the chain the app is on: the
+// demo names its vaults' chains, and a loaded vault keeps the id it was read on.
+function vaultChainId(v) {
+  if(S.demoMode) return v && v.chain ? chainIdOfName(v.chain) : S.chainId;
+  return v && v.chainId != null ? Number(v.chainId) : S.chainId;
+}
+// Whether a label that names one contract is true of this target. Four bytes
+// say which function; only the address, on a chain where the contract is
+// deployed, says which contract.
+function labelFits(sel, target, v) {
+  const t = String(target).toLowerCase(), to = a => !!a && t === String(a).toLowerCase();
+  if(sel === SEL.depositTo) return to(SLOW_ADDRESS) && slowOnChain(vaultChainId(v));
+  if(sel === SEL.wnsRegister) return to(WNS_ID_REGISTRAR) && vaultChainId(v) === WNS_CHAIN_ID;
+  if(sel === SEL.wnsSetPrimary) return to(WEINS) && vaultChainId(v) === WNS_CHAIN_ID;
+  if(sel === SEL.enableForward) return to(TIMELOCK_EXECUTOR) || to(v && v.executor);
+  if(VAULT_SELECTORS.has(sel)) return !(v && v.address) || to(v.address);
+  return true;
+}
+// The target is optional, and only ever narrows the answer: given one, a label
+// that names a particular contract is used only when the call reaches it, and
+// given one whose verified ABI has been read, the four bytes get the name the
+// contract gives them instead of being spelled back as themselves.
+function selectorToLabel(callData, target, v) {
   if(!callData || callData === '0x') return 'TRANSFER';
   const sel = selOf(callData);
   if(!sel) return 'CALL';
-  if(SELECTOR_LABELS[sel]) return SELECTOR_LABELS[sel];
+  if(SELECTOR_LABELS[sel] && (!target || labelFits(sel, target, v))) return SELECTOR_LABELS[sel];
   const vfn = verifiedFn(target, sel);
   return vfn ? `CALL ${fnLabel(vfn)}` : `CALL ${sel}`;
 }
@@ -3896,12 +3948,17 @@ function txKind(tx, v) {
   const is = name => sel === SEL[name];
   const dec = (fn, iface) => { try { return (iface || msIface).decodeFunctionData(fn, data); } catch(_) { return null; } };
   const at = a => a ? shortAddr(a) : 'AN ADDRESS';
+  // wstETH, SLOW and the .wei registrar each live at one address on the chains
+  // they are deployed on. The same address anywhere else is nobody's contract,
+  // and ETH sent there is gone, so every branch that names one of them checks
+  // the chain as well as the address.
+  const cid = vaultChainId(v);
 
   // ── no calldata: value moves, or a nonce-consuming no-op ──
   if(data === '0x') {
     if(self && val === 0n) return { label:'REJECT · NO-OP', tone:'danger',
       note:'A DO-NOTHING SELF-CALL WHOSE ONLY EFFECT IS TO CONSUME THIS NONCE, SO LATER PROPOSALS CAN PROCEED. IT MOVES NOTHING.' };
-    if(tx.isStake || isStakeCall(tx.target, data)) return { label:'STAKE · ETH → wstETH', tone:'stake', icon:'wstETH',
+    if(cid === STAKE_CHAIN_ID && (tx.isStake || isStakeCall(tx.target, data))) return { label:'STAKE · ETH → wstETH', tone:'stake', icon:'wstETH',
       note:'STAKES ETH WITH LIDO — THE wstETH CONTRACT MINTS wstETH STRAIGHT BACK TO THE VAULT. HOW MUCH IS SET BY THE RATE AT EXECUTION, NOT NOW.' };
     // Audit L-2 — see lockedDest().
     const burn = val > 0n && lockedDest(tx.target);
@@ -3926,12 +3983,24 @@ function txKind(tx, v) {
   if(self && sel && !isKnownMultisigSelector(sel)) return { label:'SELF-CALL · SILENT NO-OP', tone:'danger', warn:true,
     note:`THE VAULT HAS NO FUNCTION WITH SELECTOR ${sel}, AND ITS FALLBACK RETURNS SUCCESS INSTEAD OF REVERTING. THIS WOULD CONSUME NONCE ${tx.nonce != null ? tx.nonce : 'ITS NONCE'}, EMIT ExecutionSuccess, AND CHANGE NOTHING — A MISTYPED GOVERNANCE CALL THAT LOOKS EXECUTED EVERYWHERE AFTERWARDS. CHECK THE FUNCTION NAME BEFORE SIGNING.` };
 
+  // The other side of the same rule. Every branch below for addOwner through
+  // delegateCall describes what the call does to THIS vault, which is only true
+  // of a call addressed to this vault. The same four bytes sent to another
+  // address change nothing here; they hand that contract the calldata and any
+  // value, to do with as its own code says.
+  if(!self && v.address && VAULT_SELECTORS.has(sel)) return { label:`${SELECTOR_LABELS[sel]} · ANOTHER CONTRACT`, tone:'danger', warn:true,
+    note:`CARRIES THIS VAULT'S ${msIface.getFunction(sel).name} SELECTOR BUT IS ADDRESSED TO ${at(tx.target)}, NOT TO THIS VAULT${val > 0n ? `, AND SENDS IT ${ethers.formatEther(val)} ETH` : ''}. NOTHING ABOUT THIS VAULT CHANGES — WHAT IT DOES IS WHATEVER THAT CONTRACT DOES WITH THESE FOUR BYTES. READ THE CALLDATA BEFORE SIGNING.` };
+
   // ── asset movement ──
   if(is('transfer')) {
     const d = dec('transfer', erc20Iface);
     const burn = d && lockedDest(d[0]);
     if(burn) return { label:'ERC20 TRANSFER · UNRECOVERABLE', tone:'danger', warn:true,
       note:`SENDS THIS TOKEN TO ${burn}, WHICH HAS NO WITHDRAWAL PATH AND CANNOT MOVE A TOKEN BALANCE. THE AMOUNT IS GONE FOR GOOD ONCE THIS EXECUTES.` };
+    // A token this browser has no symbol or decimals for has no amount on the
+    // card, so the sentence carries it in the only unit the calldata has.
+    if(d && !tx.displayToken) return { label:'ERC20 TRANSFER', tone:'value',
+      note:`SENDS ${BigInt(d[1]).toString()} BASE UNITS OF THE TOKEN AT ${at(tx.target)} TO ${at(d[0])}. THIS BROWSER DOES NOT KNOW THAT TOKEN'S SYMBOL OR DECIMALS — CHECK THE CONTRACT AND THE AMOUNT BEFORE SIGNING.` };
     return { label:'ERC20 TRANSFER', tone:'value' };
   }
   if(is('approve')) {
@@ -3952,9 +4021,9 @@ function txKind(tx, v) {
     // `SLOW · 7 DAYS`, tone `slow`, no warning, and told the co-signer the
     // vault could reverse it at any point before then. Nothing could reverse
     // it; the ETH was gone the moment it executed.
-    if(!tx.target || tx.target.toLowerCase() !== SLOW_ADDRESS.toLowerCase())
+    if(!labelFits(sel, tx.target, v))
       return { label:'SLOW · UNKNOWN CONTRACT', tone:'danger', warn:true,
-        note:`CARRIES SLOW'S depositTo SELECTOR BUT IS ADDRESSED TO ${at(tx.target)}, WHICH IS NOT THE SLOW CONTRACT. NONE OF SLOW'S GUARANTEES APPLY — THERE IS NO TIME-DELAYED CLAIM AND NOTHING FOR THE VAULT TO REVERSE. WHATEVER THIS SENDS IS SENT OUTRIGHT, TO CODE THIS INTERFACE HAS NOT CHECKED. READ THE CALLDATA BEFORE SIGNING.` };
+        note:`CARRIES SLOW'S depositTo SELECTOR BUT IS ADDRESSED TO ${at(tx.target)}, WHICH IS NOT THE SLOW CONTRACT${tx.target && tx.target.toLowerCase() === SLOW_ADDRESS.toLowerCase() ? ' ON THIS CHAIN — SLOW IS NOT DEPLOYED HERE' : ''}. NONE OF SLOW'S GUARANTEES APPLY — THERE IS NO TIME-DELAYED CLAIM AND NOTHING FOR THE VAULT TO REVERSE. WHATEVER THIS SENDS IS SENT OUTRIGHT, TO CODE THIS INTERFACE HAS NOT CHECKED. READ THE CALLDATA BEFORE SIGNING.` };
     return { label:`SLOW · ${delay ? fmtDelay(delay) : 'DELAYED'}`, tone:'slow',
       note:`LOCKS THE ASSET IN A TIME-DELAYED CLAIM FOR ${at(d && d[1])}. THEY CAN COLLECT IT ONLY AFTER ${delay ? fmtDelay(delay) : 'THE DELAY'}, AND THE VAULT CAN REVERSE IT AT ANY POINT BEFORE THEN.` };
   }
@@ -4060,7 +4129,7 @@ function txKind(tx, v) {
   // nothing about which contract is being called, and "CLAIM NAME" beside a
   // stranger's address would be this interface vouching for something it never
   // checked — the same reasoning the executor branch above runs on.
-  if(is('wnsRegister') && tx.target && tx.target.toLowerCase() === WNS_ID_REGISTRAR.toLowerCase()) {
+  if(is('wnsRegister') && labelFits(sel, tx.target, v)) {
     const d = dec('register', wnsRegIface);
     if(!d || BigInt(d[0]) !== BigInt(WNS_ID_PARENT)) return { label:'CLAIM NAME · UNKNOWN NAMESPACE', tone:'code', warn:true,
       note:`MINTS A SUBDOMAIN UNDER A PARENT NODE THIS INTERFACE DOES NOT RECOGNISE — NOT UNDER id.wei. THE NAME THIS PRODUCES IS NOT THE NAME THE LABEL READS AS. CHECK THE PARENT ID BEFORE SIGNING.` };
@@ -4080,7 +4149,7 @@ function txKind(tx, v) {
       note:`REGISTERS ${full} TO THE VAULT, FREE — THE NAME IS AN NFT THE VAULT THEN HOLDS, SO MOVING IT LATER TAKES A FULL MULTISIG ROUND LIKE ANY OTHER ASSET. IT MAKES ${full} RESOLVE TO THIS ADDRESS. IT DOES NOT MAKE THIS ADDRESS ANSWER WITH ${full} — THAT IS setPrimaryName, AND IT IS NOT IN THIS PROPOSAL.`
         + (odd ? ` THIS LABEL USES CHARACTERS THIS INTERFACE WOULD NOT CLAIM — IT MAY CONTAIN INVISIBLE OR MIXED-SCRIPT CHARACTERS AND MAY NOT BE THE NAME IT APPEARS TO BE. READ THE CALLDATA BEFORE SIGNING.` : '') };
   }
-  if(is('wnsSetPrimary') && tx.target && tx.target.toLowerCase() === WEINS.toLowerCase()) {
+  if(is('wnsSetPrimary') && labelFits(sel, tx.target, v)) {
     // The id is a one-way hash, so which name this points at cannot be read off
     // the calldata alone. Say that rather than name a name we did not verify.
     return { label:'SET PRIMARY NAME', tone:'policy',
@@ -4123,7 +4192,7 @@ function txKind(tx, v) {
       // The mint and the reverse record are one decision, so they are one
       // proposal — and a queue row reading "BATCH · 2 CALLS" would bury the
       // only thing a co-signer needs to check, which is the name itself.
-      const ident = wnsIdentityBatch(targets, values, datas);
+      const ident = cid === WNS_CHAIN_ID && wnsIdentityBatch(targets, values, datas);
       if(ident) {
         // Same rule as the single-call branch above: escaped into the note,
         // raw into the label, which its own sink escapes.
@@ -4133,7 +4202,29 @@ function txKind(tx, v) {
           note:`CLAIMS ${full} FOR THIS VAULT AND POINTS REVERSE RESOLUTION AT IT, ATOMICALLY — AFTER THIS THE NAME RESOLVES TO THIS ADDRESS AND THIS ADDRESS ANSWERS WITH THE NAME. THE SUBDOMAIN IS FREE; THE ONLY COST IS THE GAS TO EXECUTE. THE NAME BECOMES AN NFT THE VAULT HOLDS. IT GRANTS NOBODY ANY POWER OVER THE VAULT AND MOVES NOTHING OUT OF IT.`
             + (odd ? ` THIS LABEL USES CHARACTERS THIS INTERFACE WOULD NOT CLAIM — IT MAY CONTAIN INVISIBLE OR MIXED-SCRIPT CHARACTERS AND MAY NOT BE THE NAME IT APPEARS TO BE. READ THE CALLDATA BEFORE SIGNING.` : '') };
       }
-      const parts = datas.map((cd, i) => (!cd || cd === '0x') && BigInt(values[i]) > 0n ? 'ETH TRANSFER' : selectorToLabel(cd, targets[i]));
+      // Each member with what it moves and to whom. A batch's value rides in its
+      // members, so the card's own amount line reads zero and this sentence is
+      // the only place the amounts appear. Addresses and amounts come out of the
+      // ABI decoder and symbols out of the built-in token list, so all of it is
+      // shaped before it reaches the note.
+      const units = (tk, raw) => {
+        const t = (PROD_TOKENS[cid] || ETH_ONLY).find(x => x.address.toLowerCase() === String(tk).toLowerCase());
+        return t ? `${groupInt(fmtAmount(raw, t.decimals))} ${t.symbol}` : `${BigInt(raw).toString()} BASE UNITS OF ${at(tk)}`;
+      };
+      const parts = datas.map((cd, i) => {
+        const w = BigInt(values[i]), tgt = targets[i], s4 = selOf(cd);
+        const eth = w > 0n ? ` WITH ${ethers.formatEther(w)} ETH` : '';
+        const m = (fn, iface) => { try { return iface.decodeFunctionData(fn, cd); } catch(_) { return null; } };
+        if(!cd || cd === '0x') return w > 0n ? `ETH TRANSFER OF ${ethers.formatEther(w)} ETH → ${at(tgt)}` : `EMPTY CALL → ${at(tgt)}`;
+        const tr = s4 === SEL.transfer && m('transfer', erc20Iface);
+        if(tr) return `ERC20 TRANSFER OF ${units(tgt, tr[1])} → ${at(tr[0])}${eth}`;
+        const ap = s4 === SEL.approve && m('approve', erc20Iface);
+        if(ap) return `ERC20 APPROVE OF ${BigInt(ap[1]) >= 2n ** 255n ? `UNLIMITED ${at(tgt)}` : units(tgt, ap[1])} FOR ${at(ap[0])}${eth}`;
+        const dp = s4 === SEL.depositTo && labelFits(s4, tgt, v) && m('depositTo', slowIface);
+        if(dp) return `SLOW TRANSFER OF ${dp[0] === ethers.ZeroAddress ? `${ethers.formatEther(w)} ETH` : units(dp[0], dp[2])} → ${at(dp[1])}, CLAIMABLE AFTER ${fmtDelay(dp[3])}`;
+        const own = v.address && String(tgt).toLowerCase() === v.address.toLowerCase();
+        return selectorToLabel(cd, tgt, v) + eth + (own ? '' : ` → ${at(tgt)}`);
+      });
       return { label:`BATCH · ${targets.length} CALLS`, tone:'code',
         note:`${parts.join(' + ')} — EXECUTED ATOMICALLY, SO EITHER EVERY CALL LANDS OR THE WHOLE PROPOSAL REVERTS AND NOTHING DOES.` };
     }
@@ -4177,6 +4268,15 @@ function findQueueTx(v, ref) {
   return matches.length === 1 ? matches[0] : null;
 }
 
+// The next free nonce against the vault's live nonce, for a proposal about to
+// be signed. v.nonce is only as fresh as the last full load, and a proposal
+// executed from another client since then put this one at a nonce the chain had
+// already spent — which every co-signer's loader prunes as stale on arrival, so
+// the proposer's signature went nowhere.
+async function freshNonce(v) {
+  if(!S.demoMode && v && v.address) v.nonce = Math.max(Number(v.nonce) || 0, await fetchLiveNonce(v.address).catch(() => 0));
+  return nextNonce(v);
+}
 function nextNonce(v) {
   return v.queue.length
     ? Math.max(v.nonce, ...v.queue.map(t => t.nonce + 1))
@@ -4237,6 +4337,19 @@ function getYou(){
   if(S.demoMode) return DEMO_YOU;
   return window._connectedAddress || null;
 }
+// Whether `addr` holds a seat on vault `v`. tx.approvals is keyed by owner, so
+// `!tx.approvals[you]` alone is also true of a wallet that holds none: viewing
+// a vault by address with any other wallet connected said its signature was
+// needed, offered SIGN, and counted the result toward the threshold here —
+// where verifySigs drops it on the next load and the vault refuses it at submit.
+function isOwnerOf(v, addr){
+  return !!(v && addr) && v.owners.some(o => o.addr.toLowerCase() === String(addr).toLowerCase());
+}
+function requireOwner(v, addr){
+  if(isOwnerOf(v, addr)) return true;
+  flash('THIS WALLET IS NOT AN OWNER OF THIS VAULT', 5000);
+  return false;
+}
 
 // Whether a vault has work waiting, as the two flags every tab strip draws its
 // dot from. The dashboard derives these inside the pass it already makes over
@@ -4248,7 +4361,7 @@ function vaultWorkFlags(vt){
   let rdy = false, needsYou = false;
   vt.queue.forEach(tx => {
     const st = txSt(tx, vt);
-    if(st.sign && you && !tx.approvals[you]) needsYou = true;
+    if(st.sign && you && !tx.approvals[you] && isOwnerOf(vt, you)) needsYou = true;
     if(st.exec || st.instant) rdy = true;
   });
   return { rdy, needsYou };
@@ -4627,7 +4740,11 @@ function isKnownVaultAddr(addr) {
 }
 
 async function fetchContractAbi(addr) {
-  const key = S.chainId + ':' + addr.toLowerCase();
+  // The chain and provider this lookup belongs to, held across its awaits. Read
+  // again after them, a switch mid-lookup filed one chain's ABI (or its "no
+  // code") under the other chain's key for the rest of the session.
+  const chainId = S.chainId, prov = provider;
+  const key = chainId + ':' + addr.toLowerCase();
   // A vault is a minimal proxy: 45 bytes of delegating runtime at its own
   // address, and nothing at that address for Sourcify to have verified. So the
   // one contract this app ships the full ABI for was the one the CUSTOM tab
@@ -4650,12 +4767,12 @@ async function fetchContractAbi(addr) {
     delete _abiCache[first]; delete _selIndex[first]; _abiPrefetched.delete(first);
   }
   try {
-    const code = await provider.getCode(addr);
+    const code = await prov.getCode(addr);
     if(!code || code === '0x') { _abiCache[key] = false; return false; }
 
     // Check proxy implementation slots in parallel
-    const slotReads = IMPL_SLOTS.map(s => provider.getStorage(addr, s).catch(() => null));
-    const [directAbi, ...slotResults] = await Promise.all([sourcifyAbi(S.chainId, addr), ...slotReads]);
+    const slotReads = IMPL_SLOTS.map(s => prov.getStorage(addr, s).catch(() => null));
+    const [directAbi, ...slotResults] = await Promise.all([sourcifyAbi(chainId, addr), ...slotReads]);
 
     // Find implementation address from first non-zero slot
     let implAddr = null;
@@ -4669,7 +4786,7 @@ async function fetchContractAbi(addr) {
     // If proxy detected, fetch implementation ABI
     let implAbi = null;
     if(implAddr) {
-      implAbi = await sourcifyAbi(S.chainId, implAddr);
+      implAbi = await sourcifyAbi(chainId, implAddr);
       if(implAbi && implAbi.length) {
         const fns = extractWriteFns(implAbi);
         // Indexed off the whole ABI, not the write functions the builder offers:
@@ -5636,6 +5753,7 @@ function render(){
 }
 let _renderFailed = false;
 function renderNow(){
+  if(S.topup && !S.topup.sending && !topUpVault(S.topup)) S.topup = null;
   const v = S.vaults[S.sel] || null;
   const mob = _vw <= 640;
   // body.className is assigned wholesale, so every class that lives on <body>
@@ -5955,7 +6073,7 @@ function renderDeployOverlay(){
     // included, so the warning block only appears when there is something to
     // warn about — and "proceed anyway and those chains may fail" is not
     // something to tell someone whose preflight came back green.
-    const warnText = `${fpVoid?`At ${d.ctx.thresh}-of-${d.ctx.resolvedOwners.length} every quorum is already unanimous, so instant execution makes the timelock advisory rather than enforced — the same signatures can queue or execute, whichever the submitter picks. Lower the threshold, or leave instant execution off, to keep the delay enforced. `:''}${noFac?'No factory on some chains — the vault cannot be deployed there. ':''}${badImpl?'On some chains the factory address holds code that does not name the audited implementation — a vault deployed there would not be the reviewed contract. ':''}${noExec?`No TimelockExecutor on some chains${d.ctx&&d.ctx.wantForward?' — instant execution cannot be enabled there, and there':' — there'} is no way to cancel a queued proposal inside its ${d.ctx?esc(fmtD(d.ctx.del)):''} window: a cancel raised as an ordinary proposal is itself queued for the full delay. `:''}${noGas?`Not enough gas in the connected wallet on some chains${shortfall>0n?` — up to ${esc(fmtGasShort(shortfall))} short`:''}. `:''}${notOwner?'You are not one of the owners — the vault will deploy, but it will not appear in your history. ':''}${d.ctx&&d.ctx.wns&&d.wnsAvail!==true?`${d.ctx.wns.full} ${d.wnsAvail===false?'has been claimed by someone else since you picked it':'could not be confirmed free — mainnet did not answer'}. The vault deploys either way; the name is dropped rather than reverting the deploy, and you can claim another one from the NAME tab afterwards. `:''}`;
+    const warnText = `${fpVoid?`At ${esc(d.ctx.thresh)}-of-${esc(d.ctx.resolvedOwners.length)} every quorum is already unanimous, so instant execution makes the timelock advisory rather than enforced — the same signatures can queue or execute, whichever the submitter picks. Lower the threshold, or leave instant execution off, to keep the delay enforced. `:''}${noFac?'No factory on some chains — the vault cannot be deployed there. ':''}${badImpl?'On some chains the factory address holds code that does not name the audited implementation — a vault deployed there would not be the reviewed contract. ':''}${noExec?`No TimelockExecutor on some chains${d.ctx&&d.ctx.wantForward?' — instant execution cannot be enabled there, and there':' — there'} is no way to cancel a queued proposal inside its ${d.ctx?esc(fmtD(d.ctx.del)):''} window: a cancel raised as an ordinary proposal is itself queued for the full delay. `:''}${noGas?`Not enough gas in the connected wallet on some chains${shortfall>0n?` — up to ${esc(fmtGasShort(shortfall))} short`:''}. `:''}${notOwner?'You are not one of the owners — the vault will deploy, but it will not appear in your history. ':''}${d.ctx&&d.ctx.wns&&d.wnsAvail!==true?`${esc(d.ctx.wns.full)} ${d.wnsAvail===false?'has been claimed by someone else since you picked it':'could not be confirmed free — mainnet did not answer'}. The vault deploys either way; the name is dropped rather than reverting the deploy, and you can claim another one from the NAME tab afterwards. `:''}`;
     const anyWarn = !!warnText;
     // Kept out of the block above, and stated first. The mined address is the
     // reason this screen exists — it is the only place the address funds will be
@@ -6119,7 +6237,7 @@ function renderDash(v,mob){
       // exclusive and st.instant implies st.queue — so counting `elsewhere`
       // off a single flag counts proposals, not bucket memberships.
       let hit=false;
-      if(st.sign&&you&&!tx.approvals[you]){needsSig++;needsYou=true;hit=true;if(here)hereHas.sign=true;if(firstWith.sign<0)firstWith.sign=vi;}
+      if(st.sign&&you&&!tx.approvals[you]&&isOwnerOf(vt,you)){needsSig++;needsYou=true;hit=true;if(here)hereHas.sign=true;if(firstWith.sign<0)firstWith.sign=vi;}
       if(st.exec||st.instant){readyExec++;rdy=true;hit=true;if(here)hereHas.exec=true;if(firstWith.exec<0)firstWith.exec=vi;}
       else if(st.queue){pendingSubmit++;hit=true;if(here)hereHas.submit=true;if(firstWith.submit<0)firstWith.submit=vi;}
       if(hit&&!here)elsewhere++;
@@ -6315,7 +6433,11 @@ ${/* Topping up is the one action here that needs no signature, no quorum and no
     const S_NOCANCEL = s.noCancel?`<span style="font-size:10px;color:var(--d);letter-spacing:1px" title="${T_NOCANCEL}">NO EXECUTOR &middot; CANNOT CANCEL</span>`:'';
     const actWrap = inner => `<div style="display:flex;gap:8px${mob?';flex-direction:column':''}">${inner}</div>`;
     let actionBtn="";
-    if(s.sign&&!signedByYou){
+    if(s.sign&&you&&!isOwnerOf(v,you)){
+      // Connected, but not as an owner: there is nothing on this card for this
+      // wallet to sign, and saying so beats a SIGN that cannot count.
+      actionBtn=`<span class="alt-link" style="cursor:default" title="The connected wallet is not one of this vault's owners. Connect an owner's wallet to sign.">NOT AN OWNER &middot; VIEW ONLY</span>`;
+    }else if(s.sign&&!signedByYou){
       // Signing is the path almost everyone wants: free, private, and it keeps
       // the submitter binding that stops a collected bundle being replayed down
       // the queueing route. On-chain approval is demoted to a fallback rather
@@ -6516,6 +6638,7 @@ ${/* Name first, then the address it stands for, then the annotations. YOU sits
 // without a full re-render, so the input keeps focus and caret while typing.
 function onTxAmount(val, dec, avail, unit){
   S.txAmount = val;
+  dropBuilderSim();
   const u = document.getElementById('tx-units');
   if(u) u.textContent = val ? toUnits(val, dec) + ' ' + unit : '';
   const n = parseFloat(stripCommas(String(val))) || 0;
@@ -6527,6 +6650,7 @@ function onTxAmount(val, dec, avail, unit){
 }
 function onTxRecipient(val){
   S.txTo = val;
+  dropBuilderSim();
   updateTxToStatus();
   updateTxReview();
 }
@@ -6554,12 +6678,17 @@ function closeTxBuilder(){
   resetTxFields();
   render();
 }
+// The whole draft, CUSTOM and BATCH included. Those were reset only after a
+// successful submit, so a batch built on one vault and discarded came back,
+// filled in and ready to propose, when + NEW was pressed on another.
 function resetTxFields(){
   S.txAmount = '';
   S.txTo = '';
   S.stakeAmount = '';
   S.wnsLabel = '';
   S.wnsPrimary = true;
+  resetCxState();
+  S.batch = [{t:'',v:'',d:''},{t:'',v:'',d:''}];
   _builderSim = null;
 }
 // Token switch keeps the typed amount but drops the stale unit/USD echo and
@@ -6613,6 +6742,7 @@ function fillTxPct(frac, amountStr, dec, avail, unit){
   onTxAmount(out, dec, avail, unit);
 }
 function onStakeAmount(val, avail){
+  dropBuilderSim();
   S.stakeAmount = val;
   const n = parseFloat(stripCommas(String(val))) || 0;
   const u = document.getElementById('stake-units');
@@ -6641,8 +6771,11 @@ function tokRate(hold){
   const b = parseFloat(stripCommas(String(hold.balance)));
   return (u > 0 && b > 0) ? u / b : 0;
 }
+// en-US, like every other figure here, and not the browser's locale: tokRate
+// and sortHoldings read this string back, and in de-DE "$1.234,56" parsed as
+// 1.23456 — a USDC rate of 0.001, and holdings sorted out of order.
 function fmtUsd(n){
-  return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 // Thousands-separate the integer part of a decimal string, leaving the
 // fraction exact — token amounts must stay digit-for-digit truthful.
@@ -6999,6 +7132,7 @@ function updateCxTargetStatus(val){
   el.textContent = s.txt; el.style.color = s.color;
 }
 function onBatchTarget(i, val){
+  dropBuilderSim();
   S.batch[i].t = val;
   updateBatchTargetStatus(i);
 }
@@ -7013,6 +7147,7 @@ function updateBatchTargetStatus(i){
   el.textContent = s.txt || ''; el.style.color = s.color;
 }
 function onBatchData(i, val){
+  dropBuilderSim();
   S.batch[i].d = val;
   const el = document.getElementById('batch-d-' + i);
   if(el){ const s = _hexState(val); el.textContent = s.txt; el.style.color = s.color; }
@@ -7099,13 +7234,19 @@ async function openTopUp(){
   if(S.demoMode){ flash('CONNECT A WALLET TO TOP UP'); return; }
   if(!window._connectedAddress || !window._signer){ flash('CONNECT WALLET FIRST'); return; }
   if(!v.address || !ethers.isAddress(v.address)){ flash('NO VAULT ADDRESS'); return; }
+  if(v.chainId != null && v.chainId !== S.chainId){ flash('THIS VAULT WAS READ ON ANOTHER CHAIN — RELOAD IT'); return; }
   // The dialog instance this read belongs to, not merely "a dialog is open".
   // Closing and reopening — or reopening against a different vault, or after a
   // chain switch — makes a new one, and the previous read was landing its
   // balances in whichever dialog happened to be up when it finished. That is a
   // MAX button offering another chain's balance of a token this one does not
   // hold, on the one screen whose whole job is to say how much you can send.
-  const t = S.topup = { sym:'ETH', amt:'', customAddr:'', bals:null, gasPrice:null, loading:true, sending:false, err:null, showCustom:false, txHash:null };
+  //
+  // It also remembers what it was opened against. A chain or account switch with
+  // the dialog up left it standing over whichever vault was selected next, still
+  // showing the old chain's balances and the old wallet's MAX — see topUpVault.
+  const t = S.topup = { sym:'ETH', amt:'', customAddr:'', bals:null, gasPrice:null, loading:true, sending:false, err:null, showCustom:false, txHash:null,
+    chainId:S.chainId, vault:v.address.toLowerCase(), wallet:window._connectedAddress.toLowerCase() };
   render();
   try {
     // The wallet is priced as well as counted: MAX on the native asset has to
@@ -7146,6 +7287,15 @@ function topUpSpendable(raw, isNative, gasPrice){
   return bal > reserve ? bal - reserve : 0n;
 }
 function closeTopUp(){ S.topup = null; render(); }
+// The vault a TOP UP dialog belongs to, while it is still the one on screen:
+// the same chain, the same wallet, the same vault selected. Null once any of
+// them has moved, and the dialog is dropped rather than repointed.
+function topUpVault(t){
+  const v = S.vaults[S.sel];
+  return t && v && v.address && t.chainId === S.chainId && (v.chainId == null || v.chainId === S.chainId)
+    && v.address.toLowerCase() === t.vault
+    && String(window._connectedAddress || '').toLowerCase() === t.wallet ? v : null;
+}
 function selectTopUpToken(sym){ if(S.topup){ S.topup.sym = sym; S.topup.showCustom = false; S.topup.err = null; render(); } }
 function onTopUpAmount(val, dec, avail, unit){
   // Held in state, not only in the field. The overlay is rebuilt from scratch by
@@ -7206,8 +7356,8 @@ async function addTopUpCustom(){
   } catch(e){ flash(e.shortMessage || e.message || 'COULD NOT LOAD TOKEN'); }
 }
 async function submitTopUp(){
-  const v = S.vaults[S.sel]; if(!v) return;
   const t = S.topup; if(!t || t.sending) return;
+  const v = topUpVault(t); if(!v){ closeTopUp(); return; }
   const w = requireSigner(); if(!w) return;
   const { signer } = w;
   const sel = vaultTokens(v).find(x => x.symbol === t.sym) || vaultTokens(v)[0];
@@ -7249,8 +7399,7 @@ async function submitTopUp(){
 }
 
 function renderTopUp(){
-  const v = S.vaults[S.sel]; if(!v || !S.topup) return '';
-  const t = S.topup;
+  const t = S.topup, v = topUpVault(t); if(!v) return '';
   const toks = vaultTokens(v);
   const sel = toks.find(x => x.symbol === t.sym) || toks[0];
   const dec = sel.decimals;
@@ -7337,7 +7486,7 @@ function renderTopUp(){
         <div class="token-pills" style="margin-bottom:0" role="group" aria-labelledby="topup-asset-lbl">${pills}<button class="pill" ${sending?'disabled':''} onclick="S.topup.showCustom=!S.topup.showCustom;render()" aria-expanded="${!!t.showCustom}">+ CUSTOM</button></div>
         ${t.showCustom?`<div style="margin-top:12px">
           <div style="display:flex;gap:8px"><input class="inp" id="topup-custom-addr" style="margin:0;flex:1;min-width:0;font-size:16px" placeholder="0x... TOKEN ADDRESS" aria-label="Custom token address" value="${esc(t.customAddr||'')}" oninput="if(S.topup)S.topup.customAddr=this.value" onkeydown="if(event.key==='Enter'){event.preventDefault();addTopUpCustom()}"><button class="btn btn-outline btn-sm" onclick="addTopUpCustom()">ADD</button></div>
-          ${(()=>{const cl=customTokensFor(S.chainId,v.address);return cl.length?`<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">${cl.map(x=>`<span class="ctok-chip">${tokIcon(x.symbol,'sm')} ${esc(x.symbol)} <span class="dim">${x.decimals}d</span><button onclick="removeCustomTokenFlow('${x.address}')" aria-label="Remove ${esc(x.symbol)}" title="Remove ${esc(x.symbol)}">&#10005;</button></span>`).join('')}</div>`:''})()}
+          ${(()=>{const cl=customTokensFor(S.chainId,v.address);return cl.length?`<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">${cl.map(x=>`<span class="ctok-chip">${tokIcon(x.symbol,'sm')} ${esc(x.symbol)} <span class="dim">${esc(x.decimals)}d</span><button onclick="removeCustomTokenFlow('${jstr(x.address)}')" aria-label="Remove ${esc(x.symbol)}" title="Remove ${esc(x.symbol)}">&#10005;</button></span>`).join('')}</div>`:''})()}
           <div style="font-size:9px;color:var(--d);letter-spacing:1px;line-height:1.5;margin-top:8px">SAVED TO THIS BROWSER FOR THIS VAULT &mdash; AVAILABLE FOR SENDS TOO</div>
         </div>`:''}
       </div>
@@ -7408,7 +7557,7 @@ function renderTxBuilder(v,mob){
         <div class="fset">
           <div class="fhead"><span class="lbl" id="lbl-token">TOKEN</span>${hold?`<span class="fhint privg"${pgAttrs()}>VAULT HOLDS <b><span class="priv">${esc(hold.balance)}</span> ${esc(S.txToken)}</b>${hold.usd?` &middot; <span class="priv">${esc(hold.usd)}</span>`:''}</span>`:`<span class="fhint">NO ${esc(S.txToken)} BALANCE</span>`}</div>
           <div class="token-pills" style="margin-bottom:0" role="group" aria-labelledby="lbl-token">${tokenObjs.map(t=>`<button class="pill${S.txToken===t.symbol?" on":""}"${S.txToken===t.symbol?' aria-current="true"':''} onclick="selectTxToken('${jstr(t.symbol)}')"><span class="tok-ico">${t.icon||iconForSym(t.symbol)}</span>${esc(t.symbol)}</button>`).join("")}${S.demoMode?"":`<button class="pill" onclick="S.showCustomTok=!S.showCustomTok;render()">+ CUSTOM</button>`}</div>
-          ${(!S.demoMode&&S.showCustomTok)?`<div style="margin-top:12px"><div style="display:flex;gap:8px"><input class="inp" id="custom-tok-addr" style="margin:0;flex:1;min-width:0;font-size:13px" placeholder="0x... TOKEN ADDRESS" aria-label="Custom token address" value="${esc(S.customTokAddr)}" oninput="S.customTokAddr=this.value" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomTokenFlow()}"><button class="btn btn-outline btn-sm" onclick="addCustomTokenFlow()">ADD</button></div>${(()=>{const cl=customTokensFor(S.chainId,v.address);return cl.length?`<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">${cl.map(t=>`<span class="ctok-chip">${tokIcon(t.symbol,'sm')} ${esc(t.symbol)} <span class="dim">${t.decimals}d</span><button onclick="removeCustomTokenFlow('${t.address}')" aria-label="Remove ${esc(t.symbol)}" title="Remove ${esc(t.symbol)}">&#10005;</button></span>`).join('')}</div>`:''})()}
+          ${(!S.demoMode&&S.showCustomTok)?`<div style="margin-top:12px"><div style="display:flex;gap:8px"><input class="inp" id="custom-tok-addr" style="margin:0;flex:1;min-width:0;font-size:13px" placeholder="0x... TOKEN ADDRESS" aria-label="Custom token address" value="${esc(S.customTokAddr)}" oninput="S.customTokAddr=this.value" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomTokenFlow()}"><button class="btn btn-outline btn-sm" onclick="addCustomTokenFlow()">ADD</button></div>${(()=>{const cl=customTokensFor(S.chainId,v.address);return cl.length?`<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">${cl.map(t=>`<span class="ctok-chip">${tokIcon(t.symbol,'sm')} ${esc(t.symbol)} <span class="dim">${esc(t.decimals)}d</span><button onclick="removeCustomTokenFlow('${jstr(t.address)}')" aria-label="Remove ${esc(t.symbol)}" title="Remove ${esc(t.symbol)}">&#10005;</button></span>`).join('')}</div>`:''})()}
           <div style="font-size:9px;color:var(--d);letter-spacing:1px;line-height:1.5;margin-top:8px">SAVED TO THIS BROWSER FOR THIS VAULT &mdash; AVAILABLE FOR TOP UPS TOO</div></div>`:''}
         </div>
 
@@ -7633,12 +7782,25 @@ ${/* Per call, not per batch. A batch is signed as one proposal but executes as
        <button class="btn btn-fill btn-w btn-big" style="margin-top:16px" onclick="submitBatch()">SIGN + SUBMIT BATCH</button>`;
   }
   return`<div class="txb"><div class="txb-tabs">${tabs}<button class="x-btn" onclick="closeTxBuilder()" aria-label="Discard this draft" title="Discard this draft">&#10005;</button></div>${body}
-    ${_builderSim
-      ? renderSim(_builderSim, { rerun:'simulateBuilder()', dismiss:'dismissBuilderSim()' })
-      : `<div class="sim-idle">
-          <button class="sim-btn" onclick="simulateBuilder()" title="Dry-run this transaction against current chain state before proposing">SIMULATE</button>
-          <span class="t">DRY-RUN AGAINST THE LATEST BLOCK &mdash; SEE THE EXACT BALANCE CHANGES AND GAS BEFORE THIS BECOMES A PROPOSAL.</span>
-        </div>`}</div>`;
+    <div id="builder-sim">${builderSimHtml()}</div></div>`;
+}
+function builderSimHtml(){
+  return _builderSim
+    ? renderSim(_builderSim, { rerun:'simulateBuilder()', dismiss:'dismissBuilderSim()' })
+    : `<div class="sim-idle">
+        <button class="sim-btn" onclick="simulateBuilder()" title="Dry-run this transaction against current chain state before proposing">SIMULATE</button>
+        <span class="t">DRY-RUN AGAINST THE LATEST BLOCK &mdash; SEE THE EXACT BALANCE CHANGES AND GAS BEFORE THIS BECOMES A PROPOSAL.</span>
+      </div>`;
+}
+// A result is about the inputs it ran on. Typing a new amount or recipient left
+// SIMULATION PASSED standing over a proposal it was never run against. Repainted
+// in place, because these fire per keystroke and a full render would take the
+// caret out of the field being typed in.
+function dropBuilderSim(){
+  if(!_builderSim) return;
+  _builderSim = null;
+  const h = document.getElementById('builder-sim');
+  if(h) h.innerHTML = builderSimHtml();
 }
 
 function getProdTokenSymbols(){
@@ -8187,7 +8349,7 @@ function renderCreate(mob){
         // operator is typing an address drops them out of the field mid-paste.
         return`<div class="owner-row">
         <span class="o-num" style="color:${note.num}">${String(i+1).padStart(2,"0")}</span>
-        <input class="inp o-addr" id="cf-own-${i}" onblur="resolveWalletOwner(${i})" aria-label="Owner ${i+1} address or name" aria-invalid="${bad}"${note.html?` aria-describedby="cf-own-note-${i}"`:''} style="${bad?'border-bottom-color:var(--r)':''}" placeholder="0x..., a name or bc1..." value="${esc(shortAddr(o.addr))}" onpaste="pasteOwners(event,${i})" onfocus="this.value=S.cf.owners[${i}].addr" onblur="this.value=shortAddr(S.cf.owners[${i}].addr)" oninput="S.cf.owners[${i}].addr=this.value;const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;if(+S.cf.threshold>fc){S.cf.threshold=String(fc)}" onchange="S.cf.owners[${i}].addr=this.value;render()">
+        <input class="inp o-addr" id="cf-own-${i}" aria-label="Owner ${i+1} address or name" aria-invalid="${bad}"${note.html?` aria-describedby="cf-own-note-${i}"`:''} style="${bad?'border-bottom-color:var(--r)':''}" placeholder="0x..., a name or bc1..." value="${esc(shortAddr(o.addr))}" onpaste="pasteOwners(event,${i})" onfocus="this.value=S.cf.owners[${i}].addr" onblur="resolveWalletOwner(${i});this.value=shortAddr(S.cf.owners[${i}].addr)" oninput="S.cf.owners[${i}].addr=this.value;const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;if(+S.cf.threshold>fc){S.cf.threshold=String(fc)}" onchange="S.cf.owners[${i}].addr=this.value;render()">
         <input class="inp o-label" id="cf-own-lbl-${i}" maxlength="64" aria-label="Owner ${i+1} label" placeholder="LABEL" value="${esc(o.label)}" oninput="S.cf.owners[${i}].label=this.value" onchange="render()">
         ${c.owners.length>1?`<button class="x-btn red o-del" aria-label="Remove owner ${i+1}" title="Remove this owner" onclick="S.cf.owners.splice(${i},1);const fc=S.cf.owners.filter(o=>o.addr.trim()).length||1;S.cf.threshold=String(Math.min(+S.cf.threshold||1,fc));render()">&#10005;</button>`:""}
       </div>${note.html?`<div class="owner-note" id="cf-own-note-${i}" style="color:${note.color}">${note.html}</div>`:''}`}).join("")}
@@ -8369,10 +8531,14 @@ ${/* Stated for whatever is currently picked, changed or not — the same rule t
         <input class="inp" id="admin-executor-input" placeholder="0x... NEW EXECUTOR" aria-label="New executor address" value="${esc(S.adminExec)}" oninput="S.adminExec=this.value" onkeydown="if(event.key==='Enter'){event.preventDefault();doAdminPropose('setExecutor')}">
         <button class="btn btn-outline btn-w" onclick="doAdminPropose('setExecutor')">PROPOSE EXECUTOR</button>
       </div>
-      ${v.delay>0&&v.executor!==ethers.ZeroAddress&&v.executor!=="0x0000...0000"?`<div>
-        <span class="lbl"><span class="dim">EXECUTOR &middot;</span> INSTANT PATH</span>
+      ${/* Only for a TimelockExecutor. A custom executor has no forward(), so the
+           proposal this offers would queue, spend a nonce and then revert for
+           good. The button names the action it proposes, with the state in
+           aria-pressed — it read ENABLED while pressing it proposed disabling. */''}
+      ${v.delay>0&&hasForwarder(v)?`<div>
+        <span class="lbl"><span class="dim">EXECUTOR &middot;</span> INSTANT PATH &middot; ${v.fastPath?"ON":"OFF"}</span>
         <div style="font-size:11px;color:var(--m);margin:8px 0 14px;line-height:1.7">Unanimous (${v.ownerCount}/${v.ownerCount}) signatures bypass the timelock via TimelockExecutor.forward(). The cancel path (${v.threshold}/${v.ownerCount}) is always available.</div>
-        <button class="btn ${v.fastPath?"btn-fill":"btn-outline"}" style="font-size:10px;padding:0 20px" onclick="doAdminPropose('enableForward')">${v.fastPath?"ENABLED":"ENABLE"}</button>
+        <button class="btn ${v.fastPath?"btn-fill":"btn-outline"}" style="font-size:10px;padding:0 20px" aria-pressed="${!!v.fastPath}" onclick="doAdminPropose('enableForward')">${v.fastPath?"PROPOSE DISABLE":"PROPOSE ENABLE"}</button>
       </div>`:""}
     </div>
   `:tab==="OWNERS"?`<div>
@@ -8900,9 +9066,7 @@ function doAccelerate(vi, nonce) {
     const vt = S.vaults[vi];
     const tx = findQueueTx(vt, nonce);
     if(!tx) return;
-    nonce = tx.nonce;
-    vt.queue = vt.queue.filter(t => t !== tx);
-    flash(`ACCELERATED #${nonce} VIA EXECUTOR`);
+    demoExecute(vt, tx.nonce, `ACCELERATED #${tx.nonce} VIA EXECUTOR`);
     render();
   } else {
     guardSubmit(prodAccelerate)(vi, nonce);
@@ -8935,7 +9099,13 @@ function btcSet(network, owners, threshold){
         if(now) _btcSets.set(key, { ...now, pending: open.length });
         render();
       }).catch(() => {});
-    })).catch(e => { console.error('Bitcoin owners:', e); _btcSets.set(key, { loading: false, failed: true, handles: [], ready: [], link: null }); render(); });
+    })).catch(e => {
+      console.error('Bitcoin owners:', e);
+      _btcSets.set(key, { loading: false, failed: true, handles: [], ready: [], link: null });
+      // Asked again later rather than remembered: a failed read is not an answer.
+      setTimeout(() => { if(_btcSets.get(key)?.failed){ _btcSets.delete(key); render(); } }, 30000);
+      render();
+    });
   }
   return _btcSets.get(key);
 }
@@ -8992,8 +9162,8 @@ function renderBtcPanel(c){
     <div style="font-size:10px;letter-spacing:2px;color:var(--m);font-weight:600">${network === 'mainnet' ? 'BITCOIN' : 'SIGNET'} &middot; ${threshold} OF ${owners.length} &middot; FREE, NOTHING TO DEPLOY</div>
     <div style="margin-top:4px;font-size:10px;line-height:1.6;color:var(--d)">Its own addresses, not this vault's. Setup costs no gas and no sats; a spend pays the usual miner fee from the vault. Its rules are built into the address, so they stay fixed.</div>
     ${policy}
-    ${owners.map(a => { const ok = set.ready.includes(a.toLowerCase()); return `<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;font-size:10px;letter-spacing:1px;color:${ok ? 'var(--g)' : 'var(--d)'}"><span>${esc(a.slice(0, 6) + '…' + a.slice(-4))}</span><span>${set.loading ? '…' : ok ? 'READY' : 'WAITING'}</span></div>`; }).join('')}
-    ${mine && !iAmReady && !set.loading ? `<a class="btn btn-outline btn-sm" style="margin-top:6px;text-decoration:none" href="./btc.html">SET UP MY BITCOIN KEY &#8599;</a>` : ''}
+    ${owners.map(a => { const ok = set.ready.includes(a.toLowerCase()); return `<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;font-size:10px;letter-spacing:1px;color:${ok ? 'var(--g)' : 'var(--d)'}"><span>${esc(a.slice(0, 6) + '…' + a.slice(-4))}</span><span>${set.loading ? '…' : set.failed ? 'UNKNOWN' : ok ? 'READY' : 'WAITING'}</span></div>`; }).join('')}
+    ${mine && !iAmReady && !set.loading && !set.failed ? `<a class="btn btn-outline btn-sm" style="margin-top:6px;text-decoration:none" href="./btc.html">SET UP MY BITCOIN KEY &#8599;</a>` : ''}
     ${kind !== 'plain' ? '' : set.link ? `<a class="alt-link" style="display:inline-block;margin-top:6px;text-decoration:none" href="${esc(set.link)}">OPEN ON BITCOIN &#8599;</a>` : `<div style="margin-top:6px;font-size:10px;line-height:1.6;color:var(--d)">Each owner sets up once, here or on the vault. The vault appears on its dashboard when all are ready. Contract owners, such as a Safe, cannot take part.</div>`}
   </div>`;
 }
@@ -9112,7 +9282,7 @@ async function safeCloneSearch(){
   let addr;
   try { addr = await resolveName(raw); }
   catch(e) {
-    if(!S.safeClone) return;
+    if(S.safeClone !== sc) return;
     sc.busy = false;
     sc.err = NAME_RE.test(raw) ? nameErrText(raw, e) : 'NOT A VALID ADDRESS OR NAME';
     render(); return;
@@ -9120,12 +9290,14 @@ async function safeCloneSearch(){
 
   const chainId = NETS[S.cf.net]?.id;
   const primary = await readSafe(addr, chainId);
-  if(!S.safeClone) return;                  // modal closed while reading
+  // This dialog, not merely a dialog: closed and reopened while reading, the new
+  // one was filled with the old search's Safe and closed as CLONED.
+  if(S.safeClone !== sc) return;            // modal closed while reading
   if(primary.hit){ applySafe(primary.hit, raw); return; }
 
   const ids = Object.keys(CHAINS).map(Number).filter(id => id !== chainId);
   const scans = await Promise.all(ids.map(id => readSafe(addr, id)));
-  if(!S.safeClone) return;
+  if(S.safeClone !== sc) return;
   const others = scans.map(s => s.hit).filter(Boolean);
   const all = [primary, ...scans];
   sc.busy = false; sc.addr = addr; sc.label = raw;
@@ -9622,6 +9794,13 @@ async function _megaGet(path, bulk){
 // registered. addr -> name, or null for an address with no primary name. Both
 // remember misses, so a form re-validating on every keystroke costs one request
 // per distinct string and not one per character.
+//
+// Forward answers carry the time they were read. A name can be repointed or sold
+// mid-session, and the submit-time lookup that assertPreviewed compares against
+// the preview was served out of this same map — so for .mega it compared the
+// cache with itself, and kept signing the old address. A direct lookup re-asks
+// once its entry is a minute old; only bulk reads (owner lists) take an older one.
+const MEGA_FWD_TTL = 60000;
 const _megaFwd = new Map();
 const _megaRev = new Map();
 const _megaFwdPending = new Map();
@@ -9647,19 +9826,19 @@ function _megaOnOurChain(j){ return !j.chain || String(j.chain) === 'megaeth:' +
 // callers share one vocabulary with the mainnet path.
 function megaResolveName(name, bulk){
   const key = String(name || '').trim().toLowerCase();
-  if(_megaFwd.has(key)){
-    const hit = _megaFwd.get(key);
-    return hit ? Promise.resolve(hit) : Promise.reject(new NameError('notfound', nameErrText(key, { nameKind:'notfound' })));
+  const hit = _megaFwd.get(key);
+  if(hit && (bulk || Date.now() - hit.at < MEGA_FWD_TTL)){
+    return hit.addr ? Promise.resolve(hit.addr) : Promise.reject(new NameError('notfound', nameErrText(key, { nameKind:'notfound' })));
   }
   if(_megaFwdPending.has(key)) return _megaFwdPending.get(key);
   const p = (async () => {
     const j = await _megaGet('/resolve?name=' + encodeURIComponent(key), bulk);
     if(!j || !j.address || !ethers.isAddress(j.address) || !_megaOnOurChain(j)){
-      _megaFwd.set(key, null);
+      _megaFwd.set(key, { addr: null, at: Date.now() });
       throw new NameError('notfound', nameErrText(key, { nameKind:'notfound' }));
     }
     const addr = ethers.getAddress(j.address);
-    _megaFwd.set(key, addr);
+    _megaFwd.set(key, { addr, at: Date.now() });
     return addr;
   })();
   _megaFwdPending.set(key, p);
@@ -9797,7 +9976,10 @@ async function altChainAddress(name, chainId, mainAddr){
   try {
     const r = await _nameRace(mainnetRpc().getResolver(name));
     if(!r) return null;
-    const a = await _nameRace(r.getAddress(0x80000000 + chainId));
+    // The chain id itself: ethers adds the 0x80000000 for an EVM chain. Handed the
+    // coin type already offset, it skipped the lookup and answered null, so this
+    // warning could never fire.
+    const a = await _nameRace(r.getAddress(chainId));
     if(!a || !ethers.isAddress(a)) return null;
     const addr = ethers.getAddress(a);
     return addr.toLowerCase() === String(mainAddr).toLowerCase() ? null : addr;
@@ -9819,7 +10001,11 @@ function previewName(raw, chainId, onSettle){
   const key = String(raw || '').trim();
   if(!key || !NAME_RE.test(key)) return null;
   const ck = _pvKey(key, chainId);
-  const hit = _namePreview[ck];
+  let hit = _namePreview[ck];
+  // A failure the network caused is asked again after a pause rather than kept.
+  // One mainnet timeout used to stand for the whole session, and assertPreviewed
+  // refused every submit to that name until the page was reloaded.
+  if(hit && hit.state === 'err' && hit.retry && Date.now() - hit.at > 15000){ delete _namePreview[ck]; hit = null; }
   if(hit){
     if(hit.state === 'resolving' && onSettle) hit.waiting.push(onSettle);
     return hit;
@@ -9844,6 +10030,8 @@ function previewName(raw, chainId, onSettle){
     } catch(e) {
       entry.state = 'err';
       entry.err = e.shortMessage || e.message || 'DOES NOT RESOLVE';
+      entry.at = Date.now();
+      entry.retry = ['unreachable', 'offchain'].includes(_nameKind(e));
     }
     // Taken and cleared before calling, so a callback that repaints — and in
     // doing so asks for this name again — cannot append to the list being
@@ -10288,7 +10476,10 @@ async function loadTokenBalances(walletAddr, ethBalance) {
   // Merged under mainnet's own keys, and only where this chain said nothing: a
   // local feed always wins, because it is the one that speaks for this chain.
   if(mainUsdPromise){
-    const m = await mainUsdPromise;
+    // Bounded. A mainnet RPC that hangs rather than failing held the whole vault
+    // load on a USD figure for as long as ethers' own five-minute timeout.
+    let t;
+    const m = await Promise.race([mainUsdPromise, new Promise(r => { t = setTimeout(() => r({}), 4000); })]).finally(() => clearTimeout(t)) || {};
     for(const k of Object.keys(m)) if(!prices[k]) prices[k] = m[k];
   }
   const ethPrice = prices['ETH'] || 0;
@@ -10323,12 +10514,14 @@ async function loadTokenBalances(walletAddr, ethBalance) {
   erc20Tokens.forEach((t, i) => {
     if(!balances[i] || !balances[i].success || balances[i].bal === 0n) return;
     const amount = Number(ethers.formatUnits(balances[i].bal, t.decimals));
+    // Priced only when it is one of the built-ins. A token somebody added names
+    // its own symbol, so pricing it by that symbol valued an airdropped "USDC"
+    // at a dollar and a stranger's "wstETH" at mainnet's rate — enough to make
+    // it the headline balance.
     let usd = 0;
-    if(stableSymbols.has(t.symbol)) {
-      usd = amount;
-    } else {
-      const px = priceOf(t.symbol);
-      if(px > 0) usd = amount * px;
+    if(seen.has(t.address.toLowerCase())) {
+      if(stableSymbols.has(t.symbol)) usd = amount;
+      else { const px = priceOf(t.symbol); if(px > 0) usd = amount * px; }
     }
     holdings.push({token:t.symbol, balance:fmtBal(balances[i].bal, t.decimals), usd: usd > 0 ? fmtUsd(usd) : '', raw: balances[i].bal.toString(), decimals: t.decimals});
   });
@@ -11001,7 +11194,8 @@ async function loadAllVaults() {
   // prompt was answered. An operator reading that saw a page that had finished
   // loading and found nothing.
   await ensureSession();
-  if(!stillOurs()) { hideLoading(); return; }
+  // Superseded: the newer load owns the spinner, as it does below.
+  if(!stillOurs()) return;
   try {
     const wallets = await dbMyWallets(addr);
     // Unreachable, not empty — see dbMyWallets. Leave whatever is on screen
@@ -11717,7 +11911,7 @@ async function loadVaultQueue(vi) {
       v.owners.forEach(o => approvals[o.addr] = false);
       validSigs.forEach(s => { const k = addrKey[s.signer.toLowerCase()]; if(k) approvals[k] = true; });
 
-      const dataLabel = selectorToLabel(t.call_data, t.target);
+      const dataLabel = selectorToLabel(t.call_data, t.target, v);
 
       const ethVal = rawValue !== '0' ? ethers.formatEther(BigInt(rawValue)) : '0';
       const value = ethVal === '0' ? '0' : ethVal;
@@ -11765,8 +11959,11 @@ async function loadVaultQueue(vi) {
           if(tokenInfo && decoded[1] != null) {
             displayValue = groupInt(fmtAmount(decoded[1], tokenInfo.decimals));
             displayToken = tokenInfo.symbol;
-            displayTo = decoded[0];
           }
+          // The recipient is in the calldata whether or not the token is one this
+          // browser knows. Left unset, the card's arrow pointed at the token
+          // contract, which reads as the recipient and is not one.
+          displayTo = decoded[0];
         } catch(_) {}
       }
       queue.push({
@@ -11867,7 +12064,7 @@ async function loadVaultHistory(vi) {
   try {
     const rows = await dbGetHistory(v.dbId, 50);
     v.history = rows.map(t => {
-      const act = selectorToLabel(t.call_data, t.target);
+      const act = selectorToLabel(t.call_data, t.target, v);
       const hv = weiStr(t.value);
       const ethVal = (hv !== null && hv !== '0') ? ethers.formatEther(BigInt(hv)) : null;
       // `target` is read defensively for the same reason `value` is above: this
@@ -11933,9 +12130,17 @@ async function reloadVault(vi) {
   try {
     const s = await multicallLoad(v.address);
     if(!stillOurs()) return;
+    const wasTh = v.threshold, wasDl = v.delay;
     v.threshold = Number(s.threshold);
     v.ownerCount = Number(s.ownerCount);
     v.delay = Number(s.delay);
+    // ADMIN's drafts follow the vault when nobody has edited them. After a
+    // setThreshold(3) executed, the form still held 2, read CHANGED against the
+    // new 3, and offered to propose reverting it in one click.
+    if(S.vaults[S.sel] === v){
+      if(Number(S.nt) === wasTh) S.nt = v.threshold;
+      if(toSec(S.nd, S.ndUnit) === wasDl) setNd(v.delay);
+    }
     v.nonce = Number(s.nonce);
     v.executor = s.executor;
     const you = window._connectedAddress;
@@ -11952,13 +12157,14 @@ async function reloadVault(vi) {
       you: o.toLowerCase() === you?.toLowerCase()
     }));
     v.loadedOwners = [...s.owners];
-    // Persist pending label to DB then clear it
-    if(v._pendingLabel && v._pendingLabel.label && v.dbId) {
-      const pl = v._pendingLabel;
+    // Persist the pending label once its owner is in the set, and not before: a
+    // timelocked addOwner reloads here when it is queued, and clearing the label
+    // then lost it for every vault with a delay.
+    const pl = v._pendingLabel;
+    if(pl && pl.label && v.dbId) {
       const match = v.owners.find(o => o.addr.toLowerCase() === pl.addr);
-      if(match) dbUpdateOwnerLabel(v, match.addr, pl.label);
-    }
-    delete v._pendingLabel;
+      if(match) { dbUpdateOwnerLabel(v, match.addr, pl.label); delete v._pendingLabel; }
+    } else delete v._pendingLabel;
     // Names are started here and not waited for — see loadSingleVaultData. This
     // path already carries the previous answers across (oldNames above), so
     // there is nothing to flicker: what is on screen stays on screen until a
@@ -12048,8 +12254,15 @@ async function loadVaultByAddress() {
     return;
   }
   showLoading('LOADING VAULT');
+  const startedOn = S.chainId;
   try {
     const vData = await loadSingleVaultData(checksummed);
+    // Both checks again, after the read. A chain switch meanwhile cleared the list
+    // for the new chain, and this vault — read on the old one — was appended to it
+    // and selected; a second Enter during the read pushed the same vault twice.
+    if(vData && S.chainId !== startedOn) { hideLoading(); flash('CHAIN CHANGED — LOAD IT AGAIN'); return; }
+    const dup = vData ? S.vaults.findIndex(v => v.address.toLowerCase() === checksummed.toLowerCase()) : -1;
+    if(dup !== -1) { hideLoading(); S.sel = dup; S.loadAddr = ''; render(); return; }
     if(vData) {
       S.vaults.push(vData);
       S.sel = S.vaults.length - 1;
@@ -12125,12 +12338,18 @@ async function updateOwnerLabel(vi, addr, label) {
   // The owner this label was typed against is no longer one. Saying so beats
   // filing it against whoever now stands where they did.
   if(!o) { clearOwnerLabelDraft(v.address, addr); flash('THAT OWNER IS NO LONGER ON THIS VAULT — LABEL NOT SAVED'); render(); return; }
+  const was = o.label;
   o.label = label;
   // Committed, so the draft has nothing left to protect and the field goes back
   // to reading from the stored value.
   clearOwnerLabelDraft(v.address, o.addr);
-  if(!S.demoMode && v.dbId) {
-    await dbUpdateOwnerLabel(v, o.addr, label);
+  // Put back if the write did not land, as renameVault does: a declined prompt
+  // or a refused write left the new label on screen, kept across reloads, under
+  // a caption saying co-signers could see it, when none of them could.
+  if(!S.demoMode && v.dbId && !(await dbUpdateOwnerLabel(v, o.addr, label))) {
+    o.label = was;
+    flash('LABEL NOT SAVED — CO-SIGNERS STILL SEE THE OLD ONE');
+    render();
   }
 }
 
@@ -12442,7 +12661,11 @@ function resumeSavedDeploy(){
       // The name is claimed by init calls on one chain only. If that chain is not
       // among the ones left, carrying the name forward would make the review
       // screen re-check a name this very vault now holds and report it as taken.
-      wns: (rec.wns && chains.some(n => Number(n.id) === WNS_CHAIN_ID)) ? rec.wns : null,
+      // Rebuilt from a label that passes the same check a fresh run applies: the
+      // record is storage anyone on the origin can write, and this label goes
+      // into the claim calldata as-is.
+      wns: (rec.wns && wnsLabelValid(rec.wns.label) && chains.some(n => Number(n.id) === WNS_CHAIN_ID))
+        ? { label: rec.wns.label, full: wnsFullName(rec.wns.label), id: wnsSubId(rec.wns.label) } : null,
     },
     phase:'preflight', address: rec.minedAddr, done:false, lastVaultAddr:null,
     wnsAvail:null, resumed:true, landedId: rec.landedId || null,
@@ -13420,6 +13643,7 @@ async function prodSign(vi, nonce) {
   const tx = findQueueTx(v, nonce);
   if(!tx) return;
   nonce = tx.nonce;
+  if(!requireOwner(v, connectedAddress)) return;
   // Neither the proposal nor the vault has a record to sign into, and the
   // branch below would have taken the signature and dropped it while
   // reporting SIGNED. See requireVaultRecord.
@@ -13455,15 +13679,9 @@ async function prodSign(vi, nonce) {
       return;
     }
 
-    // Update local state
-    tx.approvals[connectedAddress] = true;
-    if(!tx.signatures) tx.signatures = [];
-    const existing = tx.signatures.findIndex(s => s.signer.toLowerCase() === connectedAddress.toLowerCase());
-    if(existing >= 0) tx.signatures[existing] = {signer: connectedAddress, sig, sigType: 'ecdsa'};
-    else tx.signatures.push({signer: connectedAddress, sig, sigType: 'ecdsa'});
-    tx.signatures.sort((a,b) => a.signer.toLowerCase() < b.signer.toLowerCase() ? -1 : 1);
-
-    // Persist to DB
+    // Persisted before it is shown. Both writes throw on a refusal, and with the
+    // local update ahead of them the card went on reading "signed by you" — on
+    // this client only — after SIGNATURE NOT SAVED had come and gone.
     if(tx.dbId) {
       await dbAddSig(tx.dbId, connectedAddress, sig);
     } else if(v.dbId) {
@@ -13474,6 +13692,13 @@ async function prodSign(vi, nonce) {
         tx.txHash = txHash;
       }
     }
+
+    tx.approvals[connectedAddress] = true;
+    if(!tx.signatures) tx.signatures = [];
+    const existing = tx.signatures.findIndex(s => s.signer.toLowerCase() === connectedAddress.toLowerCase());
+    if(existing >= 0) tx.signatures[existing] = {signer: connectedAddress, sig, sigType: 'ecdsa'};
+    else tx.signatures.push({signer: connectedAddress, sig, sigType: 'ecdsa'});
+    tx.signatures.sort((a,b) => a.signer.toLowerCase() < b.signer.toLowerCase() ? -1 : 1);
 
     flash(`SIGNED #${nonce} (OFF-CHAIN)`);
     render();
@@ -13490,6 +13715,7 @@ async function prodApprove(vi, nonce) {
   const tx = findQueueTx(v, nonce);
   if(!tx) return;
   nonce = tx.nonce;
+  if(!requireOwner(v, connectedAddress)) return;
 
   try {
     // Compute the EIP-712 hash to approve on-chain
@@ -13583,14 +13809,24 @@ async function prodUnsign(vi, nonce) {
     }
   }
 
-  // Remove from local state
+  // The stored signature first. It is the one that counts — for every co-signer
+  // and for anyone packing a bundle — so the card says it is gone only once the
+  // verifier has removed it. This cleared the card and flashed UNSIGNED whatever
+  // came back, including a declined prompt or a wallet on the wrong chain, and
+  // the signature stayed live everywhere but here. An on-chain approval was
+  // revoked above, which is the fact that matters; its row follows best-effort.
+  if(tx.dbId && !wasOnchainApproval) {
+    if(!requireSigner()) return;
+    if(!(await dbRemoveSig(tx.dbId, connectedAddress, v, tx.txHash))) {
+      flash('SIGNATURE NOT WITHDRAWN — IT IS STILL STORED AND STILL COUNTS. TRY AGAIN.', 7000);
+      return;
+    }
+  } else if(tx.dbId) await dbRemoveSig(tx.dbId, connectedAddress, v, tx.txHash);
+
   tx.approvals[connectedAddress] = false;
   if(tx.signatures) {
     tx.signatures = tx.signatures.filter(s => s.signer.toLowerCase() !== connectedAddress.toLowerCase());
   }
-
-  // Remove from DB
-  if(tx.dbId) await dbRemoveSig(tx.dbId, connectedAddress, v, tx.txHash);
 
   flash(wasOnchainApproval ? `REVOKED #${nonce} (ON-CHAIN)` : `UNSIGNED #${nonce}`);
   render();
@@ -14110,6 +14346,7 @@ async function prodCancel(vi, nonce) {
   const tx = findQueueTx(v, nonce);
   if(!tx) return;
   nonce = tx.nonce;
+  if(!requireOwner(v, connectedAddress)) return;
   if(!requireVaultRecord(v)) return;
 
   // No executor, no in-window brake — see canForwardCancel. Refused here as well
@@ -14142,7 +14379,14 @@ async function prodCancel(vi, nonce) {
     // the executor would never hash, permanently. (The self-heal did not fire:
     // it required the row to hold signatures, and a planted row holds none.)
     // An existing companion is reused only if it is at that same live nonce.
-    const cancelNonce = v.nonce;
+    //
+    // Read now rather than taken from v.nonce, which is only as fresh as the last
+    // full load: reloadQueue does not touch it, so a proposal executed from
+    // another client left every retry here signing the same dead digest until a
+    // manual RELOAD — on the one route that exists to stop something in time.
+    // Never below the cached figure, since a nonce only moves up and a lagging
+    // RPC can answer from behind.
+    const cancelNonce = v.nonce = Math.max(Number(v.nonce) || 0, await fetchLiveNonce(v.address).catch(() => 0));
     const msg = { target: v.address, value: 0n, data: cancelData, nonce: cancelNonce };
     const cancelTxHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg);
 
@@ -14206,7 +14450,7 @@ async function prodCancel(vi, nonce) {
       if(existingTxId) {
         await dbCancelTx(existingTxId, connectedAddress);
       }
-      await reloadQueue(vi);
+      await reloadVault(vi);
       return;
     }
 
@@ -14268,6 +14512,7 @@ async function prodReject(vi, nonce) {
   const tx = findQueueTx(v, nonce);
   if(!tx) return;
   nonce = tx.nonce;
+  if(!requireOwner(v, connectedAddress)) return;
   if(!requireVaultRecord(v)) return;
 
   const rejectNonce = nonce;   // == the stuck proposal's (and live) on-chain nonce
@@ -14731,13 +14976,20 @@ async function simulateBuilder() {
     _builderSim = _simStamp(t ? demoSim(v, t) : { status:'pass', demo:true, assets: [] });
     render(); return;
   }
-  _builderSim = { loading:true }; render();
+  // The run owns this object. Anything that invalidates the result replaces it,
+  // so a run that lands after a token switch, an edit, a discard or a second
+  // press finds it gone and keeps its answer to itself instead of painting
+  // SIMULATION PASSED over inputs it never saw.
+  const mine = _builderSim = { loading:true }; render();
   let s;
   try { s = await buildSimInput(); }
-  catch(e) { _builderSim = null; flash(e.message || 'CHECK INPUTS'); render(); return; }
+  catch(e) { if(_builderSim !== mine) return; _builderSim = null; flash(e.message || 'CHECK INPUTS'); render(); return; }
+  if(_builderSim !== mine) return;
   if(!s) { _builderSim = null; render(); return; }
   s.executor = S.vaults[S.sel]?.executor;   // guard hooks apply to a proposal that does not exist yet, too
-  _builderSim = await runSim(s);
+  const r = await runSim(s);
+  if(_builderSim !== mine) return;
+  _builderSim = r;
   render();
 }
 // The dry-run panel. Three states — running, reverted, passed — each carrying
@@ -14814,6 +15066,7 @@ async function prodAccelerate(vi, nonce) {
   const tx = findQueueTx(v, nonce);
   if(!tx) return;
   nonce = tx.nonce;
+  if(!requireOwner(v, connectedAddress)) return;
   if(!requireVaultRecord(v)) return;
   // Refused before the first signature rather than after the last one. This
   // route ends in forward() on v.executor, so with no executor it can never
@@ -14842,7 +15095,7 @@ async function prodAccelerate(vi, nonce) {
     // as prodCancel: forward() hashes against the live nonce, so no other nonce
     // can produce a usable signature, and `description` is an anon-writable
     // column that must not decide which row a signature lands in.
-    const accelNonce = v.nonce;
+    const accelNonce = v.nonce = Math.max(Number(v.nonce) || 0, await fetchLiveNonce(v.address).catch(() => 0));
     const msg = { target: v.address, value: 0n, data: accelData, nonce: accelNonce };
     const accelTxHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg);
 
@@ -14900,7 +15153,7 @@ async function prodAccelerate(vi, nonce) {
       if(existingTxId) {
         await dbCancelTx(existingTxId, connectedAddress);
       }
-      await reloadQueue(vi);
+      await reloadVault(vi);
       return;
     }
 
@@ -14998,7 +15251,7 @@ async function prodSubmitTransfer() {
     }
 
     const domain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address };
-    const nonce = nextNonce(v);
+    const nonce = await freshNonce(v);
     const msg = { target, value: BigInt(value), data, nonce };
     const sig = normalizeSigV(await signer.signTypedData(domain, EIP712_TYPES, msg));
     const txHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg);
@@ -15055,7 +15308,7 @@ async function prodSubmitName() {
     const p = buildWnsProposal(v, plan);
 
     const domain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address };
-    const nonce = nextNonce(v);
+    const nonce = await freshNonce(v);
     const msg = { target: p.target, value: 0n, data: p.data, nonce };
     const sig = normalizeSigV(await signer.signTypedData(domain, EIP712_TYPES, msg));
     const txHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg);
@@ -15095,7 +15348,7 @@ async function prodSubmitStake() {
     const desc = `STAKE ${amt} ETH → wstETH`;
 
     const domain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address };
-    const nonce = nextNonce(v);
+    const nonce = await freshNonce(v);
     const msg = { target, value: BigInt(value), data, nonce };
     const sig = normalizeSigV(await signer.signTypedData(domain, EIP712_TYPES, msg));
     const txHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg);
@@ -15140,7 +15393,7 @@ async function prodSubmitCustom() {
     if(burn) { flash(`REFUSED — ETH SENT TO ${burn} CANNOT BE RECOVERED`); return; }
 
     const domain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address };
-    const nonce = nextNonce(v);
+    const nonce = await freshNonce(v);
     const msg = { target: resolvedTarget, value: BigInt(value), data: d, nonce };
     const sig = normalizeSigV(await signer.signTypedData(domain, EIP712_TYPES, msg));
     const txHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg);
@@ -15198,7 +15451,7 @@ async function prodSubmitBatch() {
     const value = '0';
 
     const domain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address };
-    const nonce = nextNonce(v);
+    const nonce = await freshNonce(v);
     const msg = { target, value: 0n, data: batchData, nonce };
     const sig = normalizeSigV(await signer.signTypedData(domain, EIP712_TYPES, msg));
     const txHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg);
@@ -15324,6 +15577,9 @@ async function prodAdminPropose(action, val) {
         break;
       }
       case 'enableForward': {
+        // Refused here as well as hidden: a custom executor has no forward(), and
+        // this proposal would queue, spend a nonce and revert at execution.
+        if(!hasForwarder(v)){ flash('THIS VAULT\'S EXECUTOR IS NOT A TIMELOCK EXECUTOR — THERE IS NO INSTANT PATH TO TOGGLE'); return; }
         const newState = !v.fastPath;
         // Audit H-1. forward() and execute() verify against the same EIP-712
         // Execute digest; the only thing separating "run this now" from "queue
@@ -15351,7 +15607,7 @@ async function prodAdminPropose(action, val) {
         // For enableForward, target is the executor, not self
         const target = v.executor;
         const domain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address };
-        const nonce = nextNonce(v);
+        const nonce = await freshNonce(v);
         const msg = { target, value: 0n, data, nonce };
         const sig = normalizeSigV(await signer.signTypedData(domain, EIP712_TYPES, msg));
         const txHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg);
@@ -15407,7 +15663,7 @@ async function prodAdminPropose(action, val) {
     // Self-call for settings changes
     const target = v.address;
     const domain = { ...EIP712_DOMAIN, chainId: S.chainId, verifyingContract: v.address };
-    const nonce = nextNonce(v);
+    const nonce = await freshNonce(v);
     const msg = { target, value: 0n, data, nonce };
     const sig = normalizeSigV(await signer.signTypedData(domain, EIP712_TYPES, msg));
     const txHash = ethers.TypedDataEncoder.hash(domain, EIP712_TYPES, msg);
@@ -15451,6 +15707,7 @@ function adoptChain(id) {
   // choice does not survive the chain.
   S.txSlow = false;
   resetCxState();
+  _builderSim = null;
   // The new chain's cadence, not the old one's: leaving a 12s tick behind on
   // MegaETH is the whole bug this exists to avoid, and leaving a 2s tick on
   // Ethereum spends six requests to learn the same block number. The wallet's
@@ -15466,7 +15723,16 @@ function adoptChain(id) {
 // callers that are about to sign something can say why the wallet never arrived.
 async function switchChain(id, skipLoad) {
   if(!CHAINS[id]) return { ok:false, unknown:true };
+  // Not from the picker while a transaction confirms. The receipt is awaited
+  // through the wallet's provider, which follows the wallet to the new chain and
+  // asks it for the old chain's receipt — so the wait never ended and every later
+  // action answered ONE AT A TIME until the operator switched back.
+  if(!skipLoad && _submitting){ flash('A TRANSACTION IS STILL CONFIRMING — SWITCH CHAINS WHEN IT LANDS'); return { ok:false, busy:true }; }
   adoptChain(id);
+  // The list goes with the chain, at once rather than after the wallet's prompt
+  // returns: in between, the old chain's vaults sat under the new chain's header
+  // and could be acted on there.
+  if(!S.demoMode && !skipLoad){ S.vaults = []; S.sel = 0; render(); }
 
   // Ask wallet to switch chain
   let res = { ok: true };
@@ -15496,8 +15762,6 @@ async function switchChain(id, skipLoad) {
   }
 
   if(!S.demoMode && !skipLoad) {
-    S.vaults = [];
-    S.sel = 0;
     if(window._connectedAddress) showLoading('SWITCHING CHAIN');
     render();
     loadAllVaults();
@@ -15554,7 +15818,10 @@ window.onWalletAccountsChanged = function(addr, prev) {
     render();
     return;
   }
-  S.vaults = [];
+  // A vault opened from a link is public and stays, as it does on disconnect;
+  // the rest of the list belonged to the previous account.
+  const li = deepLinkIndex();
+  S.vaults = li === -1 ? [] : [S.vaults[li]];
   S.sel = 0;
   if(window._connectedAddress && !S.deploy) showLoading('SWITCHING ACCOUNT');
   render();
@@ -15571,7 +15838,9 @@ function onWalletConnect() {
   _onWalletConnect().catch(e => console.error('onConnect error:', e));
 }
 async function _onWalletConnect() {
-  if(S.demoMode) S.demoMode = false;
+  // Leaving the demo leaves its vaults too: they have made-up addresses and no
+  // chain, so none of the guards below would ever have turned them away.
+  if(S.demoMode){ S.demoMode = false; S.vaults = []; S.sel = 0; }
   // Wait for a link that is still being followed before touching the vault
   // list. This used to snapshot S.vaults synchronously and restore it further
   // down, which works only if the link has already landed — and in a second tab
@@ -15627,7 +15896,13 @@ async function _onWalletConnect() {
       if(readable) S.walletChain = walletChain;
     } catch(_) {}
   }
-  if(deepLinked) { S.vaults = deepLinked; S.sel = 0; }
+  // Only what was read on the chain the app is now on. A vault loaded on Ethereum
+  // and kept through a connect that moved the app to Base stayed selected under
+  // the Base header, with Ethereum's balances and queue.
+  if(deepLinked) {
+    const here = deepLinked.filter(x => x && (x.chainId == null || x.chainId === S.chainId));
+    if(here.length) { S.vaults = here; S.sel = 0; }
+  }
   render();
   loadAllVaults();
 }
@@ -15741,7 +16016,14 @@ function handleDeepLink() {
   // mined receipt reported up to twelve seconds after it existed. It also
   // leaves the previous chain's block number in the footer until the first
   // fetch answers, which adoptChain clears.
+  //
+  // A link onto another chain takes the list with it: the vaults on screen were
+  // read on the old one, and kept beside the link's vault they showed that
+  // chain's balances under this one's header, while the operator's own vaults
+  // here were never loaded at all.
+  const moved = link.chainId !== S.chainId;
   adoptChain(link.chainId);
+  if(moved && !S.demoMode){ S.vaults = []; S.sel = 0; }
   // Sync wallet target chain so auto-reconnect uses the deep-linked chain
   walletSwitchChain({
     chainId: link.chainId,
@@ -15771,6 +16053,7 @@ function handleDeepLink() {
       if(link.nonce !== null){ _focusNonce = link.nonce; _focusVaultAddr = addr; _focusScroll = true; }
       _deepLinkAddr = addr;
       const vData = await loadSingleVaultData(addr);
+      if(S.chainId !== link.chainId){ hideLoading(); return; }   // moved on again while reading
       if(vData) {
         // Take the selection, not the whole list. With a wallet connected,
         // loadAllVaults() may already have landed the operator's own vaults —
@@ -15778,7 +16061,7 @@ function handleDeepLink() {
         // you your vault list, depending only on which request answered first.
         // Whoever lands last now, both survive and the link's vault is the one
         // on screen.
-        const others = S.vaults.filter(x => x && x.address &&
+        const others = S.vaults.filter(x => x && x.address && (x.chainId == null || x.chainId === link.chainId) &&
           x.address.toLowerCase() !== addr.toLowerCase());
         S.vaults = [vData, ...others];
         S.sel = 0;
@@ -15793,6 +16076,7 @@ function handleDeepLink() {
         // common case for a link sent between co-signers. Loading a queue into
         // whatever ended up at index 0 filled a different vault's queue with
         // this one's proposals.
+        if(moved && window._connectedAddress) loadAllVaults().catch(e => console.error('loadAllVaults:', e));
         const li = deepLinkIndex();
         if(li !== -1) {
           S.sel = li;

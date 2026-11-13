@@ -90,11 +90,14 @@ function reader(file, label) {
 const NEEDED = [
   'FACTORY', 'IMPLEMENTATION', 'TIMELOCK_EXECUTOR', 'WSTETH_ADDRESS',
   'WEINS', 'WNS_ID_REGISTRAR', 'WNS_ID_PARENT', 'WNS_ID_SUFFIX',
-  'MAX_SAFE_THRESHOLD', 'DELAY_SANE_MAX',
+  'MAX_SAFE_THRESHOLD', 'DELAY_SANE_MAX', 'SLOW_ADDRESS',
   'MULTISIG_ABI', 'msIface', 'TIMELOCK_EXECUTOR_ABI', 'tlIface',
   'ERC20_ABI', 'erc20Iface', 'SLOW_ABI', 'slowIface',
   'WEINS_ABI', 'weinsIface', 'wnsRegIface',
   'SEL', 'SEL_RE', 'selOf',
+  // which contract a selector names, and on which chains it exists
+  'STAKE_CHAIN_ID', 'WNS_CHAIN_ID', 'SLOW_CHAINS', 'slowOnChain',
+  'VAULT_SELECTORS', 'vaultChainId', 'labelFits', 'fmtAmount',
   '_ESC', '_escOne', 'esc', 'jstr', 'DECIMALS', 'stripCommas',
   'weiStr', 'bigOr0', 'toUnits', '_amtTrim', '_amtDisp', 'groupInt', 'fmtBal',
   'shortAddr', 'fmtD', 'fmtDelay', 'toSec', 'fromSec',
@@ -113,6 +116,10 @@ function load(file, label) {
   const sandbox = {
     console: { ...console, warn() {}, error() {} },
     S: { demoMode: false, chainId: 1 },
+    // The built-in token list, cut to one entry: the real table drags in every
+    // icon constant, and the classifier reads only symbol, address and decimals.
+    PROD_TOKENS: { 1: [{ symbol: 'USDC', address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', decimals: 6 }] },
+    ETH_ONLY: [],
     provider: null,
     TextEncoder, TextDecoder, URL, setTimeout, clearTimeout,
     crypto: globalThis.crypto,

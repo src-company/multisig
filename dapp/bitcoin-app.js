@@ -37,6 +37,10 @@ const ETH_ICON = '<svg viewBox="0 0 32 32" aria-hidden="true"><polygon fill="#80
 const KEY_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/></svg>';
 
 const TAC_ICON = `<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#0a0a0a"/><circle cx="16" cy="16" r="13" fill="none" stroke="#f4efe6" stroke-width="2.5"/><path d="M17.5 7L13 22.5Q13 25 18 24" fill="none" stroke="#f7931a" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 11L21 11" stroke="#f7931a" stroke-width="2.4" stroke-linecap="round"/></svg>`;
+// index.html's header icons, so the two pages wear the same button.
+const ICON = d => `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="square" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const SUN_ICON = ICON('<circle cx="12" cy="12" r="4.2"/><path d="M12 1.6v2.5M12 19.9v2.5M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M1.6 12h2.5M19.9 12h2.5M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/>');
+const MOON_ICON = ICON('<path d="M20.4 14.9A8.9 8.9 0 0 1 9.1 3.6 8.9 8.9 0 1 0 20.4 14.9Z"/>');
 
 const S = {
   network: MAINNET && lsGet('ms_btc_net') !== 'signet' ? 'mainnet' : 'signet',
@@ -115,6 +119,8 @@ async function connect(el){
   const choice = el?.dataset?.w || '';
   if(choice.startsWith('btc:')){
     checkPlace();
+    // Up before the first prompt, so CANCEL is there for the account request too.
+    S.progress = 'OPEN YOUR WALLET'; render();
     const wallet = window.BitcoinWallets.detect().find(w => w.key === choice.slice(4));
     const key = await window.BitcoinWallets.connectWallet(wallet, S.network, onStep);
     S.progress = null;
@@ -140,6 +146,7 @@ function checkPlace(){
 async function connectEvm(eth){
   checkPlace();
   if(!eth) throw new Error('No Ethereum wallet in this browser. Owners on a hardware wallet need no connection here: copy the PSBT and sign it there.');
+  S.progress = 'OPEN YOUR WALLET'; render();
   const got = await window.BitcoinWallets.connectEvmForHandle(eth, S.network, { keep: true, onStep });
   forget();
   S.owner = { ...got.owner, signer: got.signer };
@@ -238,9 +245,15 @@ function policyFromForm(){
     S.mirrored = true;
     return policy;
   }
-  const keys = parseOwners(f.owners), threshold = +f.threshold;
+  // Clamped the way the steppers draw them. Removing an owner left the stepper
+  // reading 2 OF 2 while this still asked for 3, and CREATE stayed disabled
+  // behind a summary that contradicted the number on screen.
+  const keys = parseOwners(f.owners), threshold = Math.min(+f.threshold || 1, Math.max(keys.length, 1));
   const paths = [{ threshold, keys }];
-  if(f.kind === 'recovery') paths.push({ threshold: +f.secondThreshold, keys: parseOwners(f.second), older: +f.older });
+  if(f.kind === 'recovery'){
+    const second = parseOwners(f.second);
+    paths.push({ threshold: Math.min(+f.secondThreshold || 1, Math.max(second.length, 1)), keys: second, older: +f.older });
+  }
   // The hold preset is the same two leaves the other way up: everyone at once, or
   // the quorum once a coin has aged.
   if(f.kind === 'hold'){
@@ -273,10 +286,19 @@ function createVault(){
 // to be paid until they have looked at the owners and said so.
 async function open(policy, fromLink = false){
   const trusted = !fromLink || saved().includes(BV.descriptor(policy));
+  // A different vault starts with an empty send form. The last one's recipient,
+  // MAX and spending path were carried over, so RESTART THE CLOCK on one vault
+  // and SEND on the next proposed sweeping all of the second into the first.
+  // movecoins and reset fill the form after this, so they are unaffected.
+  if(!S.policy || BV.descriptor(S.policy) !== BV.descriptor(policy)){
+    Object.assign(S.form, { to: '', amt: '', max: false, path: '0', rate: '', tier: '', merge: '', paste: '', tacTo: '', tacAmt: '' });
+    S.tacOpen = false;
+  }
   S.moving = null;
   if(S.moveTo !== BV.descriptor(policy)) Object.assign(S, { moveFrom: null, moveTo: null });
   if(trusted) remember(policy);
   S.noteKey?.fill(0);
+  stopScan();
   Object.assign(S, { receive: 0, change: 0, noteLocked: false, notes: null, tacQueue: null, noteKey: null, noteRecord: undefined, noteBad: false, inbox: null, who: null, policy, trusted, view: 'dash', compose: false, coins: null, tip: null, queue: [], psbt: null, review: null, msg: null });
   syncHash();
   render();
@@ -286,21 +308,33 @@ async function open(policy, fromLink = false){
 }
 
 // Numbered, because a slow scan of the last vault must not land on this one.
-let scanning = 0, lastScan = 0, scanned = Promise.resolve(), retries = 0;
+let scanning = 0, lastScan = 0, scanned = Promise.resolve(), retries = 0, failures = 0;
+// Retires whatever scan is running, and its retry timers with it, when the vault
+// it was reading is no longer on screen. Without it a mainnet scan landed on the
+// signet page, and a retry fired into a page with no vault and threw.
+const stopScan = () => { scanning++; retries = 0; failures = 0; };
 // Anything that fails simply shows no address: a record that does
 // not check out against this vault's keys is treated as no record at all.
-async function readTacit(){
-  const policy = S.policy, BT = window.BitcoinTacit;
+//
+// Numbered like the scan. Every refresh starts two of these at once, one before
+// the coins are read and one after, and the first could finish last: its queue
+// and notes overwrote the second's, so a Tacit send just broadcast showed as
+// ready again. Only the newest run writes, and a key a stale run opened is
+// zeroed rather than dropped. Never awaited by its callers, so it never throws.
+let tacGen = 0;
+function readTacit(){ return readTacitNow(++tacGen).catch(e => console.warn('Tacit:', e && e.message)); }
+async function readTacitNow(gen){
+  const policy = S.policy, BT = window.BitcoinTacit, live = () => gen === tacGen;
   if(!policy || !BT || !S.trusted) return;
   const record = await BV.fetchNoteRecord(policy).catch(() => undefined);
-  if(policy !== S.policy || record === undefined) return;
+  if(policy !== S.policy || record === undefined || !live()) return;
   S.noteRecord = record && BT.verifyRecord(policy, record) ? record : null;
   S.noteBad = !!record && !S.noteRecord;
   const owner = S.owner, here = () => policy === S.policy && owner === S.owner;
   if(S.noteRecord && owner?.signer && allKeys(policy).some(isMe) && !S.noteKey){
     const key = await BT.openRecord(S.noteRecord, owner.signer, owner, policy).catch(() => null);
     // The page may have moved on, and a key must not land on another vault or a forgotten owner.
-    if(!here()){ key?.fill(0); return; }
+    if(!here() || !live()){ key?.fill(0); return; }
     S.noteKey = key;
     S.noteLocked = !key;
   }
@@ -313,7 +347,8 @@ async function readTacit(){
     for(const coin of candidates){
       const verdict = verdicts[`${coin.txid}:${coin.vout}`];
       if(verdict?.status === 'plain') continue;
-      const n = BT.openNote(await c.tx(coin.txid).catch(() => null), coin.vout, key);
+      let n = null;
+      try { n = BT.openNote(await c.tx(coin.txid).catch(() => null), coin.vout, key); } catch(_) {}
       if(n && verdict?.status === 'asset' && verdict.asset_ids?.[0] === n.asset) held.push({ ...coin, ...n, value: coin.value });
       else if(n) pendingNotes++;
     }
@@ -326,7 +361,7 @@ async function readTacit(){
         queue.push({ p, id: BT.sendId(p), review: await BT.reviewSend(p, policy, key, c, prover, known()), votes: BT.signersOf(p, policy) });
       } catch(e) { queue.push({ error: e.message }); }
     }
-    if(!here() || S.noteKey !== key) return;
+    if(!here() || S.noteKey !== key || !live()) return;
     Object.assign(S, { inbox, notes: held, tacQueue: queue, pendingNotes });
     // Tacit's check can be slow or briefly down, and a held note must not just look gone.
     clearTimeout(S.tacTimer);
@@ -379,7 +414,10 @@ function renderTacit(){
     <p class="small" style="padding:10px 8px">Pilot. Use small amounts.</p>`;
 }
 // An explorer's estimate is a stranger's number, and these ops pay from a small float.
-const tacRate = () => Math.min(Math.max(feeOf('6'), 1), 50);
+const tacRate = () => {
+  if(!S.fees?.['6']) throw new Error('Fee estimates are unavailable. Try again shortly.');
+  return Math.min(Math.max(feeOf('6'), 1), 50);
+};
 const tacCard = el => {
   const id = el.closest('[data-tac]')?.dataset.tac, q = (S.tacQueue || []).find(x => x.id === id);
   if(!q) throw new Error('This send changed. Check it again.');
@@ -389,7 +427,9 @@ const tacCard = el => {
 async function tacBroadcast({ commit, reveal }){
   const c = BV.chain(S.network);
   // A retry finds the commit already there, which is fine.
-  await c.broadcast(commit).catch(e => { if(!/already|known|conflict/i.test(e.message)) throw e; });
+  // A conflict is not one: it means the fee coin was spent elsewhere, and the
+  // reveal would only wait out its retries and fail on a raw node error.
+  await c.broadcast(commit).catch(e => { if(!/already|known/i.test(e.message)) throw e; });
   for(let tries = 0; ; tries++){
     try { return await c.broadcast(reveal); }
     catch(e) { if(tries >= 5 || !/missing|spent/i.test(e.message)) throw e; await new Promise(ok => setTimeout(ok, 3000)); }
@@ -401,13 +441,15 @@ function readOwners(){
   if(policy) BV.ownersOf(policy).then(who => { if(policy === S.policy){ S.who = who; render(); } }, () => {});
 }
 async function refresh(){
+  if(!S.policy) return;
   const c = BV.chain(S.network), run = ++scanning;
   lastScan = Date.now();
   readOwners();
   try {
     const [found, tip, fees] = await Promise.all([BV.scan(S.policy, c), c.tip(), c.fees().catch(() => ({}))]);
     if(run !== scanning) return;
-    Object.assign(S, { coins: found.coins, receive: found.receive, change: found.change, truncated: found.truncated, tip, fees });
+    failures = 0;
+    Object.assign(S, { coins: found.coins, receive: found.receive, change: found.change, truncated: found.truncated, unreadable: found.unreadable || [], tip, fees });
     await syncQueue();
     render();
     readTacit();
@@ -416,9 +458,14 @@ async function refresh(){
     else if(!S.coins.some(c => c.quarantine === 'unknown')) retries = 0;
   } catch(e) {
     if(run !== scanning) return;
-    // A rate limit passes by itself, so it gets a calm word and another try.
-    if(e.message === BV.EXPLORERS_BUSY){ say('The Bitcoin explorers are busy. Trying again shortly.'); setTimeout(() => { if(run === scanning) scanned = refresh(); }, 30000); }
-    else say(`Could not read the chain: ${e.message}`);
+    // A rate limit passes by itself, and a failed read often does too, so both
+    // get a few more tries before ↻ is the way to ask again. A failed first read
+    // used to get none and no ↻ either, leaving SCANNING… up for good; and a
+    // missing explorer, which reads as busy, meant a full rescan every 30
+    // seconds for as long as the page stayed open.
+    const again = failures++ < 5, busy = e.message === BV.EXPLORERS_BUSY;
+    say(busy ? `The Bitcoin explorers are busy. ${again ? 'Trying again shortly.' : 'Press ↻ to try again.'}` : `Could not read the chain: ${e.message}`);
+    if(again) setTimeout(() => { if(run === scanning) scanned = refresh(); }, 30000);
   }
 }
 
@@ -528,17 +575,23 @@ async function merge(){
 }
 
 async function broadcast(){
-  const c = BV.chain(S.network);
+  // Held, as sign() holds them: a background queue sync or a link opened during
+  // the checks below could otherwise swap the proposal, and finalize would run
+  // on one whose coins were never checked.
+  const c = BV.chain(S.network), psbt = S.psbt, policy = S.policy, inputs = S.review.inputs;
   // A coin spent since this was proposed makes the whole proposal void. Say that,
-  // rather than show a node's refusal.
-  for(const i of S.review.inputs) if(await c.spent(i.txid, i.vout)) throw new Error('A coin in this proposal has already been spent. It is void; propose again.');
+  // rather than show a node's refusal. Asked in small batches, not one by one.
+  for(let i = 0; i < inputs.length; i += 5){
+    const spent = await Promise.all(inputs.slice(i, i + 5).map(x => c.spent(x.txid, x.vout)));
+    if(spent.some(Boolean)) throw new Error('A coin in this proposal has already been spent. It is void; propose again.');
+  }
   // Signatures can arrive from a wallet that never saw this check.
-  await BV.assertSpendable(S.review.inputs, c);
-  const raw = BV.finalize(S.psbt, S.policy), txid = BV.txidOf(raw), said = (await c.broadcast(raw)).trim();
+  await BV.assertSpendable(inputs, c);
+  const raw = BV.finalize(psbt, policy), txid = BV.txidOf(raw), said = (await c.broadcast(raw)).trim();
   // The signatures are not thrown away on an explorer's word.
   if(said !== txid) throw new Error('The explorer gave an unexpected reply, so this may not have been sent. The proposal is still here.');
-  S.queue = S.queue.filter(q => q.psbt !== S.psbt);
-  Object.assign(S, { psbt: null, review: null });
+  S.queue = S.queue.filter(q => q.psbt !== psbt);
+  if(S.psbt === psbt) Object.assign(S, { psbt: null, review: null });
   syncHash();
   S.msg = { text: `SENT ${short(txid)}`, kind: 'ok', href: `${BV.NETWORKS[S.network].explorer}/tx/${txid}` };
   scanned = refresh();
@@ -591,10 +644,10 @@ function renderHeader(){
       <div>
         <h1 class="logo"><a href="./index.html">MULTISIG</a></h1>
         <div class="sub" aria-hidden="true">.software</div>
-        <div class="addr">${esc(vaultAddr)}</div>
+        ${vaultAddr ? `<div class="addr">${esc(vaultAddr)}</div>` : ''}
       </div>
       <div class="hdr-r">
-        <button class="theme-btn" data-act="theme" aria-label="Switch to ${S.dark ? 'light' : 'dark'} theme">${S.dark ? '☀' : '☾'}</button>
+        <button class="theme-btn" data-act="theme" aria-label="Switch to ${S.dark ? 'light' : 'dark'} theme" title="Switch to ${S.dark ? 'light' : 'dark'} theme">${S.dark ? SUN_ICON : MOON_ICON}</button>
         <button class="wallet-btn" data-act="wallet" aria-haspopup="dialog">${S.owner ? '<span class="dot-sm" aria-hidden="true"></span>' : ''}${esc(label)}</button>
         ${S.owner ? '<button class="wallet-btn" data-act="disconnect" aria-label="Disconnect and forget this key">DISCONNECT</button>' : ''}
       </div>
@@ -619,6 +672,7 @@ function renderBars(){
   }
   if(SHARED) out.push('<div class="attn bad"><b>THIS ADDRESS IS SHARED WITH OTHER SITES</b><a href="https://multisig.wei.limo/bitcoin.html">OPEN IT HERE</a></div>');
   if(S.truncated) out.push('<div class="attn"><b>THIS VAULT HAS MORE ADDRESSES THAN THE SCAN COVERS</b><span>LATER COINS ARE NOT SHOWN. A DESCRIPTOR WALLET CAN FIND THEM</span></div>');
+  if(S.unreadable?.length) out.push(`<div class="attn"><b>${S.unreadable.length} ADDRESS${S.unreadable.length > 1 ? 'ES' : ''} COULD NOT BE LISTED</b><span>THE COINS THERE ARE NOT SHOWN OR SPENT FROM HERE. A DESCRIPTOR WALLET CAN SPEND THEM</span></div>`);
   if(m) out.push(`<div class="attn ${m.kind === 'ok' ? 'ok' : 'bad'}" role="status"><b>${esc(m.text)}</b>${m.href ? `<a href="${esc(m.href)}" target="_blank" rel="noopener">VIEW ↗</a>` : ''}<button class="end" data-act="dismiss" aria-label="Dismiss">✕</button></div>`);
   if(S.policy && S.owner && BV.seatMisdescribed(S.policy, S.owner)) out.push(`<div class="attn"><b>YOUR KEY IS MISDESCRIBED IN THIS VAULT</b><span>IT STILL SIGNS HERE, BUT ASK WHO CREATED IT WHY</span></div>`);
   if(S.view === 'dash' && S.moveFrom && S.trusted && curDesc() === S.moveTo) out.push(`<div class="attn ok"><b>NEW VAULT READY</b><span>${backedUp() ? 'NOW MOVE THE COINS FROM THE OLD ONE' : 'SAVE ITS BACKUP, THEN MOVE THE COINS FROM THE OLD ONE'}</span>${backedUp() ? '<button class="end" data-act="movecoins">MOVE COINS</button>' : ''}</div>`);
@@ -718,9 +772,15 @@ function renderProposal(item, i){
 
 // The send as it stands, built the way PROPOSE builds it, so what the form says is what
 // the proposal will be. Before an address is in, the vault's own stands in for the size.
+// A decimal typed with a comma, as the decimal keypad offers in comma locales.
+// Read as a point rather than refused without a word, or, for the fee rate,
+// quietly replaced by the default.
+const num = s => String(s).trim().replace(/^(\d*),(\d{1,8})$/, '$1.$2');
 function sendArgs(to){
-  const f = S.form, amt = f.amt.trim();
-  const args = { policy: S.policy, utxos: S.coins || [], tip: S.tip, feeRate: +f.rate || feeOf('6'), path: +f.path, change: S.change };
+  const f = S.form, amt = num(f.amt);
+  // An unreadable rate goes through as NaN, which propose() refuses by name.
+  const args = { policy: S.policy, utxos: S.coins || [], tip: S.tip, feeRate: String(f.rate).trim() ? Number(num(f.rate)) : feeOf('6'),
+    path: S.policy.paths[+f.path] ? +f.path : 0, change: S.change };
   if(f.max) return { ...args, sweep: to };
   if(!/^\d+(\.\d{1,8})?$/.test(amt)) return null;
   const [whole, frac = ''] = amt.split('.');
@@ -728,7 +788,9 @@ function sendArgs(to){
 }
 function sendPreview(){
   const f = S.form, args = sendArgs(f.to.trim() || BV.vaultOf(S.policy, 0, 0).address);
-  if(!args || !S.coins) return null;
+  if(!S.coins) return null;
+  // Said rather than left as a PROPOSE that will not light up.
+  if(!args) return f.amt.trim() ? { error: 'Amount is in BTC, up to 8 places, or use MAX.' } : null;
   try {
     const v = BV.inspect(BV.propose(args), S.policy, known()), inSats = v.inputs.reduce((n, i) => n + i.sats, 0);
     const send = f.max ? inSats - v.fee : args.outputs[0].sats;
@@ -750,7 +812,7 @@ function renderCompose(){
     <div class="amt-row"><input class="inp" id="amt" data-field="amt" inputmode="decimal" autocomplete="off" placeholder="0.00000000" value="${esc(f.amt)}"><span class="unit">BTC</span><button class="pill${f.max ? ' on' : ''}" data-act="max" aria-pressed="${!!f.max}">MAX</button></div>
     <span class="lbl">SPEED</span>
     <div class="speed">${tiers.map(([l, t]) => `<button class="pill${tier === t ? ' on' : ''}" data-act="tier" data-t="${t}" aria-pressed="${tier === t}">${l}</button>`).join('')}
-      <label class="rate"><input class="inp" id="rate" data-field="rate" inputmode="decimal" autocomplete="off" aria-label="Fee rate in sats per vbyte" value="${esc(f.rate || String(feeOf('6')))}"><span>sat/vB</span></label></div>
+      <label class="rate"><input class="inp" id="rate" data-field="rate" inputmode="decimal" autocomplete="off" aria-label="Fee rate in sats per vbyte" value="${esc(f.rate || '')}" placeholder="${feeOf('6')}"><span>sat/vB</span></label></div>
     ${p.paths.length > 1 ? `<span class="lbl">SPEND WITH</span><div class="pills">${p.paths.map((x, i) => `<button class="pill${f.path === String(i) ? ' on' : ''}" data-act="path" data-p="${i}">${pathLabel(x)}</button>`).join('')}</div>` : ''}
     ${view?.error ? `<div class="send-err">${esc(view.error)}</div>` : view ? `<div class="send-sum">
       <div><span>RECIPIENT GETS</span><b>${btcOf(view.send)} BTC</b></div>
@@ -804,7 +866,7 @@ const noteUnits = (asset, amount) => {
   return frac ? `${whole}.${frac}` : whole;
 };
 function readUnits(asset, text){
-  const t = String(text).trim();
+  const t = num(text);
   if(BV.TACIT_ASSETS[asset] !== 'TAC'){
     if(!/^[1-9]\d*$/.test(t)) throw new Error('Enter a whole amount.');
     return BigInt(t);
@@ -880,7 +942,7 @@ function renderDash(){
   const mine = S.owner && allKeys(p).some(isMe), seated = S.owner && p.paths[0].keys.some(isMe);
   return `<div class="stats">
       <div class="stat-row"><span class="btc">${BTC_ICON}</span><span class="stat-big">${coins ? btcOf(total) : '<span class="pulse">…</span>'}</span><span class="stat-token">BTC</span>${coins && total ? `<span class="stat-sats">${total.toLocaleString('en-US')} SATS</span>` : ''}
-      ${coins ? `<button class="addrline" data-act="refresh" aria-label="Scan again">↻</button>` : ''}
+      <button class="addrline" data-act="refresh" aria-label="Scan again">↻</button>
       ${S.trusted ? `<button class="addrline" data-act="download">BACKUP ↓</button>` : ''}</div>
       <div class="meta">
         <span><b>${p.paths[0].threshold}/${p.paths[0].keys.length}</b> SIG</span>
@@ -1086,6 +1148,7 @@ const copy = async (text, label = 'COPIED') => {
 function goNet(network){
   // A key is per network, so it does not carry across.
   forget();
+  stopScan(); clearTimeout(S.tacTimer);
   Object.assign(S, { moving: null, moveFrom: null, moveTo: null, network, invited: [], view: 'dash', ovl: null, policy: null, queue: [], psbt: null, review: null, msg: null, coins: null, tip: null });
   lsSet('ms_btc_net', network);
   syncHash();
@@ -1117,6 +1180,9 @@ const ACT = {
     S.trusted = true;
     S.invited = S.invited.filter(d => d !== curDesc());
     if(S.owner && allKeys(S.policy).some(isMe)) BV.saveVault(S.policy, S.owner.signer, myHandle(), [myHandle()]).catch(() => {});
+    // Tacit is read only for a trusted vault, so it is read now rather than at
+    // the next scan.
+    readTacit();
   },
   invited(el){ return open(BV.parseDescriptor(S.invited[+el.dataset.i], S.network), true); },
   net(el){ if(S.network !== el.dataset.n) return goNet(el.dataset.n); },
@@ -1133,7 +1199,12 @@ const ACT = {
   'add-me'(){ if(S.pending) throw new Error('Confirm your wallet first.'); const f = S.form, me = myHandle(); if(!f.owners.includes(me)) f.owners = (f.owners.trim() + '\n' + me).trim(); },
   compose(){ S.compose = !S.compose; S.msg = null; },
   max(){ S.form.max = !S.form.max; if(!S.form.max) S.form.amt = ''; },
-  tier(el){ Object.assign(S.form, { rate: String(feeOf(el.dataset.t)), tier: el.dataset.t }); },
+  // Only with estimates to read from: feeOf falls back to 1 sat/vB, and the pill
+  // was the way round propose()'s refusal to guess at a floor.
+  tier(el){
+    if(!S.fees?.[el.dataset.t]) throw new Error('Fee estimates are unavailable. Enter a rate.');
+    Object.assign(S.form, { rate: String(feeOf(el.dataset.t)), tier: el.dataset.t });
+  },
   path(el){ S.form.path = el.dataset.p; },
   // Sending coins to the vault's own next address is how their clock restarts.
   reset(){ Object.assign(S.form, { to: BV.vaultOf(S.policy, 0, S.receive).address, max: true, path: '0' }); S.compose = true; },
@@ -1150,7 +1221,8 @@ const ACT = {
     if(!window.confirm('Remove this vault from this browser? The coins are not touched, but you will need its backup to open it again.')) return;
     const d = curDesc();
     lsSet(`ms_btc_vaults_${S.network}`, JSON.stringify(rawSaved().filter(x => x !== d)));
-    Object.assign(S, { policy: null, view: 'dash', queue: [], psbt: null, review: null, coins: null });
+    stopScan(); clearTimeout(S.tacTimer);
+    Object.assign(S, { policy: null, view: 'dash', queue: [], psbt: null, review: null, coins: null, tip: null });
     syncHash();
     const first = saved()[0];
     if(first) return open(BV.parseDescriptor(first, S.network));
@@ -1282,6 +1354,9 @@ document.addEventListener('click', async e => {
   finally { S.busy = false; }
 });
 document.addEventListener('input', e => {
+  // Typing is activity too: filling the create form or pasting a proposal for
+  // fifteen minutes without a click used to forget the key mid-task.
+  touch();
   const k = e.target.dataset?.field;
   if(!k) return;
   S.form[k] = e.target.value;
@@ -1293,7 +1368,13 @@ document.addEventListener('input', e => {
   if(k === 'owners' || k === 'second') resolveWallets(k);
   if(S.view === 'create' || k === 'rate' || k === 'amt' || k === 'to') render();
 });
-document.addEventListener('keydown', e => { if(e.key === 'Escape' && S.ovl && S.ovl !== 'confirm'){ S.ovl = null; render(); } });
+// While a wallet prompt is open, Escape is CANCEL. Closing the dialog over it
+// left the busy lock held and every button dead until the prompt timed out.
+document.addEventListener('keydown', e => {
+  if(e.key !== 'Escape') return;
+  if(S.progress){ window.BitcoinWallets.cancelPrompt(); return; }
+  if(S.ovl && S.ovl !== 'confirm'){ S.ovl = null; render(); }
+});
 window.addEventListener('hashchange', readHash);
 // Coming back to a tab: the key may be past its time, and the coins may have moved.
 document.addEventListener('visibilitychange', () => {

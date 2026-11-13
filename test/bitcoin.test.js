@@ -1038,3 +1038,20 @@ test('Bitcoin Core agrees', { skip: !BITCOIND && 'set BITCOIND to run' }, async 
     assert.throws(() => BV.inspect(base64.encode(tx.toPSBT()), policy), /delay/);
   });
 });
+
+test('a proposal is never one that signing would refuse for its fee rate', () => {
+  // When change would fall under the dust line the remainder goes to the fee,
+  // and near the top rate that remainder alone could carry the fee past what
+  // sign() puts a key to. Swept across the band where that happens.
+  const policy = plain('signet'), coin = 1000000;
+  let built = 0;
+  for (let sats = coin - 300000; sats < coin; sats += 997) {
+    let psbt;
+    try { psbt = BV.propose({ policy, utxos: [fakeCoin(coin)], tip: 200, outputs: [{ address: payee, sats }], feeRate: 1000 }); }
+    catch (e) { assert.match(e.message, /not enough/); continue; }
+    built++;
+    const v = BV.inspect(psbt, policy);
+    assert.ok(v.feeRate <= 1000, `${sats} sats proposed at ${v.feeRate.toFixed(0)} sat/vB`);
+  }
+  assert.ok(built > 0, 'the sweep built nothing, so it checked nothing');
+});

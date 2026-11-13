@@ -67,6 +67,8 @@ function grab(name) {
 const NEEDED = [
   'stripCommas', 'toUnits', '_amtTrim', 'pctOfAmount',
   'onTxAmount', 'fillTxPct', 'onStakeAmount', 'fillStakePct',
+  // An edit retires a dry-run result; with none on screen it touches nothing.
+  'dropBuilderSim',
 ];
 
 // Enough of a DOM for handlers that patch one: they write a handful of nodes by
@@ -84,6 +86,7 @@ function freshDom(ids) {
 const sandbox = {
   console: { ...console, warn() {}, error() {} },
   S: {},
+  _builderSim: null,
   document: { getElementById: id => nodes.get(id) || null },
   // The review card repaints itself off S on every keystroke. What it draws is
   // its own suite's business; what matters here is that the fill reached it.

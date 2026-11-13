@@ -19,6 +19,9 @@ const short = s => s.length > 18 ? `${s.slice(0, 8)}…${s.slice(-6)}` : s;
 const BTC = `<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#F7931A"/><path fill="#FFF" d="M22.3 14.1c.3-2.1-1.3-3.2-3.5-4l.7-2.8-1.7-.4-.7 2.7-1.4-.3.7-2.8-1.7-.4-.7 2.8-1.1-.3-2.4-.6-.5 1.8s1.3.3 1.3.3c.7.2.8.6.8 1l-.8 3.2.2.1-.2-.1-1.1 4.5c-.1.2-.3.5-.8.4 0 0-1.3-.3-1.3-.3l-.9 2 2.3.6 1.2.3-.7 2.9 1.7.4.7-2.8 1.4.3-.7 2.8 1.7.4.7-2.9c2.9.6 5.1.3 6-2.3.8-2.1 0-3.3-1.6-4.1 1.1-.3 2-1.1 2.3-2.7zm-3.9 5.4c-.5 2.1-4.1 1-5.2.7l.9-3.7c1.2.3 4.9.9 4.3 3zm.5-5.4c-.5 1.9-3.4.9-4.4.7l.8-3.3c1 .2 4.1.7 3.6 2.6z"/></svg>`;
 
 const TAC = `<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#0a0a0a"/><circle cx="16" cy="16" r="13" fill="none" stroke="#f4efe6" stroke-width="2.5"/><path d="M17.5 7L13 22.5Q13 25 18 24" fill="none" stroke="#f7931a" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 11L21 11" stroke="#f7931a" stroke-width="2.4" stroke-linecap="round"/></svg>`;
+const ICON = d => `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="square" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const SUN_ICON = ICON('<circle cx="12" cy="12" r="4.2"/><path d="M12 1.6v2.5M12 19.9v2.5M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M1.6 12h2.5M19.9 12h2.5M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/>');
+const MOON_ICON = ICON('<path d="M20.4 14.9A8.9 8.9 0 0 1 9.1 3.6 8.9 8.9 0 1 0 20.4 14.9Z"/>');
 
 const S = {
   network: 'mainnet', dark: !lsGet('ms_light'),
@@ -130,7 +133,14 @@ async function resolve(row){
       if(stale()) return;
       if(f) Object.assign(row, { owner: BV.decodeOwner(f.handle, S.network), handle: f.handle, state: 'ready' }); else row.state = 'waiting';
     } else Object.assign(row, { owner: BV.decodeOwner(t, S.network), handle: t, state: 'ready' });
-  } catch(e) { if(stale()) return; Object.assign(row, { state: 'bad', error: e.message }); }
+  } catch(e) {
+    if(stale()) return;
+    // A lookup that failed is not a verdict on the owner. It goes back to WAITING,
+    // which the poll asks again; marked NOT VALID, a network blip during an
+    // invite left a co-owner refused until the page was reloaded.
+    const lookup = e?.name === 'TimeoutError' || e?.name === 'AbortError' || e instanceof TypeError || /could not (read|be read)/i.test(e?.message || '');
+    Object.assign(row, lookup ? { state: 'waiting', error: null } : { state: 'bad', error: e.message });
+  }
   // One key cannot take two seats. Said here, not as an error on the last step.
   const taken = row.rec ? S.recRows.filter(r => r !== row).map(r => r.owner?.xpub) : [...(S.me ? [S.me.owner.xpub] : []), ...S.rows.filter(r => r !== row).map(r => r.owner?.xpub)];
   if(row.owner && taken.includes(row.owner.xpub) && !row.mine) Object.assign(row, { owner: null, state: 'bad', error: 'That owner is already on this vault.' });
@@ -260,7 +270,7 @@ function renderOwners(){
   return `<h2>Add owners</h2><p class="lead">Mix Ethereum and Bitcoin wallets freely. Each owner signs with the wallet they already have.</p>
     ${S.me ? `<div class="row"><span class="n">${S.me.wallet ? BTC : ETH}</span><span class="inp">${esc(S.me.label)}</span><span class="st ok">YOU</span></div>
     ${S.me.wallet ? `<div class="idline"><span>Your address on Ethereum multisigs</span><button class="link" data-act="copyevm">${esc(short(S.me.evm))} ⧉</button></div>` : ''}` : ''}
-    ${S.rows.map((r, i) => `<div class="row"><span class="n">${markOf(r.text)}</span><input class="inp" id="o${i}" data-row="${i}" aria-label="Owner" spellcheck="false" autocomplete="off" placeholder="${S.network === 'mainnet' ? '0x…, name.wei, bc1… or xpub' : '0x…, name.wei, tb1… or xpub'}" value="${esc(r.text)}">${statusOf(r)}${S.rows.length > 1 ? `<button class="x" data-act="drop" data-i="${i}" aria-label="Remove">✕</button>` : ''}</div>${r.addr ? `<div class="idline"><span>${esc(r.text.trim())} is</span><span>${esc(r.addr)}</span></div>` : ''}${r.error ? `<div class="st bad" style="padding:4px 0">${esc(r.error)}</div>` : ''}`).join('')}
+    ${S.rows.map((r, i) => `<div class="row"><span class="n">${markOf(r.text)}</span><input class="inp" id="o${i}" data-row="${i}" aria-label="Owner" spellcheck="false" autocomplete="off" placeholder="${S.network === 'mainnet' ? '0x…, name.wei, bc1… or xpub' : '0x…, name.wei, tb1… or xpub'}" value="${esc(r.text)}">${statusOf(r)}${S.rows.length > 1 ? `<button class="x" data-act="drop" data-i="${i}" aria-label="Remove">✕</button>` : ''}</div>${r.addr ? `<div class="idline"><span>${esc(r.text.trim())} is</span><span>${esc(r.addr)}</span></div>` : ''}${r.error ? `<div class="err">${esc(r.error)}</div>` : ''}`).join('')}
     <div class="btns"><button class="link" data-act="add">+ Add owner</button></div>
     ${waiting ? `<div class="wait">Send your co-owners this link. They connect once, and this updates by itself.<div class="btns"><button class="btn fill" data-act="invite">COPY INVITE LINK</button></div></div>` : ''}
     ${n > 1 ? `<div class="th"><div class="stepper"><button data-act="th" data-d="-1" aria-label="Fewer">−</button><output>${th} OF ${n}</output><button data-act="th" data-d="1" aria-label="More">+</button></div><span>${S.kind === 'hold' ? 'on aged coins' : 'must sign'}</span></div>` : ''}
@@ -311,7 +321,7 @@ function render(){
   $('app').innerHTML = `<div class="frame">
     <div class="hbar" aria-hidden="true">${'/'.repeat(120)}</div>
     <div class="hdr"><div class="logo"><a href="./index.html">MULTISIG</a></div>
-      <div class="pills"><button class="theme" data-act="theme" aria-label="Switch to ${S.dark ? 'light' : 'dark'} theme">${S.dark ? '☀' : '☾'}</button>${['mainnet', 'signet'].map(k => `<button class="pill${k === S.network ? ' on' : ''}" data-act="net" data-n="${k}"${k === S.network ? ' aria-current="true"' : ''}${S.policy ? ' disabled' : ''}>${k.toUpperCase()}</button>`).join('')}</div></div>
+      <div class="pills"><button class="theme" data-act="theme" aria-label="Switch to ${S.dark ? 'light' : 'dark'} theme" title="Switch to ${S.dark ? 'light' : 'dark'} theme">${S.dark ? SUN_ICON : MOON_ICON}</button>${['mainnet', 'signet'].map(k => `<button class="pill${k === S.network ? ' on' : ''}" data-act="net" data-n="${k}"${k === S.network ? ' aria-current="true"' : ''}${S.policy ? ' disabled' : ''}>${k.toUpperCase()}</button>`).join('')}</div></div>
     <div class="hero"><div class="marks"><span class="mark">${BTC}</span><span class="mark">${ETH}</span><span class="mark">${TAC}</span></div>
       <h1>Bitcoin multisig</h1><div class="sub">Your Ethereum wallet can sign for Bitcoin. So can a Bitcoin wallet.</div><div class="free">FREE · DEADMAN SWITCH · NO NEW SEED PHRASE</div></div>
     ${renderFlow()}
@@ -369,6 +379,8 @@ const ACT = {
     const w = el.dataset.w;
     if(window.top !== window || window.opener) throw new Error('Open this page in its own tab to use a key.');
     if(/^\/ip[fn]s\//.test(location.pathname)) throw new Error('Open this page from its own domain to use a key.');
+    // Up before the first prompt, so CANCEL is there for the account request too.
+    S.progress = 'Approve in your wallet'; render();
     if(w.startsWith('btc:')){
       const wallet = BW.detect().find(x => x.key === w.slice(4)), key = await BW.connectWallet(wallet, S.network, onStep);
       key.evmPriv.fill(0);
@@ -378,11 +390,12 @@ const ACT = {
       S.me = await BW.connectEvmForHandle(eth, S.network, { onStep, keep: true });
     }
     if(S.me.repeats) return afterConnect();
-    S.confirming = true;
+    // A failed confirm belongs to the attempt it failed in, not to this one.
+    S.confirming = true; S.unanswered = false;
   },
   net(el){
     wipe();
-    S.network = el.dataset.n; S.me = null; S.step = 0; S.confirming = false;
+    S.network = el.dataset.n; S.me = null; S.step = 0; S.confirming = false; S.unanswered = false;
     [...S.rows, ...S.recRows].forEach(r => { r.mine = false; r.owner = null; r.state = r.text.trim() ? 'checking' : 'empty'; });
     return ACT.check();
   },

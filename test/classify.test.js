@@ -93,6 +93,9 @@ const NEEDED = [
   'ERC20_ABI', 'erc20Iface', 'SLOW_ABI', 'slowIface',
   'WEINS_ABI', 'weinsIface', 'wnsRegIface',
   'SEL', 'SEL_RE', 'selOf',
+  // which contract a selector names, and on which chains it exists
+  'STAKE_CHAIN_ID', 'WNS_CHAIN_ID', 'SLOW_CHAINS', 'slowOnChain',
+  'VAULT_SELECTORS', 'vaultChainId', 'labelFits', 'fmtAmount',
   // helpers the classifier composes with
   '_ESC', '_escOne', 'esc', 'weiStr', 'bigOr0', 'shortAddr', 'fmtD', 'fmtDelay',
   'asciiLower', 'wnsSubId', 'wnsFullName', 'WNS_LABEL_RE', 'WNS_LABEL_MAX',
@@ -102,7 +105,7 @@ const NEEDED = [
   // the verified-ABI index: what the classifier consults before it gives up
   '_selIndex', 'abiTypeSig', 'indexAbiSelectors', 'verifiedFn', 'fnLabel',
   'fmtAbiArg', 'verifiedCallNote',
-  'SELECTOR_LABELS', 'selectorToLabel',
+  'groupInt', 'SELECTOR_LABELS', 'selectorToLabel',
   // the subjects
   'txKind', 'isCancelTx', 'nextNonce', 'POLICY_SELECTORS', 'pendingPolicyChanges',
 ];
@@ -110,6 +113,10 @@ const NEEDED = [
 const sandbox = {
   console: { ...console, warn() {}, error() {} },
   S: { demoMode: false, chainId: 1 },
+  // The built-in token list, cut to one entry: the real table drags in every
+  // icon constant, and the classifier reads only symbol, address and decimals.
+  PROD_TOKENS: { 1: [{ symbol: 'USDC', address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', decimals: 6 }] },
+  ETH_ONLY: [],
   // txKind reads nothing off the chain. Anything that tried to would fail loudly
   // here rather than quietly resolving to a stub's opinion.
   provider: null,
@@ -179,6 +186,71 @@ test('a depositTo aimed anywhere but SLOW is not a SLOW transfer', () => {
   assert.ok(k.warn, 'a stranger holding SLOW\'s selector must be flagged');
   // The old note promised the vault could reverse it. It could not.
   assert.ok(!/REVERSE IT AT ANY POINT/.test(k.note), 'the note still promises a reversal that cannot happen');
+});
+
+test('the vault\'s own functions addressed to another contract change nothing here, and say so', () => {
+  // Every one of these is onlySelf (executeQueued skips the delay only for the
+  // vault itself), so the same four bytes sent anywhere else describe nothing
+  // about this vault — and the old branches said ADD OWNER, 3 → 4, no warning.
+  for (const [fn, args] of [
+    ['addOwner', [BOB]], ['removeOwner', [ALICE, BOB]], ['setThreshold', [1]], ['setDelay', [0]],
+    ['setExecutor', [BOB]], ['cancelQueued', ['0x' + 'ab'.repeat(32)]],
+    ['executeQueued', [ALICE, 0n, '0x', 9]], ['delegateCall', [BOB, '0x']],
+    ['batch', [[WNS_ID_REGISTRAR], [0n], [wnsRegIface.encodeFunctionData('register', [WNS_ID_PARENT, 'treasury'])]]],
+  ]) {
+    const k = txKind(prop({ target: BOB, rawValue: '50000000000000000000', callData: ms(fn, args) }), vault());
+    assert.match(k.label, / · ANOTHER CONTRACT$/, `${fn} aimed at a stranger read as ${k.label}`);
+    assert.equal(k.tone, 'danger');
+    assert.ok(k.warn, `${fn} aimed at a stranger was not flagged`);
+    assert.match(k.note, /SENDS IT 50\.0 ETH/, 'the value riding on it is not named');
+  }
+  // Addressed to the vault, the policy branches are untouched.
+  assert.equal(txKind(prop({ target: VAULT, callData: ms('addOwner', [BOB]) }), vault()).label, 'ADD OWNER');
+});
+
+test('a batch member says what it moves and to whom', () => {
+  const USDC = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
+  const data = ms('batch', [[BOB, USDC, TOKEN, SLOW_ADDRESS], [10n ** 18n, 0n, 0n, 0n], [
+    '0x',
+    erc20Iface.encodeFunctionData('transfer', [ALICE, 2500000000n]),
+    erc20Iface.encodeFunctionData('approve', [SLOW_ADDRESS, 2n ** 256n - 1n]),
+    slowIface.encodeFunctionData('depositTo', [TOKEN, ALICE, 7n, 604800, '0x']),
+  ]]);
+  const k = txKind(prop({ target: VAULT, callData: data }), vault());
+  assert.match(k.note, /ETH TRANSFER OF 1\.0 ETH → 0x3333…3333/);
+  // A known token in its own units; the recipient out of the calldata, not the token.
+  assert.match(k.note, /ERC20 TRANSFER OF 2,500 USDC → 0x2222…2222/);
+  assert.match(k.note, /ERC20 APPROVE OF UNLIMITED 0x4444…4444 FOR /);
+  // An unknown token in the only unit the calldata has.
+  assert.match(k.note, /SLOW TRANSFER OF 7 BASE UNITS OF 0x4444…4444 → 0x2222…2222, CLAIMABLE AFTER 7 DAYS/);
+});
+
+test('a token this browser cannot name still shows its amount and its real recipient', () => {
+  const k = txKind(prop({ target: TOKEN, callData: erc20Iface.encodeFunctionData('transfer', [BOB, 12345n]) }), vault());
+  assert.equal(k.label, 'ERC20 TRANSFER');
+  assert.match(k.note, /SENDS 12345 BASE UNITS OF THE TOKEN AT 0x4444…4444 TO 0x3333…3333/);
+  // A known token's card carries the amount itself, so it needs no sentence.
+  const known = txKind(prop({ target: TOKEN, displayToken: 'USDC', callData: erc20Iface.encodeFunctionData('transfer', [BOB, 1n]) }), vault());
+  assert.equal(known.note, undefined);
+});
+
+test('wstETH, SLOW and the .wei registrar are only themselves on the chains they are deployed on', () => {
+  const v = vault({ chainId: 42161 });
+  // The mainnet wstETH address on Arbitrum is nobody's contract.
+  assert.equal(txKind(prop({ target: WSTETH_ADDRESS, rawValue: '10' }), v).label, 'ETH TRANSFER');
+  assert.equal(txKind(prop({ target: WSTETH_ADDRESS, rawValue: '10' }), vault()).label, 'STAKE · ETH → wstETH');
+  // SLOW is not on Arbitrum, so its address there promises nothing.
+  const dep = slowIface.encodeFunctionData('depositTo', [TOKEN, BOB, 1n, 604800, '0x']);
+  const k = txKind(prop({ target: SLOW_ADDRESS, callData: dep }), v);
+  assert.equal(k.label, 'SLOW · UNKNOWN CONTRACT');
+  assert.match(k.note, /SLOW IS NOT DEPLOYED HERE/);
+  assert.match(txKind(prop({ target: SLOW_ADDRESS, callData: dep }), vault({ chainId: 8453 })).label, /^SLOW · 7 DAYS/);
+  // The registrar is on mainnet only.
+  const reg = wnsRegIface.encodeFunctionData('register', [WNS_ID_PARENT, 'treasury']);
+  assert.match(txKind(prop({ target: WNS_ID_REGISTRAR, callData: reg }), vault()).label, /^CLAIM NAME/);
+  assert.match(txKind(prop({ target: WNS_ID_REGISTRAR, callData: reg }), v).label, /^CALL /);
+  const pair = ms('batch', [[WNS_ID_REGISTRAR], [0n], [reg]]);
+  assert.match(txKind(prop({ target: VAULT, callData: pair }), v).label, /^BATCH/);
 });
 
 test('an enableForward aimed anywhere but the executor is not the fast path', () => {
@@ -704,8 +776,9 @@ test('a batch names each member off the contract that member calls', () => {
   const inner = listingIface.encodeFunctionData('freeze', [false]);
   const data = msIface.encodeFunctionData('batch', [[BOB, ALICE], [0n, 0n], [inner, inner]]);
   const k = txKind(prop({ target: VAULT, callData: data }), vault());
-  // Same bytes, two targets: named at the one that published an ABI for it.
-  assert.match(k.note, new RegExp(`CALL freeze \\+ CALL ${selOf(inner)}`));
+  // Same bytes, two targets: named at the one that published an ABI for it,
+  // and each member says which contract it reaches.
+  assert.match(k.note, new RegExp(`CALL freeze → 0x3333…3333 \\+ CALL ${selOf(inner)} → 0x2222…2222`));
 });
 
 test('a selector is hashed from the canonical signature, tuples expanded', () => {
@@ -780,7 +853,7 @@ test('a batch carrying an undecodable member still reports the batch', () => {
   assert.equal(k.label, 'BATCH · 2 CALLS');
   // A member with value and no calldata is a transfer; one with an unknown
   // selector is named by that selector rather than guessed at.
-  assert.match(k.note, /ETH TRANSFER \+ CALL 0xdeadbeef/);
+  assert.match(k.note, /ETH TRANSFER OF 0\.000000000000000001 ETH → 0x2222…2222 \+ CALL 0xdeadbeef → 0x3333…3333/);
 });
 
 test('a truncated batch cannot be decoded, and says BATCH rather than inventing members', () => {

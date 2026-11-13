@@ -13,6 +13,8 @@
 <title>multisig</title>
 <meta name="description" content="k-of-n Bitcoin vaults. Taproot, no contract: a vault is a descriptor and a proposal is a PSBT.">
 <link rel="canonical" href="https://www.multisig.software/bitcoin.html">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 <link id="favicon" rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%0A%3Crect%20width%3D%2264%22%20height%3D%2264%22%20fill%3D%22%232D5FE8%22%2F%3E%0A%3Cdefs%3E%0A%3Cpath%20id%3D%22pt%22%20d%3D%22M4%2C4%20H60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pr%22%20d%3D%22M60%2C4%20V60%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pb%22%20d%3D%22M60%2C60%20H4%22%20fill%3D%22none%22%2F%3E%0A%3Cpath%20id%3D%22pl%22%20d%3D%22M4%2C60%20V4%22%20fill%3D%22none%22%2F%3E%0A%3C%2Fdefs%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%23F5FBFF%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pt%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%23F5FBFF%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pr%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%23F5FBFF%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pb%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Ctext%20font-family%3D%22%27Courier%20New%27%2Cmonospace%22%20font-size%3D%224.2%22%20fill%3D%22%23F5FBFF%22%20fill-opacity%3D%220.6%22%20letter-spacing%3D%22-0.3%22%3E%3CtextPath%20href%3D%22%23pl%22%3E%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%3C%2FtextPath%3E%3C%2Ftext%3E%0A%3Cpath%20d%3D%22M16%2C48%20V16%20H22%20L32%2C32%20L42%2C16%20H48%20V48%20H42%20V26%20L32%2C42%20L22%2C26%20V48%20Z%22%20fill%3D%22%23F5FBFF%22%2F%3E%0A%3C%2Fsvg%3E" type="image/svg+xml">
 <style>
@@ -60,8 +62,10 @@ button:disabled{opacity:.45;cursor:default}
 .sub{font-size:10px;letter-spacing:13px;color:var(--m);margin-top:2px;opacity:.5;user-select:none}
 .addr{font-size:10px;letter-spacing:2px;color:var(--m);margin-top:4px;min-height:14px}
 .hdr-r{display:flex;gap:10px;align-items:center}
-.theme-btn{background:transparent;border:1px solid var(--ln);color:var(--a);width:40px;height:40px;font-size:14px;display:flex;align-items:center;justify-content:center}
-.wallet-btn{background:transparent;border:1px solid var(--ln);color:var(--m);height:40px;padding:0 14px;font-size:10px;font-weight:600;letter-spacing:1px;display:flex;align-items:center;gap:6px;white-space:nowrap}
+.theme-btn{background:transparent;border:1px solid var(--ln);color:var(--a);width:40px;height:40px;font-size:14px;display:flex;align-items:center;justify-content:center;transition:background .15s}
+.theme-btn svg{display:block}
+.wallet-btn{background:transparent;border:1px solid var(--ln);color:var(--m);height:40px;padding:0 14px;font-size:10px;font-weight:600;letter-spacing:1px;display:flex;align-items:center;gap:6px;white-space:nowrap;transition:background .15s}
+@media(hover:hover){.theme-btn:hover,.wallet-btn:hover{background:var(--ln);border-color:var(--fr)}}
 .dot-sm{width:4px;height:4px;border-radius:50%;background:var(--g)}
 
 .nav{display:flex;border-bottom:1px solid var(--ln);align-items:stretch}
@@ -89,6 +93,7 @@ button:disabled{opacity:.45;cursor:default}
 .vtab-name{font-size:14px;font-weight:700;display:flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .vtab-info{font-size:10px;opacity:.85;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .vtab-dot{width:6px;height:6px;border-radius:50%;background:var(--y);flex-shrink:0}
+.vtab:focus-visible{outline-offset:-2px}
 
 .content{flex:1;padding-bottom:40px}
 .stats{padding:36px 0 8px}
@@ -214,6 +219,8 @@ select.inp option{color:#0A0A0A}
 .kind.on{color:var(--a);background:color-mix(in srgb,var(--a) 6%,transparent);box-shadow:inset 2px 0 0 var(--a)}
 .oln{display:flex;gap:10px;align-items:center;font-size:11px;padding:8px;border-bottom:1px solid var(--ln);letter-spacing:1px}
 .oln .tick{color:var(--g)}
+.oln span,.send-err,.addrline,.who-c{min-width:0;overflow-wrap:anywhere}
+.who-c{max-width:100%}
 .oln.bad,.oln.bad .tick{color:var(--r)}
 .stepper{display:inline-flex;align-items:center;border:1px solid var(--ln)}
 .stepper button{width:40px;height:40px;background:none;border:none;font-size:16px;color:var(--a)}
@@ -236,14 +243,15 @@ details[open] summary{margin-bottom:10px}
 .ovl-card{background:var(--bg);border:1px solid var(--fr);width:min(480px,100%);max-height:calc(100dvh - 32px);overflow-y:auto;padding:24px}
 .ovl-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;font-size:12px;font-weight:700;letter-spacing:2px}
 .x-btn{background:none;border:none;color:var(--a);font-size:14px;padding:4px 8px}
-.toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:var(--a);color:var(--bg);font-size:10px;font-weight:700;letter-spacing:2px;padding:10px 16px;z-index:300}
-.footer{display:flex;justify-content:space-between;gap:16px;padding:16px 0 12px;border-top:1px solid var(--ln);font-size:9px;letter-spacing:2px;color:var(--d);flex-wrap:wrap}
+.toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:var(--a);color:var(--bg);font-size:10px;font-weight:700;letter-spacing:2px;padding:10px 16px;z-index:300;width:max-content;max-width:calc(100vw - 32px);text-align:center}
+.footer{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:16px 0 12px;border-top:1px solid var(--ln);font-size:9px;letter-spacing:2px;color:var(--d);flex-wrap:wrap}
 .footer a{color:var(--d);text-decoration:none;border-bottom:1px solid var(--ln);display:inline-block;padding:6px 0}
 .pulse{animation:pulse 1.6s infinite}
 @keyframes pulse{50%{opacity:.45}}
 
 @media(max-width:760px){
   .frame{padding:0 8px}
+  .hdr,.hdr-r{flex-wrap:wrap}
   .rail{display:none}
   .logo{font-size:28px}
   .stat-big{font-size:40px;letter-spacing:-1px}

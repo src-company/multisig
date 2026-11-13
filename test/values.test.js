@@ -323,6 +323,9 @@ test('a delay is spelled one way in the timelock column and another in a sentenc
   assert.equal(fmtD(1800), '30M');
   assert.equal(fmtD(5400), '1.5H');
   assert.equal(fmtD(0), '0');
+  // Not 1D: a day and a half is not a day.
+  assert.equal(fmtD(129600), '36H');
+  assert.equal(fmtD(20), '20S');
   assert.equal(fmtDelay(86400), '1 DAY');
   assert.equal(fmtDelay(172800), '2 DAYS');
   assert.equal(fmtDelay(3600), '1 HOUR');
@@ -342,6 +345,16 @@ test('a delay entered in one unit and read back in another is the same delay', (
       const back = fromSec(sec);
       assert.equal(back.val * UNIT_SEC[back.unit], sec, `${n}${unit} did not round-trip`);
     }
+  }
+});
+
+test('every delay the admin form can be handed reads back as itself', () => {
+  // A delay is read into the form with fromSec and out again with toSec. A
+  // floor there lost a second to floating point (123 s became 2.05 min became
+  // 122 s), and the form offered to propose a change nobody had made.
+  for (let sec = 1; sec <= 200000; sec++) {
+    const p = fromSec(sec);
+    if (toSec(String(p.val), p.unit) !== sec) assert.fail(`${sec}s read back as ${toSec(String(p.val), p.unit)}s`);
   }
 });
 

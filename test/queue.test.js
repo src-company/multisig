@@ -58,7 +58,7 @@ function grab(name) {
 // decides which branch renderDash takes, so stubbing it would leave the suite
 // asserting against its own idea of the states rather than the app's.
 const NEEDED = [
-  'renderDash', 'txSt', 'fmtEta', 'canForwardCancel', 'hasForwarder', 'isCancelTx',
+  'renderDash', 'txSt', 'fmtEta', 'canForwardCancel', 'hasForwarder', 'isCancelTx', 'isOwnerOf',
   'rejectArmKey', 'queueRef',
   'vaultDot', 'ownerIdent', 'thresholdNote', 'delayNote',
   // Not render functions. They are what the submit routes apply to the card

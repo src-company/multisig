@@ -434,6 +434,7 @@ window.closeWalletModal = function() {
   // its next tick noticing the sheet has gone.
   _stopSheetPoll();
   const modal = document.getElementById('walletModal');
+  const wasOpen = !!(modal && modal.classList.contains('active'));
   if (modal) modal.classList.remove('active');
   document.body.classList.remove('modal-open');
   // The app may still have an overlay of its own underneath; let it restate the
@@ -442,6 +443,10 @@ window.closeWalletModal = function() {
   // The app rebuilds its header from innerHTML, so the node that opened this
   // sheet is often gone by now — fall back to whatever is playing that role.
   const back = _walletFocusReturn; _walletFocusReturn = null;
+  // Only when there was a sheet to come back from. This also runs on every
+  // auto-reconnect and remote disconnect, and was pulling focus out of whatever
+  // field the user was typing in.
+  if (!wasOpen) return;
   const target = (back && back.isConnected) ? back : document.querySelector('.wallet-btn');
   if (target && typeof target.focus === 'function') target.focus();
 };

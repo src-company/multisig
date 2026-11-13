@@ -78,11 +78,13 @@ let _cancel = null, _cancelled = false;
 const cancelPrompt = () => { _cancelled = true; _cancel?.(new Error('Cancelled. Nothing was changed.')); };
 async function ask(fn){
   for(let tries = 0, closed = 0; ; tries++){
-    let timer;
+    // `mine`, so an abandoned prompt that settles late clears only its own cancel,
+    // not the one a newer prompt has put in its place.
+    let timer, mine;
     const asked = Date.now();
     try {
       return await Promise.race([fn(), new Promise((_, no) => {
-        _cancel = no;
+        _cancel = mine = no;
         timer = setTimeout(() => no(new Error('Your wallet did not answer. Open it, look for a waiting request, and try again.')), PROMPT_MS);
       })]);
     } catch(e) {
@@ -93,7 +95,7 @@ async function ask(fn){
         throw new Error('Your wallet closed that request, so nothing was changed. Try again.');
       }
       throw e;
-    } finally { clearTimeout(timer); _cancel = null; }
+    } finally { clearTimeout(timer); if(_cancel === mine) _cancel = null; }
   }
 }
 
@@ -123,7 +125,15 @@ async function connectWallet(wallet, network, onStep = () => {}){
   await gap();
   onStep(1, 2);
   const sign = () => ask(() => wallet.sign(BV.walletMessage(), address, network));
-  const key = BV.keyFromWalletSignature(await sign(), network);
+  const first = await sign();
+  // The check the Ethereum path makes, where the signature allows it: an account
+  // switched between the address request and this prompt would otherwise make a
+  // key from one account and file it under the other. A signature that names no
+  // signer (BIP-322) is let through, as the link proof below lets it through.
+  let signers = [];
+  try { signers = BV.bitcoinSigners(BV.walletMessage(), window.btc.base64.decode(first), network); } catch(_) {}
+  if(signers.length && !signers.includes(address)) throw new Error('That signature did not come from the connected address. Nothing was changed.');
+  const key = BV.keyFromWalletSignature(first, network);
   try {
     const { repeats, stale } = await checkOnRecord(BV, network, key.evm, key.owner.xpub, address);
     await gap();
@@ -148,6 +158,8 @@ async function connectWallet(wallet, network, onStep = () => {}){
 // at all: a closed popup says nothing, and the owner has been told what they are skipping.
 function confirmer(BV, network, handle, xpub, repeats, again){
   return async ({ skip = false } = {}) => {
+    // A CANCEL pressed on an earlier attempt is not a CANCEL of this one.
+    _cancelled = false;
     if(!repeats && !skip && await ask(again) !== xpub) throw Object.assign(new Error('Your wallet gave a different key the second time, so it cannot hold a Bitcoin key here. Nothing was published.'), { mismatch: true });
     return repeats || BV.publishHandle(handle, network).then(() => true, () => false);
   };
@@ -198,35 +210,59 @@ async function connectEvmForHandle(eth, network, { keep = false, onStep = () => 
 // WalletConnect is only fetched by someone who picks it, so a page that can hold a key
 // does not carry a relay client for the owners who never use one.
 const WC_PROJECT_ID = '1e8390ef1c1d8a185e035912a1409749';
+// The provider is made once and the session asked for on every use. A session
+// ended from the phone, or expired, left the cached provider answering with no
+// account and no QR code until a reload; enable() returns at once on a live
+// session and pairs again without one.
 let _wc = null;
 function walletConnect(){
-  return _wc || (_wc = new Promise((ok, no) => {
+  _wc ||= new Promise((ok, no) => {
     const el = document.createElement('script');
     el.src = './walletconnect.min.js';
     el.onerror = () => { _wc = null; no(new Error('Could not load WalletConnect')); };
     el.onload = async () => {
       try {
         const BV = await loadBitcoinLibs();
-        const p = await globalThis['@walletconnect/ethereum-provider'].EthereumProvider.init({ projectId: WC_PROJECT_ID, chains: [1], showQrModal: true, metadata: { name: 'multisig', description: 'multisig', url: location.origin, icons: [] }, rpcMap: { 1: BV.EVM_CHAINS[1].rpc } });
-        await p.enable();
-        ok(p);
+        ok(await globalThis['@walletconnect/ethereum-provider'].EthereumProvider.init({ projectId: WC_PROJECT_ID, chains: [1], showQrModal: true, metadata: { name: 'multisig', description: 'multisig', url: location.origin, icons: [] }, rpcMap: { 1: BV.EVM_CHAINS[1].rpc } }));
       } catch(e) { _wc = null; no(e); }
     };
     document.head.appendChild(el);
-  }));
+  });
+  return _wc.then(async p => { await p.enable(); return p; });
 }
 
 // ── AS AN ETHEREUM WALLET ──────────────────────────────────
 const RPCS = () => window.BitcoinVault.EVM_CHAINS;
-const APP_TYPES = new Set(['Execute', 'Metadata', 'Action', 'Session']);
+// The app's own messages, field for field, as index.html defines them. ethers
+// takes the primary type from `types`, not from the `primaryType` a caller
+// declares, so checking the declared name alone left `types` free: declared
+// Session, which also skips the chain check, over any struct at all, including
+// the SafeMessage the vault itself accepts through ERC-1271. Pinned whole, the
+// struct can only be one of these four.
+const APP_TYPES = {
+  Execute:  [['target', 'address'], ['value', 'uint256'], ['data', 'bytes'], ['nonce', 'uint32']],
+  Metadata: [['vault', 'address'], ['subject', 'address'], ['value', 'string'], ['issuedAt', 'uint64']],
+  Action:   [['vault', 'address'], ['action', 'string'], ['txHash', 'bytes32'], ['issuedAt', 'uint64']],
+  Session:  [['address', 'address'], ['issuedAt', 'uint64']],
+};
+function appTypes(types, primaryType){
+  if(!Object.hasOwn(APP_TYPES, primaryType) || !types || typeof types !== 'object') return null;
+  const { EIP712Domain, ...rest } = types, want = APP_TYPES[primaryType], got = rest[primaryType];
+  const exact = Object.keys(rest).length === 1 && Array.isArray(got) && got.length === want.length
+    && got.every((f, i) => f && f.name === want[i][0] && f.type === want[i][1]);
+  return exact ? rest : null;
+}
 const READS = new Set(['eth_blockNumber', 'eth_call', 'eth_estimateGas', 'eth_feeHistory', 'eth_gasPrice', 'eth_getBalance', 'eth_getBlockByNumber', 'eth_getCode', 'eth_getStorageAt', 'eth_getTransactionByHash', 'eth_getTransactionCount', 'eth_getTransactionReceipt', 'eth_maxPriorityFeePerGas']);
 function providerFor(wallet){
   let key = null, chain = 1, idle;
   // Same limit as the Bitcoin page. A key left in an open tab is a risk for no benefit.
-  const forget = () => { clearTimeout(idle); if(key){ key.evmPriv.fill(0); key = null; } };
-  const touch = () => { clearTimeout(idle); idle = setTimeout(forget, 15 * 60 * 1000); };
   const listeners = {};
   const emit = (e, v) => (listeners[e] || []).forEach(f => { try { f(v); } catch(_) {} });
+  const forget = () => { clearTimeout(idle); if(key){ key.evmPriv.fill(0); key = null; } };
+  // Expiry is said out loud, the way a wallet that locks says it: the page kept
+  // this account as connected and every signature failed as "could not coalesce
+  // error". `disconnect` stays silent, since the page calls it from its own.
+  const touch = () => { clearTimeout(idle); idle = setTimeout(() => { forget(); emit('accountsChanged', []); }, 15 * 60 * 1000); };
   const refuse = (code, message) => Object.assign(new Error(message), { code });
   const signing = () => { if(!key) throw refuse(4100, 'Connect first'); touch(); return key; };
   return {
@@ -267,9 +303,9 @@ function providerFor(wallet){
         case 'eth_signTypedData_v4': {
           const k = signing(), { domain, types, primaryType, message } = JSON.parse(params[1]);
           if(String(params[0]).toLowerCase() !== k.evm) throw refuse(4100, 'That is not this account');
-          if(domain?.name !== 'Multisig' || !APP_TYPES.has(primaryType)) throw refuse(4200, 'This wallet only signs this app\'s own messages');
+          const rest = domain?.name === 'Multisig' && appTypes(types, primaryType);
+          if(!rest) throw refuse(4200, 'This wallet only signs this app\'s own messages');
           if(primaryType !== 'Session' && Number(domain.chainId) !== chain) throw refuse(4901, 'That message is for another chain');
-          const { EIP712Domain, ...rest } = types;
           const hash = window.ethers.TypedDataEncoder.hash(domain, rest, message);
           return window.BitcoinVault.evmSignHash(window.btc.hex.decode(hash.slice(2)), k.evmPriv);
         }
@@ -298,7 +334,9 @@ function announce(){
     window.dispatchEvent(new CustomEvent('eip6963:announceProvider', { detail }));
   }
 }
-window.addEventListener('eip6963:requestProvider', () => loadBitcoinLibs().then(announce, () => {}));
+// Only with a Bitcoin wallet to announce: index.html asks at boot and on every
+// sheet open, and each ask was fetching the Bitcoin libraries for nobody.
+window.addEventListener('eip6963:requestProvider', () => { if(detect().length) loadBitcoinLibs().then(announce, () => {}); });
 if(detect().length) loadBitcoinLibs().then(announce, () => {});
 
 window.BitcoinWallets = { detect, connectWallet, connectEvmForHandle, cancelPrompt, walletConnect, loadBitcoinLibs, providerFor };

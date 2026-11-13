@@ -379,9 +379,21 @@ const fingerprintOf = k => k.fingerprint.toString(16).padStart(8, '0');
 // An xpub's text also holds its depth and parent, which are free to differ for one
 // key, so two strings can be one key in two seats. What makes a key is its point and
 // chain code.
+// Remembered by network and xpub: chainBase compares every key with every other,
+// and parsing each extended key again per pair made a 20-owner vault's address
+// cost a large fraction of a second. The network stays in the key, so an xpub
+// from the other network still throws.
+const _keyIds = new Map();
 const keyId = (owner, network) => {
-  const k = HDKey.fromExtendedKey(owner.xpub, net(network).versions);
-  return hex.encode(k.publicKey) + hex.encode(k.chainCode);
+  const id = `${network}|${owner.xpub}`;
+  let got = _keyIds.get(id);
+  if(got === undefined){
+    const k = HDKey.fromExtendedKey(owner.xpub, net(network).versions);
+    got = hex.encode(k.publicKey) + hex.encode(k.chainCode);
+    if(_keyIds.size >= 5000) _keyIds.clear();
+    _keyIds.set(id, got);
+  }
+  return got;
 };
 // True when two owner records are one key, however their xpub text is dressed.
 const sameKey = (a, b, network) => a.xpub === b.xpub || keyId(a, network) === keyId(b, network);
@@ -448,9 +460,18 @@ const pathDescriptor = (policy, i) => {
   const m = `multi_a(${p.threshold},${keys.join(',')})`;
   return p.older ? `and_v(v:older(${p.older}),${m})` : m;
 };
+// Per policy object, which nothing edits once made. vaultOf builds its cache key
+// from this on every call, hits included, so it was being rebuilt for every
+// input of every size estimate.
+const _bodies = new WeakMap();
 function descriptorBody(policy){
-  const leaves = policy.paths.map((_, i) => pathDescriptor(policy, i));
-  return `tr(${numsKey(policy.network).publicExtendedKey}/<0;1>/*,${leaves.length === 1 ? leaves[0] : `{${leaves.join(',')}}`})`;
+  let body = _bodies.get(policy);
+  if(body === undefined){
+    const leaves = policy.paths.map((_, i) => pathDescriptor(policy, i));
+    body = `tr(${numsKey(policy.network).publicExtendedKey}/<0;1>/*,${leaves.length === 1 ? leaves[0] : `{${leaves.join(',')}}`})`;
+    _bodies.set(policy, body);
+  }
+  return body;
 }
 function descriptor(policy){
   const body = descriptorBody(policy);
@@ -958,12 +979,17 @@ function propose({ policy, utxos, tip, outputs = [], sweep = null, feeRate, path
     for(const u of eligible){
       picked.push(u); have += u.value;
       if(picked.length > MAX_INPUTS || vsize(policy, path, picked.length, lens) > MAX_VSIZE) throw new Error('that needs too many small coins for one transaction. Send a smaller amount first');
-      fee = Math.ceil(vsize(policy, path, picked.length, [...lens, changeSlot.script.length]) * feeRate);
-      // Change must clear the dust line, or it would become a coin this page never spends.
-      if(have >= want + fee + DUST + 1){ change = have - want - fee; done = true; break; }
-      // Exactly enough, or short of a change output worth making: the rest is fee.
-      const noChange = Math.ceil(vsize(policy, path, picked.length, lens) * feeRate);
-      if(have >= want + noChange){ change = 0; done = true; break; }
+      const withChange = vsize(policy, path, picked.length, [...lens, changeSlot.script.length]), bare = vsize(policy, path, picked.length, lens);
+      fee = Math.ceil(withChange * feeRate);
+      // Change must clear the dust line, or it would become a coin this page never
+      // spends. And the size cap counts the change output too: checked without it,
+      // a proposal could land just over the cap that sign() then refuses.
+      if(have >= want + fee + DUST + 1 && withChange <= MAX_VSIZE){ change = have - want - fee; done = true; break; }
+      // Exactly enough, or short of a change output worth making: the rest is fee —
+      // but only while that stays under the rate sign() will put a key to. Past it,
+      // one more coin makes room for change instead.
+      const noChange = Math.ceil(bare * feeRate);
+      if(have >= want + noChange && (have - want) / bare <= MAX_FEE_RATE){ change = 0; done = true; break; }
     }
     if(!done) throw new Error('not enough to cover that and the fee');
   }
@@ -1276,7 +1302,7 @@ function chain(network, doFetch = (...a) => root.fetch(...a), bases = net(networ
 // Walks both chains until GAP addresses in a row have never been used. Small batches,
 // because a public explorer rate-limits a page that asks for forty addresses at once.
 async function scan(policy, c, gap = GAP){
-  const coins = [], next = [0, 0];
+  const coins = [], next = [0, 0], unreadable = [];
   let truncated = false;
   for(const branch of [0, 1]){
     let index = 0, idle = 0;
@@ -1290,7 +1316,15 @@ async function scan(policy, c, gap = GAP){
         if(!seen[i]){ idle++; continue; }
         idle = 0;
         next[branch] = batch[i] + 1;
-        for(const u of await c.utxos(vaultOf(policy, branch, batch[i]).address)) coins.push({ ...u, branch, index: batch[i] });
+        // One address that will not list is said, not fatal. An indexer refuses an
+        // address holding more outputs than its limit, and anyone can put that many
+        // dust outputs on an address they know: a scan that stopped there left the
+        // whole vault unreadable, for good, from this page.
+        let found;
+        const address = vaultOf(policy, branch, batch[i]).address;
+        try { found = await c.utxos(address); }
+        catch(e) { if(e.message === EXPLORERS_BUSY) throw e; unreadable.push({ branch, index: batch[i], address, error: e.message }); continue; }
+        for(const u of found) coins.push({ ...u, branch, index: batch[i] });
       }
       index += batch.length;
     }
@@ -1305,7 +1339,7 @@ async function scan(policy, c, gap = GAP){
     next[branch] = Math.min(next[branch], MAX_INDEX - gap);
   }
   if(c.tx) await classifyCoins(coins, c);
-  return { coins, receive: next[0], change: next[1], truncated };
+  return { coins, receive: next[0], change: next[1], truncated, unreadable };
 }
 
 // Sets `quarantine` on any coin that is not provably plain. Fails closed throughout: a
